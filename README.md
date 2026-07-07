@@ -2,6 +2,8 @@
 
 A standalone TypeScript TUI wrapper for routed parallel coding workflows. It keeps a main chat open while Codex routes larger tasks into Judge, Actor, and Critic workers that can write prompts, logs, session metadata, and outputs to disk.
 
+Built with Codex-assisted development.
+
 ## Requirements
 
 - Node.js 22.5+.
