@@ -44,7 +44,7 @@ describe("package metadata", () => {
   it("points the executable bin at dist/cli.js", async () => {
     const pkg = await readPackageJson();
 
-    expect(pkg.bin["parallel-codex-tui"]).toBe("./dist/cli.js");
+    expect(pkg.bin["parallel-codex-tui"]).toBe("dist/cli.js");
   });
 
   it("declares public open-source package metadata", async () => {
@@ -68,7 +68,7 @@ describe("package metadata", () => {
       ".parallel-codex/config.example.toml"
     ]);
     expect(pkg.scripts?.prepack).toBe("npm run build");
-    expect(pkg.scripts?.prepare).toBe("npm run build");
+    expect(pkg.scripts?.prepare).toBeUndefined();
   });
 
   it("ships an MIT license file", async () => {
@@ -111,8 +111,7 @@ describe("package metadata", () => {
     expect(readme).toContain("Codex CLI");
     expect(readme).toContain("Claude CLI");
     expect(readme).toContain("## Install");
-    expect(readme).toContain("npm install -g git+https://github.com/allendred/parallel-codex-tui.git");
-    expect(readme).toContain("The npm registry package is not published yet");
+    expect(readme).toContain("npm install -g parallel-codex-tui");
     expect(readme).toContain("parallel-codex-tui --init");
     expect(readme).toContain("parallel-codex-tui --doctor");
     expect(readme).toContain("parallel-codex-tui --workspace /path/to/project");

@@ -15,7 +15,7 @@
     "node": ">=22.5.0"
   },
   "bin": {
-    "parallel-codex-tui": "./dist/cli.js"
+    "parallel-codex-tui": "dist/cli.js"
   },
   "files": [
     "dist/",
@@ -27,7 +27,6 @@
     "dev": "tsx src/cli.tsx",
     "build": "tsc -p tsconfig.json",
     "postbuild": "node -e \"require('node:fs').chmodSync('dist/cli.js', 0o755)\"",
-    "prepare": "npm run build",
     "prepack": "npm run build",
     "test": "vitest run",
     "test:watch": "vitest",
