@@ -1,0 +1,62 @@
+[router]
+defaultMode = "auto"
+
+[router.codex]
+command = "codex"
+args = ["exec", "--skip-git-repo-check", "--sandbox", "workspace-write", "--color", "never", "-"]
+timeoutMs = 120000
+fallback = "complex"
+
+[workers.codex]
+command = "codex"
+args = ["exec", "--skip-git-repo-check", "--sandbox", "workspace-write", "--color", "never", "-"]
+firstOutputTimeoutMs = 120000
+
+[workers.codex.interactive]
+command = "codex"
+args = ["resume", "{sessionId}"]
+
+[workers.codex.nativeSession]
+fallback = "new"
+
+[workers.claude]
+command = "claude"
+args = ["--print", "--permission-mode", "acceptEdits", "--output-format", "text"]
+firstOutputTimeoutMs = 120000
+
+[workers.claude.interactive]
+command = "claude"
+args = ["--resume", "{sessionId}"]
+
+[workers.claude.nativeSession]
+fallback = "new"
+
+[workers.mock]
+command = "mock"
+args = []
+
+[pairing]
+main = "claude"
+judge = "codex"
+actor = "codex"
+critic = "codex"
+
+[roles.main]
+title = "Main"
+instructions = ["Answer simple chat and status questions directly."]
+
+[roles.judge]
+title = "Judge"
+instructions = ["Clarify requirements and write task files. Do not implement code."]
+
+[roles.actor]
+title = "Actor"
+instructions = ["Read Judge files, implement the requested change, and record your work."]
+
+[roles.critic]
+title = "Critic"
+instructions = ["Review Actor work against Judge requirements. Lead with blocking findings."]
+
+[ui]
+showStatusBar = true
+autoOpenFailedWorker = true

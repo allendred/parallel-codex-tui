@@ -1,0 +1,250 @@
+import { accessSync, chmodSync, constants, existsSync } from "node:fs";
+import { createRequire } from "node:module";
+import { readdir } from "node:fs/promises";
+import { homedir } from "node:os";
+import { dirname, join } from "node:path";
+import { spawn } from "node-pty";
+import type { AppConfig } from "../core/config.js";
+import { pathExists, readJson, readTextIfExists, writeJson } from "../core/file-store.js";
+import { NativeSessionSchema, TaskMetaSchema, type EngineName, type NativeSession } from "../domain/schemas.js";
+import type { WorkerLogRef } from "../orchestrator/orchestrator.js";
+import type { WorkerModelRunConfig } from "./types.js";
+
+const require = createRequire(import.meta.url);
+
+export interface NativeAttachLaunchInput {
+  config: AppConfig;
+  worker: WorkerLogRef;
+}
+
+export interface NativeAttachLaunch {
+  command: string;
+  args: string[];
+  cwd: string;
+  sessionId: string;
+  label: string;
+  cols?: number;
+  rows?: number;
+}
+
+export interface NativeAttachProcessHandlers {
+  onOutput?: (chunk: string) => void;
+  onClose?: (code: number) => void;
+  onError?: (error: Error) => void;
+}
+
+export interface NativeAttachProcessRef {
+  write(input: string): void;
+  kill(): void;
+}
+
+export async function buildNativeAttachLaunch(input: NativeAttachLaunchInput): Promise<NativeAttachLaunch> {
+  const nativeSession = await readWorkerNativeSession(input.worker);
+  const workerConfig = input.config.workers[input.worker.engine];
+  const modelConfig = workerConfig.model;
+
+  return {
+    command: workerConfig.interactive.command,
+    args: workerConfig.interactive.args.map((arg) => renderTemplate(arg, nativeSession.session_id, modelConfig)),
+    cwd: nativeSession.cwd,
+    sessionId: nativeSession.session_id,
+    label: input.worker.label
+  };
+}
+
+export function startNativeAttachProcess(
+  launch: NativeAttachLaunch,
+  handlers: NativeAttachProcessHandlers = {}
+): NativeAttachProcessRef {
+  ensureNodePtySpawnHelperExecutable();
+  const child = spawn(launch.command, launch.args, {
+    name: "xterm-256color",
+    cols: launch.cols ?? process.stdout.columns ?? 120,
+    rows: launch.rows ?? process.stdout.rows ?? 30,
+    cwd: launch.cwd,
+    env: {
+      ...process.env,
+      TERM: process.env.TERM || "xterm-256color"
+    }
+  });
+
+  child.onData((chunk) => {
+    handlers.onOutput?.(chunk);
+  });
+  child.onExit(({ exitCode }) => {
+    handlers.onClose?.(exitCode);
+  });
+
+  return {
+    write(input: string): void {
+      child.write(input);
+    },
+    kill(): void {
+      child.kill("SIGTERM");
+    }
+  };
+}
+
+function ensureNodePtySpawnHelperExecutable(): void {
+  if (process.platform === "win32") {
+    return;
+  }
+
+  const packageRoot = dirname(dirname(require.resolve("node-pty")));
+  const helperPath = join(packageRoot, "prebuilds", `${process.platform}-${process.arch}`, "spawn-helper");
+  if (!existsSync(helperPath)) {
+    return;
+  }
+
+  try {
+    accessSync(helperPath, constants.X_OK);
+  } catch {
+    chmodSync(helperPath, 0o755);
+  }
+}
+
+async function readWorkerNativeSession(worker: WorkerLogRef): Promise<NativeSession> {
+  const workerDir = dirname(worker.statusPath);
+  const nativePath = join(workerDir, "native-session.json");
+  if (!(await pathExists(nativePath))) {
+    const recovered = await recoverClaudeNativeSession(worker, workerDir);
+    if (recovered) {
+      await writeJson(nativePath, NativeSessionSchema.parse(recovered));
+      return recovered;
+    }
+    throw new Error(
+      `No native session recorded for ${worker.label}. Run the worker once before attaching, or make sure ${worker.engine} persisted a resumable session.`
+    );
+  }
+  const record = await readJson(nativePath, NativeSessionSchema);
+  if (record.engine !== worker.engine) {
+    throw new Error(`Native session engine mismatch for ${worker.label}: expected ${worker.engine}, got ${record.engine}`);
+  }
+  return record;
+}
+
+async function recoverClaudeNativeSession(worker: WorkerLogRef, workerDir: string): Promise<NativeSession | null> {
+  if (worker.engine !== "claude") {
+    return null;
+  }
+
+  const prompt = await readTextIfExists(join(workerDir, "prompt.md"));
+  if (!prompt.trim()) {
+    return null;
+  }
+
+  const taskDir = dirname(workerDir);
+  const metaPath = join(taskDir, "meta.json");
+  const cwd = (await pathExists(metaPath)) ? (await readJson(metaPath, TaskMetaSchema)).cwd : null;
+  if (!cwd) {
+    return null;
+  }
+
+  const match = await findClaudeProjectSession({
+    cwd,
+    prompt
+  });
+  if (!match) {
+    return null;
+  }
+
+  return {
+    engine: "claude",
+    role: worker.role,
+    worker_id: worker.id,
+    session_id: match.sessionId,
+    scope: "task",
+    cwd,
+    created_at: match.timestamp,
+    last_used_at: match.timestamp,
+    source: "claude-project-log"
+  };
+}
+
+async function findClaudeProjectSession(input: { cwd: string; prompt: string }): Promise<{ sessionId: string; timestamp: string } | null> {
+  const projectDir = join(claudeProjectsDir(), claudeProjectSlug(input.cwd));
+  if (!(await pathExists(projectDir))) {
+    return null;
+  }
+
+  const entries = await readdir(projectDir, { withFileTypes: true });
+  const matches: Array<{ sessionId: string; timestamp: string }> = [];
+  for (const entry of entries) {
+    if (!entry.isFile() || !entry.name.endsWith(".jsonl")) {
+      continue;
+    }
+    const candidate = await matchClaudeSessionFile(join(projectDir, entry.name), input);
+    if (candidate) {
+      matches.push(candidate);
+    }
+  }
+
+  return matches.sort((left, right) => left.timestamp.localeCompare(right.timestamp)).at(-1) ?? null;
+}
+
+async function matchClaudeSessionFile(
+  path: string,
+  input: { cwd: string; prompt: string }
+): Promise<{ sessionId: string; timestamp: string } | null> {
+  const lines = (await readTextIfExists(path)).split(/\r?\n/).filter(Boolean);
+  for (const line of lines) {
+    const parsed = safeParseJson(line);
+    if (!parsed || typeof parsed !== "object") {
+      continue;
+    }
+    const record = parsed as Record<string, unknown>;
+    if (record.cwd !== input.cwd && record.type !== "queue-operation") {
+      continue;
+    }
+    if (extractClaudePrompt(record) !== input.prompt) {
+      continue;
+    }
+    const sessionId = typeof record.sessionId === "string" ? record.sessionId : null;
+    const timestamp = typeof record.timestamp === "string" ? record.timestamp : null;
+    if (sessionId && timestamp) {
+      return { sessionId, timestamp };
+    }
+  }
+  return null;
+}
+
+function extractClaudePrompt(record: Record<string, unknown>): string | null {
+  if (typeof record.content === "string") {
+    return record.content;
+  }
+
+  const message = record.message;
+  if (!message || typeof message !== "object") {
+    return null;
+  }
+  const content = (message as Record<string, unknown>).content;
+  return typeof content === "string" ? content : null;
+}
+
+function claudeProjectsDir(): string {
+  return process.env.PARALLEL_CODEX_CLAUDE_PROJECTS_DIR ?? join(homedir(), ".claude", "projects");
+}
+
+function claudeProjectSlug(cwd: string): string {
+  return cwd.replace(/[^A-Za-z0-9]/g, "-");
+}
+
+function safeParseJson(value: string): unknown {
+  try {
+    return JSON.parse(value);
+  } catch {
+    return null;
+  }
+}
+
+function renderTemplate(value: string, sessionId: string, modelConfig: WorkerModelRunConfig | undefined): string {
+  return value
+    .replaceAll("{sessionId}", sessionId)
+    .replaceAll("{model}", modelConfig?.name ?? "")
+    .replaceAll("{provider}", modelConfig?.provider ?? "")
+    .replace(/\{env:([A-Za-z_][A-Za-z0-9_]*)\}/g, (_match, name: string) => process.env[name] ?? "");
+}
+
+export function supportsNativeAttach(engine: EngineName): boolean {
+  return engine === "codex" || engine === "claude" || engine === "mock";
+}

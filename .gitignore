@@ -1,0 +1,7 @@
+node_modules/
+dist/
+.parallel-codex/config.toml
+.parallel-codex/session-index.sqlite
+.parallel-codex/sessions/
+docs/superpowers/
+npm-debug.log*

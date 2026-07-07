@@ -1,0 +1,403 @@
+import React from "react";
+import { Text } from "ink";
+import { render } from "ink-testing-library";
+import { describe, expect, it } from "vitest";
+import { AppShell } from "../src/tui/AppShell.js";
+import { displayWidth } from "../src/tui/display-width.js";
+
+describe("AppShell", () => {
+  it("renders a structured worker interface with header, full-width content, input, and status", () => {
+    const { lastFrame } = render(
+      <AppShell
+        view="worker"
+        cwd="/tmp/project"
+        taskId="task-1"
+        statusText="workers 2 | critic/mock done"
+        input={<TextLine text="Input area" />}
+      >
+        <TextLine text="Role artifacts" />
+      </AppShell>
+    );
+
+    const frame = lastFrame() ?? "";
+
+    expect(frame).toContain("parallel-codex-tui");
+    expect(frame).toContain("logs");
+    expect(frame).toContain("^C exit");
+    expect(frame).toContain("project");
+    expect(frame).not.toContain("/tmp/project");
+    expect(frame).not.toContain("Worker logs");
+    expect(frame).not.toContain("Workers");
+    expect(frame).not.toContain("> Critic/mock");
+    expect(frame).toContain("Role artifacts");
+    expect(frame).toContain("Input area");
+    expect(frame).toContain("workers 2");
+    expect(frame).toContain("@ critic/mock");
+    expect(frame).toContain("critic/mock");
+    expect(frame).not.toContain("w2");
+    expect(frame).not.toContain("workers 2 | critic/mock done");
+  });
+
+  it("shows detach guidance instead of outer exit while attached to a native agent", () => {
+    const { lastFrame } = render(
+      <AppShell
+        view="native"
+        cwd="/tmp/project"
+        taskId="task-1"
+        statusText="task-1 | worker done"
+        input={<TextLine text="Native input" />}
+      >
+        <TextLine text="Native terminal" />
+      </AppShell>
+    );
+
+    const frame = lastFrame() ?? "";
+
+    expect(frame).toContain("native");
+    expect(frame).toContain("^] detach");
+    expect(frame).not.toContain("Native agent");
+    expect(frame).not.toContain("^C exit");
+  });
+
+  it("uses a compact task label in the header for long task ids", () => {
+    const { lastFrame } = render(
+      <AppShell
+        view="worker"
+        cwd="/workspace/tetris"
+        taskId="task-20260630-093326-1980"
+        statusText="task"
+        input={<TextLine text="Input area" />}
+      >
+        <TextLine text="Worker output" />
+      </AppShell>
+    );
+
+    const frame = lastFrame() ?? "";
+
+    expect(frame).toContain("task 093326-1980");
+    expect(frame).not.toContain("task task-20260630-093326-1980");
+    expect(frame).toContain("tetris");
+  });
+
+  it("uses a single-line short header in narrow terminals", () => {
+    const { lastFrame } = render(
+      <AppShell
+        view="worker"
+        cwd="/workspace/tetris"
+        taskId="task-20260630-093326-1980"
+        statusText="task"
+        terminalWidth={50}
+        input={<TextLine text="Input area" />}
+      >
+        <TextLine text="Worker output" />
+      </AppShell>
+    );
+
+    const frame = lastFrame() ?? "";
+
+    expect(frame).toContain("pct");
+    expect(frame).toContain("logs");
+    expect(frame).toContain("093326-1980");
+    expect(frame).toContain("tetris");
+    expect(frame).toContain("^C");
+    expect(frame).not.toContain("parallel-codex-tui");
+    expect(frame).not.toContain("Worker logs");
+  });
+
+  it("uses an ultra compact header below forty columns", () => {
+    const { lastFrame } = render(
+      <AppShell
+        view="worker"
+        cwd="/workspace/tetris"
+        taskId="task-20260630-093326-1980"
+        statusText="task"
+        terminalWidth={36}
+        input={<TextLine text="Input area" />}
+      >
+        <TextLine text="Worker output" />
+      </AppShell>
+    );
+
+    const frame = lastFrame() ?? "";
+
+    expect(frame).toContain("pct");
+    expect(frame).toContain("logs");
+    expect(frame).toContain("093326");
+    expect(frame).toContain("^C");
+    expect(frame).not.toContain("093326-1980");
+    expect(frame).not.toContain("tetris");
+  });
+
+  it("uses an unbordered tiny header below twenty four columns", () => {
+    const { lastFrame } = render(
+      <AppShell
+        view="chat"
+        cwd="/tmp/project"
+        taskId={null}
+        statusText="idle"
+        terminalWidth={20}
+        input={<TextLine text="> | Type a message" />}
+      >
+        <TextLine text="Ready" />
+      </AppShell>
+    );
+
+    const frame = lastFrame() ?? "";
+    const firstLine = frame.split("\n")[0] ?? "";
+
+    expect(firstLine).toContain("pct");
+    expect(firstLine).toContain("chat");
+    expect(firstLine).toContain("^C");
+    expect(frame).not.toContain("pc  cha  non");
+    expect(frame).not.toContain("┌");
+    expect(frame).not.toContain("│");
+    expect(Math.max(...frame.split("\n").map((line) => displayWidth(line)))).toBeLessThanOrEqual(20);
+  });
+
+  it("keeps nano headers from clipping words below sixteen columns", () => {
+    const { lastFrame } = render(
+      <AppShell
+        view="chat"
+        cwd="/tmp/project"
+        taskId={null}
+        statusText="idle"
+        terminalWidth={12}
+        input={<TextLine text="> ...age|" />}
+      >
+        <TextLine text="Ready" />
+      </AppShell>
+    );
+
+    const frame = lastFrame() ?? "";
+    const firstLine = frame.split("\n")[0] ?? "";
+
+    expect(firstLine).toContain("pct");
+    expect(firstLine).toContain("^C");
+    expect(firstLine).not.toContain("pc  ch");
+    expect(firstLine).not.toContain("chat");
+    expect(Math.max(...frame.split("\n").map((line) => displayWidth(line)))).toBeLessThanOrEqual(12);
+  });
+
+  it("keeps an identifying header at eight columns", () => {
+    const { lastFrame } = render(
+      <AppShell
+        view="chat"
+        cwd="/tmp/project"
+        taskId={null}
+        statusText="idle"
+        terminalWidth={8}
+        input={<TextLine text=">|msg" />}
+      >
+        <TextLine text="Ready" />
+      </AppShell>
+    );
+
+    const frame = lastFrame() ?? "";
+    const firstLine = frame.split("\n")[0] ?? "";
+
+    expect(firstLine).toContain("pct");
+    expect(firstLine).not.toContain("^C");
+    expect(firstLine.trim()).not.toHaveLength(0);
+    expect(Math.max(...frame.split("\n").map((line) => displayWidth(line)))).toBeLessThanOrEqual(8);
+  });
+
+  it("hides task ids before clipping worker headers in tiny terminals", () => {
+    const { lastFrame } = render(
+      <AppShell
+        view="worker"
+        cwd="/tmp/project"
+        taskId="task-20260705-000000-tiny"
+        statusText="workers 1 | done 1 | critic/mock done"
+        terminalWidth={16}
+        input={<TextLine text="logs · read" />}
+      >
+        <TextLine text="critic 1/1" />
+      </AppShell>
+    );
+
+    const frame = lastFrame() ?? "";
+    const firstLine = frame.split("\n")[0] ?? "";
+
+    expect(firstLine).toContain("pct");
+    expect(firstLine).toContain("logs");
+    expect(firstLine).toContain("^C");
+    expect(firstLine).not.toContain("pc  lo");
+    expect(firstLine).not.toContain("000");
+    expect(Math.max(...frame.split("\n").map((line) => displayWidth(line)))).toBeLessThanOrEqual(16);
+  });
+
+  it("uses an intentional native label in tiny headers instead of ellipsis", () => {
+    const { lastFrame } = render(
+      <AppShell
+        view="native"
+        cwd="/tmp/project"
+        taskId="task-20260705-000000-native"
+        statusText="workers 1 | done 1 | actor/mock done"
+        terminalWidth={20}
+        input={<TextLine text="native · ^]" />}
+      >
+        <TextLine text="actor/mock" />
+      </AppShell>
+    );
+
+    const frame = lastFrame() ?? "";
+    const firstLine = frame.split("\n")[0] ?? "";
+
+    expect(firstLine).toContain("pct");
+    expect(firstLine).toContain("nat");
+    expect(firstLine).toContain("^]");
+    expect(firstLine).not.toContain("n...");
+    expect(firstLine).not.toContain("000");
+    expect(Math.max(...frame.split("\n").map((line) => displayWidth(line)))).toBeLessThanOrEqual(20);
+  });
+
+  it("hides clipped task fragments at twenty columns", () => {
+    const { lastFrame } = render(
+      <AppShell
+        view="worker"
+        cwd="/tmp/project"
+        taskId="task-20260630-093326-1980"
+        statusText="workers 1 | done 1 | actor/mock done"
+        terminalWidth={20}
+        input={<TextLine text="logs · Pg · ^O" />}
+      >
+        <TextLine text="actor 1/1" />
+      </AppShell>
+    );
+
+    const frame = lastFrame() ?? "";
+    const firstLine = frame.split("\n")[0] ?? "";
+
+    expect(firstLine).toContain("pct");
+    expect(firstLine).toContain("logs");
+    expect(firstLine).toContain("^C");
+    expect(firstLine).not.toContain("093");
+    expect(Math.max(...frame.split("\n").map((line) => displayWidth(line)))).toBeLessThanOrEqual(20);
+  });
+
+  it("hides clipped task fragments at twenty two columns", () => {
+    const { lastFrame } = render(
+      <AppShell
+        view="worker"
+        cwd="/tmp/project"
+        taskId="task-20260630-093326-1980"
+        statusText="workers 1 | done 1 | actor/mock done"
+        terminalWidth={22}
+        input={<TextLine text="logs · Pg · ^O" />}
+      >
+        <TextLine text="actor 1/1" />
+      </AppShell>
+    );
+
+    const frame = lastFrame() ?? "";
+    const firstLine = frame.split("\n")[0] ?? "";
+
+    expect(firstLine).toContain("pct");
+    expect(firstLine).toContain("logs");
+    expect(firstLine).toContain("^C");
+    expect(firstLine).not.toContain("09...");
+    expect(firstLine).not.toContain("093");
+    expect(Math.max(...frame.split("\n").map((line) => displayWidth(line)))).toBeLessThanOrEqual(22);
+  });
+
+  it("keeps the native label intentional at twenty four columns", () => {
+    const { lastFrame } = render(
+      <AppShell
+        view="native"
+        cwd="/tmp/project"
+        taskId="task-20260705-000000-native"
+        statusText="workers 1 | done 1 | actor/mock done"
+        terminalWidth={24}
+        input={<TextLine text="native · ^]" />}
+      >
+        <TextLine text="actor/mock" />
+      </AppShell>
+    );
+
+    const frame = lastFrame() ?? "";
+    const headerRow = frame.split("\n")[0] ?? "";
+
+    expect(headerRow).toContain("pct");
+    expect(headerRow).toContain("nat");
+    expect(headerRow).toContain("000");
+    expect(headerRow).toContain("^]");
+    expect(headerRow).not.toContain("n...");
+    expect(headerRow).not.toContain("0...");
+  });
+
+  it("does not show a clipped none task label in very narrow headers", () => {
+    const { lastFrame } = render(
+      <AppShell
+        view="chat"
+        cwd="/tmp/project"
+        taskId={null}
+        statusText="idle"
+        terminalWidth={24}
+        input={<TextLine text="> | Type a message" />}
+      >
+        <TextLine text="Ready" />
+      </AppShell>
+    );
+
+    const frame = lastFrame() ?? "";
+    expect(frame).toContain("pct");
+    expect(frame).toContain("chat");
+    expect(frame).toContain("^C");
+    expect(frame).not.toContain(" non ");
+    expect(frame).not.toContain(" none ");
+  });
+
+  it("keeps long narrow native headers to a single lightweight row", () => {
+    const { lastFrame } = render(
+      <AppShell
+        view="native"
+        cwd="/tmp/pct-cli-native-compact-long-project"
+        taskId="task-20260705-000000-native-compact"
+        statusText="workers 1 | done 1 | actor/mock done"
+        terminalWidth={42}
+        input={<TextLine text="native · ^] logs" />}
+      >
+        <TextLine text="Native terminal" />
+      </AppShell>
+    );
+
+    const frame = lastFrame() ?? "";
+    const headerRow = frame.split("\n")[0] ?? "";
+
+    expect(headerRow).toContain("pct");
+    expect(headerRow).toContain("native");
+    expect(headerRow).toContain("^]");
+    expect(frame).not.toContain("│");
+    expect(frame).not.toContain("compact-long-project");
+  });
+
+  it("budgets narrow headers by display width for Chinese project and task names", () => {
+    const { lastFrame } = render(
+      <AppShell
+        view="worker"
+        cwd="/tmp/并行编码终端超级长项目名称测试"
+        taskId="task-20260705-中文任务后缀超级长超级长超级长"
+        statusText="workers 1 | done 1 | actor/codex done"
+        terminalWidth={42}
+        input={<TextLine text="logs · read" />}
+      >
+        <TextLine text="Worker output" />
+      </AppShell>
+    );
+
+    const frame = lastFrame() ?? "";
+    const headerContent = frame.split("\n")[0] ?? "";
+
+    expect(headerContent).toContain("pct");
+    expect(headerContent).toContain("logs");
+    expect(headerContent).toContain("...");
+    expect(frame).not.toContain("│");
+    expect(frame).not.toContain("并行编码终端超级长项目名称测试");
+    expect(frame).not.toContain("中文任务后缀超级长超级长超级长");
+    expect(displayWidth(headerContent)).toBeLessThanOrEqual(42);
+  });
+});
+
+function TextLine({ text }: { text: string }) {
+  return <Text>{text}</Text>;
+}

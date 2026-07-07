@@ -1,0 +1,65 @@
+import { mkdir, readFile, rename, stat, unlink, writeFile } from "node:fs/promises";
+import { basename, dirname, join } from "node:path";
+import type { output, ZodTypeAny } from "zod";
+
+export async function ensureDir(path: string): Promise<void> {
+  await mkdir(path, { recursive: true });
+}
+
+export async function pathExists(path: string): Promise<boolean> {
+  try {
+    await stat(path);
+    return true;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      return false;
+    }
+    throw error;
+  }
+}
+
+export async function writeJson(path: string, value: unknown): Promise<void> {
+  const dir = dirname(path);
+  const tempPath = join(dir, `.${basename(path)}.${process.pid}.${Date.now()}.${Math.random().toString(16).slice(2)}.tmp`);
+
+  await ensureDir(dir);
+  await writeFile(tempPath, `${JSON.stringify(value, null, 2)}\n`, "utf8");
+  await rename(tempPath, path);
+}
+
+export async function readJson<TSchema extends ZodTypeAny>(path: string, schema: TSchema): Promise<output<TSchema>> {
+  const text = await readFile(path, "utf8");
+  return schema.parse(JSON.parse(text));
+}
+
+export async function appendJsonLine(path: string, value: unknown): Promise<void> {
+  await ensureDir(dirname(path));
+  await writeFile(path, `${JSON.stringify(value)}\n`, { encoding: "utf8", flag: "a" });
+}
+
+export async function writeText(path: string, value: string): Promise<void> {
+  await ensureDir(dirname(path));
+  await writeFile(path, value, "utf8");
+}
+
+export async function appendText(path: string, value: string): Promise<void> {
+  await ensureDir(dirname(path));
+  await writeFile(path, value, { encoding: "utf8", flag: "a" });
+}
+
+export async function readTextIfExists(path: string): Promise<string> {
+  if (!(await pathExists(path))) {
+    return "";
+  }
+  return readFile(path, "utf8");
+}
+
+export async function removeIfExists(path: string): Promise<void> {
+  try {
+    await unlink(path);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+      throw error;
+    }
+  }
+}

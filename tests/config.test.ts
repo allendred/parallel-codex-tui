@@ -1,0 +1,229 @@
+import { mkdtemp } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { describe, expect, it } from "vitest";
+import { writeText } from "../src/core/file-store.js";
+import { loadConfig, writeDefaultConfig } from "../src/core/config.js";
+
+describe("config", () => {
+  it("returns defaults when config file is absent", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pct-config-default-"));
+    const config = await loadConfig(root);
+
+    expect(config.projectRoot).toBe(root);
+    expect(config.dataDir).toBe(".parallel-codex");
+    expect("engine" in config.router).toBe(false);
+    expect("complexityThreshold" in config.router).toBe(false);
+    expect(config.router.codex.args).toEqual([
+      "exec",
+      "--skip-git-repo-check",
+      "--sandbox",
+      "workspace-write",
+      "--color",
+      "never",
+      "-"
+    ]);
+    expect(config.router.codex.fallback).toBe("complex");
+    expect(config.workers.codex.args).toEqual([
+      "exec",
+      "--skip-git-repo-check",
+      "--sandbox",
+      "workspace-write",
+      "--color",
+      "never",
+      "-"
+    ]);
+    expect(config.pairing.main).toBe("claude");
+    expect(config.pairing.actor).toBe("codex");
+    expect(config.pairing.critic).toBe("codex");
+    expect(config.roles.actor.title).toBe("Actor");
+    expect(config.roles.critic.instructions.join("\n")).toContain("blocking findings");
+    expect(config.workers.claude.args).toEqual([
+      "--print",
+      "--permission-mode",
+      "acceptEdits",
+      "--output-format",
+      "text"
+    ]);
+    expect(config.workers.codex.nativeSession.resumeArgs).toEqual([
+      "exec",
+      "resume",
+      "{sessionId}",
+      "--skip-git-repo-check",
+      "-"
+    ]);
+    expect(config.workers.codex.interactive.args).toEqual([
+      "resume",
+      "{sessionId}"
+    ]);
+    expect(config.workers.claude.interactive.args).toEqual(["--resume", "{sessionId}"]);
+    expect(config.workers.codex.nativeSession.fallback).toBe("new");
+  });
+
+  it("loads TOML overrides", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pct-config-file-"));
+
+    await writeDefaultConfig(root);
+    const config = await loadConfig(root);
+
+    expect(config.workers.codex.command).toBe("codex");
+    expect(config.ui.showStatusBar).toBe(true);
+  });
+
+  it("keeps default worker timeouts when TOML overrides only command fields", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pct-config-worker-merge-"));
+
+    await writeText(
+      join(root, ".parallel-codex", "config.toml"),
+      [
+        "[workers.codex]",
+        'command = "codex"',
+        'args = ["exec", "-"]',
+        "",
+        "[workers.claude]",
+        'command = "claude"',
+        'args = ["--print"]'
+      ].join("\n")
+    );
+
+    const config = await loadConfig(root);
+
+    expect(config.workers.codex.args).toEqual(["exec", "-"]);
+    expect(config.workers.codex.timeoutMs).toBe(45 * 60 * 1000);
+    expect(config.workers.codex.idleTimeoutMs).toBe(5 * 60 * 1000);
+    expect(config.workers.codex.nativeSession.enabled).toBe(true);
+    expect(config.workers.claude.timeoutMs).toBe(45 * 60 * 1000);
+  });
+
+  it("merges interactive native TUI command overrides", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pct-config-interactive-"));
+
+    await writeText(
+      join(root, ".parallel-codex", "config.toml"),
+      [
+        "[workers.codex.interactive]",
+        'command = "codex-beta"',
+        'args = ["resume", "{sessionId}", "--model", "{model}"]',
+        "",
+        "[workers.claude.interactive]",
+        'args = ["--resume", "{sessionId}", "--dangerously-skip-permissions"]'
+      ].join("\n")
+    );
+
+    const config = await loadConfig(root);
+
+    expect(config.workers.codex.interactive.command).toBe("codex-beta");
+    expect(config.workers.codex.interactive.args).toEqual(["resume", "{sessionId}", "--model", "{model}"]);
+    expect(config.workers.claude.interactive.command).toBe("claude");
+    expect(config.workers.claude.interactive.args).toEqual([
+      "--resume",
+      "{sessionId}",
+      "--dangerously-skip-permissions"
+    ]);
+  });
+
+  it("merges native session TOML overrides", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pct-config-native-session-"));
+
+    await writeText(
+      join(root, ".parallel-codex", "config.toml"),
+      [
+        "[workers.claude.nativeSession]",
+        "enabled = true",
+        'resumeArgs = ["--print", "--resume", "{sessionId}"]',
+        'fallback = "new"'
+      ].join("\n")
+    );
+
+    const config = await loadConfig(root);
+
+    expect(config.workers.claude.nativeSession.resumeArgs).toEqual(["--print", "--resume", "{sessionId}"]);
+    expect(config.workers.claude.nativeSession.detectSessionId).toBe(true);
+    expect(config.workers.claude.nativeSession.fallback).toBe("new");
+  });
+
+  it("loads worker model and third-party provider overrides", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pct-config-model-provider-"));
+
+    await writeText(
+      join(root, ".parallel-codex", "config.toml"),
+      [
+        "[workers.codex.model]",
+        'name = "gpt-5.5"',
+        'provider = "custom"',
+        'args = ["--model", "{model}", "--provider", "{provider}"]',
+        "",
+        "[workers.codex.model.env]",
+        'OPENAI_BASE_URL = "https://third-party.example/v1"',
+        'OPENAI_API_KEY = "{env:OPENAI_API_KEY}"'
+      ].join("\n")
+    );
+
+    const config = await loadConfig(root);
+
+    expect(config.workers.codex.model.name).toBe("gpt-5.5");
+    expect(config.workers.codex.model.provider).toBe("custom");
+    expect(config.workers.codex.model.args).toEqual(["--model", "{model}", "--provider", "{provider}"]);
+    expect(config.workers.codex.model.env).toEqual({
+      OPENAI_BASE_URL: "https://third-party.example/v1",
+      OPENAI_API_KEY: "{env:OPENAI_API_KEY}"
+    });
+    expect(config.workers.claude.model.args).toEqual([]);
+  });
+
+  it("loads Codex router command overrides", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pct-config-codex-router-"));
+
+    await writeText(
+      join(root, ".parallel-codex", "config.toml"),
+      [
+        "[router.codex]",
+        'command = "codex"',
+        'args = ["exec", "--skip-git-repo-check", "--sandbox", "workspace-write", "--color", "never", "-"]',
+        "timeoutMs = 120000",
+        'fallback = "complex"'
+      ].join("\n")
+    );
+
+    const config = await loadConfig(root);
+
+    expect(config.router.codex.command).toBe("codex");
+    expect(config.router.codex.args).toContain("exec");
+    expect(config.router.codex.timeoutMs).toBe(120000);
+    expect(config.router.codex.fallback).toBe("complex");
+  });
+
+  it("rejects the removed heuristic router fallback", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pct-config-router-heuristic-"));
+
+    await writeText(
+      join(root, ".parallel-codex", "config.toml"),
+      ["[router.codex]", 'fallback = "heuristic"'].join("\n")
+    );
+
+    await expect(loadConfig(root)).rejects.toThrow();
+  });
+
+  it("loads role prompt overrides", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pct-config-roles-"));
+
+    await writeText(
+      join(root, ".parallel-codex", "config.toml"),
+      [
+        "[roles.actor]",
+        'title = "Builder"',
+        'instructions = ["Prefer small patches.", "Always update worklog.md."]',
+        "",
+        "[roles.critic]",
+        'instructions = ["Check tests first."]'
+      ].join("\n")
+    );
+
+    const config = await loadConfig(root);
+
+    expect(config.roles.actor.title).toBe("Builder");
+    expect(config.roles.actor.instructions).toEqual(["Prefer small patches.", "Always update worklog.md."]);
+    expect(config.roles.critic.title).toBe("Critic");
+    expect(config.roles.critic.instructions).toEqual(["Check tests first."]);
+  });
+});

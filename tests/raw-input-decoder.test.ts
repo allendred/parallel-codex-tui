@@ -1,0 +1,34 @@
+import { Buffer } from "node:buffer";
+import { describe, expect, it } from "vitest";
+import { createRawInputDecoder } from "../src/tui/raw-input-decoder.js";
+
+describe("createRawInputDecoder", () => {
+  it("preserves UTF-8 characters split across raw terminal chunks", () => {
+    const decoder = createRawInputDecoder();
+    const input = "做个俄罗斯方块的游戏";
+    let decoded = "";
+
+    for (const byte of Buffer.from(input, "utf8")) {
+      decoded += decoder.write(Buffer.from([byte]));
+    }
+    decoded += decoder.end();
+
+    expect(decoded).toBe(input);
+  });
+
+  it("preserves mixed escape sequences and split UTF-8 text", () => {
+    const decoder = createRawInputDecoder();
+    const input = "\x1b[200~设置速度\x1b[201~\r";
+    const bytes = Buffer.from(input, "utf8");
+    const chunks = [
+      bytes.subarray(0, 5),
+      bytes.subarray(5, 7),
+      bytes.subarray(7, 10),
+      bytes.subarray(10)
+    ];
+
+    const decoded = chunks.map((chunk) => decoder.write(chunk)).join("") + decoder.end();
+
+    expect(decoded).toBe(input);
+  });
+});

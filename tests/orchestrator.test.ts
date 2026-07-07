@@ -1,0 +1,731 @@
+import { mkdtemp } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { describe, expect, it } from "vitest";
+import { defaultConfig } from "../src/core/config.js";
+import { appendJsonLine, pathExists, readJson, readTextIfExists, writeJson, writeText } from "../src/core/file-store.js";
+import { SessionManager } from "../src/core/session-manager.js";
+import { NativeSessionSchema, TaskMetaSchema, WorkerStatusSchema } from "../src/domain/schemas.js";
+import { Orchestrator } from "../src/orchestrator/orchestrator.js";
+import { MockWorkerAdapter } from "../src/workers/mock-adapter.js";
+import type { WorkerAdapter, WorkerResult, WorkerRunSpec } from "../src/workers/types.js";
+
+function mockConfig(root: string) {
+  const config = defaultConfig(root);
+  config.pairing.judge = "mock";
+  config.pairing.actor = "mock";
+  config.pairing.critic = "mock";
+  config.pairing.main = "mock";
+  config.router.defaultMode = "complex";
+  config.workers.mock.command = "mock";
+  return config;
+}
+
+describe("Orchestrator", () => {
+  it("does not create Judge Actor Critic sessions for simple requests", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pct-orch-simple-"));
+    const config = mockConfig(root);
+    config.router.defaultMode = "simple";
+    const manager = new SessionManager({
+      projectRoot: root,
+      dataDir: config.dataDir,
+      now: () => new Date("2026-06-30T03:30:00.000Z"),
+      randomId: () => "a1b2"
+    });
+    const orchestrator = new Orchestrator(config, manager, new Map([["mock", new MockWorkerAdapter()]]));
+
+    const result = await orchestrator.handleRequest({
+      request: "解释一下 actor critic",
+      cwd: root
+    });
+
+    expect(result.mode).toBe("simple");
+    expect(result.taskId).toBeNull();
+    expect(result.summary).toBe("Mock simple response for: 解释一下 actor critic");
+    expect(result.workers.map((worker) => worker.id)).toEqual(["main-mock"]);
+    expect(await pathExists(join(root, ".parallel-codex", "sessions"))).toBe(true);
+    expect(await pathExists(join(root, ".parallel-codex", "sessions", "main"))).toBe(true);
+    expect(await pathExists(join(root, ".parallel-codex", "sessions", "main", "judge-mock"))).toBe(false);
+  });
+
+  it("does not expose router debug text when a simple main worker returns no visible output", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pct-orch-simple-empty-"));
+    const config = mockConfig(root);
+    config.router.defaultMode = "simple";
+    const manager = new SessionManager({
+      projectRoot: root,
+      dataDir: config.dataDir,
+      now: () => new Date("2026-06-30T03:30:00.000Z"),
+      randomId: () => "a1b2"
+    });
+    const orchestrator = new Orchestrator(config, manager, new Map([["mock", new EmptyMainWorkerAdapter()]]));
+
+    const result = await orchestrator.handleRequest({
+      request: "你好",
+      cwd: root
+    });
+
+    expect(result.mode).toBe("simple");
+    expect(result.summary).toContain("简单对话通道没有收到可显示回复");
+    expect(result.summary).not.toContain("main worker");
+    expect(result.summary).not.toContain("Simple route selected");
+    expect(result.summary).not.toContain("Forced simple mode");
+  });
+
+  it("runs Judge Actor Critic for complex requests", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pct-orch-complex-"));
+    const config = mockConfig(root);
+    const manager = new SessionManager({
+      projectRoot: root,
+      dataDir: config.dataDir,
+      now: () => new Date("2026-06-30T03:30:00.000Z"),
+      randomId: () => "a1b2"
+    });
+    const orchestrator = new Orchestrator(config, manager, new Map([["mock", new MockWorkerAdapter()]]));
+    const statuses: string[] = [];
+    const workerLabels: string[] = [];
+
+    const result = await orchestrator.handleRequest({
+      request: "实现 parallel coding worker 状态栏",
+      cwd: root,
+      onStatus: (status) => statuses.push([status.judge, status.actor, status.critic].join("/")),
+      onWorker: (worker) => workerLabels.push(worker.label)
+    });
+
+    expect(result.mode).toBe("complex");
+    expect(result.taskId).toBe("task-20260630-033000-a1b2");
+    expect(result.summary).toContain("APPROVED");
+    expect(result.workers.map((worker) => worker.id)).toEqual(["judge-mock", "actor-mock", "critic-mock"]);
+    expect(workerLabels).toEqual(["Judge (mock)", "Actor (mock)", "Critic (mock)"]);
+    expect(statuses).toContain("running/waiting/waiting");
+    expect(statuses).toContain("done/done/done");
+
+    const taskDir = join(root, ".parallel-codex", "sessions", "task-20260630-033000-a1b2");
+    expect(await readTextIfExists(join(taskDir, "judge-mock", "requirements.md"))).toContain("Mock requirements");
+    expect(await readTextIfExists(join(taskDir, "actor-mock", "worklog.md"))).toContain("Mock actor");
+    expect(await readTextIfExists(join(taskDir, "critic-mock", "review.md"))).toContain("APPROVED");
+
+    const actorStatus = await readJson(join(taskDir, "actor-mock", "status.json"), WorkerStatusSchema);
+    expect(actorStatus.state).toBe("done");
+    expect(await readTextIfExists(join(taskDir, "turns", "0001", "user.md"))).toContain(
+      "实现 parallel coding worker 状态栏"
+    );
+    expect(await readTextIfExists(join(taskDir, "actor-mock", "prompt.md"))).toContain("Current turn: 0001");
+
+    const featureDir = join(taskDir, "features", "0001-parallel-coding-worker");
+    expect(await readTextIfExists(join(featureDir, "spec.md"))).toContain("实现 parallel coding worker 状态栏");
+    expect(await readTextIfExists(join(featureDir, "actor-worklog.md"))).toContain("Mock actor");
+    expect(await readTextIfExists(join(featureDir, "critic-findings.jsonl"))).toBe("");
+    expect(await readTextIfExists(join(featureDir, "decisions.md"))).toContain("APPROVED");
+    expect(await readTextIfExists(join(taskDir, "actor-mock", "prompt.md"))).toContain(`Feature directory: ${featureDir}`);
+    expect(await readTextIfExists(join(taskDir, "critic-mock", "prompt.md"))).toContain("critic-findings.jsonl");
+    expect(await readTextIfExists(join(taskDir, "dialogue", "actor-critic.jsonl"))).toContain('"type":"critic.completed"');
+  });
+
+  it("lists workers from an existing task session after TUI restart", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pct-orch-list-workers-"));
+    const config = mockConfig(root);
+    const manager = new SessionManager({
+      projectRoot: root,
+      dataDir: config.dataDir,
+      now: () => new Date("2026-06-30T03:30:00.000Z"),
+      randomId: () => "a1b2"
+    });
+    const firstOrchestrator = new Orchestrator(config, manager, new Map([["mock", new MockWorkerAdapter()]]));
+    const result = await firstOrchestrator.handleRequest({
+      request: "实现 worker attach",
+      cwd: root
+    });
+    const restartedOrchestrator = new Orchestrator(config, manager, new Map([["mock", new MockWorkerAdapter()]]));
+
+    const workers = await restartedOrchestrator.listTaskWorkers(result.taskId ?? "");
+
+    expect(workers.map((worker) => worker.id)).toEqual(["judge-mock", "actor-mock", "critic-mock"]);
+    expect(workers.map((worker) => worker.label)).toEqual(["Judge (mock)", "Actor (mock)", "Critic (mock)"]);
+    expect(workers[1].statusPath).toBe(join(root, ".parallel-codex", "sessions", result.taskId ?? "", "actor-mock", "status.json"));
+  });
+
+  it("uses Codex router decisions before starting workers", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pct-orch-codex-router-"));
+    const config = mockConfig(root);
+    config.router.defaultMode = "auto";
+    const manager = new SessionManager({
+      projectRoot: root,
+      dataDir: config.dataDir,
+      now: () => new Date("2026-06-30T03:30:00.000Z"),
+      randomId: () => "a1b2"
+    });
+    const orchestrator = new Orchestrator(config, manager, new Map([["mock", new MockWorkerAdapter()]]), async () =>
+      JSON.stringify({
+        mode: "complex",
+        reason: "Codex routed optimization as project work."
+      })
+    );
+
+    const result = await orchestrator.handleRequest({
+      request: "优化得分",
+      cwd: root
+    });
+
+    expect(result.mode).toBe("complex");
+    expect(result.taskId).toBe("task-20260630-033000-a1b2");
+    expect(await readTextIfExists(join(root, ".parallel-codex", "sessions", result.taskId ?? "", "route.json"))).toContain(
+      "Codex routed optimization as project work."
+    );
+  });
+
+  it("passes configured role prompts into worker prompts", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pct-orch-role-prompts-"));
+    const config = mockConfig(root);
+    config.roles.actor = {
+      title: "Builder",
+      instructions: ["Prefer small patches.", "Always update worklog.md."]
+    };
+    const manager = new SessionManager({
+      projectRoot: root,
+      dataDir: config.dataDir,
+      now: () => new Date("2026-06-30T03:30:00.000Z"),
+      randomId: () => "a1b2"
+    });
+    const orchestrator = new Orchestrator(config, manager, new Map([["mock", new MockWorkerAdapter()]]));
+
+    const result = await orchestrator.handleRequest({
+      request: "实现角色配置",
+      cwd: root
+    });
+
+    const actorPrompt = await readTextIfExists(
+      join(root, ".parallel-codex", "sessions", result.taskId ?? "", "actor-mock", "prompt.md")
+    );
+    expect(actorPrompt).toContain("# Role: Builder");
+    expect(actorPrompt).toContain("- Prefer small patches.");
+    expect(actorPrompt).toContain("- Always update worklog.md.");
+  });
+
+  it("passes same-task native sessions into worker runs", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pct-orch-native-session-"));
+    const config = mockConfig(root);
+    const manager = new SessionManager({
+      projectRoot: root,
+      dataDir: config.dataDir,
+      now: () => new Date("2026-06-30T03:30:00.000Z"),
+      randomId: () => "a1b2"
+    });
+    const capturing = new CapturingAdapter();
+    const orchestrator = new Orchestrator(config, manager, new Map([["mock", capturing]]));
+    const task = await manager.createTask({
+      request: "Build it.",
+      cwd: root,
+      route: {
+        mode: "complex",
+        reason: "Requires workers.",
+        suggested_roles: ["judge", "actor", "critic"],
+        judge_engine: "mock",
+        actor_engine: "mock",
+        critic_engine: "mock"
+      }
+    });
+    const actorDir = join(task.dir, "actor-mock");
+    await writeJson(
+      join(actorDir, "native-session.json"),
+      NativeSessionSchema.parse({
+        engine: "mock",
+        role: "actor",
+        worker_id: "actor-mock",
+        session_id: "native-actor-1",
+        scope: "task",
+        cwd: root,
+        created_at: "2026-06-30T03:30:00.000Z",
+        last_used_at: "2026-06-30T03:30:00.000Z",
+        source: "manual"
+      })
+    );
+
+    await orchestrator.handleTaskTurn({
+      taskId: task.id,
+      request: "继续改",
+      cwd: root
+    });
+
+    const actorRun = capturing.runs.find((run) => run.role === "actor");
+    expect(actorRun?.nativeSession?.session_id).toBe("native-actor-1");
+    const updated = await readJson(join(actorDir, "native-session.json"), NativeSessionSchema);
+    expect(updated.last_used_at).not.toBe("2026-06-30T03:30:00.000Z");
+    expect(updated.source).toBe("manual");
+  });
+
+  it("handles follow-up turns through Actor and Critic without rerunning Judge", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pct-orch-follow-up-"));
+    const config = mockConfig(root);
+    const manager = new SessionManager({
+      projectRoot: root,
+      dataDir: config.dataDir,
+      now: () => new Date("2026-06-30T03:30:00.000Z"),
+      randomId: () => "a1b2"
+    });
+    const capturing = new CapturingAdapter();
+    const orchestrator = new Orchestrator(config, manager, new Map([["mock", capturing]]));
+    const first = await orchestrator.handleRequest({
+      request: "实现 parallel coding worker 状态栏",
+      cwd: root
+    });
+
+    capturing.runs.length = 0;
+    const followUp = await orchestrator.handleTaskTurn({
+      taskId: first.taskId ?? "",
+      request: "继续改状态栏",
+      cwd: root
+    });
+
+    expect(followUp.mode).toBe("complex");
+    expect(capturing.runs.map((run) => run.role)).toEqual(["actor", "critic"]);
+    const taskDir = join(root, ".parallel-codex", "sessions", first.taskId ?? "");
+    expect(await readTextIfExists(join(taskDir, "turns", "0002", "user.md"))).toContain("继续改状态栏");
+    expect(await readTextIfExists(join(taskDir, "actor-mock", "prompt.md"))).toContain("Current turn: 0002");
+    expect(await readTextIfExists(join(taskDir, "actor-mock", "prompt.md"))).toContain(
+      `Feature directory: ${join(taskDir, "features", "0002")}`
+    );
+    expect(await readTextIfExists(join(taskDir, "features", "0002", "spec.md"))).toContain("继续改状态栏");
+    expect(await readTextIfExists(join(taskDir, "dialogue", "actor-critic.jsonl"))).toContain('"feature_id":"0002"');
+    expect(await readTextIfExists(join(taskDir, "turns", "0002", "supervisor-summary.md"))).toContain(
+      "Complex task completed."
+    );
+  });
+
+  it("passes critic findings through the feature mailbox for actor revision", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pct-orch-feature-revision-"));
+    const config = mockConfig(root);
+    const adapter = new RevisionFindingAdapter();
+    const manager = new SessionManager({
+      projectRoot: root,
+      dataDir: config.dataDir,
+      now: () => new Date("2026-06-30T03:30:00.000Z"),
+      randomId: () => "a1b2"
+    });
+    const orchestrator = new Orchestrator(config, manager, new Map([["mock", adapter]]));
+
+    const result = await orchestrator.handleRequest({
+      request: "实现 keyboard feature",
+      cwd: root
+    });
+
+    expect(adapter.runs.map((run) => run.role)).toEqual(["judge", "actor", "critic", "actor", "critic"]);
+    const taskDir = join(root, ".parallel-codex", "sessions", result.taskId ?? "");
+    const featureDir = join(taskDir, "features", "0001-keyboard-feature");
+    const actorPrompts = adapter.runs.filter((run) => run.role === "actor").map((run) => run.prompt);
+    expect(actorPrompts[1]).toContain("Revision request:");
+    expect(actorPrompts[1]).toContain(join(featureDir, "critic-findings.jsonl"));
+    expect(await readTextIfExists(join(featureDir, "critic-findings.jsonl"))).toContain('"id":"C-001"');
+    expect(await readTextIfExists(join(featureDir, "actor-replies.jsonl"))).toContain('"finding_id":"C-001"');
+    expect(await readTextIfExists(join(featureDir, "status.json"))).toContain('"state": "approved"');
+  });
+
+  it("uses current feature worklog in supervisor summaries instead of stale actor worker artifacts", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pct-orch-feature-summary-"));
+    const config = mockConfig(root);
+    const manager = new SessionManager({
+      projectRoot: root,
+      dataDir: config.dataDir,
+      now: () => new Date("2026-06-30T03:30:00.000Z"),
+      randomId: () => "a1b2"
+    });
+    const task = await manager.createTask({
+      request: "Build it.",
+      cwd: root,
+      route: {
+        mode: "complex",
+        reason: "Requires workers.",
+        suggested_roles: ["judge", "actor", "critic"],
+        judge_engine: "mock",
+        actor_engine: "mock",
+        critic_engine: "mock"
+      }
+    });
+    await writeText(join(task.dir, "judge-mock", "requirements.md"), "# Requirements\n\n- Current requirements.\n");
+    await writeText(join(task.dir, "actor-mock", "worklog.md"), "STALE_ACTOR_WORKLOG");
+    await writeText(join(task.dir, "critic-mock", "review.md"), "STALE_CRITIC_REVIEW");
+    const orchestrator = new Orchestrator(config, manager, new Map([["mock", new FeatureOnlyWorklogAdapter()]]));
+
+    await orchestrator.handleTaskTurn({
+      taskId: task.id,
+      request: "继续优化",
+      cwd: root
+    });
+
+    const summary = await readTextIfExists(join(task.dir, "turns", "0002", "supervisor-summary.md"));
+    const decisions = await readTextIfExists(join(task.dir, "features", "0002", "decisions.md"));
+    expect(summary).toContain("CURRENT_FEATURE_WORKLOG");
+    expect(summary).toContain("CURRENT_CRITIC_REVIEW");
+    expect(summary).not.toContain("STALE_ACTOR_WORKLOG");
+    expect(summary).not.toContain("STALE_CRITIC_REVIEW");
+    expect(decisions).toContain("CURRENT_FEATURE_WORKLOG");
+    expect(decisions).not.toContain("STALE_ACTOR_WORKLOG");
+  });
+
+  it("uses current turn requirements in supervisor summaries when Judge writes there", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pct-orch-turn-requirements-"));
+    const config = mockConfig(root);
+    const manager = new SessionManager({
+      projectRoot: root,
+      dataDir: config.dataDir,
+      now: () => new Date("2026-06-30T03:30:00.000Z"),
+      randomId: () => "a1b2"
+    });
+    const orchestrator = new Orchestrator(config, manager, new Map([["mock", new TurnRequirementsJudgeAdapter()]]));
+
+    const result = await orchestrator.handleRequest({
+      request: "做个俄罗斯方块的游戏",
+      cwd: root
+    });
+
+    const taskDir = join(root, ".parallel-codex", "sessions", result.taskId ?? "");
+    const summary = await readTextIfExists(join(taskDir, "turns", "0001", "supervisor-summary.md"));
+    expect(summary).toContain("TURN_ONLY_REQUIREMENTS");
+    expect(summary).not.toContain("Requirements:\n(empty)");
+  });
+
+  it("clears stale worker artifacts before reusing actor and critic worker directories", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pct-orch-clear-artifacts-"));
+    const config = mockConfig(root);
+    const manager = new SessionManager({
+      projectRoot: root,
+      dataDir: config.dataDir,
+      now: () => new Date("2026-06-30T03:30:00.000Z"),
+      randomId: () => "a1b2"
+    });
+    const task = await manager.createTask({
+      request: "Build it.",
+      cwd: root,
+      route: {
+        mode: "complex",
+        reason: "Requires workers.",
+        suggested_roles: ["judge", "actor", "critic"],
+        judge_engine: "mock",
+        actor_engine: "mock",
+        critic_engine: "mock"
+      }
+    });
+    await writeText(join(task.dir, "judge-mock", "requirements.md"), "# Requirements\n\n- Current requirements.\n");
+    await writeText(join(task.dir, "actor-mock", "worklog.md"), "STALE_ACTOR_WORKLOG");
+    await writeText(join(task.dir, "actor-mock", "patch.diff"), "STALE_PATCH");
+    await writeText(join(task.dir, "critic-mock", "review.md"), "STALE_CRITIC_REVIEW");
+    const orchestrator = new Orchestrator(config, manager, new Map([["mock", new NoArtifactAdapter()]]));
+
+    await orchestrator.handleTaskTurn({
+      taskId: task.id,
+      request: "继续优化",
+      cwd: root
+    });
+
+    const summary = await readTextIfExists(join(task.dir, "turns", "0002", "supervisor-summary.md"));
+    expect(await readTextIfExists(join(task.dir, "actor-mock", "worklog.md"))).toBe("");
+    expect(await readTextIfExists(join(task.dir, "actor-mock", "patch.diff"))).toBe("");
+    expect(await readTextIfExists(join(task.dir, "critic-mock", "review.md"))).toBe("");
+    expect(summary).not.toContain("STALE_ACTOR_WORKLOG");
+    expect(summary).not.toContain("STALE_PATCH");
+    expect(summary).not.toContain("STALE_CRITIC_REVIEW");
+  });
+
+  it("continues task turns under the workspace session root when app root differs", async () => {
+    const appRoot = await mkdtemp(join(tmpdir(), "pct-orch-app-root-"));
+    const workspaceRoot = await mkdtemp(join(tmpdir(), "pct-orch-workspace-root-"));
+    const config = mockConfig(appRoot);
+    const manager = new SessionManager({
+      projectRoot: workspaceRoot,
+      dataDir: config.dataDir,
+      now: () => new Date("2026-06-30T03:30:00.000Z"),
+      randomId: () => "a1b2"
+    });
+    const orchestrator = new Orchestrator(config, manager, new Map([["mock", new MockWorkerAdapter()]]));
+    const task = await manager.createTask({
+      request: "做个俄罗斯方块的游戏",
+      cwd: workspaceRoot,
+      route: {
+        mode: "complex",
+        reason: "Requires workers.",
+        suggested_roles: ["judge", "actor", "critic"],
+        judge_engine: "mock",
+        actor_engine: "mock",
+        critic_engine: "mock"
+      }
+    });
+
+    await orchestrator.handleTaskTurn({
+      taskId: task.id,
+      request: "键盘能改不",
+      cwd: workspaceRoot
+    });
+
+    expect(await pathExists(join(workspaceRoot, ".parallel-codex", "sessions", task.id, "turns", "0002", "user.md"))).toBe(true);
+    expect(await pathExists(join(appRoot, ".parallel-codex", "sessions", task.id, "turns", "0001", "user.md"))).toBe(false);
+  });
+
+  it("answers active task questions from session files without starting a new turn", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pct-orch-task-question-"));
+    const config = mockConfig(root);
+    const manager = new SessionManager({
+      projectRoot: root,
+      dataDir: config.dataDir,
+      now: () => new Date("2026-06-30T03:30:00.000Z"),
+      randomId: () => "a1b2"
+    });
+    const orchestrator = new Orchestrator(config, manager, new Map([["mock", new MockWorkerAdapter()]]));
+    const task = await manager.createTask({
+      request: "优化得分",
+      cwd: root,
+      route: {
+        mode: "complex",
+        reason: "Requires workers.",
+        suggested_roles: ["judge", "actor", "critic"],
+        judge_engine: "mock",
+        actor_engine: "mock",
+        critic_engine: "mock"
+      }
+    });
+    await manager.updateTaskStatus(task, "failed");
+    await writeJson(join(task.dir, "critic-mock", "status.json"), {
+      worker_id: "critic-mock",
+      role: "critic",
+      engine: "mock",
+      state: "failed",
+      phase: "process-idle-timeout",
+      last_event_at: "2026-06-30T03:35:00.000Z",
+      summary: "mock produced no output for 300000ms"
+    });
+    await writeText(
+      join(task.dir, "critic-mock", "output.log"),
+      "$ mock critic\n\nProcess idle timed out after 300000ms\n"
+    );
+
+    const result = await orchestrator.answerTaskQuestion({
+      taskId: task.id,
+      request: "原因呢超时",
+      cwd: root
+    });
+
+    expect(result.mode).toBe("simple");
+    expect(result.taskId).toBe(task.id);
+    expect(result.summary).toContain("process-idle-timeout");
+    expect(result.summary).toContain("mock produced no output for 300000ms");
+    expect(await pathExists(join(task.dir, "turns", "0002", "user.md"))).toBe(false);
+  });
+
+  it("routes active task follow-ups through the Codex semantic router", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pct-orch-follow-up-router-"));
+    const config = mockConfig(root);
+    config.router.defaultMode = "auto";
+    const manager = new SessionManager({
+      projectRoot: root,
+      dataDir: config.dataDir,
+      now: () => new Date("2026-06-30T03:30:00.000Z"),
+      randomId: () => "a1b2"
+    });
+    const task = await manager.createTask({
+      request: "优化得分",
+      cwd: root,
+      route: {
+        mode: "complex",
+        reason: "Requires workers.",
+        suggested_roles: ["judge", "actor", "critic"],
+        judge_engine: "mock",
+        actor_engine: "mock",
+        critic_engine: "mock"
+      }
+    });
+    const orchestrator = new Orchestrator(config, manager, new Map([["mock", new MockWorkerAdapter()]]), async (prompt) =>
+      JSON.stringify({
+        mode: prompt.includes("改成不用 Docker") ? "complex" : "simple",
+        reason: "mock semantic follow-up route"
+      })
+    );
+
+    await expect(
+      orchestrator.routeTaskFollowUp({
+        taskId: task.id,
+        request: "原因呢超时",
+        cwd: root
+      })
+    ).resolves.toMatchObject({
+      mode: "simple",
+      taskId: null
+    });
+    await expect(
+      orchestrator.routeTaskFollowUp({
+        taskId: task.id,
+        request: "那改成不用 Docker 评测呢",
+        cwd: root
+      })
+    ).resolves.toMatchObject({
+      mode: "complex",
+      taskId: task.id
+    });
+  });
+
+  it("stops complex flow when a worker fails", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pct-orch-failure-"));
+    const config = mockConfig(root);
+    const manager = new SessionManager({
+      projectRoot: root,
+      dataDir: config.dataDir,
+      now: () => new Date("2026-06-30T03:30:00.000Z"),
+      randomId: () => "fail"
+    });
+    const orchestrator = new Orchestrator(config, manager, new Map([["mock", new FailingJudgeAdapter()]]));
+
+    await expect(
+      orchestrator.handleRequest({
+        request: "做个俄罗斯方块的游戏",
+        cwd: root
+      })
+    ).rejects.toThrow("judge-mock failed with exit code 2");
+
+    const taskDir = join(root, ".parallel-codex", "sessions", "task-20260630-033000-fail");
+    expect(await pathExists(join(taskDir, "critic-mock"))).toBe(false);
+    const meta = await readJson(join(taskDir, "meta.json"), TaskMetaSchema);
+    expect(meta.status).toBe("failed");
+  });
+});
+
+class FailingJudgeAdapter implements WorkerAdapter {
+  readonly name = "mock" as const;
+
+  async run(spec: WorkerRunSpec): Promise<WorkerResult> {
+    if (spec.role === "judge") {
+      return {
+        workerId: spec.workerId,
+        exitCode: 2,
+        signal: null
+      };
+    }
+    return new MockWorkerAdapter().run(spec);
+  }
+}
+
+class CapturingAdapter extends MockWorkerAdapter {
+  readonly runs: WorkerRunSpec[] = [];
+
+  async run(spec: WorkerRunSpec): Promise<WorkerResult> {
+    this.runs.push(spec);
+    return super.run(spec);
+  }
+}
+
+class RevisionFindingAdapter extends MockWorkerAdapter {
+  readonly runs: WorkerRunSpec[] = [];
+  private criticRuns = 0;
+
+  async run(spec: WorkerRunSpec): Promise<WorkerResult> {
+    this.runs.push(spec);
+    const result = await super.run(spec);
+    if (spec.role === "critic") {
+      this.criticRuns += 1;
+      if (this.criticRuns === 1) {
+        const featureDir = featureDirFromPrompt(spec.prompt);
+        await writeText(join(featureDir, "critic-findings.jsonl"), "");
+        await appendJsonLine(join(featureDir, "critic-findings.jsonl"), {
+          id: "C-001",
+          severity: "blocker",
+          summary: "Keyboard handling is incomplete"
+        });
+        await writeText(join(spec.filesDir, "review.md"), "# Review\n\nREVISION_REQUIRED\n\nSee critic-findings.jsonl.\n");
+      }
+    }
+    if (spec.role === "actor" && spec.prompt.includes("Revision request:")) {
+      const featureDir = featureDirFromPrompt(spec.prompt);
+      await appendJsonLine(join(featureDir, "actor-replies.jsonl"), {
+        finding_id: "C-001",
+        status: "fixed",
+        notes: "Mock actor fixed the keyboard handling."
+      });
+    }
+    return result;
+  }
+}
+
+class EmptyMainWorkerAdapter extends MockWorkerAdapter {
+  async run(spec: WorkerRunSpec): Promise<WorkerResult> {
+    if (spec.role === "main") {
+      return {
+        workerId: spec.workerId,
+        exitCode: 0,
+        signal: null
+      };
+    }
+
+    return super.run(spec);
+  }
+}
+
+class FeatureOnlyWorklogAdapter extends MockWorkerAdapter {
+  async run(spec: WorkerRunSpec): Promise<WorkerResult> {
+    if (spec.role === "actor") {
+      const featureDir = featureDirFromPrompt(spec.prompt);
+      await writeText(join(featureDir, "actor-worklog.md"), "# Actor Feature Worklog\n\nCURRENT_FEATURE_WORKLOG\n");
+      return {
+        workerId: spec.workerId,
+        exitCode: 0,
+        signal: null
+      };
+    }
+
+    if (spec.role === "critic") {
+      await writeText(join(spec.filesDir, "review.md"), "# Review\n\nCURRENT_CRITIC_REVIEW\n\nAPPROVED\n");
+      return {
+        workerId: spec.workerId,
+        exitCode: 0,
+        signal: null
+      };
+    }
+
+    return super.run(spec);
+  }
+}
+
+class NoArtifactAdapter extends MockWorkerAdapter {
+  async run(spec: WorkerRunSpec): Promise<WorkerResult> {
+    if (spec.role === "actor" || spec.role === "critic") {
+      return {
+        workerId: spec.workerId,
+        exitCode: 0,
+        signal: null
+      };
+    }
+
+    return super.run(spec);
+  }
+}
+
+class TurnRequirementsJudgeAdapter extends MockWorkerAdapter {
+  async run(spec: WorkerRunSpec): Promise<WorkerResult> {
+    if (spec.role === "judge") {
+      await writeText(join(turnDirFromPrompt(spec.prompt), "requirements.md"), "# Requirements\n\nTURN_ONLY_REQUIREMENTS\n");
+      await writeText(join(turnDirFromPrompt(spec.prompt), "plan.md"), "# Plan\n\nTurn-local plan.\n");
+      await writeText(join(turnDirFromPrompt(spec.prompt), "acceptance.md"), "# Acceptance\n\nTurn-local acceptance.\n");
+      await writeText(join(turnDirFromPrompt(spec.prompt), "actor-brief.md"), "# Actor Brief\n\nTurn-local actor brief.\n");
+      await writeText(join(turnDirFromPrompt(spec.prompt), "critic-brief.md"), "# Critic Brief\n\nTurn-local critic brief.\n");
+      return {
+        workerId: spec.workerId,
+        exitCode: 0,
+        signal: null
+      };
+    }
+
+    return super.run(spec);
+  }
+}
+
+function featureDirFromPrompt(prompt: string): string {
+  const line = prompt.split("\n").find((item) => item.startsWith("Feature directory: "));
+  if (!line) {
+    throw new Error("Feature directory missing from prompt");
+  }
+  return line.replace("Feature directory: ", "").trim();
+}
+
+function turnDirFromPrompt(prompt: string): string {
+  const line = prompt.split("\n").find((item) => item.startsWith("Current turn directory: "));
+  if (!line) {
+    throw new Error("Current turn directory missing from prompt");
+  }
+  return line.replace("Current turn directory: ", "").trim();
+}
