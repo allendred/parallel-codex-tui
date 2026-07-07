@@ -11,8 +11,10 @@ A standalone TypeScript TUI wrapper for routed parallel coding workflows. It kee
 
 ## Install
 
+The npm registry package is not published yet. Install the current public GitHub build:
+
 ```bash
-npm install -g parallel-codex-tui
+npm install -g git+https://github.com/allendred/parallel-codex-tui.git
 ```
 
 Run it against the project you want the workers to operate on:
