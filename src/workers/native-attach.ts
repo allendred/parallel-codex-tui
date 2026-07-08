@@ -120,6 +120,11 @@ async function readWorkerNativeSession(worker: WorkerLogRef): Promise<NativeSess
   if (record.engine !== worker.engine) {
     throw new Error(`Native session engine mismatch for ${worker.label}: expected ${worker.engine}, got ${record.engine}`);
   }
+  if (record.worker_id !== worker.id || record.role !== worker.role) {
+    throw new Error(
+      `Native session worker mismatch for ${worker.label}: expected ${worker.role}/${worker.id}, got ${record.role}/${record.worker_id}`
+    );
+  }
   return record;
 }
 

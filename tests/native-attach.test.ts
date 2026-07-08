@@ -102,6 +102,36 @@ describe("buildNativeAttachLaunch", () => {
     ).rejects.toThrow("No native session recorded");
   });
 
+  it("rejects native session records from another worker", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pct-native-attach-wrong-worker-"));
+    const workerDir = join(root, "task-a", "actor-codex");
+    await writeJson(join(workerDir, "native-session.json"), {
+      engine: "codex",
+      role: "critic",
+      worker_id: "critic-codex",
+      session_id: "native-critic",
+      scope: "task",
+      cwd: root,
+      created_at: "2026-06-30T03:30:00.000Z",
+      last_used_at: "2026-06-30T03:30:00.000Z",
+      source: "manual"
+    });
+
+    await expect(
+      buildNativeAttachLaunch({
+        config: defaultConfig(root),
+        worker: {
+          id: "actor-codex",
+          role: "actor",
+          engine: "codex",
+          label: "Actor (codex)",
+          logPath: join(workerDir, "output.log"),
+          statusPath: join(workerDir, "status.json")
+        }
+      })
+    ).rejects.toThrow("Native session worker mismatch");
+  });
+
   it("recovers a Claude native session from Claude's project log when the worker file is missing", async () => {
     const root = await mkdtemp(join(tmpdir(), "pct-native-attach-claude-log-"));
     const workspace = join(root, "workspace");
