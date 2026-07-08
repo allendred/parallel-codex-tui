@@ -83,11 +83,17 @@ async function promptForWorkspace(input: {
 
   const rl = createInterface({ input: input.stdin, output: input.stdout });
   try {
+    const defaultWorkspace = createableDefaultWorkspace(input.invalidExplicitWorkspace);
     if (input.choices.length === 0) {
-      return await promptForNewWorkspace(rl, input.cwd, createableDefaultWorkspace(input.invalidExplicitWorkspace));
+      return await promptForNewWorkspace(rl, input.cwd, defaultWorkspace);
     }
 
-    const answer = (await rl.question(`Workspace [1/${input.choices.length}, n]: `)).trim();
+    const defaultLabel = defaultWorkspace ? `${defaultWorkspace}, ` : "";
+    const answer = (await rl.question(`Workspace [${defaultLabel}1/${input.choices.length}, n]: `)).trim();
+    if (!answer && defaultWorkspace) {
+      return defaultWorkspace;
+    }
+
     if (!answer || answer === "1") {
       return input.choices[0]?.path ?? input.cwd;
     }
@@ -98,7 +104,7 @@ async function promptForWorkspace(input: {
     }
 
     if (/^n(?:ew)?$/i.test(answer)) {
-      return await promptForNewWorkspace(rl, input.cwd, createableDefaultWorkspace(input.invalidExplicitWorkspace));
+      return await promptForNewWorkspace(rl, input.cwd, defaultWorkspace);
     }
 
     const index = Number.parseInt(answer, 10);

@@ -29,7 +29,7 @@ parallel-codex-tui --workspace /path/to/project
 Startup resolves the worker project before routing:
 
 - `--workspace <path>` opens that project when it already exists.
-- If `--workspace <path>` does not exist in an interactive terminal, the CLI shows remembered projects from `.parallel-codex/workspaces.json` and lets you either pick one or create the requested folder.
+- If `--workspace <path>` does not exist in an interactive terminal, the CLI shows remembered projects from `.parallel-codex/workspaces.json`; press Enter to create the requested folder, pick a remembered project, or enter another path.
 - If `--workspace <path>` points to an existing file, the CLI reports that it is not a directory and will not use that file path as the default folder to create.
 - Without `--workspace`, an interactive terminal shows remembered projects from `.parallel-codex/workspaces.json`; choose a number or enter `n <path>` to create/open another folder.
 - In non-interactive startup, the CLI reuses the last remembered workspace, falls back to the current directory if none was saved, and creates an explicit `--workspace` path if needed.

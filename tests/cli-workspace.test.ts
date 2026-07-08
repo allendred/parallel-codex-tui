@@ -27,7 +27,7 @@ describe("selectWorkspaceForCli", () => {
     expect(stdout.output()).toBe("");
   });
 
-  it("prompts before creating a missing explicit workspace when remembered projects exist", async () => {
+  it("uses a missing explicit workspace as the default create target when remembered projects exist", async () => {
     const appRoot = await mkdtemp(join(tmpdir(), "pct-cli-workspace-missing-explicit-"));
     const remembered = join(appRoot, "remembered");
     const missing = join(appRoot, "missing");
@@ -39,13 +39,31 @@ describe("selectWorkspaceForCli", () => {
         appRoot,
         cwd: appRoot,
         explicitWorkspace: missing,
-        stdin: fakeInput("1\n"),
+        stdin: fakeInput("\n"),
         stdout
       })
-    ).resolves.toBe(remembered);
+    ).resolves.toBe(missing);
     expect(stdout.output()).toContain("Workspace does not exist:");
     expect(stdout.output()).toContain(missing);
     expect(stdout.output()).toContain("Select workspace:");
+    expect(stdout.output()).toContain(`Workspace [${missing}, 1/1, n]:`);
+  });
+
+  it("still lets a TTY user choose a remembered workspace instead of a missing explicit workspace", async () => {
+    const appRoot = await mkdtemp(join(tmpdir(), "pct-cli-workspace-missing-explicit-choice-"));
+    const remembered = join(appRoot, "remembered");
+    const missing = join(appRoot, "missing");
+    await prepareWorkspace(appRoot, remembered);
+
+    await expect(
+      selectWorkspaceForCli({
+        appRoot,
+        cwd: appRoot,
+        explicitWorkspace: missing,
+        stdin: fakeInput("1\n"),
+        stdout: fakeOutput()
+      })
+    ).resolves.toBe(remembered);
   });
 
   it("prompts before using an explicit workspace path that is an existing file", async () => {

@@ -8,6 +8,7 @@ import type { AppConfig } from "../core/config.js";
 import { pathExists, pathIsDirectory, readJson, readTextIfExists, removeIfExists, writeJson } from "../core/file-store.js";
 import { NativeSessionSchema, TaskMetaSchema, type EngineName, type NativeSession } from "../domain/schemas.js";
 import type { WorkerLogRef } from "../orchestrator/orchestrator.js";
+import { detectResumeSessionId } from "./native-session-detection.js";
 import type { WorkerModelRunConfig } from "./types.js";
 
 const require = createRequire(import.meta.url);
@@ -306,19 +307,6 @@ function safeParseJson(value: string): unknown {
   } catch {
     return null;
   }
-}
-
-function detectResumeSessionId(text: string): string | null {
-  const resume = text.match(/\bcodex\s+resume\s+([A-Za-z0-9._:@-]{4,})\b/i);
-  return resume?.[1] && isLikelyNativeSessionId(resume[1]) ? resume[1] : null;
-}
-
-function isLikelyNativeSessionId(value: string): boolean {
-  if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value)) {
-    return true;
-  }
-
-  return value.length >= 8 && /[0-9]/.test(value) && /[._:@-]/.test(value);
 }
 
 function renderTemplate(value: string, sessionId: string, modelConfig: WorkerModelRunConfig | undefined): string {
