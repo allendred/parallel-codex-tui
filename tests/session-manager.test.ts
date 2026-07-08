@@ -2,7 +2,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { pathExists, readJson, readTextIfExists } from "../src/core/file-store.js";
+import { pathExists, readJson, readTextIfExists, writeJson } from "../src/core/file-store.js";
 import { SessionIndex } from "../src/core/session-index.js";
 import { SessionManager } from "../src/core/session-manager.js";
 import {
@@ -326,11 +326,23 @@ describe("SessionManager", () => {
       last_used_at: "2026-06-30T03:30:00.000Z",
       source: "manual"
     });
+    await writeJson(worker.statusPath, WorkerStatusSchema.parse({
+      worker_id: "actor-mock",
+      role: "actor",
+      engine: "mock",
+      state: "done",
+      phase: "process-exited",
+      last_event_at: "2026-06-30T03:31:00.000Z",
+      summary: "mock exited",
+      native_session_id: "native-123"
+    }));
 
     await manager.retireNativeSession(worker, "context window full");
 
     expect(await manager.readNativeSession(worker)).toBeNull();
     expect(await pathExists(join(worker.dir, "native-session.json"))).toBe(false);
+    const status = await readJson(worker.statusPath, WorkerStatusSchema);
+    expect(status.native_session_id).toBeUndefined();
     const retired = await readJson(join(worker.dir, "native-session.retired.json"), NativeSessionSchema.extend({
       retired_at: NativeSessionSchema.shape.last_used_at,
       retired_reason: NativeSessionSchema.shape.session_id

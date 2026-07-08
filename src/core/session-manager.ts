@@ -25,6 +25,7 @@ import {
   type TurnMeta,
   TurnMetaSchema,
   type WorkerRole,
+  WorkerStatusSchema,
   type WorkerStatus
 } from "../domain/schemas.js";
 
@@ -273,6 +274,7 @@ export class SessionManager {
       retired_reason: reason
     });
     await removeIfExists(nativeSessionPath);
+    await this.clearWorkerStatusNativeSession(worker);
     await this.index?.deleteNativeSession(this.taskIdFromWorkerDir(worker.dir), record.worker_id);
   }
 
@@ -361,6 +363,27 @@ export class SessionManager {
 
   private taskIdFromWorkerDir(workerDir: string): string {
     return basename(dirname(workerDir));
+  }
+
+  private async clearWorkerStatusNativeSession(worker: Pick<WorkerFiles, "dir">): Promise<void> {
+    const statusPath = join(worker.dir, "status.json");
+    if (!(await pathExists(statusPath))) {
+      return;
+    }
+
+    const status = await readJson(statusPath, WorkerStatusSchema);
+    if (!status.native_session_id) {
+      return;
+    }
+
+    const nextStatus = { ...status };
+    delete nextStatus.native_session_id;
+    await writeJson(statusPath, WorkerStatusSchema.parse(nextStatus));
+    await this.index?.upsertWorker(this.taskIdFromWorkerDir(worker.dir), nextStatus, {
+      dir: worker.dir,
+      statusPath,
+      outputLogPath: join(worker.dir, "output.log")
+    });
   }
 
   private async clearWorkerArtifacts(dir: string, role: WorkerRole): Promise<void> {
