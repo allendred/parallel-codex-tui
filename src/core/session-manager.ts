@@ -139,6 +139,11 @@ export class SessionManager {
     };
   }
 
+  async hasTask(taskId: string): Promise<boolean> {
+    const task = this.taskFromId(taskId);
+    return Boolean(await readTaskMetaIfValid(task.metaPath));
+  }
+
   async latestTask(): Promise<TaskSession | null> {
     const root = sessionsRoot(this.projectRoot, this.dataDir);
     if (!(await pathExists(root))) {

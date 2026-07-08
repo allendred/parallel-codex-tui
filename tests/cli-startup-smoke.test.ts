@@ -60,4 +60,43 @@ describe("CLI startup", () => {
     expect(stderr).not.toContain("Config error:");
     expect(stderr).not.toContain("at ");
   });
+
+  it("rejects missing explicit task sessions before starting the TUI", async () => {
+    const appRoot = await mkdtemp(join(tmpdir(), "pct-cli-startup-missing-task-app-"));
+    const workspace = await mkdtemp(join(tmpdir(), "pct-cli-startup-missing-task-workspace-"));
+
+    let stderr = "";
+    await expect(
+      execFileAsync(
+        process.execPath,
+        [
+          "./node_modules/.bin/tsx",
+          "src/cli.tsx",
+          "--app-root",
+          appRoot,
+          "--workspace",
+          workspace,
+          "--task",
+          "task-20990101-000000-missing"
+        ],
+        {
+          cwd: process.cwd(),
+          timeout: 5000
+        }
+      )
+        .catch((error) => {
+          stderr = String((error as { stderr?: string }).stderr ?? "");
+          throw error;
+        })
+    ).rejects.toMatchObject({
+      code: 1,
+      stdout: "",
+      stderr: expect.stringContaining("Startup error:")
+    });
+
+    expect(stderr).toContain("Task session not found in workspace");
+    expect(stderr).toContain("task-20990101-000000-missing");
+    expect(stderr).toContain(workspace);
+    expect(stderr).not.toContain("at ");
+  });
 });

@@ -68,6 +68,9 @@ async function main(): Promise<void> {
       explicitWorkspace: cliArgs.explicitWorkspace
     });
     const runtime = await createRuntime(cliArgs.appRoot, workspaceRoot);
+    if (cliArgs.taskId && !(await runtime.sessions.hasTask(cliArgs.taskId))) {
+      throw new Error(`Task session not found in workspace ${runtime.workspaceRoot}: ${cliArgs.taskId}`);
+    }
     const latestTask = await runtime.sessions.latestTask();
     const initialTaskId = cliArgs.taskId ?? latestTask?.id ?? null;
 
