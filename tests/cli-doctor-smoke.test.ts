@@ -199,6 +199,83 @@ describe("CLI doctor", () => {
     expect(result.stdout).not.toContain("codex: missing");
     expect(result.stdout).not.toContain("claude: missing");
   });
+
+  it("reports missing worker model environment variables before workers start", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pct-cli-doctor-model-env-"));
+    const binDir = join(root, "bin");
+    const appRoot = join(root, "app");
+    const workspace = join(root, "workspace");
+
+    await mkdir(binDir, { recursive: true });
+    await mkdir(join(appRoot, ".parallel-codex"), { recursive: true });
+    await writeExecutable(join(binDir, "codex"), "#!/bin/sh\necho codex 1.0\n");
+    await writeFile(
+      join(appRoot, ".parallel-codex", "config.toml"),
+      [
+        "[router]",
+        'defaultMode = "complex"',
+        "",
+        "[pairing]",
+        'judge = "codex"',
+        'actor = "codex"',
+        'critic = "mock"',
+        "",
+        "[workers.codex.model.env]",
+        'OPENAI_BASE_URL = "https://third-party.example/v1"',
+        'OPENAI_API_KEY = "{env:OPENAI_API_KEY}"'
+      ].join("\n"),
+      "utf8"
+    );
+
+    const result = await runCli(["--app-root", appRoot, "--workspace", workspace, "--doctor"], {
+      env: {
+        PATH: `${binDir}${delimiter}${process.env.PATH ?? ""}`,
+        OPENAI_API_KEY: ""
+      }
+    });
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr).toBe("");
+    expect(result.stdout).toContain("codex: ok");
+    expect(result.stdout).toContain("workers.codex.model.env.OPENAI_API_KEY: missing env OPENAI_API_KEY");
+    expect(result.stdout).not.toContain("OPENAI_BASE_URL: missing");
+  });
+
+  it("does not check inactive worker model environment variables", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pct-cli-doctor-inactive-model-env-"));
+    const appRoot = join(root, "app");
+
+    await mkdir(join(appRoot, ".parallel-codex"), { recursive: true });
+    await writeFile(
+      join(appRoot, ".parallel-codex", "config.toml"),
+      [
+        "[router]",
+        'defaultMode = "simple"',
+        "",
+        "[pairing]",
+        'main = "mock"',
+        'judge = "codex"',
+        'actor = "codex"',
+        'critic = "codex"',
+        "",
+        "[workers.codex.model.env]",
+        'OPENAI_API_KEY = "{env:OPENAI_API_KEY}"'
+      ].join("\n"),
+      "utf8"
+    );
+
+    const result = await runCli(["--app-root", appRoot, "--doctor"], {
+      env: {
+        PATH: "",
+        OPENAI_API_KEY: ""
+      }
+    });
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stderr).toBe("");
+    expect(result.stdout).not.toContain("OPENAI_API_KEY");
+    expect(result.stdout).not.toContain("codex: missing");
+  });
 });
 
 async function writeExecutable(path: string, contents: string): Promise<void> {

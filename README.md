@@ -59,6 +59,8 @@ parallel-codex-tui --doctor
 parallel-codex-tui --version
 ```
 
+`--doctor` checks the configured commands and any `{env:NAME}` references in active worker model environment settings before workers start.
+
 ## Quick Start
 
 Create a local config in the app root:
@@ -135,6 +137,14 @@ Configure Codex and Claude commands in `.parallel-codex/config.toml`:
 [workers.codex]
 command = "codex"
 args = ["exec", "--skip-git-repo-check", "--sandbox", "workspace-write", "--color", "never", "-"]
+
+[workers.codex.model]
+name = "gpt-5"
+provider = "openai"
+args = ["--model", "{model}"]
+
+[workers.codex.model.env]
+OPENAI_API_KEY = "{env:OPENAI_API_KEY}"
 
 [workers.codex.interactive]
 command = "codex"

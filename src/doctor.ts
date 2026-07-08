@@ -11,6 +11,9 @@ export interface DoctorResult {
   text: string;
 }
 
+type ConfiguredEngine = "router-codex" | "codex" | "claude" | "mock";
+type WorkerEngine = "codex" | "claude";
+
 export async function runDoctor(appRoot: string, workspaceRoot: string, env: NodeJS.ProcessEnv = process.env): Promise<DoctorResult> {
   const lines = ["parallel-codex-tui doctor"];
   let ok = true;
@@ -58,6 +61,15 @@ export async function runDoctor(appRoot: string, workspaceRoot: string, env: Nod
     }
   }
 
+  for (const check of configuredWorkerModelEnvChecks(config, env)) {
+    if (check.ok) {
+      lines.push(`${check.label}: ok`);
+    } else {
+      ok = false;
+      lines.push(`${check.label}: missing env ${check.envName}`);
+    }
+  }
+
   return {
     ok,
     text: `${lines.join("\n")}\n`
@@ -73,32 +85,16 @@ function isSupportedNodeVersion(version: string): boolean {
 }
 
 function configuredCommands(config: Awaited<ReturnType<typeof loadConfig>>): string[] {
-  const engines = new Set<string>();
-
-  if (config.router.defaultMode === "auto") {
-    engines.add("router-codex");
-    engines.add(config.pairing.main);
-    engines.add(config.pairing.judge);
-    engines.add(config.pairing.actor);
-    engines.add(config.pairing.critic);
-  } else if (config.router.defaultMode === "simple") {
-    engines.add(config.pairing.main);
-  } else {
-    engines.add(config.pairing.judge);
-    engines.add(config.pairing.actor);
-    engines.add(config.pairing.critic);
-  }
-
   return Array.from(
     new Set(
-      Array.from(engines)
+      configuredEngines(config, { includeRouter: true })
         .map((engine) => commandForEngine(config, engine))
         .filter((command): command is string => Boolean(command) && command !== "mock")
     )
   );
 }
 
-function commandForEngine(config: Awaited<ReturnType<typeof loadConfig>>, engine: string): string | null {
+function commandForEngine(config: Awaited<ReturnType<typeof loadConfig>>, engine: ConfiguredEngine): string | null {
   if (engine === "router-codex") {
     return config.router.codex.command;
   }
@@ -112,6 +108,64 @@ function commandForEngine(config: Awaited<ReturnType<typeof loadConfig>>, engine
   }
 
   return null;
+}
+
+function configuredEngines(
+  config: Awaited<ReturnType<typeof loadConfig>>,
+  options: { includeRouter: boolean }
+): ConfiguredEngine[] {
+  const engines = new Set<ConfiguredEngine>();
+
+  if (config.router.defaultMode === "auto" && options.includeRouter) {
+    engines.add("router-codex");
+  }
+
+  if (config.router.defaultMode === "auto") {
+    engines.add(config.pairing.main);
+    engines.add(config.pairing.judge);
+    engines.add(config.pairing.actor);
+    engines.add(config.pairing.critic);
+  } else if (config.router.defaultMode === "simple") {
+    engines.add(config.pairing.main);
+  } else {
+    engines.add(config.pairing.judge);
+    engines.add(config.pairing.actor);
+    engines.add(config.pairing.critic);
+  }
+
+  return Array.from(engines);
+}
+
+function configuredWorkerEngines(config: Awaited<ReturnType<typeof loadConfig>>): WorkerEngine[] {
+  return configuredEngines(config, { includeRouter: false }).filter(
+    (engine): engine is WorkerEngine => engine === "codex" || engine === "claude"
+  );
+}
+
+function configuredWorkerModelEnvChecks(
+  config: Awaited<ReturnType<typeof loadConfig>>,
+  env: NodeJS.ProcessEnv
+): Array<{ label: string; envName: string; ok: boolean }> {
+  const checks: Array<{ label: string; envName: string; ok: boolean }> = [];
+
+  for (const engine of configuredWorkerEngines(config)) {
+    const worker = engine === "codex" ? config.workers.codex : config.workers.claude;
+    for (const [key, value] of Object.entries(worker.model.env)) {
+      for (const envName of referencedEnvNames(value)) {
+        checks.push({
+          label: `workers.${engine}.model.env.${key}`,
+          envName,
+          ok: Boolean(env[envName])
+        });
+      }
+    }
+  }
+
+  return checks;
+}
+
+function referencedEnvNames(value: string): string[] {
+  return Array.from(value.matchAll(/\{env:([A-Za-z_][A-Za-z0-9_]*)\}/g), (match) => match[1] ?? "");
 }
 
 async function commandExists(command: string, env: NodeJS.ProcessEnv): Promise<boolean> {
