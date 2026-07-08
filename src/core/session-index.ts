@@ -171,6 +171,10 @@ export class SessionIndex {
       );
   }
 
+  async deleteNativeSession(taskId: string, workerId: string): Promise<void> {
+    this.db.prepare("DELETE FROM native_sessions WHERE task_id = ? AND worker_id = ?").run(taskId, workerId);
+  }
+
   async countRows(table: "tasks" | "turns" | "workers" | "native_sessions"): Promise<number> {
     const row = this.db.prepare(`SELECT COUNT(*) AS count FROM ${table}`).get() as { count: number };
     return row.count;

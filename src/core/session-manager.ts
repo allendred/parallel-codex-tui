@@ -273,6 +273,7 @@ export class SessionManager {
       retired_reason: reason
     });
     await removeIfExists(nativeSessionPath);
+    await this.index?.deleteNativeSession(this.taskIdFromWorkerDir(worker.dir), record.worker_id);
   }
 
   async appendEvent(task: Pick<TaskSession, "id" | "dir">, type: string, message: string): Promise<void> {

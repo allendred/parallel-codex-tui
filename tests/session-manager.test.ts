@@ -390,4 +390,50 @@ describe("SessionManager", () => {
     await expect(index.countRows("native_sessions")).resolves.toBe(1);
     index.close();
   });
+
+  it("removes retired native sessions from the SQLite index", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pct-session-retired-index-"));
+    const index = await SessionIndex.open(root, ".parallel-codex");
+    const manager = new SessionManager({
+      projectRoot: root,
+      dataDir: ".parallel-codex",
+      now: () => new Date("2026-06-30T03:30:00.000Z"),
+      randomId: () => "a1b2",
+      index
+    });
+    const task = await manager.createTask({
+      request: "Build it.",
+      cwd: root,
+      route: {
+        mode: "complex",
+        reason: "Requires workers.",
+        suggested_roles: ["judge", "actor", "critic"],
+        judge_engine: "mock",
+        actor_engine: "mock",
+        critic_engine: "mock"
+      }
+    });
+    const worker = await manager.initializeWorker(task, {
+      workerId: "actor-mock",
+      role: "actor",
+      engine: "mock",
+      prompt: "Write code."
+    });
+    await manager.writeNativeSession(worker, {
+      engine: "mock",
+      role: "actor",
+      worker_id: "actor-mock",
+      session_id: "native-123",
+      scope: "task",
+      cwd: root,
+      created_at: "2026-06-30T03:30:00.000Z",
+      last_used_at: "2026-06-30T03:30:00.000Z",
+      source: "manual"
+    });
+
+    await manager.retireNativeSession(worker, "context window full");
+
+    await expect(index.countRows("native_sessions")).resolves.toBe(0);
+    index.close();
+  });
 });
