@@ -114,6 +114,11 @@ async function readWorkerNativeSession(worker: WorkerLogRef): Promise<NativeSess
   const nativePath = join(workerDir, "native-session.json");
   const record = await readAttachNativeSessionIfValid(nativePath);
   if (!record) {
+    const recoveredCodex = await recoverCodexNativeSession(worker, workerDir);
+    if (recoveredCodex) {
+      await writeJson(nativePath, NativeSessionSchema.parse(recoveredCodex));
+      return recoveredCodex;
+    }
     const recovered = await recoverClaudeNativeSession(worker, workerDir);
     if (recovered) {
       await writeJson(nativePath, NativeSessionSchema.parse(recovered));
@@ -145,6 +150,37 @@ async function readAttachNativeSessionIfValid(nativePath: string): Promise<Nativ
     await removeIfExists(nativePath);
     return null;
   }
+}
+
+async function recoverCodexNativeSession(worker: WorkerLogRef, workerDir: string): Promise<NativeSession | null> {
+  if (worker.engine !== "codex") {
+    return null;
+  }
+
+  const taskDir = dirname(workerDir);
+  const cwd = await readTaskCwdIfValid(join(taskDir, "meta.json"));
+  if (!cwd) {
+    return null;
+  }
+
+  const output = await readTextIfExists(join(workerDir, "output.log"));
+  const sessionId = detectResumeSessionId(output);
+  if (!sessionId) {
+    return null;
+  }
+
+  const now = new Date().toISOString();
+  return {
+    engine: "codex",
+    role: worker.role,
+    worker_id: worker.id,
+    session_id: sessionId,
+    scope: "task",
+    cwd,
+    created_at: now,
+    last_used_at: now,
+    source: "output-detected"
+  };
 }
 
 async function recoverClaudeNativeSession(worker: WorkerLogRef, workerDir: string): Promise<NativeSession | null> {
@@ -270,6 +306,19 @@ function safeParseJson(value: string): unknown {
   } catch {
     return null;
   }
+}
+
+function detectResumeSessionId(text: string): string | null {
+  const resume = text.match(/\bcodex\s+resume\s+([A-Za-z0-9._:@-]{4,})\b/i);
+  return resume?.[1] && isLikelyNativeSessionId(resume[1]) ? resume[1] : null;
+}
+
+function isLikelyNativeSessionId(value: string): boolean {
+  if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value)) {
+    return true;
+  }
+
+  return value.length >= 8 && /[0-9]/.test(value) && /[._:@-]/.test(value);
 }
 
 function renderTemplate(value: string, sessionId: string, modelConfig: WorkerModelRunConfig | undefined): string {

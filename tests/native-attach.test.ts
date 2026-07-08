@@ -82,6 +82,53 @@ describe("buildNativeAttachLaunch", () => {
     ).rejects.toThrow("No native session recorded");
   });
 
+  it("recovers a Codex native session from the worker output log when the worker file is missing", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pct-native-attach-codex-log-"));
+    const workspace = join(root, "workspace");
+    const taskDir = join(workspace, ".parallel-codex", "sessions", "task-a");
+    const workerDir = join(taskDir, "actor-codex");
+    const sessionId = "019f1b9b-768b-7753-9c3b-33b17f25bc6b";
+
+    await writeJson(join(taskDir, "meta.json"), {
+      id: "task-a",
+      title: "Task A",
+      created_at: "2026-06-30T03:30:00.000Z",
+      cwd: workspace,
+      mode: "complex",
+      status: "done"
+    });
+    await writeText(join(workerDir, "output.log"), `Done. To continue, run: codex resume ${sessionId}\n`);
+
+    const launch = await buildNativeAttachLaunch({
+      config: defaultConfig(root),
+      worker: {
+        id: "actor-codex",
+        role: "actor",
+        engine: "codex",
+        label: "Actor (codex)",
+        logPath: join(workerDir, "output.log"),
+        statusPath: join(workerDir, "status.json")
+      }
+    });
+
+    expect(launch).toMatchObject({
+      command: "codex",
+      args: ["resume", sessionId],
+      cwd: workspace,
+      sessionId,
+      label: "Actor (codex)"
+    });
+    const record = await readJson(join(workerDir, "native-session.json"), NativeSessionSchema);
+    expect(record).toMatchObject({
+      engine: "codex",
+      role: "actor",
+      worker_id: "actor-codex",
+      session_id: sessionId,
+      cwd: workspace,
+      source: "output-detected"
+    });
+  });
+
   it("treats corrupt native session files as missing when attaching", async () => {
     const root = await mkdtemp(join(tmpdir(), "pct-native-attach-corrupt-"));
     const workerDir = join(root, "task-a", "actor-codex");
