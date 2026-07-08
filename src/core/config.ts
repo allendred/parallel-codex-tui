@@ -202,6 +202,7 @@ export async function loadConfig(projectRoot: string): Promise<AppConfig> {
   }
 
   const parsed = parse(await readTextIfExists(file)) as Partial<AppConfig>;
+  assertObjectSections(parsed);
   const merged = {
     ...base,
     ...parsed,
@@ -305,6 +306,46 @@ export async function loadConfig(projectRoot: string): Promise<AppConfig> {
   };
 
   return AppConfigSchema.parse(merged);
+}
+
+function assertObjectSections(parsed: Partial<AppConfig>): void {
+  const sections: Array<[string, unknown]> = [
+    ["router", parsed.router],
+    ["router.codex", parsed.router?.codex],
+    ["workers", parsed.workers],
+    ["workers.codex", parsed.workers?.codex],
+    ["workers.codex.model", parsed.workers?.codex?.model],
+    ["workers.codex.model.env", parsed.workers?.codex?.model?.env],
+    ["workers.codex.nativeSession", parsed.workers?.codex?.nativeSession],
+    ["workers.codex.interactive", parsed.workers?.codex?.interactive],
+    ["workers.claude", parsed.workers?.claude],
+    ["workers.claude.model", parsed.workers?.claude?.model],
+    ["workers.claude.model.env", parsed.workers?.claude?.model?.env],
+    ["workers.claude.nativeSession", parsed.workers?.claude?.nativeSession],
+    ["workers.claude.interactive", parsed.workers?.claude?.interactive],
+    ["workers.mock", parsed.workers?.mock],
+    ["workers.mock.model", parsed.workers?.mock?.model],
+    ["workers.mock.model.env", parsed.workers?.mock?.model?.env],
+    ["workers.mock.nativeSession", parsed.workers?.mock?.nativeSession],
+    ["workers.mock.interactive", parsed.workers?.mock?.interactive],
+    ["pairing", parsed.pairing],
+    ["roles", parsed.roles],
+    ["roles.main", parsed.roles?.main],
+    ["roles.judge", parsed.roles?.judge],
+    ["roles.actor", parsed.roles?.actor],
+    ["roles.critic", parsed.roles?.critic],
+    ["ui", parsed.ui]
+  ];
+
+  for (const [path, value] of sections) {
+    if (value !== undefined && !isPlainObject(value)) {
+      throw new Error(`Invalid config section [${path}]: expected a table`);
+    }
+  }
+}
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 
 export async function writeDefaultConfig(projectRoot: string): Promise<void> {

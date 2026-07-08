@@ -23,54 +23,66 @@ Options:
 
 Options with values also accept --name=value and -x=value forms.`;
 
-const rawArgs = process.argv.slice(2);
-const cliArgErrors = validateCliArgs(rawArgs);
-if (cliArgErrors.length > 0) {
-  process.stderr.write(`${cliArgErrors.join("\n")}\n`);
+main().catch((error) => {
+  process.stderr.write(`${formatStartupError(error)}\n`);
   process.exit(1);
+});
+
+async function main(): Promise<void> {
+  const rawArgs = process.argv.slice(2);
+  const cliArgErrors = validateCliArgs(rawArgs);
+  if (cliArgErrors.length > 0) {
+    process.stderr.write(`${cliArgErrors.join("\n")}\n`);
+    process.exit(1);
+  }
+
+  const cliArgs = parseCliArgs(rawArgs, process.cwd());
+  const localConfigPath = configPath(cliArgs.appRoot);
+
+  if (cliArgs.help) {
+    console.log(helpText);
+  } else if (cliArgs.version) {
+    console.log(`parallel-codex-tui ${version}`);
+  } else if (cliArgs.doctor) {
+    const workspaceRoot = await selectWorkspaceForCli({
+      appRoot: cliArgs.appRoot,
+      cwd: process.cwd(),
+      explicitWorkspace: cliArgs.explicitWorkspace,
+      interactive: false
+    });
+    const result = await runDoctor(cliArgs.appRoot, workspaceRoot);
+    process.stdout.write(result.text);
+    process.exitCode = result.ok ? 0 : 1;
+  } else if (cliArgs.init) {
+    if (await pathExists(localConfigPath)) {
+      console.log(`Config already exists: ${localConfigPath}`);
+    } else {
+      await writeDefaultConfig(cliArgs.appRoot);
+      console.log(`Wrote ${localConfigPath}`);
+    }
+  } else {
+    const workspaceRoot = await selectWorkspaceForCli({
+      appRoot: cliArgs.appRoot,
+      cwd: process.cwd(),
+      explicitWorkspace: cliArgs.explicitWorkspace
+    });
+    const runtime = await createRuntime(cliArgs.appRoot, workspaceRoot);
+    const latestTask = await runtime.sessions.latestTask();
+    const initialTaskId = cliArgs.taskId ?? latestTask?.id ?? null;
+
+    render(
+      <App
+        config={runtime.config}
+        orchestrator={runtime.orchestrator}
+        cwd={runtime.workspaceRoot}
+        initialTaskId={initialTaskId}
+      />,
+      { exitOnCtrlC: false }
+    );
+  }
 }
 
-const cliArgs = parseCliArgs(rawArgs, process.cwd());
-const localConfigPath = configPath(cliArgs.appRoot);
-
-if (cliArgs.help) {
-  console.log(helpText);
-} else if (cliArgs.version) {
-  console.log(`parallel-codex-tui ${version}`);
-} else if (cliArgs.doctor) {
-  const workspaceRoot = await selectWorkspaceForCli({
-    appRoot: cliArgs.appRoot,
-    cwd: process.cwd(),
-    explicitWorkspace: cliArgs.explicitWorkspace,
-    interactive: false
-  });
-  const result = await runDoctor(cliArgs.appRoot, workspaceRoot);
-  process.stdout.write(result.text);
-  process.exitCode = result.ok ? 0 : 1;
-} else if (cliArgs.init) {
-  if (await pathExists(localConfigPath)) {
-    console.log(`Config already exists: ${localConfigPath}`);
-  } else {
-    await writeDefaultConfig(cliArgs.appRoot);
-    console.log(`Wrote ${localConfigPath}`);
-  }
-} else {
-  const workspaceRoot = await selectWorkspaceForCli({
-    appRoot: cliArgs.appRoot,
-    cwd: process.cwd(),
-    explicitWorkspace: cliArgs.explicitWorkspace
-  });
-  const runtime = await createRuntime(cliArgs.appRoot, workspaceRoot);
-  const latestTask = await runtime.sessions.latestTask();
-  const initialTaskId = cliArgs.taskId ?? latestTask?.id ?? null;
-
-  render(
-    <App
-      config={runtime.config}
-      orchestrator={runtime.orchestrator}
-      cwd={runtime.workspaceRoot}
-      initialTaskId={initialTaskId}
-    />,
-    { exitOnCtrlC: false }
-  );
+function formatStartupError(error: unknown): string {
+  const message = error instanceof Error ? error.message : String(error);
+  return `Config error: ${message}\nRun parallel-codex-tui --doctor for details.`;
 }

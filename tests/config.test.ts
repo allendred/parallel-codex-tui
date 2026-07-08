@@ -204,6 +204,21 @@ describe("config", () => {
     await expect(loadConfig(root)).rejects.toThrow();
   });
 
+  it("rejects invalid nested section types instead of silently using defaults", async () => {
+    const cases = [
+      ["workers.codex", '[workers]\ncodex = "bad"\n'],
+      ["router.codex", '[router]\ncodex = "bad"\n'],
+      ["roles.actor", '[roles]\nactor = "bad"\n']
+    ];
+
+    for (const [label, text] of cases) {
+      const root = await mkdtemp(join(tmpdir(), `pct-config-invalid-section-${label.replace(".", "-")}-`));
+      await writeText(join(root, ".parallel-codex", "config.toml"), text);
+
+      await expect(loadConfig(root), label).rejects.toThrow();
+    }
+  });
+
   it("loads role prompt overrides", async () => {
     const root = await mkdtemp(join(tmpdir(), "pct-config-roles-"));
 
