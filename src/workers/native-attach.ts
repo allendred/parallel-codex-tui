@@ -42,6 +42,9 @@ export async function buildNativeAttachLaunch(input: NativeAttachLaunchInput): P
   const nativeSession = await readWorkerNativeSession(input.worker);
   const workerConfig = input.config.workers[input.worker.engine];
   const modelConfig = workerConfig.model;
+  if (!(await pathExists(nativeSession.cwd))) {
+    throw new Error(`Native session workspace not found for ${input.worker.label}: ${nativeSession.cwd}`);
+  }
 
   return {
     command: workerConfig.interactive.command,
