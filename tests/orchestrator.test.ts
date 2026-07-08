@@ -532,6 +532,50 @@ describe("Orchestrator", () => {
     expect(await pathExists(join(task.dir, "turns", "0002", "user.md"))).toBe(false);
   });
 
+  it("skips corrupt worker status files when answering active task questions", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pct-orch-task-question-corrupt-"));
+    const config = mockConfig(root);
+    const manager = new SessionManager({
+      projectRoot: root,
+      dataDir: config.dataDir,
+      now: () => new Date("2026-06-30T03:30:00.000Z"),
+      randomId: () => "a1b2"
+    });
+    const orchestrator = new Orchestrator(config, manager, new Map([["mock", new MockWorkerAdapter()]]));
+    const task = await manager.createTask({
+      request: "优化得分",
+      cwd: root,
+      route: {
+        mode: "complex",
+        reason: "Requires workers.",
+        suggested_roles: ["judge", "actor", "critic"],
+        judge_engine: "mock",
+        actor_engine: "mock",
+        critic_engine: "mock"
+      }
+    });
+    await manager.updateTaskStatus(task, "failed");
+    await writeText(join(task.dir, "actor-mock", "status.json"), "{");
+    await writeJson(join(task.dir, "critic-mock", "status.json"), {
+      worker_id: "critic-mock",
+      role: "critic",
+      engine: "mock",
+      state: "failed",
+      phase: "process-idle-timeout",
+      last_event_at: "2026-06-30T03:35:00.000Z",
+      summary: "mock produced no output for 300000ms"
+    });
+
+    const result = await orchestrator.answerTaskQuestion({
+      taskId: task.id,
+      request: "原因呢超时",
+      cwd: root
+    });
+
+    expect(result.summary).toContain("process-idle-timeout");
+    expect(result.summary).toContain("mock produced no output for 300000ms");
+  });
+
   it("routes active task follow-ups through the Codex semantic router", async () => {
     const root = await mkdtemp(join(tmpdir(), "pct-orch-follow-up-router-"));
     const config = mockConfig(root);

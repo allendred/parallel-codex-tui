@@ -609,7 +609,10 @@ export class Orchestrator {
       if (!(await pathExists(files.statusPath))) {
         continue;
       }
-      const status = await readJson(files.statusPath, WorkerStatusSchema);
+      const status = await readWorkerStatusIfValid(files.statusPath);
+      if (!status) {
+        continue;
+      }
       return {
         status,
         logTail: tailText(await readTextIfExists(files.outputLogPath), 8)
