@@ -3,6 +3,7 @@ import { chmod, mkdir, mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
 import { describe, expect, it } from "vitest";
+import { pathExists } from "../src/core/file-store.js";
 
 interface CliResult {
   exitCode: number;
@@ -48,7 +49,6 @@ describe("CLI doctor", () => {
 
     await mkdir(binDir, { recursive: true });
     await mkdir(appRoot, { recursive: true });
-    await mkdir(workspace, { recursive: true });
     await writeExecutable(join(binDir, "codex"), "#!/bin/sh\necho codex 1.0\n");
     await writeExecutable(join(binDir, "claude"), "#!/bin/sh\necho claude 1.0\n");
 
@@ -68,6 +68,7 @@ describe("CLI doctor", () => {
     expect(result.stdout).toContain("config: ok");
     expect(result.stdout).toContain("codex: ok");
     expect(result.stdout).toContain("claude: ok");
+    await expect(pathExists(workspace)).resolves.toBe(true);
   });
 
   it("exits non-zero and explains missing configured commands", async () => {

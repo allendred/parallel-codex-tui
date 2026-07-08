@@ -8,6 +8,7 @@ describe("parseCliArgs", () => {
     expect(parsed.appRoot).toBe("/app");
     expect(parsed.doctor).toBe(false);
     expect(parsed.workspaceRoot).toBe("/app");
+    expect(parsed.explicitWorkspace).toBeNull();
     expect(parsed.help).toBe(false);
     expect(parsed.init).toBe(false);
     expect(parsed.taskId).toBeNull();
@@ -19,6 +20,7 @@ describe("parseCliArgs", () => {
 
     expect(parsed.appRoot).toBe("/app");
     expect(parsed.workspaceRoot).toBe("/tmp/game");
+    expect(parsed.explicitWorkspace).toBe("/tmp/game");
   });
 
   it("accepts an initial task id", () => {
@@ -33,6 +35,7 @@ describe("parseCliArgs", () => {
     expect(parsed.init).toBe(true);
     expect(parsed.appRoot).toBe("/app");
     expect(parsed.workspaceRoot).toBe("/app/game");
+    expect(parsed.explicitWorkspace).toBe("game");
   });
 
   it("accepts doctor without changing workspace parsing", () => {
@@ -41,6 +44,7 @@ describe("parseCliArgs", () => {
     expect(parsed.doctor).toBe(true);
     expect(parsed.appRoot).toBe("/app");
     expect(parsed.workspaceRoot).toBe("/app/game");
+    expect(parsed.explicitWorkspace).toBe("game");
   });
 
   it("accepts a separate app root for config lookup", () => {

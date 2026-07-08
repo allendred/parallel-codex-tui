@@ -3,6 +3,7 @@ import { access } from "node:fs/promises";
 import { delimiter, join } from "node:path";
 import { configPath, loadConfig } from "./core/config.js";
 import { pathExists } from "./core/file-store.js";
+import { prepareWorkspace } from "./core/workspace.js";
 
 export interface DoctorResult {
   ok: boolean;
@@ -12,6 +13,7 @@ export interface DoctorResult {
 export async function runDoctor(appRoot: string, workspaceRoot: string, env: NodeJS.ProcessEnv = process.env): Promise<DoctorResult> {
   const lines = ["parallel-codex-tui doctor"];
   let ok = true;
+  const preparedWorkspace = await prepareWorkspace(appRoot, workspaceRoot);
 
   if (isSupportedNodeVersion(process.versions.node)) {
     lines.push(`Node.js: ok (${process.versions.node})`);
@@ -20,12 +22,7 @@ export async function runDoctor(appRoot: string, workspaceRoot: string, env: Nod
     lines.push(`Node.js: unsupported (${process.versions.node}; need 22.5+)`);
   }
 
-  if (await pathExists(workspaceRoot)) {
-    lines.push(`workspace: ok (${workspaceRoot})`);
-  } else {
-    ok = false;
-    lines.push(`workspace: missing (${workspaceRoot})`);
-  }
+  lines.push(`workspace: ok (${preparedWorkspace})`);
 
   const localConfigPath = configPath(appRoot);
   if (!(await pathExists(localConfigPath))) {

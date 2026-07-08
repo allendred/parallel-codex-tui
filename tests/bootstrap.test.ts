@@ -24,6 +24,16 @@ describe("createRuntime", () => {
     expect(runtime.workspaceRoot).toBe(workspaceRoot);
   });
 
+  it("creates a missing worker workspace and remembers it for later startup", async () => {
+    const appRoot = await mkdtemp(join(tmpdir(), "pct-app-root-"));
+    const workspaceRoot = join(appRoot, "new-project");
+    const runtime = await createRuntime(appRoot, workspaceRoot);
+
+    expect(runtime.workspaceRoot).toBe(workspaceRoot);
+    expect(await pathExists(workspaceRoot)).toBe(true);
+    expect(await pathExists(join(appRoot, ".parallel-codex", "last-workspace"))).toBe(true);
+  });
+
   it("stores task sessions under the worker workspace", async () => {
     const appRoot = await mkdtemp(join(tmpdir(), "pct-app-root-"));
     const workspaceRoot = await mkdtemp(join(tmpdir(), "pct-worker-root-"));

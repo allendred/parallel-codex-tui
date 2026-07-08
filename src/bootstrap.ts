@@ -1,6 +1,7 @@
 import { loadConfig, type AppConfig } from "./core/config.js";
 import { SessionIndex } from "./core/session-index.js";
 import { SessionManager } from "./core/session-manager.js";
+import { prepareWorkspace } from "./core/workspace.js";
 import { Orchestrator } from "./orchestrator/orchestrator.js";
 import { createWorkerRegistry, type WorkerRegistry } from "./workers/registry.js";
 
@@ -15,10 +16,11 @@ export interface AppRuntime {
 
 export async function createRuntime(appRoot: string, workspaceRoot = appRoot): Promise<AppRuntime> {
   const config = await loadConfig(appRoot);
-  const index = await SessionIndex.open(workspaceRoot, config.dataDir);
+  const preparedWorkspace = await prepareWorkspace(appRoot, workspaceRoot);
+  const index = await SessionIndex.open(preparedWorkspace, config.dataDir);
   await index.rebuildFromFiles();
   const sessions = new SessionManager({
-    projectRoot: workspaceRoot,
+    projectRoot: preparedWorkspace,
     dataDir: config.dataDir,
     index
   });
@@ -27,7 +29,7 @@ export async function createRuntime(appRoot: string, workspaceRoot = appRoot): P
 
   return {
     config,
-    workspaceRoot,
+    workspaceRoot: preparedWorkspace,
     index,
     sessions,
     workers,

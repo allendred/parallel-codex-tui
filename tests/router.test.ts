@@ -53,6 +53,41 @@ describe("routeRequestWithCodex", () => {
     expect(route.reason).toBe("Codex saw an optimization request.");
   });
 
+  it("builds router prompts from the user request without workspace context", async () => {
+    const config = defaultConfig("/tmp/secret-project");
+    let seenPrompt = "";
+    const runner: CodexRouteRunner = async (prompt) => {
+      seenPrompt = prompt;
+      return JSON.stringify({
+        mode: "complex",
+        reason: "Codex saw project work."
+      });
+    };
+
+    await routeRequestWithCodex("做个俄罗斯方块的游戏", config, runner, "/tmp/secret-project");
+
+    expect(seenPrompt).toContain("做个俄罗斯方块的游戏");
+    expect(seenPrompt).not.toContain("/tmp/secret-project");
+    expect(seenPrompt).not.toContain("Workspace");
+    expect(seenPrompt).not.toContain("cwd");
+  });
+
+  it("passes the workspace only as the router process cwd", async () => {
+    const config = defaultConfig("/tmp/project");
+    let seenCwd = "";
+    const runner: CodexRouteRunner = async (_prompt, _config, cwd) => {
+      seenCwd = cwd;
+      return JSON.stringify({
+        mode: "simple",
+        reason: "Codex saw chat."
+      });
+    };
+
+    await routeRequestWithCodex("你好", config, runner, "/tmp/router-cwd");
+
+    expect(seenCwd).toBe("/tmp/router-cwd");
+  });
+
   it("trusts the Codex route even when old keywords would have matched", async () => {
     const config = defaultConfig("/tmp/project");
     const runner: CodexRouteRunner = async () =>

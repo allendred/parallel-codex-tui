@@ -82,7 +82,9 @@ describe("package metadata", () => {
     const gitignore = await readFile(join(process.cwd(), ".gitignore"), "utf8");
 
     expect(gitignore).toContain(".parallel-codex/config.toml");
+    expect(gitignore).toContain(".parallel-codex/last-workspace");
     expect(gitignore).toContain(".parallel-codex/sessions/");
+    expect(gitignore).toContain(".parallel-codex/workspaces.json");
     expect(gitignore).toContain("docs/superpowers/");
   });
 
@@ -115,9 +117,13 @@ describe("package metadata", () => {
     expect(readme).toContain("parallel-codex-tui --init");
     expect(readme).toContain("parallel-codex-tui --doctor");
     expect(readme).toContain("parallel-codex-tui --workspace /path/to/project");
+    expect(readme).toContain("shows remembered projects from `.parallel-codex/workspaces.json`");
+    expect(readme).toContain("Router classification only receives the user request");
     expect(readme).toContain("parallel-codex-tui --help");
     expect(readme).toContain("parallel-codex-tui --version");
     expect(readme).toContain(".parallel-codex/config.toml");
+    expect(readme).toContain(".parallel-codex/last-workspace");
+    expect(readme).toContain(".parallel-codex/workspaces.json");
     expect(readme).toContain(".parallel-codex/sessions/");
   });
 

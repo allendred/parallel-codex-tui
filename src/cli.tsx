@@ -2,6 +2,7 @@
 import React from "react";
 import { render } from "ink";
 import { parseCliArgs } from "./cli-args.js";
+import { selectWorkspaceForCli } from "./cli-workspace.js";
 import { createRuntime } from "./bootstrap.js";
 import { configPath, writeDefaultConfig } from "./core/config.js";
 import { pathExists } from "./core/file-store.js";
@@ -28,7 +29,12 @@ if (cliArgs.help) {
 } else if (cliArgs.version) {
   console.log(`parallel-codex-tui ${version}`);
 } else if (cliArgs.doctor) {
-  const result = await runDoctor(cliArgs.appRoot, cliArgs.workspaceRoot);
+  const workspaceRoot = await selectWorkspaceForCli({
+    appRoot: cliArgs.appRoot,
+    cwd: process.cwd(),
+    explicitWorkspace: cliArgs.explicitWorkspace
+  });
+  const result = await runDoctor(cliArgs.appRoot, workspaceRoot);
   process.stdout.write(result.text);
   process.exitCode = result.ok ? 0 : 1;
 } else if (cliArgs.init) {
@@ -39,7 +45,12 @@ if (cliArgs.help) {
     console.log(`Wrote ${localConfigPath}`);
   }
 } else {
-  const runtime = await createRuntime(cliArgs.appRoot, cliArgs.workspaceRoot);
+  const workspaceRoot = await selectWorkspaceForCli({
+    appRoot: cliArgs.appRoot,
+    cwd: process.cwd(),
+    explicitWorkspace: cliArgs.explicitWorkspace
+  });
+  const runtime = await createRuntime(cliArgs.appRoot, workspaceRoot);
   const latestTask = await runtime.sessions.latestTask();
   const initialTaskId = cliArgs.taskId ?? latestTask?.id ?? null;
 

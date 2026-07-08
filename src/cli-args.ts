@@ -3,6 +3,7 @@ import { resolve } from "node:path";
 export interface CliArgs {
   appRoot: string;
   doctor: boolean;
+  explicitWorkspace: string | null;
   help: boolean;
   init: boolean;
   workspaceRoot: string;
@@ -22,15 +23,16 @@ export function parseCliArgs(args: string[], cwd: string): CliArgs {
     appRootFlagIndex >= 0 && args[appRootFlagIndex + 1]
       ? resolve(cwd, args[appRootFlagIndex + 1])
       : cwd;
+  const explicitWorkspace =
+    workspaceFlagIndex >= 0 && args[workspaceFlagIndex + 1] ? args[workspaceFlagIndex + 1] : null;
   const workspaceRoot =
-    workspaceFlagIndex >= 0 && args[workspaceFlagIndex + 1]
-      ? resolve(cwd, args[workspaceFlagIndex + 1])
-      : cwd;
+    explicitWorkspace ? resolve(cwd, explicitWorkspace) : cwd;
   const taskId = taskFlagIndex >= 0 && args[taskFlagIndex + 1] ? args[taskFlagIndex + 1] : null;
 
   return {
     appRoot,
     doctor,
+    explicitWorkspace,
     help,
     init,
     workspaceRoot,

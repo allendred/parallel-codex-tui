@@ -254,24 +254,7 @@ export class Orchestrator {
   }
 
   async routeTaskFollowUp(input: HandleTaskQuestionInput): Promise<TaskFollowUpRouteResult> {
-    const task = this.sessions.taskFromId(input.taskId);
-    const meta = (await pathExists(task.metaPath)) ? await readJson(task.metaPath, TaskMetaSchema) : null;
-    const route = await routeRequestWithCodex(
-      [
-        "Active task follow-up routing.",
-        `Task id: ${input.taskId}`,
-        `Task status: ${meta?.status ?? "unknown"}`,
-        "",
-        "Choose simple for status/log/reason/explanation questions that can be answered from session files.",
-        "Choose complex for requests that change direction, ask for code changes, reruns, fixes, new experiments, or implementation work.",
-        "",
-        "Follow-up request:",
-        input.request
-      ].join("\n"),
-      this.config,
-      this.routeRunner,
-      input.cwd
-    );
+    const route = await routeRequestWithCodex(input.request, this.config, this.routeRunner, input.cwd);
 
     return {
       mode: route.mode,

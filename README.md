@@ -26,6 +26,13 @@ parallel-codex-tui --doctor
 parallel-codex-tui --workspace /path/to/project
 ```
 
+Startup resolves the worker project before routing:
+
+- `--workspace <path>` wins and is created if it does not exist.
+- Without `--workspace`, an interactive terminal shows remembered projects from `.parallel-codex/workspaces.json`; choose a number or enter `n <path>` to create/open another folder.
+- In non-interactive startup, the CLI reuses the last remembered workspace and falls back to the current directory if none was saved.
+- The selected workspace is prepared before any router or worker process starts.
+
 From a source checkout, install dependencies and link the local binary:
 
 ```bash
@@ -81,6 +88,7 @@ parallel-codex-tui --workspace /path/to/project
 ## Behavior
 
 - Requests are routed by Codex by default, with a configured simple/complex fallback if the router process fails.
+- Router classification only receives the user request; workspace selection and session files are kept out of the router prompt.
 - Simple requests stay in the main TUI flow and do not create Judge, Actor, or Critic workers.
 - Complex requests create a session under `.parallel-codex/sessions/`.
 - Complex requests run Judge -> Actor -> Critic.
@@ -148,5 +156,6 @@ If a native resume fails because the underlying CLI reports that its context win
 ## Publishing Hygiene
 
 - `.parallel-codex/config.toml` is local-only and ignored.
+- `.parallel-codex/last-workspace` and `.parallel-codex/workspaces.json` are local workspace-selection state and are ignored.
 - `.parallel-codex/sessions/` contains task prompts, logs, native session ids, and worker output; never commit it.
 - `docs/superpowers/` contains internal planning notes and is ignored for public releases.

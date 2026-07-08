@@ -561,6 +561,49 @@ describe("Orchestrator", () => {
     });
   });
 
+  it("routes active task follow-ups using only the current user request", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pct-orch-follow-up-request-only-"));
+    const config = mockConfig(root);
+    config.router.defaultMode = "auto";
+    const manager = new SessionManager({
+      projectRoot: root,
+      dataDir: config.dataDir,
+      now: () => new Date("2026-06-30T03:30:00.000Z"),
+      randomId: () => "a1b2"
+    });
+    const task = await manager.createTask({
+      request: "优化得分",
+      cwd: root,
+      route: {
+        mode: "complex",
+        reason: "Requires workers.",
+        suggested_roles: ["judge", "actor", "critic"],
+        judge_engine: "mock",
+        actor_engine: "mock",
+        critic_engine: "mock"
+      }
+    });
+    let seenPrompt = "";
+    const orchestrator = new Orchestrator(config, manager, new Map([["mock", new MockWorkerAdapter()]]), async (prompt) => {
+      seenPrompt = prompt;
+      return JSON.stringify({
+        mode: "simple",
+        reason: "mock request-only follow-up route"
+      });
+    });
+
+    await orchestrator.routeTaskFollowUp({
+      taskId: task.id,
+      request: "原因呢超时",
+      cwd: root
+    });
+
+    expect(seenPrompt).toContain("原因呢超时");
+    expect(seenPrompt).not.toContain(task.id);
+    expect(seenPrompt).not.toContain("Task status");
+    expect(seenPrompt).not.toContain(root);
+  });
+
   it("stops complex flow when a worker fails", async () => {
     const root = await mkdtemp(join(tmpdir(), "pct-orch-failure-"));
     const config = mockConfig(root);
