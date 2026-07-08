@@ -74,6 +74,15 @@ describe("parseCliArgs", () => {
     expect(parsed.workspaceRoot).toBe("/tmp/work");
   });
 
+  it("expands home-relative app root and workspace option values", () => {
+    const parsed = parseCliArgs(["--app-root", "~/pct-app", "--workspace", "~/pct-work"], "/repo");
+
+    expect(parsed.appRoot).toMatch(/\/pct-app$/);
+    expect(parsed.appRoot).not.toBe("/repo/~/pct-app");
+    expect(parsed.workspaceRoot).toMatch(/\/pct-work$/);
+    expect(parsed.workspaceRoot).not.toBe("/repo/~/pct-work");
+  });
+
   it("uses the last provided value when value flags are repeated", () => {
     const parsed = parseCliArgs(
       [

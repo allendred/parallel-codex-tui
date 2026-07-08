@@ -1,4 +1,5 @@
 import { resolve } from "node:path";
+import { homedir } from "node:os";
 
 export interface CliArgs {
   appRoot: string;
@@ -30,9 +31,9 @@ export function parseCliArgs(args: string[], cwd: string): CliArgs {
   const init = optionArgs.includes("--init");
   const version = optionArgs.includes("--version") || optionArgs.includes("-v");
   const appRootValue = flagValue(optionArgs, appRootFlagIndex);
-  const appRoot = appRootValue ? resolve(cwd, appRootValue) : cwd;
+  const appRoot = appRootValue ? resolvePathArg(cwd, appRootValue) : cwd;
   const explicitWorkspace = flagValue(optionArgs, workspaceFlagIndex);
-  const workspaceRoot = explicitWorkspace ? resolve(cwd, explicitWorkspace) : cwd;
+  const workspaceRoot = explicitWorkspace ? resolvePathArg(cwd, explicitWorkspace) : cwd;
   const taskId = flagValue(optionArgs, taskFlagIndex);
 
   return {
@@ -45,6 +46,18 @@ export function parseCliArgs(args: string[], cwd: string): CliArgs {
     taskId,
     version
   };
+}
+
+function resolvePathArg(cwd: string, value: string): string {
+  if (value === "~") {
+    return homedir();
+  }
+
+  if (value.startsWith("~/")) {
+    return resolve(homedir(), value.slice(2));
+  }
+
+  return resolve(cwd, value);
 }
 
 export function validateCliArgs(args: string[]): string[] {
