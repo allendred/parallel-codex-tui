@@ -33,4 +33,31 @@ describe("CLI startup", () => {
     expect(stderr).not.toContain("ZodError");
     expect(stderr).not.toContain("at ");
   });
+
+  it("does not label workspace startup errors as config errors", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pct-cli-startup-workspace-error-"));
+    const appRoot = join(root, "app");
+    const workspaceFile = join(root, "not-a-directory");
+    await mkdir(appRoot, { recursive: true });
+    await writeFile(workspaceFile, "not a directory", "utf8");
+
+    let stderr = "";
+    await expect(
+      execFileAsync(process.execPath, ["./node_modules/.bin/tsx", "src/cli.tsx", "--app-root", appRoot, "--workspace", workspaceFile], {
+        cwd: process.cwd(),
+        timeout: 5000
+      })
+        .catch((error) => {
+          stderr = String((error as { stderr?: string }).stderr ?? "");
+          throw error;
+        })
+    ).rejects.toMatchObject({
+      code: 1,
+      stdout: "",
+      stderr: expect.stringContaining("Startup error:")
+    });
+
+    expect(stderr).not.toContain("Config error:");
+    expect(stderr).not.toContain("at ");
+  });
 });

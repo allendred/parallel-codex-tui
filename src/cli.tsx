@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import React from "react";
 import { render } from "ink";
+import { ZodError } from "zod";
 import { parseCliArgs, validateCliArgs } from "./cli-args.js";
 import { selectWorkspaceForCli } from "./cli-workspace.js";
 import { createRuntime } from "./bootstrap.js";
@@ -84,5 +85,24 @@ async function main(): Promise<void> {
 
 function formatStartupError(error: unknown): string {
   const message = error instanceof Error ? error.message : String(error);
-  return `Config error: ${message}\nRun parallel-codex-tui --doctor for details.`;
+  if (isConfigStartupError(error)) {
+    return `Config error: ${message}\nRun parallel-codex-tui --doctor for details.`;
+  }
+  return `Startup error: ${message}`;
+}
+
+function isConfigStartupError(error: unknown): boolean {
+  if (error instanceof ZodError) {
+    return true;
+  }
+
+  if (!(error instanceof Error)) {
+    return false;
+  }
+
+  return (
+    error.message.startsWith("Invalid config section ") ||
+    error.name.toLowerCase().includes("toml") ||
+    error.message.toLowerCase().includes("toml")
+  );
 }

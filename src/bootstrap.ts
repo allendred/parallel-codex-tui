@@ -1,4 +1,5 @@
-import { loadConfig, type AppConfig } from "./core/config.js";
+import { configPath, loadConfig, writeDefaultConfig, type AppConfig } from "./core/config.js";
+import { pathExists } from "./core/file-store.js";
 import { SessionIndex } from "./core/session-index.js";
 import { SessionManager } from "./core/session-manager.js";
 import { prepareWorkspace } from "./core/workspace.js";
@@ -15,6 +16,9 @@ export interface AppRuntime {
 }
 
 export async function createRuntime(appRoot: string, workspaceRoot = appRoot): Promise<AppRuntime> {
+  if (!(await pathExists(configPath(appRoot)))) {
+    await writeDefaultConfig(appRoot);
+  }
   const config = await loadConfig(appRoot);
   const preparedWorkspace = await prepareWorkspace(appRoot, workspaceRoot);
   const index = await SessionIndex.open(preparedWorkspace, config.dataDir);

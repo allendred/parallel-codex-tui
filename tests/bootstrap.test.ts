@@ -31,6 +31,8 @@ describe("createRuntime", () => {
 
     expect(runtime.workspaceRoot).toBe(workspaceRoot);
     expect(await pathExists(workspaceRoot)).toBe(true);
+    expect(await pathExists(join(appRoot, ".parallel-codex", "config.toml"))).toBe(true);
+    expect(await pathExists(join(workspaceRoot, ".parallel-codex"))).toBe(true);
     expect(await pathExists(join(appRoot, ".parallel-codex", "last-workspace"))).toBe(true);
   });
 
