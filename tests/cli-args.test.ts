@@ -96,4 +96,12 @@ describe("parseCliArgs", () => {
     expect(parsed.workspaceRoot).toBe("/app");
     expect(parsed.taskId).toBeNull();
   });
+
+  it("does not let empty equals-style option values consume the next argument", () => {
+    const parsed = parseCliArgs(["--workspace=", "next", "--task=", "task-next"], "/app");
+
+    expect(parsed.explicitWorkspace).toBeNull();
+    expect(parsed.workspaceRoot).toBe("/app");
+    expect(parsed.taskId).toBeNull();
+  });
 });

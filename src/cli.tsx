@@ -19,7 +19,9 @@ Options:
       --init              Write .parallel-codex/config.toml if missing
       --doctor            Check local configuration and agent commands
   -v, --version           Print the current version
-  -h, --help              Print this help message`;
+  -h, --help              Print this help message
+
+Long options also accept --name=value form.`;
 
 const cliArgs = parseCliArgs(process.argv.slice(2), process.cwd());
 const localConfigPath = configPath(cliArgs.appRoot);

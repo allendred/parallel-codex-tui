@@ -47,6 +47,8 @@ For development without linking, run:
 npm run dev -- --workspace /path/to/project
 ```
 
+Long CLI options can also be passed as `--workspace=/path/to/project`, `--app-root=/path/to/app`, and `--task=task-id`.
+
 Check available flags or the installed version without starting the TUI:
 
 ```bash

@@ -39,9 +39,9 @@ export function parseCliArgs(args: string[], cwd: string): CliArgs {
 
 function flagValue(args: string[], flagIndex: number): string | null {
   const flag = flagIndex >= 0 ? args[flagIndex] : null;
-  const inlineValue = flag?.match(/^--[^=]+=(.*)$/)?.[1] ?? null;
-  if (inlineValue) {
-    return inlineValue;
+  const inlineMatch = flag?.match(/^--[^=]+=(.*)$/);
+  if (inlineMatch) {
+    return inlineMatch[1] || null;
   }
 
   const value = flagIndex >= 0 ? args[flagIndex + 1] : null;

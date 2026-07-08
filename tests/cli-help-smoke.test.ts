@@ -19,6 +19,7 @@ describe("CLI help and version", () => {
     expect(stdout).toContain("--init");
     expect(stdout).toContain("--doctor");
     expect(stdout).toContain("--version");
+    expect(stdout).toContain("Long options also accept --name=value form.");
   });
 
   it("prints the package version and exits without starting the TUI", async () => {
