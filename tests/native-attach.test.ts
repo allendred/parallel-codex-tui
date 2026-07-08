@@ -163,6 +163,38 @@ describe("buildNativeAttachLaunch", () => {
     ).rejects.toThrow(`Native session workspace not found for Actor (codex): ${missingWorkspace}`);
   });
 
+  it("rejects native session records whose workspace cwd is an existing file", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pct-native-attach-file-cwd-"));
+    const workerDir = join(root, "task-a", "actor-codex");
+    const fileWorkspace = join(root, "workspace-file");
+    await writeText(fileWorkspace, "not a directory");
+    await writeJson(join(workerDir, "native-session.json"), {
+      engine: "codex",
+      role: "actor",
+      worker_id: "actor-codex",
+      session_id: "native-abc",
+      scope: "task",
+      cwd: fileWorkspace,
+      created_at: "2026-06-30T03:30:00.000Z",
+      last_used_at: "2026-06-30T03:30:00.000Z",
+      source: "manual"
+    });
+
+    await expect(
+      buildNativeAttachLaunch({
+        config: defaultConfig(root),
+        worker: {
+          id: "actor-codex",
+          role: "actor",
+          engine: "codex",
+          label: "Actor (codex)",
+          logPath: join(workerDir, "output.log"),
+          statusPath: join(workerDir, "status.json")
+        }
+      })
+    ).rejects.toThrow(`Native session workspace is not a directory for Actor (codex): ${fileWorkspace}`);
+  });
+
   it("recovers a Claude native session from Claude's project log when the worker file is missing", async () => {
     const root = await mkdtemp(join(tmpdir(), "pct-native-attach-claude-log-"));
     const workspace = join(root, "workspace");

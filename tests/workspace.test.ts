@@ -13,7 +13,18 @@ describe("workspace selection", () => {
     await expect(prepareWorkspace(appRoot, workspaceRoot)).resolves.toBe(workspaceRoot);
 
     expect(await pathExists(workspaceRoot)).toBe(true);
+    expect(await pathExists(join(workspaceRoot, ".parallel-codex"))).toBe(true);
     await expect(resolveWorkspaceSelection({ appRoot, cwd: appRoot })).resolves.toBe(workspaceRoot);
+  });
+
+  it("rejects workspace paths that are existing files", async () => {
+    const appRoot = await mkdtemp(join(tmpdir(), "pct-workspace-file-app-"));
+    const workspaceFile = join(appRoot, "not-a-directory");
+    await writeText(workspaceFile, "not a directory");
+
+    await expect(prepareWorkspace(appRoot, workspaceFile)).rejects.toThrow(
+      `Workspace path exists but is not a directory: ${workspaceFile}`
+    );
   });
 
   it("uses cwd when no explicit or remembered workspace exists", async () => {
@@ -67,6 +78,51 @@ describe("workspace selection", () => {
 
     expect(choices[0]).toMatchObject({ path: newest, exists: true });
     expect(choices[1]).toMatchObject({ path: existing, exists: true });
+  });
+
+  it("omits remembered workspace paths that are existing files", async () => {
+    const appRoot = await mkdtemp(join(tmpdir(), "pct-workspace-list-file-"));
+    const fileWorkspace = join(appRoot, "workspace-file");
+    const realWorkspace = join(appRoot, "real-workspace");
+    await prepareWorkspace(appRoot, realWorkspace);
+    await writeText(fileWorkspace, "not a directory");
+    await writeJson(join(appRoot, ".parallel-codex", "workspaces.json"), {
+      version: 1,
+      workspaces: [
+        {
+          path: fileWorkspace,
+          last_used_at: "2026-07-08T12:00:00.000Z"
+        },
+        {
+          path: realWorkspace,
+          last_used_at: "2026-07-08T11:00:00.000Z"
+        }
+      ]
+    });
+
+    const choices = await listWorkspaceChoices(appRoot);
+
+    expect(choices.map((choice) => choice.path)).toEqual([realWorkspace]);
+    await expect(resolveWorkspaceSelection({ appRoot, cwd: appRoot })).resolves.toBe(realWorkspace);
+  });
+
+  it("keeps missing remembered workspace paths selectable so startup can create them", async () => {
+    const appRoot = await mkdtemp(join(tmpdir(), "pct-workspace-list-missing-"));
+    const missingWorkspace = join(appRoot, "missing-workspace");
+    await writeJson(join(appRoot, ".parallel-codex", "workspaces.json"), {
+      version: 1,
+      workspaces: [
+        {
+          path: missingWorkspace,
+          last_used_at: "2026-07-08T12:00:00.000Z"
+        }
+      ]
+    });
+
+    const choices = await listWorkspaceChoices(appRoot);
+
+    expect(choices).toEqual([{ path: missingWorkspace, exists: false, lastUsedAt: "2026-07-08T12:00:00.000Z" }]);
+    await expect(resolveWorkspaceSelection({ appRoot, cwd: appRoot })).resolves.toBe(missingWorkspace);
   });
 
   it("resolves legacy relative last-workspace entries from the app root", async () => {

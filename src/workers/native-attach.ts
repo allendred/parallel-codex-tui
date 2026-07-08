@@ -5,7 +5,7 @@ import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { spawn } from "node-pty";
 import type { AppConfig } from "../core/config.js";
-import { pathExists, readJson, readTextIfExists, removeIfExists, writeJson } from "../core/file-store.js";
+import { pathExists, pathIsDirectory, readJson, readTextIfExists, removeIfExists, writeJson } from "../core/file-store.js";
 import { NativeSessionSchema, TaskMetaSchema, type EngineName, type NativeSession } from "../domain/schemas.js";
 import type { WorkerLogRef } from "../orchestrator/orchestrator.js";
 import type { WorkerModelRunConfig } from "./types.js";
@@ -44,6 +44,9 @@ export async function buildNativeAttachLaunch(input: NativeAttachLaunchInput): P
   const modelConfig = workerConfig.model;
   if (!(await pathExists(nativeSession.cwd))) {
     throw new Error(`Native session workspace not found for ${input.worker.label}: ${nativeSession.cwd}`);
+  }
+  if (!(await pathIsDirectory(nativeSession.cwd))) {
+    throw new Error(`Native session workspace is not a directory for ${input.worker.label}: ${nativeSession.cwd}`);
   }
 
   return {

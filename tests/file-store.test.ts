@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 import {
   appendJsonLine,
   pathExists,
+  pathIsDirectory,
   readJson,
   readTextIfExists,
   writeJson,
@@ -51,5 +52,17 @@ describe("file store", () => {
 
     expect(await pathExists(file)).toBe(true);
     expect(await readTextIfExists(file)).toBe("hello\n");
+  });
+
+  it("distinguishes directories from existing files", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pct-directory-"));
+    const file = join(root, "workspace-file");
+
+    await writeText(file, "not a directory");
+
+    expect(await pathExists(file)).toBe(true);
+    expect(await pathIsDirectory(root)).toBe(true);
+    expect(await pathIsDirectory(file)).toBe(false);
+    expect(await pathIsDirectory(join(root, "missing"))).toBe(false);
   });
 });

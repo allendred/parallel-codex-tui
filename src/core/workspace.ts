@@ -1,7 +1,7 @@
 import { join, resolve } from "node:path";
 import { homedir } from "node:os";
 import { z } from "zod";
-import { ensureDir, pathExists, readJson, readTextIfExists, writeJson, writeText } from "./file-store.js";
+import { ensureDir, pathExists, pathIsDirectory, readJson, readTextIfExists, writeJson, writeText } from "./file-store.js";
 
 const lastWorkspaceFile = "last-workspace";
 const workspacesFile = "workspaces.json";
@@ -44,7 +44,11 @@ export async function resolveWorkspaceSelection(input: WorkspaceSelectionInput):
 
 export async function prepareWorkspace(appRoot: string, workspaceRoot: string): Promise<string> {
   const resolved = resolveWorkspacePath(process.cwd(), workspaceRoot);
+  if ((await pathExists(resolved)) && !(await pathIsDirectory(resolved))) {
+    throw new Error(`Workspace path exists but is not a directory: ${resolved}`);
+  }
   await ensureDir(resolved);
+  await ensureDir(join(resolved, ".parallel-codex"));
   await rememberWorkspace(appRoot, resolved);
   return resolved;
 }
@@ -79,13 +83,22 @@ export async function listWorkspaceChoices(appRoot: string): Promise<WorkspaceCh
       return byDate === 0 ? left.order - right.order : byDate;
     });
 
-  return Promise.all(
-    unique.map(async (entry) => ({
-      path: entry.path,
-      exists: await pathExists(entry.path),
-      lastUsedAt: entry.lastUsedAt
-    }))
+  const choices = await Promise.all(
+    unique.map(async (entry) => {
+      const exists = await pathExists(entry.path);
+      const isDirectory = exists && (await pathIsDirectory(entry.path));
+      return {
+        path: entry.path,
+        exists: isDirectory,
+        lastUsedAt: entry.lastUsedAt,
+        selectable: !exists || isDirectory
+      };
+    })
   );
+
+  return choices
+    .filter((choice) => choice.selectable)
+    .map(({ selectable: _selectable, ...choice }) => choice);
 }
 
 async function rememberWorkspace(appRoot: string, workspaceRoot: string): Promise<void> {

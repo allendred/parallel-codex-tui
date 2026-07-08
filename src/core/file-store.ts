@@ -18,6 +18,17 @@ export async function pathExists(path: string): Promise<boolean> {
   }
 }
 
+export async function pathIsDirectory(path: string): Promise<boolean> {
+  try {
+    return (await stat(path)).isDirectory();
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      return false;
+    }
+    throw error;
+  }
+}
+
 export async function writeJson(path: string, value: unknown): Promise<void> {
   const dir = dirname(path);
   const tempPath = join(dir, `.${basename(path)}.${process.pid}.${Date.now()}.${Math.random().toString(16).slice(2)}.tmp`);

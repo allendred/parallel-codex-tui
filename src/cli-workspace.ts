@@ -1,7 +1,7 @@
 import { createInterface } from "node:readline/promises";
 import type { ReadStream, WriteStream } from "node:tty";
 import { basename } from "node:path";
-import { pathExists } from "./core/file-store.js";
+import { pathExists, pathIsDirectory } from "./core/file-store.js";
 import { listWorkspaceChoices, resolveWorkspacePath, resolveWorkspaceSelection, type WorkspaceChoice } from "./core/workspace.js";
 
 export interface CliWorkspaceInput {
@@ -18,11 +18,16 @@ export async function selectWorkspaceForCli(input: CliWorkspaceInput): Promise<s
     const explicit = resolveWorkspacePath(input.cwd, input.explicitWorkspace);
     const stdin = input.stdin ?? process.stdin;
     const stdout = input.stdout ?? process.stdout;
-    if (!(await pathExists(explicit)) && input.interactive !== false && shouldPromptForWorkspace(stdin, stdout)) {
+    const explicitExists = await pathExists(explicit);
+    const explicitIsDirectory = explicitExists && (await pathIsDirectory(explicit));
+    if (!explicitIsDirectory && input.interactive !== false && shouldPromptForWorkspace(stdin, stdout)) {
       return promptForWorkspace({
         cwd: input.cwd,
         choices: await listWorkspaceChoices(input.appRoot),
-        missingExplicitWorkspace: explicit,
+        invalidExplicitWorkspace: {
+          path: explicit,
+          reason: explicitExists ? "file" : "missing"
+        },
         stdin: stdin as ReadStream,
         stdout: stdout as WriteStream
       });
@@ -53,12 +58,17 @@ function shouldPromptForWorkspace(stdin: NodeJS.ReadStream, stdout: NodeJS.Write
 async function promptForWorkspace(input: {
   cwd: string;
   choices: WorkspaceChoice[];
-  missingExplicitWorkspace?: string;
+  invalidExplicitWorkspace?: {
+    path: string;
+    reason: "file" | "missing";
+  };
   stdin: ReadStream;
   stdout: WriteStream;
 }): Promise<string> {
-  if (input.missingExplicitWorkspace) {
-    input.stdout.write(`Workspace does not exist: ${input.missingExplicitWorkspace}\n`);
+  if (input.invalidExplicitWorkspace?.reason === "missing") {
+    input.stdout.write(`Workspace does not exist: ${input.invalidExplicitWorkspace.path}\n`);
+  } else if (input.invalidExplicitWorkspace?.reason === "file") {
+    input.stdout.write(`Workspace is not a directory: ${input.invalidExplicitWorkspace.path}\n`);
   }
 
   if (input.choices.length === 0) {
@@ -74,7 +84,7 @@ async function promptForWorkspace(input: {
   const rl = createInterface({ input: input.stdin, output: input.stdout });
   try {
     if (input.choices.length === 0) {
-      return await promptForNewWorkspace(rl, input.cwd, input.missingExplicitWorkspace);
+      return await promptForNewWorkspace(rl, input.cwd, input.invalidExplicitWorkspace?.path);
     }
 
     const answer = (await rl.question(`Workspace [1/${input.choices.length}, n]: `)).trim();
@@ -88,7 +98,7 @@ async function promptForWorkspace(input: {
     }
 
     if (/^n(?:ew)?$/i.test(answer)) {
-      return await promptForNewWorkspace(rl, input.cwd, input.missingExplicitWorkspace);
+      return await promptForNewWorkspace(rl, input.cwd, input.invalidExplicitWorkspace?.path);
     }
 
     const index = Number.parseInt(answer, 10);

@@ -4,6 +4,7 @@ import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { selectWorkspaceForCli } from "../src/cli-workspace.js";
+import { writeText } from "../src/core/file-store.js";
 import { prepareWorkspace } from "../src/core/workspace.js";
 
 describe("selectWorkspaceForCli", () => {
@@ -45,6 +46,27 @@ describe("selectWorkspaceForCli", () => {
     expect(stdout.output()).toContain("Workspace does not exist:");
     expect(stdout.output()).toContain(missing);
     expect(stdout.output()).toContain("Select workspace:");
+  });
+
+  it("prompts before using an explicit workspace path that is an existing file", async () => {
+    const appRoot = await mkdtemp(join(tmpdir(), "pct-cli-workspace-file-explicit-"));
+    const remembered = join(appRoot, "remembered");
+    const fileWorkspace = join(appRoot, "workspace-file");
+    await prepareWorkspace(appRoot, remembered);
+    await writeText(fileWorkspace, "not a directory");
+    const stdout = fakeOutput();
+
+    await expect(
+      selectWorkspaceForCli({
+        appRoot,
+        cwd: appRoot,
+        explicitWorkspace: fileWorkspace,
+        stdin: fakeInput("1\n"),
+        stdout
+      })
+    ).resolves.toBe(remembered);
+    expect(stdout.output()).toContain("Workspace is not a directory:");
+    expect(stdout.output()).toContain(fileWorkspace);
   });
 
   it("lets a TTY user choose a remembered workspace", async () => {
