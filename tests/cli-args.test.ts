@@ -53,4 +53,26 @@ describe("parseCliArgs", () => {
     expect(parsed.appRoot).toBe("/tmp/app");
     expect(parsed.workspaceRoot).toBe("/tmp/work");
   });
+
+  it("does not treat another flag as a workspace value", () => {
+    const parsed = parseCliArgs(["--workspace", "--doctor"], "/app");
+
+    expect(parsed.doctor).toBe(true);
+    expect(parsed.explicitWorkspace).toBeNull();
+    expect(parsed.workspaceRoot).toBe("/app");
+  });
+
+  it("does not treat another flag as an app root value", () => {
+    const parsed = parseCliArgs(["--app-root", "--doctor"], "/app");
+
+    expect(parsed.doctor).toBe(true);
+    expect(parsed.appRoot).toBe("/app");
+  });
+
+  it("does not treat another flag as a task id", () => {
+    const parsed = parseCliArgs(["--task", "--doctor"], "/app");
+
+    expect(parsed.doctor).toBe(true);
+    expect(parsed.taskId).toBeNull();
+  });
 });

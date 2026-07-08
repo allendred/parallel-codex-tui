@@ -1,6 +1,6 @@
 import { PassThrough, Writable } from "node:stream";
 import { mkdtemp } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { selectWorkspaceForCli } from "../src/cli-workspace.js";
@@ -58,6 +58,20 @@ describe("selectWorkspaceForCli", () => {
     ).resolves.toBe(join(appRoot, "created"));
   });
 
+  it("expands home-relative paths entered from the workspace picker", async () => {
+    const appRoot = await mkdtemp(join(tmpdir(), "pct-cli-workspace-home-"));
+    await prepareWorkspace(appRoot, join(appRoot, "remembered"));
+
+    await expect(
+      selectWorkspaceForCli({
+        appRoot,
+        cwd: appRoot,
+        stdin: fakeInput("n ~/created-from-picker\n"),
+        stdout: fakeOutput()
+      })
+    ).resolves.toBe(join(homedir(), "created-from-picker"));
+  });
+
   it("lets a TTY user type n and then answer the path prompt", async () => {
     const appRoot = await mkdtemp(join(tmpdir(), "pct-cli-workspace-new-step-"));
     await prepareWorkspace(appRoot, join(appRoot, "remembered"));
@@ -112,6 +126,24 @@ describe("selectWorkspaceForCli", () => {
         cwd: appRoot,
         stdin: fakeInput("", { tty: false }),
         stdout
+      })
+    ).resolves.toBe(workspace);
+    expect(stdout.output()).toBe("");
+  });
+
+  it("can skip the picker for command modes that should not prompt", async () => {
+    const appRoot = await mkdtemp(join(tmpdir(), "pct-cli-workspace-skip-picker-"));
+    const workspace = join(appRoot, "remembered");
+    await prepareWorkspace(appRoot, workspace);
+    const stdout = fakeOutput();
+
+    await expect(
+      selectWorkspaceForCli({
+        appRoot,
+        cwd: appRoot,
+        stdin: fakeInput("2\n"),
+        stdout,
+        interactive: false
       })
     ).resolves.toBe(workspace);
     expect(stdout.output()).toBe("");

@@ -1,4 +1,5 @@
 import { join, resolve } from "node:path";
+import { homedir } from "node:os";
 import { z } from "zod";
 import { ensureDir, pathExists, readJson, readTextIfExists, writeJson, writeText } from "./file-store.js";
 
@@ -34,7 +35,7 @@ export interface WorkspaceChoice {
 
 export async function resolveWorkspaceSelection(input: WorkspaceSelectionInput): Promise<string> {
   if (input.explicitWorkspace?.trim()) {
-    return resolve(input.cwd, input.explicitWorkspace);
+    return resolveWorkspacePath(input.cwd, input.explicitWorkspace);
   }
 
   const [latest] = await listWorkspaceChoices(input.appRoot);
@@ -42,7 +43,7 @@ export async function resolveWorkspaceSelection(input: WorkspaceSelectionInput):
 }
 
 export async function prepareWorkspace(appRoot: string, workspaceRoot: string): Promise<string> {
-  const resolved = resolve(workspaceRoot);
+  const resolved = resolveWorkspacePath(process.cwd(), workspaceRoot);
   await ensureDir(resolved);
   await rememberWorkspace(appRoot, resolved);
   return resolved;
@@ -56,13 +57,13 @@ export async function listWorkspaceChoices(appRoot: string): Promise<WorkspaceCh
   const entries = await readWorkspaceEntries(appRoot);
   const legacy = (await readTextIfExists(lastWorkspacePath(appRoot))).trim();
   if (legacy) {
-    entries.push({ path: resolve(legacy), last_used_at: "" });
+    entries.push({ path: resolveWorkspacePath(process.cwd(), legacy), last_used_at: "" });
   }
 
   const seen = new Set<string>();
   const unique = entries
     .map((entry, index) => ({
-      path: resolve(entry.path),
+      path: resolveWorkspacePath(process.cwd(), entry.path),
       lastUsedAt: entry.last_used_at || null,
       order: index
     }))
@@ -89,13 +90,13 @@ export async function listWorkspaceChoices(appRoot: string): Promise<WorkspaceCh
 
 async function rememberWorkspace(appRoot: string, workspaceRoot: string): Promise<void> {
   const now = new Date().toISOString();
-  const resolved = resolve(workspaceRoot);
+  const resolved = resolveWorkspacePath(process.cwd(), workspaceRoot);
   const current = await readWorkspaceEntries(appRoot);
   const next: WorkspaceRegistry = {
     version: 1,
     workspaces: [
       { path: resolved, last_used_at: now },
-      ...current.filter((entry) => resolve(entry.path) !== resolved)
+      ...current.filter((entry) => resolveWorkspacePath(process.cwd(), entry.path) !== resolved)
     ].slice(0, maxRememberedWorkspaces)
   };
 
@@ -122,4 +123,16 @@ function lastWorkspacePath(appRoot: string): string {
 
 function workspacesPath(appRoot: string): string {
   return join(appRoot, ".parallel-codex", workspacesFile);
+}
+
+export function resolveWorkspacePath(cwd: string, value: string): string {
+  if (value === "~") {
+    return homedir();
+  }
+
+  if (value.startsWith("~/")) {
+    return resolve(homedir(), value.slice(2));
+  }
+
+  return resolve(cwd, value);
 }

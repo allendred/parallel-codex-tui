@@ -1,5 +1,5 @@
 import { mkdtemp } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { pathExists } from "../src/core/file-store.js";
@@ -27,6 +27,14 @@ describe("workspace selection", () => {
 
     await expect(resolveWorkspaceSelection({ appRoot, cwd: appRoot, explicitWorkspace: "game" })).resolves.toBe(
       join(appRoot, "game")
+    );
+  });
+
+  it("expands home-relative explicit workspaces", async () => {
+    const appRoot = await mkdtemp(join(tmpdir(), "pct-workspace-home-"));
+
+    await expect(resolveWorkspaceSelection({ appRoot, cwd: appRoot, explicitWorkspace: "~/pct-game" })).resolves.toBe(
+      join(homedir(), "pct-game")
     );
   });
 

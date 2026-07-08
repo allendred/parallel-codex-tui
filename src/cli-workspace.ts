@@ -1,12 +1,13 @@
 import { createInterface } from "node:readline/promises";
 import type { ReadStream, WriteStream } from "node:tty";
-import { basename, resolve } from "node:path";
-import { listWorkspaceChoices, resolveWorkspaceSelection, type WorkspaceChoice } from "./core/workspace.js";
+import { basename } from "node:path";
+import { listWorkspaceChoices, resolveWorkspacePath, resolveWorkspaceSelection, type WorkspaceChoice } from "./core/workspace.js";
 
 export interface CliWorkspaceInput {
   appRoot: string;
   cwd: string;
   explicitWorkspace?: string | null;
+  interactive?: boolean;
   stdin?: NodeJS.ReadStream;
   stdout?: NodeJS.WriteStream;
 }
@@ -20,7 +21,7 @@ export async function selectWorkspaceForCli(input: CliWorkspaceInput): Promise<s
   const stdout = input.stdout ?? process.stdout;
   const choices = await listWorkspaceChoices(input.appRoot);
 
-  if (!shouldPromptForWorkspace(stdin, stdout)) {
+  if (input.interactive === false || !shouldPromptForWorkspace(stdin, stdout)) {
     return resolveWorkspaceSelection(input);
   }
 
@@ -65,7 +66,7 @@ async function promptForWorkspace(input: {
 
     const newWorkspaceMatch = answer.match(/^n(?:ew)?\s+(.+)$/i);
     if (newWorkspaceMatch?.[1]?.trim()) {
-      return resolve(input.cwd, newWorkspaceMatch[1].trim());
+      return resolveWorkspacePath(input.cwd, newWorkspaceMatch[1].trim());
     }
 
     if (/^n(?:ew)?$/i.test(answer)) {
@@ -77,7 +78,7 @@ async function promptForWorkspace(input: {
       return input.choices[index - 1]?.path ?? input.cwd;
     }
 
-    return resolve(input.cwd, answer);
+    return resolveWorkspacePath(input.cwd, answer);
   } finally {
     rl.close();
   }
@@ -85,7 +86,7 @@ async function promptForWorkspace(input: {
 
 async function promptForNewWorkspace(rl: ReturnType<typeof createInterface>, cwd: string): Promise<string> {
   const answer = (await rl.question("Workspace path: ")).trim();
-  return answer ? resolve(cwd, answer) : cwd;
+  return answer ? resolveWorkspacePath(cwd, answer) : cwd;
 }
 
 function workspaceLabel(choice: WorkspaceChoice): string {

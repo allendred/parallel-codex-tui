@@ -19,15 +19,11 @@ export function parseCliArgs(args: string[], cwd: string): CliArgs {
   const help = args.includes("--help") || args.includes("-h");
   const init = args.includes("--init");
   const version = args.includes("--version") || args.includes("-v");
-  const appRoot =
-    appRootFlagIndex >= 0 && args[appRootFlagIndex + 1]
-      ? resolve(cwd, args[appRootFlagIndex + 1])
-      : cwd;
-  const explicitWorkspace =
-    workspaceFlagIndex >= 0 && args[workspaceFlagIndex + 1] ? args[workspaceFlagIndex + 1] : null;
-  const workspaceRoot =
-    explicitWorkspace ? resolve(cwd, explicitWorkspace) : cwd;
-  const taskId = taskFlagIndex >= 0 && args[taskFlagIndex + 1] ? args[taskFlagIndex + 1] : null;
+  const appRootValue = flagValue(args, appRootFlagIndex);
+  const appRoot = appRootValue ? resolve(cwd, appRootValue) : cwd;
+  const explicitWorkspace = flagValue(args, workspaceFlagIndex);
+  const workspaceRoot = explicitWorkspace ? resolve(cwd, explicitWorkspace) : cwd;
+  const taskId = flagValue(args, taskFlagIndex);
 
   return {
     appRoot,
@@ -39,4 +35,9 @@ export function parseCliArgs(args: string[], cwd: string): CliArgs {
     taskId,
     version
   };
+}
+
+function flagValue(args: string[], flagIndex: number): string | null {
+  const value = flagIndex >= 0 ? args[flagIndex + 1] : null;
+  return value && !value.startsWith("-") ? value : null;
 }

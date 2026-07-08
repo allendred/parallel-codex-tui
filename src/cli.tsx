@@ -32,7 +32,8 @@ if (cliArgs.help) {
   const workspaceRoot = await selectWorkspaceForCli({
     appRoot: cliArgs.appRoot,
     cwd: process.cwd(),
-    explicitWorkspace: cliArgs.explicitWorkspace
+    explicitWorkspace: cliArgs.explicitWorkspace,
+    interactive: false
   });
   const result = await runDoctor(cliArgs.appRoot, workspaceRoot);
   process.stdout.write(result.text);
