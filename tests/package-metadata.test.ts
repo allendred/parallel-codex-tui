@@ -118,6 +118,7 @@ describe("package metadata", () => {
     expect(readme).toContain("parallel-codex-tui --doctor");
     expect(readme).toContain("parallel-codex-tui --workspace /path/to/project");
     expect(readme).toContain("--workspace=/path/to/project");
+    expect(readme).toContain("-w=/path/to/project");
     expect(readme).toContain("shows remembered projects from `.parallel-codex/workspaces.json`");
     expect(readme).toContain("Router classification only receives the user request");
     expect(readme).toContain("parallel-codex-tui --help");

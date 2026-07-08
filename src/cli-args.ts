@@ -13,8 +13,10 @@ export interface CliArgs {
 
 export function parseCliArgs(args: string[], cwd: string): CliArgs {
   const appRootFlagIndex = args.findIndex((arg) => arg === "--app-root" || arg.startsWith("--app-root="));
-  const workspaceFlagIndex = args.findIndex((arg) => arg === "--workspace" || arg.startsWith("--workspace=") || arg === "-w");
-  const taskFlagIndex = args.findIndex((arg) => arg === "--task" || arg.startsWith("--task=") || arg === "-t");
+  const workspaceFlagIndex = args.findIndex(
+    (arg) => arg === "--workspace" || arg.startsWith("--workspace=") || arg === "-w" || arg.startsWith("-w=")
+  );
+  const taskFlagIndex = args.findIndex((arg) => arg === "--task" || arg.startsWith("--task=") || arg === "-t" || arg.startsWith("-t="));
   const doctor = args.includes("--doctor");
   const help = args.includes("--help") || args.includes("-h");
   const init = args.includes("--init");
@@ -39,7 +41,7 @@ export function parseCliArgs(args: string[], cwd: string): CliArgs {
 
 function flagValue(args: string[], flagIndex: number): string | null {
   const flag = flagIndex >= 0 ? args[flagIndex] : null;
-  const inlineMatch = flag?.match(/^--[^=]+=(.*)$/);
+  const inlineMatch = flag?.match(/^-{1,2}[^=]+=(.*)$/);
   if (inlineMatch) {
     return inlineMatch[1] || null;
   }

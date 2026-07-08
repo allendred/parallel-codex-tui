@@ -21,7 +21,7 @@ Options:
   -v, --version           Print the current version
   -h, --help              Print this help message
 
-Long options also accept --name=value form.`;
+Options with values also accept --name=value and -x=value forms.`;
 
 const cliArgs = parseCliArgs(process.argv.slice(2), process.cwd());
 const localConfigPath = configPath(cliArgs.appRoot);

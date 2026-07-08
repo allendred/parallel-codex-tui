@@ -35,6 +35,14 @@ describe("parseCliArgs", () => {
     expect(parsed.taskId).toBe("task-1234");
   });
 
+  it("accepts equals-style short option values", () => {
+    const parsed = parseCliArgs(["-w=/tmp/work", "-t=task-short"], "/repo");
+
+    expect(parsed.workspaceRoot).toBe("/tmp/work");
+    expect(parsed.explicitWorkspace).toBe("/tmp/work");
+    expect(parsed.taskId).toBe("task-short");
+  });
+
   it("accepts an initial task id", () => {
     const parsed = parseCliArgs(["--task", "task-1234"], "/app");
 
@@ -98,7 +106,7 @@ describe("parseCliArgs", () => {
   });
 
   it("does not let empty equals-style option values consume the next argument", () => {
-    const parsed = parseCliArgs(["--workspace=", "next", "--task=", "task-next"], "/app");
+    const parsed = parseCliArgs(["--workspace=", "next", "--task=", "task-next", "-w=", "short-next", "-t=", "short-task"], "/app");
 
     expect(parsed.explicitWorkspace).toBeNull();
     expect(parsed.workspaceRoot).toBe("/app");
