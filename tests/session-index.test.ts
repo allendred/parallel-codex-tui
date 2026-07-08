@@ -205,6 +205,36 @@ describe("SessionIndex", () => {
     index.close();
   });
 
+  it("skips corrupt turn metadata while rebuilding startup indexes", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pct-index-corrupt-turn-"));
+    const dataDir = ".parallel-codex";
+    const sessionDir = join(root, dataDir, "sessions", "task-corrupt-turn");
+    const goodTurnDir = join(sessionDir, "turns", "0001");
+    const corruptTurnDir = join(sessionDir, "turns", "0002");
+
+    await writeJson(join(sessionDir, "meta.json"), TaskMetaSchema.parse({
+      id: "task-corrupt-turn",
+      title: "Corrupt turn",
+      created_at: "2026-07-01T01:00:00.000Z",
+      cwd: root,
+      mode: "complex",
+      status: "done"
+    }));
+    await writeJson(join(goodTurnDir, "turn.json"), TurnMetaSchema.parse({
+      task_id: "task-corrupt-turn",
+      turn_id: "0001",
+      created_at: "2026-07-01T01:00:00.000Z",
+      request_path: "turns/0001/user.md"
+    }));
+    await writeText(join(corruptTurnDir, "turn.json"), "{");
+
+    const index = await SessionIndex.open(root, dataDir);
+    await index.rebuildFromFiles();
+
+    await expect(index.countRows("turns")).resolves.toBe(1);
+    index.close();
+  });
+
   it("skips corrupt native session files while rebuilding startup indexes", async () => {
     const root = await mkdtemp(join(tmpdir(), "pct-index-corrupt-native-"));
     const dataDir = ".parallel-codex";

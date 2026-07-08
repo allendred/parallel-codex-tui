@@ -223,7 +223,10 @@ export class SessionIndex {
       for (const turnEntry of turnEntries) {
         const turnPath = join(turnsDir, turnEntry.name, "turn.json");
         if (turnEntry.isDirectory() && (await pathExists(turnPath))) {
-          await this.upsertTurn(taskId, await readJson(turnPath, TurnMetaSchema));
+          const turn = await readJsonIfValid(turnPath, TurnMetaSchema);
+          if (turn) {
+            await this.upsertTurn(taskId, turn);
+          }
         }
       }
     }
