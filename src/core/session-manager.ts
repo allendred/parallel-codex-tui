@@ -262,6 +262,7 @@ export class SessionManager {
     } catch {
       await removeIfExists(path);
       await this.clearWorkerStatusNativeSession(worker);
+      await this.index?.deleteNativeSession(this.taskIdFromWorkerDir(worker.dir), this.workerIdFromWorkerDir(worker.dir));
       return null;
     }
   }
@@ -373,6 +374,10 @@ export class SessionManager {
 
   private taskIdFromWorkerDir(workerDir: string): string {
     return basename(dirname(workerDir));
+  }
+
+  private workerIdFromWorkerDir(workerDir: string): string {
+    return basename(workerDir);
   }
 
   private async clearWorkerStatusNativeSession(worker: Pick<WorkerFiles, "dir">): Promise<void> {
