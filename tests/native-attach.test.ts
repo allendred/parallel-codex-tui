@@ -176,6 +176,29 @@ describe("buildNativeAttachLaunch", () => {
     });
   });
 
+  it("treats corrupt task metadata as missing when recovering Claude native sessions", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pct-native-attach-corrupt-meta-"));
+    const workspace = join(root, "workspace");
+    const taskDir = join(workspace, ".parallel-codex", "sessions", "task-a");
+    const workerDir = join(taskDir, "critic-claude");
+    await writeText(join(taskDir, "meta.json"), "{");
+    await writeText(join(workerDir, "prompt.md"), "# Role: Critic\n\nUser request:\n继续优化\n");
+
+    await expect(
+      buildNativeAttachLaunch({
+        config: defaultConfig(root),
+        worker: {
+          id: "critic-claude",
+          role: "critic",
+          engine: "claude",
+          label: "Critic (claude)",
+          logPath: join(workerDir, "output.log"),
+          statusPath: join(workerDir, "status.json")
+        }
+      })
+    ).rejects.toThrow("No native session recorded");
+  });
+
   it("starts an embedded native process with writable input and captured output", async () => {
     const output: string[] = [];
     const closed: number[] = [];

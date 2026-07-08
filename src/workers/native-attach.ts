@@ -147,8 +147,7 @@ async function recoverClaudeNativeSession(worker: WorkerLogRef, workerDir: strin
   }
 
   const taskDir = dirname(workerDir);
-  const metaPath = join(taskDir, "meta.json");
-  const cwd = (await pathExists(metaPath)) ? (await readJson(metaPath, TaskMetaSchema)).cwd : null;
+  const cwd = await readTaskCwdIfValid(join(taskDir, "meta.json"));
   if (!cwd) {
     return null;
   }
@@ -172,6 +171,18 @@ async function recoverClaudeNativeSession(worker: WorkerLogRef, workerDir: strin
     last_used_at: match.timestamp,
     source: "claude-project-log"
   };
+}
+
+async function readTaskCwdIfValid(metaPath: string): Promise<string | null> {
+  if (!(await pathExists(metaPath))) {
+    return null;
+  }
+
+  try {
+    return (await readJson(metaPath, TaskMetaSchema)).cwd;
+  } catch {
+    return null;
+  }
 }
 
 async function findClaudeProjectSession(input: { cwd: string; prompt: string }): Promise<{ sessionId: string; timestamp: string } | null> {
