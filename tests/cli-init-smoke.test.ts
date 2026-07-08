@@ -74,4 +74,30 @@ describe("CLI init", () => {
     expect(stderr).toBe("");
     expect(stdout).toContain(`Config already exists: ${configPath}`);
   });
+
+  it("rejects an app root path that is an existing file without a stack trace", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pct-cli-init-app-root-file-"));
+    const appRootFile = join(root, "app-root-file");
+    await writeFile(appRootFile, "not a directory", "utf8");
+
+    let stderr = "";
+    await expect(
+      execFileAsync(process.execPath, ["./node_modules/.bin/tsx", "src/cli.tsx", "--app-root", appRootFile, "--init"], {
+        cwd: process.cwd(),
+        timeout: 5000
+      })
+        .catch((error) => {
+          stderr = String((error as { stderr?: string }).stderr ?? "");
+          throw error;
+        })
+    ).rejects.toMatchObject({
+      code: 1,
+      stdout: "",
+      stderr: expect.stringContaining("Startup error:")
+    });
+
+    expect(stderr).toContain(`App root path exists but is not a directory: ${appRootFile}`);
+    expect(stderr).not.toContain("ENOTDIR");
+    expect(stderr).not.toContain("at ");
+  });
 });

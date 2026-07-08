@@ -61,6 +61,34 @@ describe("CLI startup", () => {
     expect(stderr).not.toContain("at ");
   });
 
+  it("rejects an app root path that is an existing file before starting the TUI", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pct-cli-startup-app-root-file-"));
+    const appRootFile = join(root, "app-root-file");
+    const workspace = join(root, "workspace");
+    await writeFile(appRootFile, "not a directory", "utf8");
+
+    let stderr = "";
+    await expect(
+      execFileAsync(process.execPath, ["./node_modules/.bin/tsx", "src/cli.tsx", "--app-root", appRootFile, "--workspace", workspace], {
+        cwd: process.cwd(),
+        timeout: 5000
+      })
+        .catch((error) => {
+          stderr = String((error as { stderr?: string }).stderr ?? "");
+          throw error;
+        })
+    ).rejects.toMatchObject({
+      code: 1,
+      stdout: "",
+      stderr: expect.stringContaining("Startup error:")
+    });
+
+    expect(stderr).toContain(`App root path exists but is not a directory: ${appRootFile}`);
+    expect(stderr).not.toContain("Config error:");
+    expect(stderr).not.toContain("ENOTDIR");
+    expect(stderr).not.toContain("at ");
+  });
+
   it("rejects missing explicit task sessions before starting the TUI", async () => {
     const appRoot = await mkdtemp(join(tmpdir(), "pct-cli-startup-missing-task-app-"));
     const workspace = await mkdtemp(join(tmpdir(), "pct-cli-startup-missing-task-workspace-"));

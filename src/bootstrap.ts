@@ -1,3 +1,4 @@
+import { prepareAppRoot } from "./core/app-root.js";
 import { configPath, loadConfig, writeDefaultConfig, type AppConfig } from "./core/config.js";
 import { ensureDir, pathExists } from "./core/file-store.js";
 import { routerRuntimeDir } from "./core/paths.js";
@@ -18,6 +19,7 @@ export interface AppRuntime {
 }
 
 export async function createRuntime(appRoot: string, workspaceRoot = appRoot): Promise<AppRuntime> {
+  await prepareAppRoot(appRoot);
   if (!(await pathExists(configPath(appRoot)))) {
     await writeDefaultConfig(appRoot);
   }

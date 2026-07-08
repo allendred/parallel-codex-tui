@@ -5,6 +5,7 @@ import { ZodError } from "zod";
 import { parseCliArgs, validateCliArgs } from "./cli-args.js";
 import { selectWorkspaceForCli } from "./cli-workspace.js";
 import { createRuntime } from "./bootstrap.js";
+import { prepareAppRoot } from "./core/app-root.js";
 import { configPath, writeDefaultConfig } from "./core/config.js";
 import { pathExists } from "./core/file-store.js";
 import { runDoctor } from "./doctor.js";
@@ -38,6 +39,9 @@ async function main(): Promise<void> {
   }
 
   const cliArgs = parseCliArgs(rawArgs, process.cwd());
+  if (!cliArgs.help && !cliArgs.version) {
+    await prepareAppRoot(cliArgs.appRoot);
+  }
   const localConfigPath = configPath(cliArgs.appRoot);
 
   if (cliArgs.help) {

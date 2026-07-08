@@ -1,6 +1,7 @@
 import { constants } from "node:fs";
 import { access } from "node:fs/promises";
 import { delimiter, join } from "node:path";
+import { prepareAppRoot } from "./core/app-root.js";
 import { configPath, loadConfig } from "./core/config.js";
 import { pathExists } from "./core/file-store.js";
 import { prepareWorkspace } from "./core/workspace.js";
@@ -13,6 +14,7 @@ export interface DoctorResult {
 export async function runDoctor(appRoot: string, workspaceRoot: string, env: NodeJS.ProcessEnv = process.env): Promise<DoctorResult> {
   const lines = ["parallel-codex-tui doctor"];
   let ok = true;
+  await prepareAppRoot(appRoot);
   const preparedWorkspace = await prepareWorkspace(appRoot, workspaceRoot);
 
   if (isSupportedNodeVersion(process.versions.node)) {

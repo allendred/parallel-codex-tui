@@ -153,6 +153,21 @@ describe("CLI doctor", () => {
     expect(result.stdout).toContain("pct-missing-worker-claude: missing");
   });
 
+  it("rejects an app root path that is an existing file without a stack trace", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pct-cli-doctor-app-root-file-"));
+    const appRootFile = join(root, "app-root-file");
+    await writeFile(appRootFile, "not a directory", "utf8");
+
+    const result = await runCli(["--app-root", appRootFile, "--doctor"]);
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stdout).toBe("");
+    expect(result.stderr).toContain("Startup error:");
+    expect(result.stderr).toContain(`App root path exists but is not a directory: ${appRootFile}`);
+    expect(result.stderr).not.toContain("ENOTDIR");
+    expect(result.stderr).not.toContain("at ");
+  });
+
   it("only checks commands required by the active router mode and pairing", async () => {
     const appRoot = await mkdtemp(join(tmpdir(), "pct-cli-doctor-mock-"));
 
