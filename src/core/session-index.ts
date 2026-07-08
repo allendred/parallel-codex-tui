@@ -211,7 +211,10 @@ export class SessionIndex {
   private async rebuildTask(taskDir: string, taskId: string): Promise<void> {
     const metaPath = join(taskDir, "meta.json");
     if (await pathExists(metaPath)) {
-      await this.upsertTask(await readJson(metaPath, TaskMetaSchema));
+      const meta = await readJsonIfValid(metaPath, TaskMetaSchema);
+      if (meta) {
+        await this.upsertTask(meta);
+      }
     }
 
     const turnsDir = join(taskDir, "turns");

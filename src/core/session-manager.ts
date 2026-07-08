@@ -153,7 +153,10 @@ export class SessionManager {
       }
       const metaPath = join(root, entry.name, "meta.json");
       if (await pathExists(metaPath)) {
-        const meta = await readJson(metaPath, TaskMetaSchema);
+        const meta = await readTaskMetaIfValid(metaPath);
+        if (!meta) {
+          continue;
+        }
         if (meta.mode === "complex") {
           tasks.push(meta);
         }
@@ -403,4 +406,12 @@ export class SessionManager {
 function titleFromRequest(request: string): string {
   const firstLine = request.trim().split("\n")[0] ?? "Untitled task";
   return firstLine.length > 80 ? `${firstLine.slice(0, 77)}...` : firstLine;
+}
+
+async function readTaskMetaIfValid(metaPath: string): Promise<TaskMeta | null> {
+  try {
+    return await readJson(metaPath, TaskMetaSchema);
+  } catch {
+    return null;
+  }
 }

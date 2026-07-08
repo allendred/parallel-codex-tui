@@ -2,7 +2,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { pathExists, readJson, readTextIfExists, writeJson } from "../src/core/file-store.js";
+import { pathExists, readJson, readTextIfExists, writeJson, writeText } from "../src/core/file-store.js";
 import { SessionIndex } from "../src/core/session-index.js";
 import { SessionManager } from "../src/core/session-manager.js";
 import {
@@ -121,6 +121,34 @@ describe("SessionManager", () => {
     const latest = await manager.latestTask();
 
     expect(latest?.id).toBe(second.id);
+  });
+
+  it("skips corrupt task metadata when finding the latest complex task", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pct-latest-task-corrupt-meta-"));
+    const manager = new SessionManager({
+      projectRoot: root,
+      dataDir: ".parallel-codex",
+      now: () => new Date("2026-06-30T03:30:00.000Z"),
+      randomId: () => "good"
+    });
+    const good = await manager.createTask({
+      request: "Good task.",
+      cwd: root,
+      route: {
+        mode: "complex",
+        reason: "Requires workers.",
+        suggested_roles: ["judge", "actor", "critic"],
+        judge_engine: "mock",
+        actor_engine: "mock",
+        critic_engine: "mock"
+      }
+    });
+    const corruptDir = join(root, ".parallel-codex", "sessions", "task-20260630-033100-bad");
+    await writeText(join(corruptDir, "meta.json"), "{");
+
+    const latest = await manager.latestTask();
+
+    expect(latest?.id).toBe(good.id);
   });
 
   it("backfills turn 0001 before appending to legacy tasks with user-request but no turns directory", async () => {
