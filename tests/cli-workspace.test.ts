@@ -69,6 +69,26 @@ describe("selectWorkspaceForCli", () => {
     expect(stdout.output()).toContain(fileWorkspace);
   });
 
+  it("does not default to an explicit workspace path that is an existing file on first run", async () => {
+    const appRoot = await mkdtemp(join(tmpdir(), "pct-cli-workspace-first-run-file-explicit-"));
+    const fileWorkspace = join(appRoot, "workspace-file");
+    await writeText(fileWorkspace, "not a directory");
+    const stdout = fakeOutput();
+
+    await expect(
+      selectWorkspaceForCli({
+        appRoot,
+        cwd: appRoot,
+        explicitWorkspace: fileWorkspace,
+        stdin: fakeInput("\n"),
+        stdout
+      })
+    ).resolves.toBe(appRoot);
+    expect(stdout.output()).toContain("Workspace is not a directory:");
+    expect(stdout.output()).toContain("Workspace path:");
+    expect(stdout.output()).not.toContain(`Workspace path [${fileWorkspace}]`);
+  });
+
   it("lets a TTY user choose a remembered workspace", async () => {
     const appRoot = await mkdtemp(join(tmpdir(), "pct-cli-workspace-choice-"));
     const first = join(appRoot, "first");

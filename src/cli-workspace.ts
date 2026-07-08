@@ -84,7 +84,7 @@ async function promptForWorkspace(input: {
   const rl = createInterface({ input: input.stdin, output: input.stdout });
   try {
     if (input.choices.length === 0) {
-      return await promptForNewWorkspace(rl, input.cwd, input.invalidExplicitWorkspace?.path);
+      return await promptForNewWorkspace(rl, input.cwd, createableDefaultWorkspace(input.invalidExplicitWorkspace));
     }
 
     const answer = (await rl.question(`Workspace [1/${input.choices.length}, n]: `)).trim();
@@ -98,7 +98,7 @@ async function promptForWorkspace(input: {
     }
 
     if (/^n(?:ew)?$/i.test(answer)) {
-      return await promptForNewWorkspace(rl, input.cwd, input.invalidExplicitWorkspace?.path);
+      return await promptForNewWorkspace(rl, input.cwd, createableDefaultWorkspace(input.invalidExplicitWorkspace));
     }
 
     const index = Number.parseInt(answer, 10);
@@ -123,6 +123,12 @@ async function promptForNewWorkspace(
     return resolveWorkspacePath(cwd, answer);
   }
   return defaultWorkspace ?? cwd;
+}
+
+function createableDefaultWorkspace(
+  invalidExplicitWorkspace?: { path: string; reason: "file" | "missing" }
+): string | undefined {
+  return invalidExplicitWorkspace?.reason === "missing" ? invalidExplicitWorkspace.path : undefined;
 }
 
 function workspaceLabel(choice: WorkspaceChoice): string {
