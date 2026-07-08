@@ -12,9 +12,9 @@ export interface CliArgs {
 }
 
 export function parseCliArgs(args: string[], cwd: string): CliArgs {
-  const appRootFlagIndex = args.findIndex((arg) => arg === "--app-root");
-  const workspaceFlagIndex = args.findIndex((arg) => arg === "--workspace" || arg === "-w");
-  const taskFlagIndex = args.findIndex((arg) => arg === "--task" || arg === "-t");
+  const appRootFlagIndex = args.findIndex((arg) => arg === "--app-root" || arg.startsWith("--app-root="));
+  const workspaceFlagIndex = args.findIndex((arg) => arg === "--workspace" || arg.startsWith("--workspace=") || arg === "-w");
+  const taskFlagIndex = args.findIndex((arg) => arg === "--task" || arg.startsWith("--task=") || arg === "-t");
   const doctor = args.includes("--doctor");
   const help = args.includes("--help") || args.includes("-h");
   const init = args.includes("--init");
@@ -38,6 +38,12 @@ export function parseCliArgs(args: string[], cwd: string): CliArgs {
 }
 
 function flagValue(args: string[], flagIndex: number): string | null {
+  const flag = flagIndex >= 0 ? args[flagIndex] : null;
+  const inlineValue = flag?.match(/^--[^=]+=(.*)$/)?.[1] ?? null;
+  if (inlineValue) {
+    return inlineValue;
+  }
+
   const value = flagIndex >= 0 ? args[flagIndex + 1] : null;
   return value && !value.startsWith("-") ? value : null;
 }

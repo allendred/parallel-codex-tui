@@ -71,6 +71,30 @@ describe("CLI doctor", () => {
     await expect(pathExists(workspace)).resolves.toBe(true);
   });
 
+  it("accepts equals-style workspace values in command mode", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pct-cli-doctor-equals-"));
+    const binDir = join(root, "bin");
+    const appRoot = join(root, "app");
+    const workspace = join(root, "workspace");
+
+    await mkdir(binDir, { recursive: true });
+    await mkdir(appRoot, { recursive: true });
+    await writeExecutable(join(binDir, "codex"), "#!/bin/sh\necho codex 1.0\n");
+    await writeExecutable(join(binDir, "claude"), "#!/bin/sh\necho claude 1.0\n");
+    await expect(runCli([`--app-root=${appRoot}`, "--init"])).resolves.toMatchObject({ exitCode: 0 });
+
+    const result = await runCli([`--app-root=${appRoot}`, `--workspace=${workspace}`, "--doctor"], {
+      env: {
+        PATH: `${binDir}${delimiter}${process.env.PATH ?? ""}`
+      }
+    });
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stderr).toBe("");
+    expect(result.stdout).toContain(`workspace: ok (${workspace})`);
+    await expect(pathExists(workspace)).resolves.toBe(true);
+  });
+
   it("exits non-zero and explains missing configured commands", async () => {
     const appRoot = await mkdtemp(join(tmpdir(), "pct-cli-doctor-missing-"));
 

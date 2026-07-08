@@ -23,6 +23,18 @@ describe("parseCliArgs", () => {
     expect(parsed.explicitWorkspace).toBe("/tmp/game");
   });
 
+  it("accepts equals-style long option values", () => {
+    const parsed = parseCliArgs(
+      ["--app-root=/tmp/app", "--workspace=/tmp/work", "--task=task-1234"],
+      "/repo"
+    );
+
+    expect(parsed.appRoot).toBe("/tmp/app");
+    expect(parsed.workspaceRoot).toBe("/tmp/work");
+    expect(parsed.explicitWorkspace).toBe("/tmp/work");
+    expect(parsed.taskId).toBe("task-1234");
+  });
+
   it("accepts an initial task id", () => {
     const parsed = parseCliArgs(["--task", "task-1234"], "/app");
 
@@ -73,6 +85,15 @@ describe("parseCliArgs", () => {
     const parsed = parseCliArgs(["--task", "--doctor"], "/app");
 
     expect(parsed.doctor).toBe(true);
+    expect(parsed.taskId).toBeNull();
+  });
+
+  it("ignores empty equals-style option values", () => {
+    const parsed = parseCliArgs(["--workspace=", "--app-root=", "--task="], "/app");
+
+    expect(parsed.appRoot).toBe("/app");
+    expect(parsed.explicitWorkspace).toBeNull();
+    expect(parsed.workspaceRoot).toBe("/app");
     expect(parsed.taskId).toBeNull();
   });
 });
