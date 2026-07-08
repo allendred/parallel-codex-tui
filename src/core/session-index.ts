@@ -180,6 +180,13 @@ export class SessionIndex {
     return row.count;
   }
 
+  async workerNativeSessionId(taskId: string, workerId: string): Promise<string | null> {
+    const row = this.db
+      .prepare("SELECT native_session_id FROM workers WHERE task_id = ? AND worker_id = ?")
+      .get(taskId, workerId) as { native_session_id: string | null } | undefined;
+    return row?.native_session_id ?? null;
+  }
+
   async rebuildFromFiles(): Promise<void> {
     this.db.exec("DELETE FROM native_sessions; DELETE FROM workers; DELETE FROM turns; DELETE FROM tasks;");
     const sessions = join(this.projectRoot, this.dataDir, "sessions");
@@ -225,18 +232,28 @@ export class SessionIndex {
 
       const workerDir = join(taskDir, entry.name);
       const statusPath = join(workerDir, "status.json");
+      const nativePath = join(workerDir, "native-session.json");
       if (await pathExists(statusPath)) {
-        await this.upsertWorker(taskId, await readJson(statusPath, WorkerStatusSchema), {
+        await this.upsertWorker(taskId, await this.readRebuildWorkerStatus(statusPath, nativePath), {
           dir: workerDir,
           statusPath,
           outputLogPath: join(workerDir, "output.log")
         });
       }
 
-      const nativePath = join(workerDir, "native-session.json");
       if (await pathExists(nativePath)) {
         await this.upsertNativeSession(taskId, await readJson(nativePath, NativeSessionSchema));
       }
     }
+  }
+
+  private async readRebuildWorkerStatus(statusPath: string, nativePath: string): Promise<WorkerStatus> {
+    const status = await readJson(statusPath, WorkerStatusSchema);
+    if (status.native_session_id && !(await pathExists(nativePath))) {
+      const nextStatus = { ...status };
+      delete nextStatus.native_session_id;
+      return WorkerStatusSchema.parse(nextStatus);
+    }
+    return status;
   }
 }

@@ -125,4 +125,50 @@ describe("SessionIndex", () => {
     await expect(index.countRows("native_sessions")).resolves.toBe(1);
     index.close();
   });
+
+  it("does not resurrect retired native session ids into worker index rows", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pct-index-retired-status-"));
+    const dataDir = ".parallel-codex";
+    const sessionDir = join(root, dataDir, "sessions", "task-retired");
+    const workerDir = join(sessionDir, "actor-mock");
+
+    await writeJson(join(sessionDir, "meta.json"), TaskMetaSchema.parse({
+      id: "task-retired",
+      title: "Retired",
+      created_at: "2026-07-01T01:00:00.000Z",
+      cwd: root,
+      mode: "complex",
+      status: "done"
+    }));
+    await writeJson(join(workerDir, "status.json"), WorkerStatusSchema.parse({
+      worker_id: "actor-mock",
+      role: "actor",
+      engine: "mock",
+      state: "done",
+      phase: "process-exited",
+      last_event_at: "2026-07-01T01:01:00.000Z",
+      summary: "done",
+      native_session_id: "retired-1"
+    }));
+    await writeJson(join(workerDir, "native-session.retired.json"), {
+      engine: "mock",
+      role: "actor",
+      worker_id: "actor-mock",
+      session_id: "retired-1",
+      scope: "task",
+      cwd: root,
+      created_at: "2026-07-01T01:00:00.000Z",
+      last_used_at: "2026-07-01T01:01:00.000Z",
+      source: "manual",
+      retired_at: "2026-07-01T01:02:00.000Z",
+      retired_reason: "context window full"
+    });
+
+    const index = await SessionIndex.open(root, dataDir);
+    await index.rebuildFromFiles();
+
+    await expect(index.countRows("native_sessions")).resolves.toBe(0);
+    await expect(index.workerNativeSessionId("task-retired", "actor-mock")).resolves.toBeNull();
+    index.close();
+  });
 });
