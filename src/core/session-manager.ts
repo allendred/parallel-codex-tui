@@ -304,7 +304,10 @@ export class SessionManager {
     if (!this.index || !(await pathExists(task.metaPath))) {
       return;
     }
-    await this.index.upsertTask(await readJson(task.metaPath, TaskMetaSchema));
+    const meta = await readTaskMetaIfValid(task.metaPath);
+    if (meta) {
+      await this.index.upsertTask(meta);
+    }
   }
 
   private async backfillInitialTurn(task: TaskSession, fallbackRoute: RouteDecision): Promise<void> {
@@ -323,10 +326,8 @@ export class SessionManager {
       return;
     }
 
-    const route: RouteDecision = (await pathExists(task.routePath))
-      ? await readJson(task.routePath, RouteDecisionSchema)
-      : fallbackRoute;
-    const meta = (await pathExists(task.metaPath)) ? await readJson(task.metaPath, TaskMetaSchema) : null;
+    const route = (await readRouteDecisionIfValid(task.routePath)) ?? fallbackRoute;
+    const meta = await readTaskMetaIfValid(task.metaPath);
     await this.writeTurn(task, "0001", request, route, meta ? new Date(meta.created_at) : this.now());
   }
 
@@ -409,8 +410,24 @@ function titleFromRequest(request: string): string {
 }
 
 async function readTaskMetaIfValid(metaPath: string): Promise<TaskMeta | null> {
+  if (!(await pathExists(metaPath))) {
+    return null;
+  }
+
   try {
     return await readJson(metaPath, TaskMetaSchema);
+  } catch {
+    return null;
+  }
+}
+
+async function readRouteDecisionIfValid(routePath: string): Promise<RouteDecision | null> {
+  if (!(await pathExists(routePath))) {
+    return null;
+  }
+
+  try {
+    return await readJson(routePath, RouteDecisionSchema);
   } catch {
     return null;
   }

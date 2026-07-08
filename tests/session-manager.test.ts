@@ -86,6 +86,42 @@ describe("SessionManager", () => {
     expect(meta.turn_id).toBe("0002");
   });
 
+  it("appends follow-up turns when task metadata is corrupt but the active task is known", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pct-turns-corrupt-meta-"));
+    const index = await SessionIndex.open(root, ".parallel-codex");
+    const manager = new SessionManager({
+      projectRoot: root,
+      dataDir: ".parallel-codex",
+      now: () => new Date("2026-06-30T03:30:00.000Z"),
+      randomId: () => "a1b2",
+      index
+    });
+    const route = {
+      mode: "complex" as const,
+      reason: "Requires workers.",
+      suggested_roles: ["judge" as const, "actor" as const, "critic" as const],
+      judge_engine: "mock" as const,
+      actor_engine: "mock" as const,
+      critic_engine: "mock" as const
+    };
+    const task = await manager.createTask({
+      request: "Build it.",
+      cwd: root,
+      route
+    });
+    await writeText(task.metaPath, "{");
+
+    const turn = await manager.appendTurn(task, {
+      request: "继续改",
+      route
+    });
+
+    expect(turn.turnId).toBe("0002");
+    expect(await readTextIfExists(join(task.dir, "turns", "0002", "user.md"))).toContain("继续改");
+    await expect(index.countRows("turns")).resolves.toBe(2);
+    index.close();
+  });
+
   it("finds the latest complex task from session files", async () => {
     const root = await mkdtemp(join(tmpdir(), "pct-latest-task-"));
     const manager = new SessionManager({
@@ -188,6 +224,42 @@ describe("SessionManager", () => {
     expect(turn.turnId).toBe("0002");
     expect(await readTextIfExists(join(task.dir, "turns", "0001", "user.md"))).toContain("Original.");
     expect(await readTextIfExists(join(task.dir, "turns", "0002", "user.md"))).toContain("继续");
+  });
+
+  it("backfills legacy task turns with fallback route when route and task metadata are corrupt", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pct-legacy-corrupt-route-"));
+    const manager = new SessionManager({
+      projectRoot: root,
+      dataDir: ".parallel-codex",
+      now: () => new Date("2026-06-30T03:30:00.000Z"),
+      randomId: () => "a1b2"
+    });
+    const route = {
+      mode: "complex" as const,
+      reason: "Requires workers.",
+      suggested_roles: ["judge" as const, "actor" as const, "critic" as const],
+      judge_engine: "mock" as const,
+      actor_engine: "mock" as const,
+      critic_engine: "mock" as const
+    };
+    const task = await manager.createTask({
+      request: "Original.",
+      cwd: root,
+      route
+    });
+    await rm(join(task.dir, "turns"), { recursive: true, force: true });
+    await writeText(task.routePath, "{");
+    await writeText(task.metaPath, "{");
+
+    const turn = await manager.appendTurn(task, {
+      request: "继续",
+      route
+    });
+
+    expect(turn.turnId).toBe("0002");
+    expect(await readTextIfExists(join(task.dir, "turns", "0001", "user.md"))).toContain("Original.");
+    const backfilledRoute = await readJson(join(task.dir, "turns", "0001", "route.json"), RouteDecisionSchema);
+    expect(backfilledRoute.reason).toBe("Requires workers.");
   });
 
   it("indexes legacy task metadata when appending the first follow-up turn", async () => {
