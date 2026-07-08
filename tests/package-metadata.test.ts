@@ -120,6 +120,8 @@ describe("package metadata", () => {
     expect(readme).toContain("--workspace=/path/to/project");
     expect(readme).toContain("-w=/path/to/project");
     expect(readme).toContain("shows remembered projects from `.parallel-codex/workspaces.json`");
+    expect(readme).toContain("If `--workspace <path>` points to an existing file");
+    expect(readme).toContain("will not use that file path as the default folder to create");
     expect(readme).toContain("Router classification only receives the user request");
     expect(readme).toContain("parallel-codex-tui --help");
     expect(readme).toContain("parallel-codex-tui --version");
