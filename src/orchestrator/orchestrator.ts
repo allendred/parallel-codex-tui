@@ -68,7 +68,8 @@ export class Orchestrator {
     private readonly config: AppConfig,
     private readonly sessions: SessionManager,
     private readonly workers: WorkerRegistry,
-    private readonly routeRunner?: CodexRouteRunner
+    private readonly routeRunner?: CodexRouteRunner,
+    private readonly routerCwd = config.projectRoot
   ) {}
 
   async handleRequest(input: HandleRequestInput): Promise<HandleRequestResult> {
@@ -326,7 +327,7 @@ export class Orchestrator {
   }
 
   private routeRequest(request: string) {
-    return routeRequestWithCodex(request, this.config, this.routeRunner, this.config.projectRoot);
+    return routeRequestWithCodex(request, this.config, this.routeRunner, this.routerCwd);
   }
 
   private async runMain(input: HandleRequestInput, workers: WorkerLogRef[]): Promise<string> {

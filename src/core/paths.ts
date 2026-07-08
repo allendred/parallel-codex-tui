@@ -18,6 +18,10 @@ export function sessionsRoot(projectRoot: string, dataDir: string): string {
   return join(projectRoot, dataDir, "sessions");
 }
 
+export function routerRuntimeDir(appRoot: string, dataDir: string): string {
+  return join(appRoot, dataDir, "router");
+}
+
 export function taskDir(projectRoot: string, dataDir: string, taskId: string): string {
   return join(sessionsRoot(projectRoot, dataDir), taskId);
 }

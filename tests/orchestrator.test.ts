@@ -196,9 +196,10 @@ describe("Orchestrator", () => {
     );
   });
 
-  it("routes from the app root while workers run inside the selected workspace", async () => {
+  it("routes from a dedicated router directory while workers run inside the selected workspace", async () => {
     const appRoot = await mkdtemp(join(tmpdir(), "pct-orch-router-app-root-"));
     const workspaceRoot = await mkdtemp(join(tmpdir(), "pct-orch-router-workspace-"));
+    const routerCwdRoot = join(appRoot, ".parallel-codex", "router");
     const config = mockConfig(appRoot);
     config.router.defaultMode = "auto";
     const manager = new SessionManager({
@@ -213,13 +214,17 @@ describe("Orchestrator", () => {
       config,
       manager,
       new Map([["mock", new CwdRecordingWorkerAdapter(workerCwds)]]),
-      async (_prompt, _config, cwd) => {
+      async (prompt, _config, cwd) => {
+        expect(prompt).toContain("做个俄罗斯方块的游戏");
+        expect(prompt).not.toContain(appRoot);
+        expect(prompt).not.toContain(workspaceRoot);
         routerCwd = cwd;
         return JSON.stringify({
           mode: "complex",
           reason: "Codex routed project work."
         });
-      }
+      },
+      routerCwdRoot
     );
 
     const result = await orchestrator.handleRequest({
@@ -228,7 +233,7 @@ describe("Orchestrator", () => {
     });
 
     expect(result.mode).toBe("complex");
-    expect(routerCwd).toBe(appRoot);
+    expect(routerCwd).toBe(routerCwdRoot);
     expect(workerCwds).toEqual([workspaceRoot, workspaceRoot, workspaceRoot]);
   });
 

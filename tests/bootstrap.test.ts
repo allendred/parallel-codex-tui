@@ -22,6 +22,8 @@ describe("createRuntime", () => {
 
     expect(runtime.config.projectRoot).toBe(appRoot);
     expect(runtime.workspaceRoot).toBe(workspaceRoot);
+    expect(runtime.routerCwd).toBe(join(appRoot, ".parallel-codex", "router"));
+    expect(await pathExists(runtime.routerCwd)).toBe(true);
   });
 
   it("creates a missing worker workspace and remembers it for later startup", async () => {

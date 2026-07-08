@@ -1,5 +1,6 @@
 import { configPath, loadConfig, writeDefaultConfig, type AppConfig } from "./core/config.js";
-import { pathExists } from "./core/file-store.js";
+import { ensureDir, pathExists } from "./core/file-store.js";
+import { routerRuntimeDir } from "./core/paths.js";
 import { SessionIndex } from "./core/session-index.js";
 import { SessionManager } from "./core/session-manager.js";
 import { prepareWorkspace } from "./core/workspace.js";
@@ -9,6 +10,7 @@ import { createWorkerRegistry, type WorkerRegistry } from "./workers/registry.js
 export interface AppRuntime {
   config: AppConfig;
   workspaceRoot: string;
+  routerCwd: string;
   index: SessionIndex;
   sessions: SessionManager;
   workers: WorkerRegistry;
@@ -20,6 +22,8 @@ export async function createRuntime(appRoot: string, workspaceRoot = appRoot): P
     await writeDefaultConfig(appRoot);
   }
   const config = await loadConfig(appRoot);
+  const routerCwd = routerRuntimeDir(appRoot, config.dataDir);
+  await ensureDir(routerCwd);
   const preparedWorkspace = await prepareWorkspace(appRoot, workspaceRoot);
   const index = await SessionIndex.open(preparedWorkspace, config.dataDir);
   await index.rebuildFromFiles();
@@ -29,11 +33,12 @@ export async function createRuntime(appRoot: string, workspaceRoot = appRoot): P
     index
   });
   const workers = createWorkerRegistry(config);
-  const orchestrator = new Orchestrator(config, sessions, workers);
+  const orchestrator = new Orchestrator(config, sessions, workers, undefined, routerCwd);
 
   return {
     config,
     workspaceRoot: preparedWorkspace,
+    routerCwd,
     index,
     sessions,
     workers,
