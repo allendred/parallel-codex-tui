@@ -99,4 +99,34 @@ describe("CLI startup", () => {
     expect(stderr).toContain(workspace);
     expect(stderr).not.toContain("at ");
   });
+
+  it("rejects non-interactive TUI startup without an Ink raw-mode stack trace", async () => {
+    const appRoot = await mkdtemp(join(tmpdir(), "pct-cli-startup-nontty-app-"));
+    const workspace = await mkdtemp(join(tmpdir(), "pct-cli-startup-nontty-workspace-"));
+
+    let stderr = "";
+    await expect(
+      execFileAsync(
+        process.execPath,
+        ["./node_modules/.bin/tsx", "src/cli.tsx", "--app-root", appRoot, "--workspace", workspace],
+        {
+          cwd: process.cwd(),
+          timeout: 5000
+        }
+      )
+        .catch((error) => {
+          stderr = String((error as { stderr?: string }).stderr ?? "");
+          throw error;
+        })
+    ).rejects.toMatchObject({
+      code: 1,
+      stdout: "",
+      stderr: expect.stringContaining("Startup error:")
+    });
+
+    expect(stderr).toContain("requires an interactive terminal");
+    expect(stderr).not.toContain("Raw mode is not supported");
+    expect(stderr).not.toContain("node_modules/ink");
+    expect(stderr).not.toContain("at ");
+  });
 });

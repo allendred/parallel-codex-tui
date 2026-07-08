@@ -71,6 +71,9 @@ async function main(): Promise<void> {
     if (cliArgs.taskId && !(await runtime.sessions.hasTask(cliArgs.taskId))) {
       throw new Error(`Task session not found in workspace ${runtime.workspaceRoot}: ${cliArgs.taskId}`);
     }
+    if (!canRenderInteractiveTui()) {
+      throw new Error("parallel-codex-tui requires an interactive terminal. Use --help, --version, --init, or --doctor for non-interactive command modes.");
+    }
     const latestTask = await runtime.sessions.latestTask();
     const initialTaskId = cliArgs.taskId ?? latestTask?.id ?? null;
 
@@ -84,6 +87,10 @@ async function main(): Promise<void> {
       { exitOnCtrlC: false }
     );
   }
+}
+
+function canRenderInteractiveTui(): boolean {
+  return Boolean(process.stdin.isTTY && process.stdout.isTTY);
 }
 
 function formatStartupError(error: unknown): string {
