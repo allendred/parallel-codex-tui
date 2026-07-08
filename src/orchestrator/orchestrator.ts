@@ -308,7 +308,10 @@ export class Orchestrator {
       if (!(await pathExists(statusPath))) {
         continue;
       }
-      const status = await readJson(statusPath, WorkerStatusSchema);
+      const status = await readWorkerStatusIfValid(statusPath);
+      if (!status) {
+        continue;
+      }
       workers.push({
         id: status.worker_id,
         role: status.role,
@@ -619,6 +622,14 @@ export class Orchestrator {
 function ensureWorkerSuccess(workerId: string, exitCode: number): void {
   if (exitCode !== 0) {
     throw new Error(`${workerId} failed with exit code ${exitCode}`);
+  }
+}
+
+async function readWorkerStatusIfValid(statusPath: string): Promise<WorkerStatus | null> {
+  try {
+    return await readJson(statusPath, WorkerStatusSchema);
+  } catch {
+    return null;
   }
 }
 

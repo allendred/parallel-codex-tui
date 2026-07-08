@@ -145,6 +145,28 @@ describe("Orchestrator", () => {
     expect(workers[1].statusPath).toBe(join(root, ".parallel-codex", "sessions", result.taskId ?? "", "actor-mock", "status.json"));
   });
 
+  it("skips corrupt worker status files when restoring an existing task", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pct-orch-list-corrupt-workers-"));
+    const config = mockConfig(root);
+    const manager = new SessionManager({
+      projectRoot: root,
+      dataDir: config.dataDir,
+      now: () => new Date("2026-06-30T03:30:00.000Z"),
+      randomId: () => "a1b2"
+    });
+    const orchestrator = new Orchestrator(config, manager, new Map([["mock", new MockWorkerAdapter()]]));
+    const result = await orchestrator.handleRequest({
+      request: "实现 worker attach",
+      cwd: root
+    });
+
+    await writeText(join(root, ".parallel-codex", "sessions", result.taskId ?? "", "actor-mock", "status.json"), "{");
+
+    const workers = await orchestrator.listTaskWorkers(result.taskId ?? "");
+
+    expect(workers.map((worker) => worker.id)).toEqual(["judge-mock", "critic-mock"]);
+  });
+
   it("uses Codex router decisions before starting workers", async () => {
     const root = await mkdtemp(join(tmpdir(), "pct-orch-codex-router-"));
     const config = mockConfig(root);
