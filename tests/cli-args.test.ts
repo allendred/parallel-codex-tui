@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseCliArgs } from "../src/cli-args.js";
+import { parseCliArgs, validateCliArgs } from "../src/cli-args.js";
 
 describe("parseCliArgs", () => {
   it("defaults app root and workspace to cwd", () => {
@@ -133,5 +133,15 @@ describe("parseCliArgs", () => {
     expect(parsed.explicitWorkspace).toBeNull();
     expect(parsed.workspaceRoot).toBe("/app");
     expect(parsed.taskId).toBeNull();
+  });
+});
+
+describe("validateCliArgs", () => {
+  it("reports unknown options before startup can continue", () => {
+    expect(validateCliArgs(["--workspacce", "/tmp/project"])).toEqual(["Unknown option: --workspacce"]);
+  });
+
+  it("allows positional text after an option terminator", () => {
+    expect(validateCliArgs(["--workspace", "/tmp/project", "--", "--not-a-flag"])).toEqual([]);
   });
 });

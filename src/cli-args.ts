@@ -11,6 +11,9 @@ export interface CliArgs {
   version: boolean;
 }
 
+const allowedValueOptions = new Set(["--app-root", "--workspace", "-w", "--task", "-t"]);
+const allowedBooleanOptions = new Set(["--doctor", "--help", "-h", "--init", "--version", "-v"]);
+
 export function parseCliArgs(args: string[], cwd: string): CliArgs {
   const appRootFlagIndex = lastFlagIndex(args, (arg) => arg === "--app-root" || arg.startsWith("--app-root="));
   const workspaceFlagIndex = lastFlagIndex(
@@ -38,6 +41,32 @@ export function parseCliArgs(args: string[], cwd: string): CliArgs {
     taskId,
     version
   };
+}
+
+export function validateCliArgs(args: string[]): string[] {
+  const errors: string[] = [];
+  for (const arg of args) {
+    if (arg === "--") {
+      break;
+    }
+
+    if (!arg.startsWith("-") || arg === "-") {
+      continue;
+    }
+
+    if (allowedBooleanOptions.has(arg) || allowedValueOptions.has(arg)) {
+      continue;
+    }
+
+    const equalsIndex = arg.indexOf("=");
+    const optionName = equalsIndex >= 0 ? arg.slice(0, equalsIndex) : arg;
+    if (allowedValueOptions.has(optionName)) {
+      continue;
+    }
+
+    errors.push(`Unknown option: ${arg}`);
+  }
+  return errors;
 }
 
 function lastFlagIndex(args: string[], predicate: (arg: string) => boolean): number {

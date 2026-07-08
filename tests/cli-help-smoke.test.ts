@@ -35,4 +35,17 @@ describe("CLI help and version", () => {
     expect(stderr).toBe("");
     expect(stdout.trim()).toBe("parallel-codex-tui 0.1.0");
   });
+
+  it("rejects unknown options before doing other command work", async () => {
+    await expect(
+      execFileAsync(process.execPath, ["./node_modules/.bin/tsx", "src/cli.tsx", "--workspacce", "/tmp/nope", "--version"], {
+        cwd: process.cwd(),
+        timeout: 5000
+      })
+    ).rejects.toMatchObject({
+      code: 1,
+      stdout: "",
+      stderr: expect.stringContaining("Unknown option: --workspacce")
+    });
+  });
 });

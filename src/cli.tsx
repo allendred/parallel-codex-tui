@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import React from "react";
 import { render } from "ink";
-import { parseCliArgs } from "./cli-args.js";
+import { parseCliArgs, validateCliArgs } from "./cli-args.js";
 import { selectWorkspaceForCli } from "./cli-workspace.js";
 import { createRuntime } from "./bootstrap.js";
 import { configPath, writeDefaultConfig } from "./core/config.js";
@@ -23,7 +23,14 @@ Options:
 
 Options with values also accept --name=value and -x=value forms.`;
 
-const cliArgs = parseCliArgs(process.argv.slice(2), process.cwd());
+const rawArgs = process.argv.slice(2);
+const cliArgErrors = validateCliArgs(rawArgs);
+if (cliArgErrors.length > 0) {
+  process.stderr.write(`${cliArgErrors.join("\n")}\n`);
+  process.exit(1);
+}
+
+const cliArgs = parseCliArgs(rawArgs, process.cwd());
 const localConfigPath = configPath(cliArgs.appRoot);
 
 if (cliArgs.help) {
