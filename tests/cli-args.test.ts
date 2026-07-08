@@ -74,6 +74,28 @@ describe("parseCliArgs", () => {
     expect(parsed.workspaceRoot).toBe("/tmp/work");
   });
 
+  it("uses the last provided value when value flags are repeated", () => {
+    const parsed = parseCliArgs(
+      [
+        "--app-root",
+        "/tmp/first-app",
+        "--app-root=/tmp/second-app",
+        "--workspace",
+        "/tmp/first-work",
+        "-w=/tmp/second-work",
+        "--task",
+        "task-first",
+        "-t=task-second"
+      ],
+      "/repo"
+    );
+
+    expect(parsed.appRoot).toBe("/tmp/second-app");
+    expect(parsed.workspaceRoot).toBe("/tmp/second-work");
+    expect(parsed.explicitWorkspace).toBe("/tmp/second-work");
+    expect(parsed.taskId).toBe("task-second");
+  });
+
   it("does not treat another flag as a workspace value", () => {
     const parsed = parseCliArgs(["--workspace", "--doctor"], "/app");
 

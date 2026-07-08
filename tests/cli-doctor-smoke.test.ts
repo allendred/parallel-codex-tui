@@ -95,6 +95,32 @@ describe("CLI doctor", () => {
     await expect(pathExists(workspace)).resolves.toBe(true);
   });
 
+  it("uses the last workspace value when command flags are repeated", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pct-cli-doctor-repeat-"));
+    const binDir = join(root, "bin");
+    const appRoot = join(root, "app");
+    const firstWorkspace = join(root, "first-workspace");
+    const secondWorkspace = join(root, "second-workspace");
+
+    await mkdir(binDir, { recursive: true });
+    await mkdir(appRoot, { recursive: true });
+    await writeExecutable(join(binDir, "codex"), "#!/bin/sh\necho codex 1.0\n");
+    await writeExecutable(join(binDir, "claude"), "#!/bin/sh\necho claude 1.0\n");
+    await expect(runCli([`--app-root=${appRoot}`, "--init"])).resolves.toMatchObject({ exitCode: 0 });
+
+    const result = await runCli(["--app-root", appRoot, "--workspace", firstWorkspace, `--workspace=${secondWorkspace}`, "--doctor"], {
+      env: {
+        PATH: `${binDir}${delimiter}${process.env.PATH ?? ""}`
+      }
+    });
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stderr).toBe("");
+    expect(result.stdout).toContain(`workspace: ok (${secondWorkspace})`);
+    await expect(pathExists(firstWorkspace)).resolves.toBe(false);
+    await expect(pathExists(secondWorkspace)).resolves.toBe(true);
+  });
+
   it("exits non-zero and explains missing configured commands", async () => {
     const appRoot = await mkdtemp(join(tmpdir(), "pct-cli-doctor-missing-"));
 

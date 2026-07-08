@@ -12,11 +12,12 @@ export interface CliArgs {
 }
 
 export function parseCliArgs(args: string[], cwd: string): CliArgs {
-  const appRootFlagIndex = args.findIndex((arg) => arg === "--app-root" || arg.startsWith("--app-root="));
-  const workspaceFlagIndex = args.findIndex(
+  const appRootFlagIndex = lastFlagIndex(args, (arg) => arg === "--app-root" || arg.startsWith("--app-root="));
+  const workspaceFlagIndex = lastFlagIndex(
+    args,
     (arg) => arg === "--workspace" || arg.startsWith("--workspace=") || arg === "-w" || arg.startsWith("-w=")
   );
-  const taskFlagIndex = args.findIndex((arg) => arg === "--task" || arg.startsWith("--task=") || arg === "-t" || arg.startsWith("-t="));
+  const taskFlagIndex = lastFlagIndex(args, (arg) => arg === "--task" || arg.startsWith("--task=") || arg === "-t" || arg.startsWith("-t="));
   const doctor = args.includes("--doctor");
   const help = args.includes("--help") || args.includes("-h");
   const init = args.includes("--init");
@@ -37,6 +38,15 @@ export function parseCliArgs(args: string[], cwd: string): CliArgs {
     taskId,
     version
   };
+}
+
+function lastFlagIndex(args: string[], predicate: (arg: string) => boolean): number {
+  for (let index = args.length - 1; index >= 0; index -= 1) {
+    if (predicate(args[index] ?? "")) {
+      return index;
+    }
+  }
+  return -1;
 }
 
 function flagValue(args: string[], flagIndex: number): string | null {
