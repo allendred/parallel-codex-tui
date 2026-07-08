@@ -306,6 +306,45 @@ describe("ProcessWorkerAdapter", () => {
     expect(status.native_session_id).toBe(sessionId);
   });
 
+  it("does not mistake ordinary resume wording for native session ids", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pct-process-ignore-resume-word-"));
+    const filesDir = join(root, "actor-codex");
+    const promptPath = join(filesDir, "prompt.md");
+    const outputLogPath = join(filesDir, "output.log");
+    const statusPath = join(filesDir, "status.json");
+    const script = "console.log('I will resume work after reading the files.')";
+    const detected: string[] = [];
+
+    await writeText(promptPath, "hello");
+
+    const adapter = new ProcessWorkerAdapter(process.execPath, ["-e", script], "codex");
+    const result = await adapter.run({
+      workerId: "actor-codex",
+      role: "actor",
+      engine: "codex",
+      cwd: root,
+      filesDir,
+      promptPath,
+      outputLogPath,
+      statusPath,
+      prompt: "hello",
+      nativeSessionConfig: {
+        enabled: true,
+        resumeArgs: ["exec", "resume", "{sessionId}", "--skip-git-repo-check", "-"],
+        detectSessionId: true,
+        fallback: "new"
+      },
+      onNativeSession: (id) => {
+        detected.push(id);
+      }
+    });
+
+    expect(result.exitCode).toBe(0);
+    expect(detected).toEqual([]);
+    const status = await readJson(statusPath, WorkerStatusSchema);
+    expect(status.native_session_id).toBeUndefined();
+  });
+
   it("marks resume command failures with native resume phase", async () => {
     const root = await mkdtemp(join(tmpdir(), "pct-process-resume-failure-"));
     const filesDir = join(root, "actor-mock");
