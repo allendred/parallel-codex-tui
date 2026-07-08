@@ -265,7 +265,7 @@ export class Orchestrator {
 
   async answerTaskQuestion(input: HandleTaskQuestionInput): Promise<HandleRequestResult> {
     const task = this.sessions.taskFromId(input.taskId);
-    const meta = (await pathExists(task.metaPath)) ? await readJson(task.metaPath, TaskMetaSchema) : null;
+    const meta = await readTaskMetaIfValid(task.metaPath);
     const workerSummaries = await Promise.all(
       ["judge", "actor", "critic"].map((role) => this.readLatestWorkerQuestionSummary(task, role as WorkerRole))
     );
@@ -635,6 +635,18 @@ function ensureWorkerSuccess(workerId: string, exitCode: number): void {
 async function readWorkerStatusIfValid(statusPath: string): Promise<WorkerStatus | null> {
   try {
     return await readJson(statusPath, WorkerStatusSchema);
+  } catch {
+    return null;
+  }
+}
+
+async function readTaskMetaIfValid(metaPath: string) {
+  if (!(await pathExists(metaPath))) {
+    return null;
+  }
+
+  try {
+    return await readJson(metaPath, TaskMetaSchema);
   } catch {
     return null;
   }
