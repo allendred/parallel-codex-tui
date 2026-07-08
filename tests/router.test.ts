@@ -164,6 +164,34 @@ describe("routeRequestWithCodex", () => {
     expect(route.reason).toContain("Codex router fallback forced complex.");
   });
 
+  it("summarizes noisy Codex router process errors before adding fallback reason", async () => {
+    const config = defaultConfig("/tmp/project");
+    const runner: CodexRouteRunner = async () => {
+      throw new Error(
+        [
+          "Codex router exited with code 2: error: unexpected argument '--ask-for-approval' found",
+          "",
+          "  tip: to pass '--ask-for-approval' as a value, use '-- --ask-for-approval'",
+          "",
+          "Usage: codex exec [OPTIONS] [PROMPT]",
+          "       codex exec [OPTIONS] <COMMAND> [ARGS]",
+          "",
+          "For more information, try '--help'."
+        ].join("\n")
+      );
+    };
+
+    const route = await routeRequestWithCodex("做个俄罗斯方块的游戏", config, runner);
+
+    expect(route.mode).toBe("complex");
+    expect(route.reason).toBe(
+      "Codex router failed: Codex router exited with code 2: error: unexpected argument '--ask-for-approval' found. Codex router fallback forced complex."
+    );
+    expect(route.reason).not.toContain("Usage:");
+    expect(route.reason).not.toContain("tip:");
+    expect(route.reason).not.toContain("\n");
+  });
+
   it("supports an explicit simple fallback without local rules", async () => {
     const config = defaultConfig("/tmp/project");
     config.router.codex.fallback = "simple";

@@ -27,7 +27,7 @@ export async function routeRequestWithCodex(
     const fallback = fallbackRoute(config);
     return {
       ...fallback,
-      reason: `Codex router failed: ${error instanceof Error ? error.message : String(error)}. ${fallback.reason}`
+      reason: `Codex router failed: ${summarizeRouterError(error)}. ${fallback.reason}`
     };
   }
 }
@@ -155,6 +155,16 @@ function fallbackRoute(config: AppConfig): RouteDecision {
   }
 
   return complexRoute("Codex router fallback forced complex.", config);
+}
+
+function summarizeRouterError(error: unknown): string {
+  const raw = error instanceof Error ? error.message : String(error);
+  const meaningful = raw
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .find((line) => line && !line.toLowerCase().startsWith("tip:") && !line.toLowerCase().startsWith("usage:"));
+
+  return (meaningful || "unknown router error").replace(/[.。]+$/u, "");
 }
 
 function simpleRoute(reason: string, config: AppConfig): RouteDecision {
