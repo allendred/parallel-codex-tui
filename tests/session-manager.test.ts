@@ -451,6 +451,66 @@ describe("SessionManager", () => {
     expect(retired.retired_reason).toBe("context window full");
   });
 
+  it("clears corrupt native session metadata when retiring it", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pct-native-session-retire-corrupt-"));
+    const index = await SessionIndex.open(root, ".parallel-codex");
+    const manager = new SessionManager({
+      projectRoot: root,
+      dataDir: ".parallel-codex",
+      now: () => new Date("2026-06-30T03:30:00.000Z"),
+      randomId: () => "a1b2",
+      index
+    });
+    const task = await manager.createTask({
+      request: "Build the MVP.",
+      cwd: root,
+      route: {
+        mode: "complex",
+        reason: "Requires workers.",
+        suggested_roles: ["judge", "actor", "critic"],
+        judge_engine: "mock",
+        actor_engine: "mock",
+        critic_engine: "mock"
+      }
+    });
+    const worker = await manager.initializeWorker(task, {
+      workerId: "actor-mock",
+      role: "actor",
+      engine: "mock",
+      prompt: "Write code."
+    });
+    await manager.writeNativeSession(worker, {
+      engine: "mock",
+      role: "actor",
+      worker_id: "actor-mock",
+      session_id: "native-corrupt",
+      scope: "task",
+      cwd: root,
+      created_at: "2026-06-30T03:30:00.000Z",
+      last_used_at: "2026-06-30T03:30:00.000Z",
+      source: "manual"
+    });
+    await writeText(join(worker.dir, "native-session.json"), "{");
+    await writeJson(worker.statusPath, WorkerStatusSchema.parse({
+      worker_id: "actor-mock",
+      role: "actor",
+      engine: "mock",
+      state: "done",
+      phase: "process-exited",
+      last_event_at: "2026-06-30T03:31:00.000Z",
+      summary: "mock exited",
+      native_session_id: "native-corrupt"
+    }));
+
+    await expect(manager.retireNativeSession(worker, "context window full")).resolves.toBeUndefined();
+    expect(await pathExists(join(worker.dir, "native-session.json"))).toBe(false);
+    expect(await pathExists(join(worker.dir, "native-session.retired.json"))).toBe(false);
+    const status = await readJson(worker.statusPath, WorkerStatusSchema);
+    expect(status.native_session_id).toBeUndefined();
+    await expect(index.countRows("native_sessions")).resolves.toBe(0);
+    index.close();
+  });
+
   it("clears corrupt worker native session metadata when reading it", async () => {
     const root = await mkdtemp(join(tmpdir(), "pct-native-session-corrupt-"));
     const index = await SessionIndex.open(root, ".parallel-codex");

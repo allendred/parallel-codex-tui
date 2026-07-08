@@ -277,7 +277,14 @@ export class SessionManager {
     if (!(await pathExists(nativeSessionPath))) {
       return;
     }
-    const record = await readJson(nativeSessionPath, NativeSessionSchema);
+    const record = await readNativeSessionIfValid(nativeSessionPath);
+    if (!record) {
+      await removeIfExists(nativeSessionPath);
+      await this.clearWorkerStatusNativeSession(worker);
+      await this.index?.deleteNativeSession(this.taskIdFromWorkerDir(worker.dir), this.workerIdFromWorkerDir(worker.dir));
+      return;
+    }
+
     await writeJson(join(worker.dir, "native-session.retired.json"), {
       ...record,
       retired_at: this.now().toISOString(),
@@ -442,6 +449,18 @@ async function readRouteDecisionIfValid(routePath: string): Promise<RouteDecisio
 
   try {
     return await readJson(routePath, RouteDecisionSchema);
+  } catch {
+    return null;
+  }
+}
+
+async function readNativeSessionIfValid(nativeSessionPath: string): Promise<NativeSession | null> {
+  if (!(await pathExists(nativeSessionPath))) {
+    return null;
+  }
+
+  try {
+    return await readJson(nativeSessionPath, NativeSessionSchema);
   } catch {
     return null;
   }
