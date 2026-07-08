@@ -1,6 +1,7 @@
 import { createInterface } from "node:readline/promises";
 import type { ReadStream, WriteStream } from "node:tty";
 import { basename } from "node:path";
+import { pathExists } from "./core/file-store.js";
 import { listWorkspaceChoices, resolveWorkspacePath, resolveWorkspaceSelection, type WorkspaceChoice } from "./core/workspace.js";
 
 export interface CliWorkspaceInput {
@@ -14,6 +15,18 @@ export interface CliWorkspaceInput {
 
 export async function selectWorkspaceForCli(input: CliWorkspaceInput): Promise<string> {
   if (input.explicitWorkspace?.trim()) {
+    const explicit = resolveWorkspacePath(input.cwd, input.explicitWorkspace);
+    const stdin = input.stdin ?? process.stdin;
+    const stdout = input.stdout ?? process.stdout;
+    if (!(await pathExists(explicit)) && input.interactive !== false && shouldPromptForWorkspace(stdin, stdout)) {
+      return promptForWorkspace({
+        cwd: input.cwd,
+        choices: await listWorkspaceChoices(input.appRoot),
+        missingExplicitWorkspace: explicit,
+        stdin: stdin as ReadStream,
+        stdout: stdout as WriteStream
+      });
+    }
     return resolveWorkspaceSelection(input);
   }
 
@@ -40,9 +53,14 @@ function shouldPromptForWorkspace(stdin: NodeJS.ReadStream, stdout: NodeJS.Write
 async function promptForWorkspace(input: {
   cwd: string;
   choices: WorkspaceChoice[];
+  missingExplicitWorkspace?: string;
   stdin: ReadStream;
   stdout: WriteStream;
 }): Promise<string> {
+  if (input.missingExplicitWorkspace) {
+    input.stdout.write(`Workspace does not exist: ${input.missingExplicitWorkspace}\n`);
+  }
+
   if (input.choices.length === 0) {
     input.stdout.write("No workspace selected yet.\n");
   } else {
@@ -56,7 +74,7 @@ async function promptForWorkspace(input: {
   const rl = createInterface({ input: input.stdin, output: input.stdout });
   try {
     if (input.choices.length === 0) {
-      return await promptForNewWorkspace(rl, input.cwd);
+      return await promptForNewWorkspace(rl, input.cwd, input.missingExplicitWorkspace);
     }
 
     const answer = (await rl.question(`Workspace [1/${input.choices.length}, n]: `)).trim();
@@ -70,7 +88,7 @@ async function promptForWorkspace(input: {
     }
 
     if (/^n(?:ew)?$/i.test(answer)) {
-      return await promptForNewWorkspace(rl, input.cwd);
+      return await promptForNewWorkspace(rl, input.cwd, input.missingExplicitWorkspace);
     }
 
     const index = Number.parseInt(answer, 10);
@@ -84,9 +102,17 @@ async function promptForWorkspace(input: {
   }
 }
 
-async function promptForNewWorkspace(rl: ReturnType<typeof createInterface>, cwd: string): Promise<string> {
-  const answer = (await rl.question("Workspace path: ")).trim();
-  return answer ? resolveWorkspacePath(cwd, answer) : cwd;
+async function promptForNewWorkspace(
+  rl: ReturnType<typeof createInterface>,
+  cwd: string,
+  defaultWorkspace?: string
+): Promise<string> {
+  const prompt = defaultWorkspace ? `Workspace path [${defaultWorkspace}]: ` : "Workspace path: ";
+  const answer = (await rl.question(prompt)).trim();
+  if (answer) {
+    return resolveWorkspacePath(cwd, answer);
+  }
+  return defaultWorkspace ?? cwd;
 }
 
 function workspaceLabel(choice: WorkspaceChoice): string {

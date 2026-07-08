@@ -9,6 +9,8 @@ import { prepareWorkspace } from "../src/core/workspace.js";
 describe("selectWorkspaceForCli", () => {
   it("returns explicit workspaces without prompting", async () => {
     const appRoot = await mkdtemp(join(tmpdir(), "pct-cli-workspace-explicit-"));
+    const workspace = join(appRoot, "game");
+    await prepareWorkspace(appRoot, workspace);
     const stdin = fakeInput("");
     const stdout = fakeOutput();
 
@@ -16,12 +18,33 @@ describe("selectWorkspaceForCli", () => {
       selectWorkspaceForCli({
         appRoot,
         cwd: appRoot,
-        explicitWorkspace: "game",
+        explicitWorkspace: workspace,
         stdin,
         stdout
       })
-    ).resolves.toBe(join(appRoot, "game"));
+    ).resolves.toBe(workspace);
     expect(stdout.output()).toBe("");
+  });
+
+  it("prompts before creating a missing explicit workspace when remembered projects exist", async () => {
+    const appRoot = await mkdtemp(join(tmpdir(), "pct-cli-workspace-missing-explicit-"));
+    const remembered = join(appRoot, "remembered");
+    const missing = join(appRoot, "missing");
+    await prepareWorkspace(appRoot, remembered);
+    const stdout = fakeOutput();
+
+    await expect(
+      selectWorkspaceForCli({
+        appRoot,
+        cwd: appRoot,
+        explicitWorkspace: missing,
+        stdin: fakeInput("1\n"),
+        stdout
+      })
+    ).resolves.toBe(remembered);
+    expect(stdout.output()).toContain("Workspace does not exist:");
+    expect(stdout.output()).toContain(missing);
+    expect(stdout.output()).toContain("Select workspace:");
   });
 
   it("lets a TTY user choose a remembered workspace", async () => {

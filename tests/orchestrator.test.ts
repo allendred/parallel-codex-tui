@@ -196,6 +196,42 @@ describe("Orchestrator", () => {
     );
   });
 
+  it("routes from the app root while workers run inside the selected workspace", async () => {
+    const appRoot = await mkdtemp(join(tmpdir(), "pct-orch-router-app-root-"));
+    const workspaceRoot = await mkdtemp(join(tmpdir(), "pct-orch-router-workspace-"));
+    const config = mockConfig(appRoot);
+    config.router.defaultMode = "auto";
+    const manager = new SessionManager({
+      projectRoot: workspaceRoot,
+      dataDir: config.dataDir,
+      now: () => new Date("2026-06-30T03:30:00.000Z"),
+      randomId: () => "a1b2"
+    });
+    let routerCwd = "";
+    const workerCwds: string[] = [];
+    const orchestrator = new Orchestrator(
+      config,
+      manager,
+      new Map([["mock", new CwdRecordingWorkerAdapter(workerCwds)]]),
+      async (_prompt, _config, cwd) => {
+        routerCwd = cwd;
+        return JSON.stringify({
+          mode: "complex",
+          reason: "Codex routed project work."
+        });
+      }
+    );
+
+    const result = await orchestrator.handleRequest({
+      request: "做个俄罗斯方块的游戏",
+      cwd: workspaceRoot
+    });
+
+    expect(result.mode).toBe("complex");
+    expect(routerCwd).toBe(appRoot);
+    expect(workerCwds).toEqual([workspaceRoot, workspaceRoot, workspaceRoot]);
+  });
+
   it("passes configured role prompts into worker prompts", async () => {
     const root = await mkdtemp(join(tmpdir(), "pct-orch-role-prompts-"));
     const config = mockConfig(root);
@@ -761,6 +797,17 @@ class EmptyMainWorkerAdapter extends MockWorkerAdapter {
       };
     }
 
+    return super.run(spec);
+  }
+}
+
+class CwdRecordingWorkerAdapter extends MockWorkerAdapter {
+  constructor(private readonly cwds: string[]) {
+    super();
+  }
+
+  async run(spec: WorkerRunSpec): Promise<WorkerResult> {
+    this.cwds.push(spec.cwd);
     return super.run(spec);
   }
 }

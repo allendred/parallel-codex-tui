@@ -72,7 +72,7 @@ export class Orchestrator {
   ) {}
 
   async handleRequest(input: HandleRequestInput): Promise<HandleRequestResult> {
-    const route = await routeRequestWithCodex(input.request, this.config, this.routeRunner, input.cwd);
+    const route = await this.routeRequest(input.request);
     const workers: WorkerLogRef[] = [];
 
     if (route.mode === "simple") {
@@ -174,7 +174,7 @@ export class Orchestrator {
 
   async handleTaskTurn(input: HandleTaskTurnInput): Promise<HandleRequestResult> {
     const task: TaskSession = this.sessions.taskFromId(input.taskId);
-    const route = await routeRequestWithCodex(input.request, this.config, this.routeRunner, input.cwd);
+    const route = await this.routeRequest(input.request);
     const turn = await this.sessions.appendTurn(task, {
       request: input.request,
       route
@@ -254,7 +254,7 @@ export class Orchestrator {
   }
 
   async routeTaskFollowUp(input: HandleTaskQuestionInput): Promise<TaskFollowUpRouteResult> {
-    const route = await routeRequestWithCodex(input.request, this.config, this.routeRunner, input.cwd);
+    const route = await this.routeRequest(input.request);
 
     return {
       mode: route.mode,
@@ -323,6 +323,10 @@ export class Orchestrator {
     }
 
     return workers.sort((left, right) => workerRoleOrder(left.role) - workerRoleOrder(right.role));
+  }
+
+  private routeRequest(request: string) {
+    return routeRequestWithCodex(request, this.config, this.routeRunner, this.config.projectRoot);
   }
 
   private async runMain(input: HandleRequestInput, workers: WorkerLogRef[]): Promise<string> {
