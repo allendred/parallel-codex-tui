@@ -57,13 +57,13 @@ export async function listWorkspaceChoices(appRoot: string): Promise<WorkspaceCh
   const entries = await readWorkspaceEntries(appRoot);
   const legacy = (await readTextIfExists(lastWorkspacePath(appRoot))).trim();
   if (legacy) {
-    entries.push({ path: resolveWorkspacePath(process.cwd(), legacy), last_used_at: "" });
+    entries.push({ path: legacy, last_used_at: "" });
   }
 
   const seen = new Set<string>();
   const unique = entries
     .map((entry, index) => ({
-      path: resolveWorkspacePath(process.cwd(), entry.path),
+      path: resolveStoredWorkspacePath(appRoot, entry.path),
       lastUsedAt: entry.last_used_at || null,
       order: index
     }))
@@ -96,7 +96,7 @@ async function rememberWorkspace(appRoot: string, workspaceRoot: string): Promis
     version: 1,
     workspaces: [
       { path: resolved, last_used_at: now },
-      ...current.filter((entry) => resolveWorkspacePath(process.cwd(), entry.path) !== resolved)
+      ...current.filter((entry) => resolveStoredWorkspacePath(appRoot, entry.path) !== resolved)
     ].slice(0, maxRememberedWorkspaces)
   };
 
@@ -135,4 +135,8 @@ export function resolveWorkspacePath(cwd: string, value: string): string {
   }
 
   return resolve(cwd, value);
+}
+
+function resolveStoredWorkspacePath(appRoot: string, value: string): string {
+  return resolveWorkspacePath(appRoot, value);
 }

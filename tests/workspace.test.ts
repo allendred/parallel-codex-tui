@@ -2,7 +2,7 @@ import { mkdtemp } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { pathExists } from "../src/core/file-store.js";
+import { pathExists, writeJson, writeText } from "../src/core/file-store.js";
 import { listWorkspaceChoices, prepareWorkspace, resolveWorkspaceSelection } from "../src/core/workspace.js";
 
 describe("workspace selection", () => {
@@ -67,5 +67,37 @@ describe("workspace selection", () => {
 
     expect(choices[0]).toMatchObject({ path: newest, exists: true });
     expect(choices[1]).toMatchObject({ path: existing, exists: true });
+  });
+
+  it("resolves legacy relative last-workspace entries from the app root", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pct-workspace-legacy-relative-"));
+    const appRoot = join(root, "app");
+    const cwd = join(root, "launcher");
+    await writeText(join(appRoot, ".parallel-codex", "last-workspace"), "projects/game\n");
+
+    const choices = await listWorkspaceChoices(appRoot);
+
+    expect(choices.map((choice) => choice.path)).toEqual([join(appRoot, "projects", "game")]);
+    await expect(resolveWorkspaceSelection({ appRoot, cwd })).resolves.toBe(join(appRoot, "projects", "game"));
+  });
+
+  it("resolves relative workspace registry entries from the app root", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pct-workspace-registry-relative-"));
+    const appRoot = join(root, "app");
+    const cwd = join(root, "launcher");
+    await writeJson(join(appRoot, ".parallel-codex", "workspaces.json"), {
+      version: 1,
+      workspaces: [
+        {
+          path: "projects/game",
+          last_used_at: "2026-07-08T10:00:00.000Z"
+        }
+      ]
+    });
+
+    const choices = await listWorkspaceChoices(appRoot);
+
+    expect(choices.map((choice) => choice.path)).toEqual([join(appRoot, "projects", "game")]);
+    await expect(resolveWorkspaceSelection({ appRoot, cwd })).resolves.toBe(join(appRoot, "projects", "game"));
   });
 });
