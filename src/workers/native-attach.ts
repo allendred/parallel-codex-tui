@@ -5,7 +5,7 @@ import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { spawn } from "node-pty";
 import type { AppConfig } from "../core/config.js";
-import { pathExists, readJson, readTextIfExists, writeJson } from "../core/file-store.js";
+import { pathExists, readJson, readTextIfExists, removeIfExists, writeJson } from "../core/file-store.js";
 import { NativeSessionSchema, TaskMetaSchema, type EngineName, type NativeSession } from "../domain/schemas.js";
 import type { WorkerLogRef } from "../orchestrator/orchestrator.js";
 import type { WorkerModelRunConfig } from "./types.js";
@@ -106,7 +106,8 @@ function ensureNodePtySpawnHelperExecutable(): void {
 async function readWorkerNativeSession(worker: WorkerLogRef): Promise<NativeSession> {
   const workerDir = dirname(worker.statusPath);
   const nativePath = join(workerDir, "native-session.json");
-  if (!(await pathExists(nativePath))) {
+  const record = await readAttachNativeSessionIfValid(nativePath);
+  if (!record) {
     const recovered = await recoverClaudeNativeSession(worker, workerDir);
     if (recovered) {
       await writeJson(nativePath, NativeSessionSchema.parse(recovered));
@@ -116,11 +117,23 @@ async function readWorkerNativeSession(worker: WorkerLogRef): Promise<NativeSess
       `No native session recorded for ${worker.label}. Run the worker once before attaching, or make sure ${worker.engine} persisted a resumable session.`
     );
   }
-  const record = await readJson(nativePath, NativeSessionSchema);
   if (record.engine !== worker.engine) {
     throw new Error(`Native session engine mismatch for ${worker.label}: expected ${worker.engine}, got ${record.engine}`);
   }
   return record;
+}
+
+async function readAttachNativeSessionIfValid(nativePath: string): Promise<NativeSession | null> {
+  if (!(await pathExists(nativePath))) {
+    return null;
+  }
+
+  try {
+    return await readJson(nativePath, NativeSessionSchema);
+  } catch {
+    await removeIfExists(nativePath);
+    return null;
+  }
 }
 
 async function recoverClaudeNativeSession(worker: WorkerLogRef, workerDir: string): Promise<NativeSession | null> {

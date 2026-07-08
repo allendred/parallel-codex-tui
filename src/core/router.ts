@@ -111,11 +111,7 @@ function buildCodexRouterPrompt(request: string, config: AppConfig): string {
     "JSON schema:",
     JSON.stringify({
       mode: "simple|complex",
-      reason: "short explanation",
-      suggested_roles: ["judge", "actor", "critic"],
-      judge_engine: config.pairing.judge,
-      actor_engine: config.pairing.actor,
-      critic_engine: config.pairing.critic
+      reason: "short explanation"
     }),
     "",
     "User request:",
@@ -130,9 +126,9 @@ function parseCodexRoute(output: string, config: AppConfig): RouteDecision {
     mode: parsed.mode === "complex" ? "complex" : "simple",
     reason: parsed.reason || "Codex router decision.",
     suggested_roles: parsed.mode === "complex" ? ["judge", "actor", "critic"] : [],
-    judge_engine: parsed.judge_engine ?? config.pairing.judge,
-    actor_engine: parsed.actor_engine ?? config.pairing.actor,
-    critic_engine: parsed.critic_engine ?? config.pairing.critic
+    judge_engine: config.pairing.judge,
+    actor_engine: config.pairing.actor,
+    critic_engine: config.pairing.critic
   };
 }
 

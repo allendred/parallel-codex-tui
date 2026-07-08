@@ -53,6 +53,30 @@ describe("routeRequestWithCodex", () => {
     expect(route.reason).toBe("Codex saw an optimization request.");
   });
 
+  it("uses configured role pairing instead of router-provided engines", async () => {
+    const config = defaultConfig("/tmp/project");
+    config.pairing.judge = "mock";
+    config.pairing.actor = "claude";
+    config.pairing.critic = "codex";
+    const runner: CodexRouteRunner = async () =>
+      JSON.stringify({
+        mode: "complex",
+        reason: "Codex saw project work.",
+        judge_engine: "codex",
+        actor_engine: "mock",
+        critic_engine: "claude"
+      });
+
+    const route = await routeRequestWithCodex("实现一个功能", config, runner);
+
+    expect(route).toMatchObject({
+      mode: "complex",
+      judge_engine: "mock",
+      actor_engine: "claude",
+      critic_engine: "codex"
+    });
+  });
+
   it("builds router prompts from the user request without workspace context", async () => {
     const config = defaultConfig("/tmp/secret-project");
     let seenPrompt = "";
@@ -70,6 +94,32 @@ describe("routeRequestWithCodex", () => {
     expect(seenPrompt).not.toContain("/tmp/secret-project");
     expect(seenPrompt).not.toContain("Workspace");
     expect(seenPrompt).not.toContain("cwd");
+  });
+
+  it("does not expose local role pairing config to the router prompt", async () => {
+    const config = defaultConfig("/tmp/project");
+    config.pairing.judge = "claude";
+    config.pairing.actor = "mock";
+    config.pairing.critic = "codex";
+    let seenPrompt = "";
+    const runner: CodexRouteRunner = async (prompt) => {
+      seenPrompt = prompt;
+      return JSON.stringify({
+        mode: "complex",
+        reason: "Codex saw project work."
+      });
+    };
+
+    await routeRequestWithCodex("做个俄罗斯方块的游戏", config, runner);
+
+    expect(seenPrompt).toContain("做个俄罗斯方块的游戏");
+    expect(seenPrompt).not.toContain("suggested_roles");
+    expect(seenPrompt).not.toContain("judge_engine");
+    expect(seenPrompt).not.toContain("actor_engine");
+    expect(seenPrompt).not.toContain("critic_engine");
+    expect(seenPrompt).not.toContain("pairing");
+    expect(seenPrompt).not.toContain("claude");
+    expect(seenPrompt).not.toContain("mock");
   });
 
   it("passes the workspace only as the router process cwd", async () => {

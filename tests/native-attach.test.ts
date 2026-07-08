@@ -82,6 +82,26 @@ describe("buildNativeAttachLaunch", () => {
     ).rejects.toThrow("No native session recorded");
   });
 
+  it("treats corrupt native session files as missing when attaching", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pct-native-attach-corrupt-"));
+    const workerDir = join(root, "task-a", "actor-codex");
+    await writeText(join(workerDir, "native-session.json"), "{");
+
+    await expect(
+      buildNativeAttachLaunch({
+        config: defaultConfig(root),
+        worker: {
+          id: "actor-codex",
+          role: "actor",
+          engine: "codex",
+          label: "Actor (codex)",
+          logPath: join(workerDir, "output.log"),
+          statusPath: join(workerDir, "status.json")
+        }
+      })
+    ).rejects.toThrow("No native session recorded");
+  });
+
   it("recovers a Claude native session from Claude's project log when the worker file is missing", async () => {
     const root = await mkdtemp(join(tmpdir(), "pct-native-attach-claude-log-"));
     const workspace = join(root, "workspace");
