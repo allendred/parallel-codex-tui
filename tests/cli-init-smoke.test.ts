@@ -32,6 +32,27 @@ describe("CLI init", () => {
     expect(config).not.toContain("bypassPermissions");
   });
 
+  it("ignores option-like text after the option terminator", async () => {
+    const appRoot = await mkdtemp(join(tmpdir(), "pct-cli-init-terminator-"));
+
+    const { stdout, stderr } = await execFileAsync(
+      process.execPath,
+      ["./node_modules/.bin/tsx", "src/cli.tsx", "--app-root", appRoot, "--init", "--", "--version"],
+      {
+        cwd: process.cwd(),
+        timeout: 5000
+      }
+    );
+
+    const configPath = join(appRoot, ".parallel-codex", "config.toml");
+    const config = await readFile(configPath, "utf8");
+
+    expect(stderr).toBe("");
+    expect(stdout).toContain(`Wrote ${configPath}`);
+    expect(stdout).not.toContain("parallel-codex-tui 0.1.0");
+    expect(config).toContain("[router]");
+  });
+
   it("does not overwrite an existing local config", async () => {
     const appRoot = await mkdtemp(join(tmpdir(), "pct-cli-init-existing-"));
     const configPath = join(appRoot, ".parallel-codex", "config.toml");

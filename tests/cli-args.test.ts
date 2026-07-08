@@ -134,6 +134,14 @@ describe("parseCliArgs", () => {
     expect(parsed.workspaceRoot).toBe("/app");
     expect(parsed.taskId).toBeNull();
   });
+
+  it("ignores option-like text after the option terminator", () => {
+    const parsed = parseCliArgs(["--workspace", "/tmp/work", "--", "--version", "--workspace", "/tmp/ignored"], "/app");
+
+    expect(parsed.version).toBe(false);
+    expect(parsed.workspaceRoot).toBe("/tmp/work");
+    expect(parsed.explicitWorkspace).toBe("/tmp/work");
+  });
 });
 
 describe("validateCliArgs", () => {

@@ -15,21 +15,25 @@ const allowedValueOptions = new Set(["--app-root", "--workspace", "-w", "--task"
 const allowedBooleanOptions = new Set(["--doctor", "--help", "-h", "--init", "--version", "-v"]);
 
 export function parseCliArgs(args: string[], cwd: string): CliArgs {
-  const appRootFlagIndex = lastFlagIndex(args, (arg) => arg === "--app-root" || arg.startsWith("--app-root="));
+  const optionArgs = argsBeforeTerminator(args);
+  const appRootFlagIndex = lastFlagIndex(optionArgs, (arg) => arg === "--app-root" || arg.startsWith("--app-root="));
   const workspaceFlagIndex = lastFlagIndex(
-    args,
+    optionArgs,
     (arg) => arg === "--workspace" || arg.startsWith("--workspace=") || arg === "-w" || arg.startsWith("-w=")
   );
-  const taskFlagIndex = lastFlagIndex(args, (arg) => arg === "--task" || arg.startsWith("--task=") || arg === "-t" || arg.startsWith("-t="));
-  const doctor = args.includes("--doctor");
-  const help = args.includes("--help") || args.includes("-h");
-  const init = args.includes("--init");
-  const version = args.includes("--version") || args.includes("-v");
-  const appRootValue = flagValue(args, appRootFlagIndex);
+  const taskFlagIndex = lastFlagIndex(
+    optionArgs,
+    (arg) => arg === "--task" || arg.startsWith("--task=") || arg === "-t" || arg.startsWith("-t=")
+  );
+  const doctor = optionArgs.includes("--doctor");
+  const help = optionArgs.includes("--help") || optionArgs.includes("-h");
+  const init = optionArgs.includes("--init");
+  const version = optionArgs.includes("--version") || optionArgs.includes("-v");
+  const appRootValue = flagValue(optionArgs, appRootFlagIndex);
   const appRoot = appRootValue ? resolve(cwd, appRootValue) : cwd;
-  const explicitWorkspace = flagValue(args, workspaceFlagIndex);
+  const explicitWorkspace = flagValue(optionArgs, workspaceFlagIndex);
   const workspaceRoot = explicitWorkspace ? resolve(cwd, explicitWorkspace) : cwd;
-  const taskId = flagValue(args, taskFlagIndex);
+  const taskId = flagValue(optionArgs, taskFlagIndex);
 
   return {
     appRoot,
@@ -45,11 +49,7 @@ export function parseCliArgs(args: string[], cwd: string): CliArgs {
 
 export function validateCliArgs(args: string[]): string[] {
   const errors: string[] = [];
-  for (const arg of args) {
-    if (arg === "--") {
-      break;
-    }
-
+  for (const arg of argsBeforeTerminator(args)) {
     if (!arg.startsWith("-") || arg === "-") {
       continue;
     }
@@ -67,6 +67,11 @@ export function validateCliArgs(args: string[]): string[] {
     errors.push(`Unknown option: ${arg}`);
   }
   return errors;
+}
+
+function argsBeforeTerminator(args: string[]): string[] {
+  const terminatorIndex = args.indexOf("--");
+  return terminatorIndex >= 0 ? args.slice(0, terminatorIndex) : args;
 }
 
 function lastFlagIndex(args: string[], predicate: (arg: string) => boolean): number {
