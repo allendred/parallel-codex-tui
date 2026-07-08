@@ -386,7 +386,10 @@ export class SessionManager {
       return;
     }
 
-    const status = await readJson(statusPath, WorkerStatusSchema);
+    const status = await readWorkerStatusIfValid(statusPath);
+    if (!status) {
+      return;
+    }
     if (!status.native_session_id) {
       return;
     }
@@ -439,6 +442,18 @@ async function readRouteDecisionIfValid(routePath: string): Promise<RouteDecisio
 
   try {
     return await readJson(routePath, RouteDecisionSchema);
+  } catch {
+    return null;
+  }
+}
+
+async function readWorkerStatusIfValid(statusPath: string): Promise<WorkerStatus | null> {
+  if (!(await pathExists(statusPath))) {
+    return null;
+  }
+
+  try {
+    return await readJson(statusPath, WorkerStatusSchema);
   } catch {
     return null;
   }
