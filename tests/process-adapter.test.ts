@@ -473,6 +473,42 @@ describe("ProcessWorkerAdapter", () => {
     expect(output).toContain("KEY:test-key");
   });
 
+  it("logs worker commands with shell-quoted arguments", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pct-process-quoted-command-"));
+    const filesDir = join(root, "actor-mock");
+    const promptPath = join(filesDir, "prompt.md");
+    const outputLogPath = join(filesDir, "output.log");
+    const statusPath = join(filesDir, "status.json");
+    const script = "console.log('quoted command ok')";
+
+    await writeText(promptPath, "model prompt");
+
+    const adapter = new ProcessWorkerAdapter(process.execPath, ["-e", script, "--"], "mock", {
+      model: {
+        name: "model with spaces",
+        provider: "provider's gateway",
+        args: ["--model", "{model}", "--provider", "{provider}"]
+      }
+    });
+    const result = await adapter.run({
+      workerId: "actor-node",
+      role: "actor",
+      engine: "mock",
+      cwd: root,
+      filesDir,
+      promptPath,
+      outputLogPath,
+      statusPath,
+      prompt: "model prompt"
+    });
+
+    expect(result.exitCode).toBe(0);
+    const output = await readTextIfExists(outputLogPath);
+    expect(output).toContain("'model with spaces'");
+    expect(output).toContain("'provider'\\''s gateway'");
+    expect(output).toContain("quoted command ok");
+  });
+
   it("applies model provider args to native resume commands", async () => {
     const root = await mkdtemp(join(tmpdir(), "pct-process-resume-model-"));
     const filesDir = join(root, "actor-mock");

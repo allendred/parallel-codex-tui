@@ -88,7 +88,7 @@ export class ProcessWorkerAdapter implements WorkerAdapter {
     options: ProcessAttemptOptions = {}
   ): Promise<ProcessAttemptResult> {
     await setStatus(runSpec, "starting", options.startPhase ?? "process-starting", options.startSummary ?? `Starting ${this.command}`);
-    await appendText(runSpec.outputLogPath, `$ ${this.command} ${launch.args.join(" ")}\n`);
+    await appendText(runSpec.outputLogPath, `$ ${formatShellCommand(this.command, launch.args)}\n`);
 
     return new Promise<ProcessAttemptResult>((resolve, reject) => {
       const child = spawn(this.command, launch.args, {
@@ -328,6 +328,18 @@ function renderTemplate(value: string, sessionId: string | undefined, modelConfi
     .replaceAll("{model}", modelConfig?.name ?? "")
     .replaceAll("{provider}", modelConfig?.provider ?? "")
     .replace(/\{env:([A-Za-z_][A-Za-z0-9_]*)\}/g, (_match, name: string) => process.env[name] ?? "");
+}
+
+function formatShellCommand(command: string, args: string[]): string {
+  return [command, ...args].map(shellQuote).join(" ");
+}
+
+function shellQuote(value: string): string {
+  if (value.length > 0 && /^[A-Za-z0-9_./:=@%+,-]+$/.test(value)) {
+    return value;
+  }
+
+  return `'${value.replaceAll("'", "'\\''")}'`;
 }
 
 function summarizeOutput(text: string): string {
