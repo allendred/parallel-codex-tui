@@ -257,7 +257,13 @@ export class SessionManager {
     if (!(await pathExists(path))) {
       return null;
     }
-    return readJson(path, NativeSessionSchema);
+    try {
+      return await readJson(path, NativeSessionSchema);
+    } catch {
+      await removeIfExists(path);
+      await this.clearWorkerStatusNativeSession(worker);
+      return null;
+    }
   }
 
   async writeNativeSession(worker: Pick<WorkerFiles, "dir">, record: NativeSession): Promise<void> {

@@ -451,6 +451,50 @@ describe("SessionManager", () => {
     expect(retired.retired_reason).toBe("context window full");
   });
 
+  it("clears corrupt worker native session metadata when reading it", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pct-native-session-corrupt-"));
+    const manager = new SessionManager({
+      projectRoot: root,
+      dataDir: ".parallel-codex",
+      now: () => new Date("2026-06-30T03:30:00.000Z"),
+      randomId: () => "a1b2"
+    });
+    const task = await manager.createTask({
+      request: "Build the MVP.",
+      cwd: root,
+      route: {
+        mode: "complex",
+        reason: "Requires workers.",
+        suggested_roles: ["judge", "actor", "critic"],
+        judge_engine: "mock",
+        actor_engine: "mock",
+        critic_engine: "mock"
+      }
+    });
+    const worker = await manager.initializeWorker(task, {
+      workerId: "actor-mock",
+      role: "actor",
+      engine: "mock",
+      prompt: "Write code."
+    });
+    await writeText(join(worker.dir, "native-session.json"), "{");
+    await writeJson(worker.statusPath, WorkerStatusSchema.parse({
+      worker_id: "actor-mock",
+      role: "actor",
+      engine: "mock",
+      state: "done",
+      phase: "process-exited",
+      last_event_at: "2026-06-30T03:31:00.000Z",
+      summary: "mock exited",
+      native_session_id: "native-corrupt"
+    }));
+
+    await expect(manager.readNativeSession(worker)).resolves.toBeNull();
+    expect(await pathExists(join(worker.dir, "native-session.json"))).toBe(false);
+    const status = await readJson(worker.statusPath, WorkerStatusSchema);
+    expect(status.native_session_id).toBeUndefined();
+  });
+
   it("mirrors session writes into the SQLite index", async () => {
     const root = await mkdtemp(join(tmpdir(), "pct-session-indexed-"));
     const index = await SessionIndex.open(root, ".parallel-codex");
