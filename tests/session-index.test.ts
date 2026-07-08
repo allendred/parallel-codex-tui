@@ -171,4 +171,72 @@ describe("SessionIndex", () => {
     await expect(index.workerNativeSessionId("task-retired", "actor-mock")).resolves.toBeNull();
     index.close();
   });
+
+  it("skips corrupt worker status files while rebuilding startup indexes", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pct-index-corrupt-status-"));
+    const dataDir = ".parallel-codex";
+    const sessionDir = join(root, dataDir, "sessions", "task-corrupt-status");
+    const goodWorkerDir = join(sessionDir, "judge-mock");
+    const corruptWorkerDir = join(sessionDir, "actor-mock");
+
+    await writeJson(join(sessionDir, "meta.json"), TaskMetaSchema.parse({
+      id: "task-corrupt-status",
+      title: "Corrupt status",
+      created_at: "2026-07-01T01:00:00.000Z",
+      cwd: root,
+      mode: "complex",
+      status: "done"
+    }));
+    await writeJson(join(goodWorkerDir, "status.json"), WorkerStatusSchema.parse({
+      worker_id: "judge-mock",
+      role: "judge",
+      engine: "mock",
+      state: "done",
+      phase: "mock-done",
+      last_event_at: "2026-07-01T01:01:00.000Z",
+      summary: "done"
+    }));
+    await writeText(join(corruptWorkerDir, "status.json"), "{");
+
+    const index = await SessionIndex.open(root, dataDir);
+    await index.rebuildFromFiles();
+
+    await expect(index.countRows("workers")).resolves.toBe(1);
+    index.close();
+  });
+
+  it("skips corrupt native session files while rebuilding startup indexes", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pct-index-corrupt-native-"));
+    const dataDir = ".parallel-codex";
+    const sessionDir = join(root, dataDir, "sessions", "task-corrupt-native");
+    const workerDir = join(sessionDir, "actor-mock");
+
+    await writeJson(join(sessionDir, "meta.json"), TaskMetaSchema.parse({
+      id: "task-corrupt-native",
+      title: "Corrupt native",
+      created_at: "2026-07-01T01:00:00.000Z",
+      cwd: root,
+      mode: "complex",
+      status: "done"
+    }));
+    await writeJson(join(workerDir, "status.json"), WorkerStatusSchema.parse({
+      worker_id: "actor-mock",
+      role: "actor",
+      engine: "mock",
+      state: "done",
+      phase: "mock-done",
+      last_event_at: "2026-07-01T01:01:00.000Z",
+      summary: "done",
+      native_session_id: "native-corrupt"
+    }));
+    await writeText(join(workerDir, "native-session.json"), "{");
+
+    const index = await SessionIndex.open(root, dataDir);
+    await index.rebuildFromFiles();
+
+    await expect(index.countRows("workers")).resolves.toBe(1);
+    await expect(index.countRows("native_sessions")).resolves.toBe(0);
+    await expect(index.workerNativeSessionId("task-corrupt-native", "actor-mock")).resolves.toBeNull();
+    index.close();
+  });
 });

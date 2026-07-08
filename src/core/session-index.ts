@@ -1,6 +1,7 @@
 import { readdir } from "node:fs/promises";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
+import type { ZodTypeAny, output } from "zod";
 import {
   NativeSessionSchema,
   type NativeSession,
@@ -234,26 +235,50 @@ export class SessionIndex {
       const statusPath = join(workerDir, "status.json");
       const nativePath = join(workerDir, "native-session.json");
       if (await pathExists(statusPath)) {
-        await this.upsertWorker(taskId, await this.readRebuildWorkerStatus(statusPath, nativePath), {
-          dir: workerDir,
-          statusPath,
-          outputLogPath: join(workerDir, "output.log")
-        });
+        const status = await this.readRebuildWorkerStatus(statusPath, nativePath);
+        if (status) {
+          await this.upsertWorker(taskId, status, {
+            dir: workerDir,
+            statusPath,
+            outputLogPath: join(workerDir, "output.log")
+          });
+        }
       }
 
       if (await pathExists(nativePath)) {
-        await this.upsertNativeSession(taskId, await readJson(nativePath, NativeSessionSchema));
+        const nativeSession = await readJsonIfValid(nativePath, NativeSessionSchema);
+        if (nativeSession) {
+          await this.upsertNativeSession(taskId, nativeSession);
+        }
       }
     }
   }
 
-  private async readRebuildWorkerStatus(statusPath: string, nativePath: string): Promise<WorkerStatus> {
-    const status = await readJson(statusPath, WorkerStatusSchema);
-    if (status.native_session_id && !(await pathExists(nativePath))) {
+  private async readRebuildWorkerStatus(statusPath: string, nativePath: string): Promise<WorkerStatus | null> {
+    const status = await readJsonIfValid(statusPath, WorkerStatusSchema);
+    if (!status) {
+      return null;
+    }
+    if (status.native_session_id && !(await readJsonIfValid(nativePath, NativeSessionSchema))) {
       const nextStatus = { ...status };
       delete nextStatus.native_session_id;
       return WorkerStatusSchema.parse(nextStatus);
     }
     return status;
+  }
+}
+
+async function readJsonIfValid<TSchema extends ZodTypeAny>(
+  path: string,
+  schema: TSchema
+): Promise<output<TSchema> | null> {
+  if (!(await pathExists(path))) {
+    return null;
+  }
+
+  try {
+    return await readJson(path, schema);
+  } catch {
+    return null;
   }
 }
