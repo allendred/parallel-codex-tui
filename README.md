@@ -189,7 +189,7 @@ Keep `[router.codex]` on `workspace-write`; routing only classifies requests and
 
 The process adapter sends each role prompt to stdin and records stdout/stderr in `output.log`.
 
-While viewing a worker log, press `Ctrl+O` to attach to the worker's native session inside `parallel-codex-tui`. Native attach runs through a PTY, so full-screen CLIs such as `codex resume {sessionId}` receive a real terminal instead of pipe stdin. Input is forwarded to the configured interactive command and output is shown in the native attach panel. Press `Ctrl+]` to detach and return to worker logs; `Ctrl+C` is forwarded to the native agent while attached. In chat and worker-log views, press `Ctrl+C` to exit the outer TUI.
+In chat or worker-log views, press `Ctrl+O` to attach to the selected worker's native session inside `parallel-codex-tui`. Native attach runs through a PTY, so full-screen CLIs such as `codex resume {sessionId}` receive a real terminal instead of pipe stdin. Input is forwarded to the configured interactive command and output is shown in the native attach panel. Press `Ctrl+]` to detach and return to worker logs; `Ctrl+C` is forwarded to the native agent while attached. In chat and worker-log views, press `Ctrl+C` to exit the outer TUI.
 
 If a native resume fails because the underlying CLI reports that its context window is full, configure `fallback = "new"` under `[workers.<engine>.nativeSession]`. The old native session is archived as `native-session.retired.json`, removed from active use, and the worker is retried once with the normal fresh-session command.
 
