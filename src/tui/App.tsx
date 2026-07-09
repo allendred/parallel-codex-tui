@@ -856,13 +856,24 @@ function ChatEmptyState({
   activeTaskId: string | null;
   terminalWidth: number;
 }) {
-  const contentWidth = Math.max(8, terminalWidth - 2);
+  const contentWidth = chatContentWidth(terminalWidth);
+  const line = chatEmptyStateDisplayLine(cwd, activeTaskId, contentWidth);
+  const fillWidth = Math.max(0, contentWidth - displayWidth(line));
 
   return (
     <Box flexDirection="column">
-      <Text {...chatEmptyStateTheme()}>{chatEmptyStateDisplayLine(cwd, activeTaskId, contentWidth)}</Text>
+      <Text>
+        <Text {...chatEmptyStateTheme()}>{line}</Text>
+        {fillWidth > 0 ? <Text backgroundColor={TUI_THEME.surface}>{" ".repeat(fillWidth)}</Text> : null}
+      </Text>
     </Box>
   );
+}
+
+export function chatEmptyStateTrailingFillWidth(cwd: string, activeTaskId: string | null, terminalWidth: number): number {
+  const contentWidth = chatContentWidth(terminalWidth);
+  const line = chatEmptyStateDisplayLine(cwd, activeTaskId, contentWidth);
+  return Math.max(0, contentWidth - displayWidth(line));
 }
 
 export function chatEmptyStateTheme(): ChatEmptyStateTheme {

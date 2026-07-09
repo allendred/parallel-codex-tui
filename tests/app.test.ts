@@ -1,7 +1,7 @@
 import React from "react";
 import { render } from "ink-testing-library";
 import { afterEach, describe, expect, it } from "vitest";
-import { appContentHeight, chatEmptyStateTheme, chatLineTheme, chatLineTrailingFillWidth, chatMessageDisplayLines, chatViewportBlankLineTheme, ChatView, nativeAttachExitLine, nativeAttachStartingTheme, nativeAttachTerminalColumns, nativeAttachTitleDisplay, nativeTerminalScrollDisplay } from "../src/tui/App.js";
+import { appContentHeight, chatEmptyStateTheme, chatEmptyStateTrailingFillWidth, chatLineTheme, chatLineTrailingFillWidth, chatMessageDisplayLines, chatViewportBlankLineTheme, ChatView, nativeAttachExitLine, nativeAttachStartingTheme, nativeAttachTerminalColumns, nativeAttachTitleDisplay, nativeTerminalScrollDisplay } from "../src/tui/App.js";
 import { displayWidth } from "../src/tui/display-width.js";
 import { configureTuiTheme, resetTuiTheme, TUI_THEME_PRESETS } from "../src/tui/theme.js";
 
@@ -117,6 +117,13 @@ describe("ChatView", () => {
       bold: true,
       color: TUI_THEME_PRESETS.paper.success
     });
+  });
+
+  it("computes themed trailing fill for compact empty chat state rows", () => {
+    expect(chatEmptyStateTrailingFillWidth("/workspace/tetris", "task-20260630-093326-1980", 40)).toBe(10);
+    expect(chatEmptyStateTrailingFillWidth("/workspace/tetris", null, 40)).toBe(24);
+    expect(chatEmptyStateTrailingFillWidth("/tmp/并行编码终端超级长项目名称测试", "task-20260705-中文任务后缀超级长", 24)).toBe(1);
+    expect(chatEmptyStateTrailingFillWidth("/workspace/tetris", null, 10)).toBe(2);
   });
 
   it("themes chat viewport spacer rows with the active surface", () => {
