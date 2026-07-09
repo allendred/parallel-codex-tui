@@ -11,6 +11,7 @@ import {
   workerOutputDiffColumns,
   workerOutputDiffDisplayLines,
   workerOutputHeaderDisplay,
+  workerOutputLineFillTheme,
   workerOutputLineLayout,
   workerOutputLineTheme,
   workerOutputScrollDisplay,
@@ -3010,6 +3011,10 @@ describe("WorkerOutputView", () => {
     expect(workerOutputLineTheme("diff-summary")).toEqual({ color: "white" });
     expect(workerOutputLineTheme("code").backgroundColor).toBe("ansi256(236)");
     expect(workerOutputLineTheme("source-line").backgroundColor).toBe("ansi256(235)");
+    expect(workerOutputLineFillTheme("group")).toBe("ansi256(24)");
+    expect(workerOutputLineFillTheme("section")).toBe("ansi256(236)");
+    expect(workerOutputLineFillTheme("command")).toBe("ansi256(17)");
+    expect(workerOutputLineFillTheme("content")).toBeNull();
   });
 
   it("keeps styled log rows free of table gutters", () => {
@@ -3038,6 +3043,22 @@ describe("WorkerOutputView", () => {
     expect(workerOutputLineLayout("section", "features/0010/actor-worklog.md")).toEqual({
       gutter: "",
       body: "file · 0010/actor-worklog.md"
+    });
+    expect(workerOutputLineLayout("section", "patch.diff")).toEqual({
+      gutter: "",
+      body: "diff · patch.diff"
+    });
+    expect(workerOutputLineLayout("section", "features/0010/actor-replies.jsonl")).toEqual({
+      gutter: "",
+      body: "mail · 0010/actor-replies.jsonl"
+    });
+    expect(workerOutputLineLayout("section", "features/0010/critic-findings.jsonl")).toEqual({
+      gutter: "",
+      body: "findings · 0010/critic-findings.jsonl"
+    });
+    expect(workerOutputLineLayout("quote", "quoted note")).toEqual({
+      gutter: "",
+      body: "│ quoted note"
     });
     expect(workerOutputLineLayout("summary", "Collapsed code output: 8 lines")).toEqual({
       gutter: "",

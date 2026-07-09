@@ -195,7 +195,7 @@ export function WorkerOutputView({
         ? visibleLines.map((line, index) =>
           nanoRender
             ? <WorkerOutputNanoLine key={index} line={line} width={terminalWidth} />
-            : <WorkerOutputLine key={index} line={line} />
+            : <WorkerOutputLine key={index} line={line} width={panelWidth} />
         )
         : <Text>(empty log)</Text>}
     </Box>
@@ -3745,9 +3745,14 @@ export function workerOutputLineTheme(kind: WorkerOutputLineKind): WorkerOutputL
   return {};
 }
 
+export function workerOutputLineFillTheme(kind: WorkerOutputLineKind): NonNullable<TextProps["backgroundColor"]> | null {
+  const backgroundColor = workerOutputLineTheme(kind).backgroundColor;
+  return backgroundColor ?? null;
+}
+
 export function workerOutputLineLayout(kind: WorkerOutputLineKind, text: string): { gutter: string; body: string } {
   if (kind === "section") {
-    return { gutter: "", body: `file · ${formatWorkerSectionTitle(text)}` };
+    return { gutter: "", body: `${workerSectionLabel(text)} · ${formatWorkerSectionTitle(text)}` };
   }
   if (kind === "content") {
     return { gutter: "", body: formatPlainDisplayText(text) };
@@ -3765,7 +3770,7 @@ export function workerOutputLineLayout(kind: WorkerOutputLineKind, text: string)
     return { gutter: "", body: text };
   }
   if (kind === "quote") {
-    return { gutter: "", body: `> ${text}` };
+    return { gutter: "", body: `│ ${text}` };
   }
   if (kind === "table" || kind === "rule") {
     return { gutter: "", body: text };
@@ -3820,6 +3825,23 @@ export function workerOutputLineLayout(kind: WorkerOutputLineKind, text: string)
 
 function formatWorkerSectionTitle(title: string): string {
   return title.replace(/^features\//, "");
+}
+
+function workerSectionLabel(title: string): string {
+  const file = basename(title).toLowerCase();
+  if (file.endsWith(".diff")) {
+    return "diff";
+  }
+  if (file === "actor-replies.jsonl") {
+    return "mail";
+  }
+  if (file === "critic-findings.jsonl") {
+    return "findings";
+  }
+  if (file.endsWith(".jsonl")) {
+    return "jsonl";
+  }
+  return "file";
 }
 
 function formatSummaryDisplayText(text: string): string {
@@ -4084,24 +4106,29 @@ function formatFileUrlDisplay(url: string): string {
   return segments.slice(-2).join("/") || url;
 }
 
-function WorkerOutputLine({ line }: { line: DisplayLine }) {
+function WorkerOutputLine({ line, width }: { line: DisplayLine; width: number }) {
   const theme = workerOutputLineTheme(line.kind);
+  const fillBackground = workerOutputLineFillTheme(line.kind);
   if (line.kind === "blank") {
     return <Text> </Text>;
   }
   if (line.kind === "group") {
+    const body = ` ${line.text} `;
     return (
       <Box>
-        <Text {...theme}> {line.text} </Text>
+        <Text {...theme}>{body}</Text>
+        <WorkerOutputTrailingFill backgroundColor={fillBackground} width={width} usedWidth={displayWidth(body)} />
       </Box>
     );
   }
 
   if (line.preformatted) {
+    const body = line.text || " ";
     return (
       <Box>
-        <Text dimColor>  </Text>
-        <Text {...theme} wrap="truncate-end">{line.text || " "}</Text>
+        <WorkerOutputIndent backgroundColor={fillBackground} />
+        <Text {...theme} wrap="truncate-end">{body}</Text>
+        <WorkerOutputTrailingFill backgroundColor={fillBackground} width={width} usedWidth={2 + displayWidth(body)} />
       </Box>
     );
   }
@@ -4119,49 +4146,87 @@ function WorkerOutputLine({ line }: { line: DisplayLine }) {
   if (line.kind === "source-line") {
     const sourceParts = sourceDisplayLineParts(line.text);
     if (sourceParts) {
+      const usedWidth = 2 + displayWidth(sourceParts.gutter) + displayWidth(sourceParts.code || " ");
       return (
         <Box>
-          <Text dimColor>  </Text>
+          <WorkerOutputIndent backgroundColor={fillBackground} />
           <Text backgroundColor={WORKER_PANEL_BACKGROUND} color="gray">{sourceParts.gutter}</Text>
           <Text backgroundColor={WORKER_PANEL_BACKGROUND} color="white" wrap="truncate-end">{sourceParts.code}</Text>
+          <WorkerOutputTrailingFill backgroundColor={fillBackground} width={width} usedWidth={usedWidth} />
         </Box>
       );
     }
+    const body = line.text || " ";
     return (
       <Box>
-        <Text dimColor>  </Text>
-        <Text {...theme}>{line.text || " "}</Text>
+        <WorkerOutputIndent backgroundColor={fillBackground} />
+        <Text {...theme}>{body}</Text>
+        <WorkerOutputTrailingFill backgroundColor={fillBackground} width={width} usedWidth={2 + displayWidth(body)} />
       </Box>
     );
   }
 
   if (line.continuation && isDiffCodeKind(line.kind)) {
+    const body = line.text || " ";
     return (
       <Box>
-        <Text dimColor>  </Text>
-        <Text {...theme} wrap="truncate-end">{line.text || " "}</Text>
+        <WorkerOutputIndent backgroundColor={fillBackground} />
+        <Text {...theme} wrap="truncate-end">{body}</Text>
+        <WorkerOutputTrailingFill backgroundColor={fillBackground} width={width} usedWidth={2 + displayWidth(body)} />
       </Box>
     );
   }
 
   const diffCodeLine = diffCodeLineParts(line);
   if (diffCodeLine) {
+    const prefix = `${diffCodeLine.lineNumber} ${diffCodeLine.sign} `;
+    const code = diffCodeLine.code || " ";
     return (
       <Box>
-        <Text dimColor>  </Text>
-        <Text {...theme}>{`${diffCodeLine.lineNumber} ${diffCodeLine.sign} `}</Text>
-        <Text {...theme} wrap="wrap">{diffCodeLine.code || " "}</Text>
+        <WorkerOutputIndent backgroundColor={fillBackground} />
+        <Text {...theme}>{prefix}</Text>
+        <Text {...theme} wrap="wrap">{code}</Text>
+        <WorkerOutputTrailingFill backgroundColor={fillBackground} width={width} usedWidth={2 + displayWidth(prefix) + displayWidth(code)} />
       </Box>
     );
   }
 
+  const gutter = layout.gutter ? formatGutter(layout.gutter) : "";
+  const body = layout.body || " ";
   return (
     <Box>
-      <Text dimColor>  </Text>
-      {layout.gutter ? <Text {...theme}>{formatGutter(layout.gutter)}</Text> : null}
-      <Text {...theme} wrap="truncate-end">{layout.body || " "}</Text>
+      <WorkerOutputIndent backgroundColor={fillBackground} />
+      {gutter ? <Text {...theme}>{gutter}</Text> : null}
+      <Text {...theme} wrap="truncate-end">{body}</Text>
+      <WorkerOutputTrailingFill backgroundColor={fillBackground} width={width} usedWidth={2 + displayWidth(gutter) + displayWidth(body)} />
     </Box>
   );
+}
+
+function WorkerOutputIndent({ backgroundColor }: { backgroundColor: NonNullable<TextProps["backgroundColor"]> | null }) {
+  return backgroundColor && shouldRenderWorkerOutputRailFill()
+    ? <Text backgroundColor={backgroundColor}>  </Text>
+    : <Text dimColor>  </Text>;
+}
+
+function WorkerOutputTrailingFill({
+  backgroundColor,
+  usedWidth,
+  width
+}: {
+  backgroundColor: NonNullable<TextProps["backgroundColor"]> | null;
+  usedWidth: number;
+  width: number;
+}) {
+  if (!backgroundColor || !shouldRenderWorkerOutputRailFill()) {
+    return null;
+  }
+  const fillWidth = Math.max(0, width - usedWidth);
+  return fillWidth > 0 ? <Text backgroundColor={backgroundColor}>{" ".repeat(fillWidth)}</Text> : null;
+}
+
+function shouldRenderWorkerOutputRailFill(): boolean {
+  return process.stdout.isTTY === true && typeof process.stdout.columns === "number";
 }
 
 function WorkerOutputNanoLine({ line, width }: { line: DisplayLine; width: number }) {
