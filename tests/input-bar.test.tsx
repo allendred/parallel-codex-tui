@@ -172,7 +172,7 @@ describe("InputBar", () => {
     );
 
     const frame = lastFrame() ?? "";
-    expect(frame).toContain("logs · Pg/wheel · Tab · ^O · Esc");
+    expect(frame).toContain("logs · wheel/Pg · Tab · ^O · Esc");
     expect(frame).not.toContain("attach");
     expect(frame).not.toContain("read");
     expect(frame.split("\n")).toHaveLength(1);
@@ -247,7 +247,7 @@ describe("InputBar", () => {
     );
 
     const frame = lastFrame() ?? "";
-    expect(frame).toContain("native · Pg/wheel · ^]");
+    expect(frame).toContain("native · wheel/Pg · ^]");
     expect(frame).not.toContain("logs");
     expect(frame).not.toContain("detach");
     expect(frame.split("\n")).toHaveLength(1);
@@ -289,6 +289,15 @@ describe("InputBar", () => {
     expect(nanoFrame.split("\n")).toHaveLength(1);
     expect(displayWidth(nanoFrame)).toBeLessThanOrEqual(12);
     nano.unmount();
+
+    const narrow = render(
+      <InputBar mode="native" value="" nativeClosed terminalWidth={42} onChange={() => {}} />
+    );
+    const narrowFrame = narrow.lastFrame() ?? "";
+    expect(narrowFrame).toContain("closed · wheel/Pg · ^]");
+    expect(narrowFrame).not.toContain("back");
+    expect(displayWidth(narrowFrame)).toBeLessThanOrEqual(42);
+    narrow.unmount();
   });
 
   it("keeps only the native detach chord in tiny terminals", () => {

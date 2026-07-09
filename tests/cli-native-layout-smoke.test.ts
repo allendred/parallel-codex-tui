@@ -131,7 +131,7 @@ describe("CLI native layout smoke", () => {
       child.write("\x0f");
       await waitForText(chunks, "native line 8");
       await waitForScreenText(() => screenWrites, screen, "native line 8");
-      await waitForScreenText(() => screenWrites, screen, "native · Pg/wheel · ^]");
+      await waitForScreenText(() => screenWrites, screen, "native · wheel/Pg · ^]");
 
       const snapshot = screen.snapshot();
       const headerRow = snapshot.split("\n")[0] ?? "";
@@ -142,7 +142,7 @@ describe("CLI native layout smoke", () => {
       expect(snapshot).toContain("native-snap");
       expect(snapshot).toContain("...");
       expect(snapshot).toContain("native line 8");
-      expect(snapshot).toContain("native · Pg/wheel · ^]");
+      expect(snapshot).toContain("native · wheel/Pg · ^]");
       expect(snapshot).not.toContain("native · ^] logs");
       expect(snapshot).not.toContain("fake-agent.cjs");
       expect(snapshot).not.toContain(`(${nativeSessionId})`);
@@ -320,14 +320,14 @@ describe("CLI native layout smoke", () => {
       child.write("\x0f");
       await waitForText(chunks, "[process exited with code 7]");
       await waitForScreenText(() => screenWrites, screen, "exit:7");
-      await waitForScreenText(() => screenWrites, screen, "closed · Pg/wheel · ^]");
+      await waitForScreenText(() => screenWrites, screen, "closed · wheel/Pg · ^]");
 
       const snapshot = screen.snapshot();
       expect(snapshot).toContain("native done");
       expect(snapshot).toContain("[process exited with code 7]");
       expect(snapshot).toContain("native actor/mock · exit:7");
-      expect(snapshot).toContain("closed · Pg/wheel · ^]");
-      expect(snapshot).not.toContain("native · Pg/wheel · ^]");
+      expect(snapshot).toContain("closed · wheel/Pg · ^]");
+      expect(snapshot).not.toContain("native · wheel/Pg · ^]");
     } finally {
       child.write("\x1d");
       child.kill("SIGTERM");
