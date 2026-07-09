@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   terminalOutputBlankLineTheme,
   terminalOutputEmptyTheme,
+  terminalOutputTrailingFillWidth,
   terminalOutputTextProps
 } from "../src/tui/TerminalOutput.js";
 import { configureTuiTheme, resetTuiTheme, TUI_THEME_PRESETS } from "../src/tui/theme.js";
@@ -35,5 +36,20 @@ describe("TerminalOutput theme helpers", () => {
       color: "ansi256(2)",
       bold: true
     });
+  });
+
+  it("computes themed trailing fill for short native output rows by display width", () => {
+    expect(terminalOutputTrailingFillWidth({
+      chunks: [{ text: "native", style: {} }]
+    }, 10)).toBe(4);
+    expect(terminalOutputTrailingFillWidth({
+      chunks: [{ text: "你好", style: {} }]
+    }, 8)).toBe(4);
+    expect(terminalOutputTrailingFillWidth({
+      chunks: [{ text: "already wide", style: {} }]
+    }, 4)).toBe(0);
+    expect(terminalOutputTrailingFillWidth({
+      chunks: []
+    }, 4)).toBe(4);
   });
 });

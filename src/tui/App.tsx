@@ -984,7 +984,7 @@ function NativeAttachView({
   return (
     <Box flexDirection="column">
       <NativeAttachTitleRail title={title} width={panelWidth} />
-      <TerminalOutput lines={attach.screen.styledSnapshotLines({ showCursor: true })} />
+      <TerminalOutput lines={attach.screen.styledSnapshotLines({ showCursor: true })} width={panelWidth} />
     </Box>
   );
 }

@@ -1,13 +1,15 @@
 import React from "react";
 import { Box, Text, type TextProps } from "ink";
 import type { TerminalLine, TerminalTextStyle } from "./terminal-screen.js";
+import { displayWidth } from "./display-width.js";
 import { TUI_THEME } from "./theme.js";
 
 export interface TerminalOutputProps {
   lines: TerminalLine[];
+  width?: number;
 }
 
-export function TerminalOutput({ lines }: TerminalOutputProps) {
+export function TerminalOutput({ lines, width }: TerminalOutputProps) {
   if (lines.length === 0) {
     return <Text {...terminalOutputEmptyTheme()}>(no output yet)</Text>;
   }
@@ -17,12 +19,15 @@ export function TerminalOutput({ lines }: TerminalOutputProps) {
       {lines.map((line, index) => (
         <Text key={index}>
           {line.chunks.length === 0
-            ? <Text {...terminalOutputBlankLineTheme()}> </Text>
-            : line.chunks.map((chunk, chunkIndex) => (
+            ? <Text {...terminalOutputBlankLineTheme()}>{" ".repeat(terminalOutputBlankLineWidth(width))}</Text>
+            : <>
+              {line.chunks.map((chunk, chunkIndex) => (
                 <Text key={chunkIndex} {...terminalOutputTextProps(chunk.style)}>
                   {chunk.text}
                 </Text>
               ))}
+              <TerminalOutputTrailingFill line={line} width={width} />
+            </>}
         </Text>
       ))}
     </Box>
@@ -56,4 +61,24 @@ export function terminalOutputTextProps(style: TerminalTextStyle): TerminalOutpu
     strikethrough: style.strikethrough,
     underline: style.underline
   };
+}
+
+export function terminalOutputTrailingFillWidth(line: TerminalLine, width: number | undefined): number {
+  if (width === undefined) {
+    return 0;
+  }
+  return Math.max(0, width - terminalOutputLineDisplayWidth(line));
+}
+
+function TerminalOutputTrailingFill({ line, width }: { line: TerminalLine; width: number | undefined }) {
+  const fillWidth = terminalOutputTrailingFillWidth(line, width);
+  return fillWidth > 0 ? <Text {...terminalOutputBlankLineTheme()}>{" ".repeat(fillWidth)}</Text> : null;
+}
+
+function terminalOutputLineDisplayWidth(line: TerminalLine): number {
+  return line.chunks.reduce((sum, chunk) => sum + displayWidth(chunk.text), 0);
+}
+
+function terminalOutputBlankLineWidth(width: number | undefined): number {
+  return Math.max(1, width ?? 1);
 }
