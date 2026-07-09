@@ -4765,7 +4765,7 @@ describe("WorkerOutputView", () => {
 
     try {
       await waitForFrame(lastFrame, "actor/mock");
-      await waitForViewport(viewports);
+      await waitForViewport(viewports, (viewport) => viewport.maxOffset > 4);
       expect(Math.max(...viewports.map((viewport) => viewport.maxOffset))).toBeGreaterThan(4);
     } finally {
       unmount();
@@ -4843,9 +4843,12 @@ async function waitForFrame(lastFrame: () => string | undefined, text: string): 
   throw new Error(`Timed out waiting for ${text}\nFrame:\n${lastFrame() ?? ""}`);
 }
 
-async function waitForViewport(viewports: Array<{ offset: number; maxOffset: number }>): Promise<void> {
+async function waitForViewport(
+  viewports: Array<{ offset: number; maxOffset: number }>,
+  predicate: (viewport: { offset: number; maxOffset: number }) => boolean = () => true
+): Promise<void> {
   for (let attempt = 0; attempt < 120; attempt += 1) {
-    if (viewports.length > 0) {
+    if (viewports.some(predicate)) {
       return;
     }
     await new Promise((resolve) => setTimeout(resolve, 25));
