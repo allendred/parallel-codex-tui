@@ -202,9 +202,9 @@ function workerInputHints(width: number): { label: string; detail: string } {
     return { label: "logs", detail: " · Pg · Tab · ^O · Esc" };
   }
   if (width < 72) {
-    return { label: "logs", detail: " · wheel/Pg · Tab · ^O · Esc" };
+    return { label: "logs", detail: " · scroll · Tab · ^O · Esc" };
   }
-  return { label: "logs", detail: " · wheel/Pg · Tab worker · ^O attach · Esc chat" };
+  return { label: "logs", detail: " · scroll · Tab worker · ^O attach · Esc chat" };
 }
 
 function nativeInputHints(width: number, closed = false): { label: string; detail: string } {
@@ -222,9 +222,9 @@ function nativeInputHints(width: number, closed = false): { label: string; detai
       return { label: "closed", detail: " · Pg · ^]" };
     }
     if (width < 56) {
-      return { label: "closed", detail: " · wheel/Pg · ^]" };
+      return { label: "closed", detail: " · scroll · ^]" };
     }
-    return { label: "closed", detail: " · wheel/Pg · ^] logs" };
+    return { label: "closed", detail: " · scroll · ^] logs" };
   }
   if (width < 12) {
     return { label: "nat", detail: " ^]" };
@@ -236,7 +236,7 @@ function nativeInputHints(width: number, closed = false): { label: string; detai
     return { label: "native", detail: " · Pg · ^]" };
   }
   if (width < 56) {
-    return { label: "native", detail: " · wheel/Pg · ^]" };
+    return { label: "native", detail: " · scroll · ^]" };
   }
-  return { label: "native", detail: " · wheel/Pg · ^] logs" };
+  return { label: "native", detail: " · scroll · ^] logs" };
 }

@@ -68,10 +68,10 @@ export function formatWorkerRuntimeStatus(status: RuntimeWorkerStatus): string {
 
 export function formatFooterHelp(mode: FooterHelpMode = "chat"): string {
   if (mode === "native") {
-    return "wheel/Pg · ^] logs";
+    return "scroll · ^] logs";
   }
   if (mode === "worker") {
-    return "wheel/Pg · Tab worker · ^O attach · Esc chat";
+    return "scroll · Tab worker · ^O attach · Esc chat";
   }
   return "^W logs · Tab worker · ^O attach";
 }

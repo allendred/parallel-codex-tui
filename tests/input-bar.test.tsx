@@ -160,8 +160,9 @@ describe("InputBar", () => {
 
     const frame = lastFrame() ?? "";
     expect(frame).toContain("logs");
-    expect(frame).toContain("wheel/Pg");
+    expect(frame).toContain("scroll");
     expect(frame).toContain("^O attach");
+    expect(frame).not.toContain("wheel/Pg");
     expect(frame).not.toContain("read");
     expect(frame).not.toContain("Type a message");
     expect(frame).not.toContain("做个俄罗斯方块");
@@ -173,7 +174,8 @@ describe("InputBar", () => {
     );
 
     const frame = lastFrame() ?? "";
-    expect(frame).toContain("logs · wheel/Pg · Tab · ^O · Esc");
+    expect(frame).toContain("logs · scroll · Tab · ^O · Esc");
+    expect(frame).not.toContain("wheel/Pg");
     expect(frame).not.toContain("attach");
     expect(frame).not.toContain("read");
     expect(frame.split("\n")).toHaveLength(1);
@@ -248,7 +250,8 @@ describe("InputBar", () => {
     );
 
     const frame = lastFrame() ?? "";
-    expect(frame).toContain("native · wheel/Pg · ^]");
+    expect(frame).toContain("native · scroll · ^]");
+    expect(frame).not.toContain("wheel/Pg");
     expect(frame).not.toContain("logs");
     expect(frame).not.toContain("detach");
     expect(frame.split("\n")).toHaveLength(1);
@@ -260,7 +263,8 @@ describe("InputBar", () => {
     );
 
     const frame = lastFrame() ?? "";
-    expect(frame).toContain("native · wheel/Pg · ^] logs");
+    expect(frame).toContain("native · scroll · ^] logs");
+    expect(frame).not.toContain("wheel/Pg");
     expect(frame).not.toContain("detach");
     expect(frame.split("\n")).toHaveLength(1);
     expect(displayWidth(frame)).toBeLessThanOrEqual(80);
@@ -270,7 +274,8 @@ describe("InputBar", () => {
     const roomy = render(
       <InputBar mode="native" value="" nativeClosed terminalWidth={80} onChange={() => {}} />
     );
-    expect(roomy.lastFrame()).toContain("closed · wheel/Pg · ^] logs");
+    expect(roomy.lastFrame()).toContain("closed · scroll · ^] logs");
+    expect(roomy.lastFrame()).not.toContain("wheel/Pg");
     expect(roomy.lastFrame()).not.toContain("back");
     roomy.unmount();
 
@@ -297,7 +302,8 @@ describe("InputBar", () => {
       <InputBar mode="native" value="" nativeClosed terminalWidth={42} onChange={() => {}} />
     );
     const narrowFrame = narrow.lastFrame() ?? "";
-    expect(narrowFrame).toContain("closed · wheel/Pg · ^]");
+    expect(narrowFrame).toContain("closed · scroll · ^]");
+    expect(narrowFrame).not.toContain("wheel/Pg");
     expect(narrowFrame).not.toContain("back");
     expect(displayWidth(narrowFrame)).toBeLessThanOrEqual(42);
     narrow.unmount();

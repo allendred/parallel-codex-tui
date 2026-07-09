@@ -72,7 +72,8 @@ describe("CLI native layout smoke", () => {
       expect(snapshot).toContain("#000000-native-layout");
       expect(snapshot).not.toContain("task 000000-native-layout");
       expect(snapshot).toContain("native line 40");
-      expect(snapshot).toContain("native · wheel/Pg · ^] logs");
+      expect(snapshot).toContain("native · scroll · ^] logs");
+      expect(snapshot).not.toContain("native · wheel/Pg");
       expect(nativeTitleLine?.chunks.some((chunk) => chunk.style.backgroundColor === TUI_THEME_PRESETS.codex.chrome)).toBe(true);
       expect(nativeTitleLine?.chunks.some((chunk) => chunk.style.backgroundColor === TUI_THEME_PRESETS.codex.rail)).toBe(false);
       expect(displayWidth(nativeTitleLineText)).toBe(137);
@@ -132,7 +133,7 @@ describe("CLI native layout smoke", () => {
       child.write("\x0f");
       await waitForText(chunks, "native line 8");
       await waitForScreenText(() => screenWrites, screen, "native line 8");
-      await waitForScreenText(() => screenWrites, screen, "native · wheel/Pg · ^]");
+      await waitForScreenText(() => screenWrites, screen, "native · scroll · ^]");
 
       const snapshot = screen.snapshot();
       const headerRow = snapshot.split("\n")[0] ?? "";
@@ -143,7 +144,8 @@ describe("CLI native layout smoke", () => {
       expect(snapshot).toContain("native-snap");
       expect(snapshot).toContain("...");
       expect(snapshot).toContain("native line 8");
-      expect(snapshot).toContain("native · wheel/Pg · ^]");
+      expect(snapshot).toContain("native · scroll · ^]");
+      expect(snapshot).not.toContain("native · wheel/Pg");
       expect(snapshot).not.toContain("native · ^] logs");
       expect(snapshot).not.toContain("fake-agent.cjs");
       expect(snapshot).not.toContain(`(${nativeSessionId})`);
@@ -197,13 +199,13 @@ describe("CLI native layout smoke", () => {
       child.write("\x0f");
       await waitForText(chunks, "native short line");
       await waitForScreenText(() => screenWrites, screen, "native short line");
-      await waitForScreenText(() => screenWrites, screen, "native · wheel/Pg");
+      await waitForScreenText(() => screenWrites, screen, "native · scroll");
 
       const lines = screen.styledSnapshotLines();
       const nativeTitleLine = lines.find((line) => line.chunks.map((chunk) => chunk.text).join("").includes("native actor/mock"));
       const nativeTitleLineText = nativeTitleLine?.chunks.map((chunk) => chunk.text).join("") ?? "";
       const outputIndex = lines.findIndex((line) => line.chunks.map((chunk) => chunk.text).join("").includes("native short line"));
-      const inputIndex = lines.findIndex((line) => line.chunks.map((chunk) => chunk.text).join("").includes("native · wheel/Pg"));
+      const inputIndex = lines.findIndex((line) => line.chunks.map((chunk) => chunk.text).join("").includes("native · scroll"));
       const blankContentLines = lines.slice(outputIndex + 1, inputIndex).filter((line) => {
         const text = line.chunks.map((chunk) => chunk.text).join("");
         return text.trim().length === 0;
@@ -321,16 +323,17 @@ describe("CLI native layout smoke", () => {
       child.write("\x0f");
       await waitForText(chunks, "process exited · code 7");
       await waitForScreenText(() => screenWrites, screen, "exited 7");
-      await waitForScreenText(() => screenWrites, screen, "closed · wheel/Pg · ^]");
+      await waitForScreenText(() => screenWrites, screen, "closed · scroll · ^]");
 
       const snapshot = screen.snapshot();
       expect(snapshot).toContain("native done");
       expect(snapshot).toContain("process exited · code 7");
       expect(snapshot).toContain("native actor/mock · exited 7");
-      expect(snapshot).toContain("closed · wheel/Pg · ^]");
-      expect(snapshot).not.toContain("closed · wheel/Pg · ^] logs");
-      expect(snapshot).not.toContain("closed · wheel/Pg · ^] back");
-      expect(snapshot).not.toContain("native · wheel/Pg · ^]");
+      expect(snapshot).toContain("closed · scroll · ^]");
+      expect(snapshot).not.toContain("closed · scroll · ^] logs");
+      expect(snapshot).not.toContain("closed · scroll · ^] back");
+      expect(snapshot).not.toContain("native · scroll · ^]");
+      expect(snapshot).not.toContain("wheel/Pg");
     } finally {
       child.write("\x1d");
       child.kill("SIGTERM");

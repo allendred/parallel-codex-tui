@@ -45,7 +45,7 @@ describe("CLI exit shortcuts", () => {
     try {
       await waitForText(chunks, "attach");
       child.write("\x17");
-      await waitForScreenText(() => screenWrites, screen, "logs · wheel/Pg");
+      await waitForScreenText(() => screenWrites, screen, "logs · scroll");
       child.write("\x03");
       await waitForExit(exits);
 
