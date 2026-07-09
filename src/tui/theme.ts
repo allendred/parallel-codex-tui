@@ -114,29 +114,27 @@ export function normalizeTuiThemeColorValue(value: string | null | undefined): s
   if (!color) {
     return null;
   }
-  return isNormalizedTuiThemeColorValue(color) ? color : null;
-}
-
-function isNormalizedTuiThemeColorValue(color: string): boolean {
   if ((foregroundColorNames as readonly string[]).includes(color)) {
-    return true;
+    return color;
   }
 
   if (/^#[0-9a-f]{3}(?:[0-9a-f]{3})?$/i.test(color)) {
-    return true;
+    return color;
   }
 
   const ansiMatch = color.match(/^ansi256\(\s*(\d+)\s*\)$/);
   if (ansiMatch) {
-    return isByteColorValue(ansiMatch[1] ?? "");
+    const value = ansiMatch[1] ?? "";
+    return isByteColorValue(value) ? `ansi256(${value})` : null;
   }
 
   const rgbMatch = color.match(/^rgb\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*\)$/);
   if (rgbMatch) {
-    return [rgbMatch[1], rgbMatch[2], rgbMatch[3]].every((part) => isByteColorValue(part ?? ""));
+    const parts = [rgbMatch[1] ?? "", rgbMatch[2] ?? "", rgbMatch[3] ?? ""];
+    return parts.every(isByteColorValue) ? `rgb(${parts.join(",")})` : null;
   }
 
-  return false;
+  return null;
 }
 
 export function isTuiThemeName(value: string | null | undefined): value is TuiThemeName {

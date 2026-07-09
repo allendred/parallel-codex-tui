@@ -116,7 +116,8 @@ describe("config", () => {
       join(root, ".parallel-codex", "config.toml"),
       [
         "[ui.colors]",
-        'chrome = "  ansi256(238)  "',
+        'chrome = "  ansi256( 238 )  "',
+        'surface = " rgb(22, 27, 34) "',
         'accent = "  magenta  "'
       ].join("\n")
     );
@@ -125,6 +126,7 @@ describe("config", () => {
 
     expect(config.ui.colors).toEqual({
       chrome: "ansi256(238)",
+      surface: "rgb(22,27,34)",
       accent: "magenta"
     });
   });
