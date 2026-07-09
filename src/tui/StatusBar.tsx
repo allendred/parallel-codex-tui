@@ -267,7 +267,7 @@ function statusSegmentDisplay(segment: Segment, compact: boolean): { label: stri
     return { label: "w", separator: "", value: segment.value };
   }
   if (label === "current") {
-    return { label: "@", separator: " ", value: segment.value };
+    return { label: "@", separator: " ", value: workerIdentityRole(segment.value) ?? segment.value };
   }
   if (segment.tone && segment.tone !== "idle") {
     return { label: compactToneLabel(segment.tone), separator: "", value: segment.value };

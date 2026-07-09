@@ -45,10 +45,10 @@ describe("StatusBar", () => {
     expect(frame).toContain("r1");
     expect(frame).toContain("d1");
     expect(frame).toContain("f1");
-    expect(frame).toContain("@ critic/claude");
+    expect(frame).toContain("@ critic");
     expect(frame).not.toContain("workers 3");
     expect(frame).not.toContain("selected critic/claude");
-    expect(frame).toContain("critic/claude");
+    expect(frame).not.toContain("critic/claude");
   });
 
   it("truncates long selected worker labels in narrow terminals", () => {
@@ -96,7 +96,8 @@ describe("StatusBar", () => {
     );
 
     const frame = lastFrame() ?? "";
-    expect(frame).toContain("w4 f1 d3 @ judge/codex");
+    expect(frame).toContain("w4 f1 d3 @ judge");
+    expect(frame).not.toContain("judge/codex");
     expect(frame.split("\n")).toHaveLength(1);
     expect(displayWidth(frame)).toBeLessThanOrEqual(24);
   });
@@ -282,7 +283,8 @@ describe("StatusBar", () => {
     expect(frame).toContain("w3");
     expect(frame).toContain("d1");
     expect(frame).toContain("f1");
-    expect(frame).toContain("@ critic/claude");
+    expect(frame).toContain("@ critic");
+    expect(frame).not.toContain("critic/claude");
     expect(frame).not.toContain("20260702-000000-wheel");
   });
 

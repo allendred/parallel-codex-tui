@@ -585,7 +585,8 @@ describe("CLI worker layout smoke", () => {
       expect(snapshot).toContain("logs · Pg/wheel · Tab · ^O · Esc");
       expect(snapshot).toContain("w1");
       expect(snapshot).toContain("d1");
-      expect(snapshot).toContain("@ critic/mock");
+      expect(snapshot).toContain("@ critic");
+      expect(snapshot).not.toContain("@ critic/mock");
       expect(snapshot).not.toContain("s readscroll");
       expect(snapshot).not.toContain("workers 1");
       expect(snapshot).not.toContain("Type a message");
