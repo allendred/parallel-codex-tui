@@ -196,6 +196,7 @@ describe("CLI native layout smoke", () => {
       child.write("\x0f");
       await waitForText(chunks, "native short line");
       await waitForScreenText(() => screenWrites, screen, "native short line");
+      await waitForScreenText(() => screenWrites, screen, "native · wheel/Pg");
 
       const lines = screen.styledSnapshotLines();
       const nativeTitleLine = lines.find((line) => line.chunks.map((chunk) => chunk.text).join("").includes("native actor/mock"));
@@ -319,6 +320,7 @@ describe("CLI native layout smoke", () => {
       child.write("\x0f");
       await waitForText(chunks, "[process exited with code 7]");
       await waitForScreenText(() => screenWrites, screen, "exit:7");
+      await waitForScreenText(() => screenWrites, screen, "closed · Pg/wheel · ^]");
 
       const snapshot = screen.snapshot();
       expect(snapshot).toContain("native done");

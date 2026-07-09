@@ -35,12 +35,13 @@ describe("CLI worker log scroll smoke", () => {
     child.onData((chunk) => chunks.push(chunk));
     try {
       await waitForText(chunks, "attach");
+      await writeUntilText(child, chunks, "\x1b[<64;10;5M", "tail");
+      let outputCursor = chunks.length;
       child.write("\x1b[<64;10;5M");
-      await waitForText(chunks, "tail");
-      child.write("\x1b[<64;10;5M");
-      await waitForText(chunks, "back 3/");
+      await waitForText(chunks, "back 3/", outputCursor);
+      outputCursor = chunks.length;
       child.write("\x1b[<65;10;5M");
-      await waitForText(chunks, "tail");
+      await waitForText(chunks, "tail", outputCursor);
 
       expect(chunks.join("")).toContain("back 3/");
     } finally {
@@ -76,12 +77,13 @@ describe("CLI worker log scroll smoke", () => {
     child.onData((chunk) => chunks.push(chunk));
     try {
       await waitForText(chunks, "attach");
-      child.write("\x17");
-      await waitForText(chunks, "tail");
+      await writeUntilText(child, chunks, "\x17", "tail");
+      let outputCursor = chunks.length;
       child.write("\x1b[5~");
-      await waitForText(chunks, "back 20/");
+      await waitForText(chunks, "back 20/", outputCursor);
+      outputCursor = chunks.length;
       child.write("\x1b[6~");
-      await waitForText(chunks, "tail");
+      await waitForText(chunks, "tail", outputCursor);
 
       expect(chunks.join("")).toContain("back 20/");
     } finally {
@@ -125,9 +127,28 @@ async function writeTaskFiles(input: {
   );
 }
 
-async function waitForText(chunks: string[], text: string): Promise<void> {
-  for (let attempt = 0; attempt < 120; attempt += 1) {
-    if (chunks.join("").includes(text)) {
+async function writeUntilText(
+  child: { write(input: string): void },
+  chunks: string[],
+  input: string,
+  text: string
+): Promise<void> {
+  const startIndex = chunks.length;
+  for (let attempt = 0; attempt < 20; attempt += 1) {
+    child.write(input);
+    try {
+      await waitForText(chunks, text, startIndex, 6);
+      return;
+    } catch {
+      // Try the shortcut again in case the TUI had not entered raw mode yet.
+    }
+  }
+  await waitForText(chunks, text, startIndex);
+}
+
+async function waitForText(chunks: string[], text: string, startIndex = 0, maxAttempts = 120): Promise<void> {
+  for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+    if (chunks.slice(startIndex).join("").includes(text)) {
       return;
     }
     await new Promise((resolve) => setTimeout(resolve, 50));
