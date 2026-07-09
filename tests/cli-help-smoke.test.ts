@@ -33,7 +33,7 @@ describe("CLI help and version", () => {
     );
 
     expect(stderr).toBe("");
-    expect(stdout.trim()).toBe("parallel-codex-tui 0.1.0");
+    expect(stdout.trim()).toBe("parallel-codex-tui 0.1.1");
   });
 
   it("rejects unknown options before doing other command work", async () => {

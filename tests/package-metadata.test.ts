@@ -134,8 +134,8 @@ describe("package metadata", () => {
     expect(readme).toContain("## Release");
     expect(readme).toContain("GitHub Actions runs CI on pushes and pull requests to `main`");
     expect(readme).toContain("Add an `NPM_TOKEN` repository secret");
-    expect(readme).toContain("git tag v0.1.0");
-    expect(readme).toContain("git push origin v0.1.0");
+    expect(readme).toContain("git tag v0.1.1");
+    expect(readme).toContain("git push origin v0.1.1");
     expect(readme).toContain("The release tag must match `package.json`");
   });
 
