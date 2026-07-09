@@ -21,6 +21,8 @@ describe("TUI theme", () => {
     expect(TUI_THEME_NAMES).toEqual(Object.keys(TUI_THEME_PRESETS));
     expect(Object.isFrozen(TUI_THEME_FIELDS)).toBe(true);
     expect(TUI_THEME_FIELDS).toEqual(Object.keys(TUI_THEME_PRESETS.codex));
+    expect(Object.isFrozen(TUI_THEME_PRESETS)).toBe(true);
+    expect(TUI_THEME_NAMES.every((name) => Object.isFrozen(TUI_THEME_PRESETS[name]))).toBe(true);
     expect(Object.keys(TUI_THEME_PRESETS)).toEqual(["codex", "graphite", "paper"]);
     expect(resolveTuiTheme({ theme: "codex" }).chrome).toBe("ansi256(23)");
     expect(resolveTuiTheme({ theme: "graphite" }).accent).toBe("ansi256(110)");
@@ -43,6 +45,7 @@ describe("TUI theme", () => {
       accent: "magenta",
       text: "black"
     });
+    expect(Object.isFrozen(resolveTuiTheme({ theme: "paper" }))).toBe(true);
   });
 
   it("recognizes the color formats Ink can render", () => {

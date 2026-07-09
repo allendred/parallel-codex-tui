@@ -40,8 +40,8 @@ export type TuiThemeName = typeof TUI_THEME_NAMES[number];
 export type TuiThemeField = typeof TUI_THEME_FIELDS[number];
 export type TuiThemeOverrides = Partial<Record<TuiThemeField, string>>;
 
-export const TUI_THEME_PRESETS: Record<TuiThemeName, TuiTheme> = {
-  codex: {
+export const TUI_THEME_PRESETS: Readonly<Record<TuiThemeName, Readonly<TuiTheme>>> = Object.freeze({
+  codex: freezeTuiTheme({
     chrome: bg("ansi256(23)"),
     surface: bg("ansi256(235)"),
     rail: bg("ansi256(236)"),
@@ -53,8 +53,8 @@ export const TUI_THEME_PRESETS: Record<TuiThemeName, TuiTheme> = {
     warning: fg("ansi256(221)"),
     success: fg("ansi256(114)"),
     danger: fg("ansi256(203)")
-  },
-  graphite: {
+  }),
+  graphite: freezeTuiTheme({
     chrome: bg("ansi256(238)"),
     surface: bg("ansi256(234)"),
     rail: bg("ansi256(236)"),
@@ -66,8 +66,8 @@ export const TUI_THEME_PRESETS: Record<TuiThemeName, TuiTheme> = {
     warning: fg("ansi256(222)"),
     success: fg("ansi256(149)"),
     danger: fg("ansi256(203)")
-  },
-  paper: {
+  }),
+  paper: freezeTuiTheme({
     chrome: bg("ansi256(255)"),
     surface: bg("ansi256(254)"),
     rail: bg("ansi256(250)"),
@@ -79,8 +79,8 @@ export const TUI_THEME_PRESETS: Record<TuiThemeName, TuiTheme> = {
     warning: fg("ansi256(136)"),
     success: fg("green"),
     danger: fg("red")
-  }
-};
+  })
+});
 
 const DEFAULT_TUI_THEME_NAME: TuiThemeName = "codex";
 
@@ -88,10 +88,10 @@ export let TUI_THEME: TuiTheme = TUI_THEME_PRESETS[DEFAULT_TUI_THEME_NAME];
 
 export function resolveTuiTheme(options: { theme?: string; colors?: TuiThemeOverrides } = {}): TuiTheme {
   const name = isTuiThemeName(options.theme) ? options.theme : DEFAULT_TUI_THEME_NAME;
-  return {
+  return freezeTuiTheme({
     ...TUI_THEME_PRESETS[name],
     ...normalizeTuiThemeOverrides(options.colors)
-  };
+  });
 }
 
 export function configureTuiTheme(options: { theme?: string; colors?: TuiThemeOverrides } = {}): TuiTheme {
@@ -156,4 +156,8 @@ function normalizeTuiThemeOverrides(colors: TuiThemeOverrides | undefined): Part
     }
   }
   return normalized;
+}
+
+function freezeTuiTheme(theme: TuiTheme): Readonly<TuiTheme> {
+  return Object.freeze(theme);
 }
