@@ -8,12 +8,20 @@ const execFileAsync = promisify(execFile);
 
 interface PackageJson {
   bin: Record<string, string>;
+  bugs?: {
+    url?: string;
+  };
   description?: string;
   engines?: Record<string, string>;
   files?: string[];
+  homepage?: string;
   keywords?: string[];
   license?: string;
   private?: boolean;
+  repository?: {
+    type?: string;
+    url?: string;
+  };
   scripts?: Record<string, string>;
 }
 
@@ -53,6 +61,12 @@ describe("package metadata", () => {
     expect(pkg.private).not.toBe(true);
     expect(pkg.license).toBe("MIT");
     expect(pkg.description).toContain("parallel coding");
+    expect(pkg.repository).toEqual({
+      type: "git",
+      url: "git+https://github.com/allendred/parallel-codex-tui.git"
+    });
+    expect(pkg.bugs?.url).toBe("https://github.com/allendred/parallel-codex-tui/issues");
+    expect(pkg.homepage).toBe("https://github.com/allendred/parallel-codex-tui#readme");
     expect(pkg.engines?.node).toBe(">=26.0.0");
     expect(pkg.keywords).toEqual([
       "codex",
@@ -133,7 +147,8 @@ describe("package metadata", () => {
     expect(readme).toContain(".parallel-codex/sessions/");
     expect(readme).toContain("## Release");
     expect(readme).toContain("GitHub Actions runs CI on pushes and pull requests to `main`");
-    expect(readme).toContain("Add an `NPM_TOKEN` repository secret");
+    expect(readme).toContain("Configure npm Trusted Publishing");
+    expect(readme).toContain("add an `NPM_TOKEN` repository secret");
     expect(readme).toContain("git tag v0.1.1");
     expect(readme).toContain("git push origin v0.1.1");
     expect(readme).toContain("The release tag must match `package.json`");
@@ -169,6 +184,7 @@ describe("package metadata", () => {
     expect(workflow).toContain("workflow_dispatch:");
     expect(workflow).toContain("tags:");
     expect(workflow).toContain("- \"v*\"");
+    expect(workflow).toContain("id-token: write");
     expect(workflow).toContain('node-version: "26.x"');
     expect(workflow).toContain("npm run typecheck");
     expect(workflow).toContain('CI: "0"');
@@ -178,7 +194,9 @@ describe("package metadata", () => {
     expect(workflow).toContain("npm view \"parallel-codex-tui@$PACKAGE_VERSION\" version --json");
     expect(workflow).toContain('published=$PUBLISHED');
     expect(workflow).toContain("if: steps.npm.outputs.published != 'true'");
-    expect(workflow).toContain("npm publish --access public");
+    expect(workflow).toContain("npm publish --access public --provenance");
+    expect(workflow).toContain("trying npm trusted publishing via GitHub OIDC");
+    expect(workflow).toContain("sed -i '/_authToken/d'");
     expect(workflow).toContain("softprops/action-gh-release@v2");
     expect(workflow).toContain("NPM_TOKEN");
   });

@@ -13,6 +13,7 @@ on:
 
 permissions:
   contents: write
+  id-token: write
 
 jobs:
   publish:
@@ -83,15 +84,21 @@ jobs:
 
           echo "published=$PUBLISHED" >> "$GITHUB_OUTPUT"
 
-      - name: Verify npm token
-        if: steps.npm.outputs.published != 'true'
-        run: test -n "$NODE_AUTH_TOKEN"
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-
       - name: Publish to npm
         if: steps.npm.outputs.published != 'true'
-        run: npm publish --access public
+        shell: bash
+        run: |
+          if [ -n "$NODE_AUTH_TOKEN" ]; then
+            echo "Publishing to npm with NPM_TOKEN."
+          else
+            echo "NPM_TOKEN is not set; trying npm trusted publishing via GitHub OIDC."
+            if [ -n "${NPM_CONFIG_USERCONFIG:-}" ] && [ -f "$NPM_CONFIG_USERCONFIG" ]; then
+              sed -i '/_authToken/d' "$NPM_CONFIG_USERCONFIG"
+            fi
+            unset NODE_AUTH_TOKEN
+          fi
+
+          npm publish --access public --provenance
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 

@@ -4,6 +4,14 @@
   "description": "A TypeScript TUI wrapper for routed parallel coding with Codex and Claude workers.",
   "license": "MIT",
   "type": "module",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/allendred/parallel-codex-tui.git"
+  },
+  "bugs": {
+    "url": "https://github.com/allendred/parallel-codex-tui/issues"
+  },
+  "homepage": "https://github.com/allendred/parallel-codex-tui#readme",
   "keywords": [
     "codex",
     "claude",
