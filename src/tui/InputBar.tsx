@@ -169,7 +169,7 @@ function chatTaskPlaceholderDisplayValue(terminalWidth: number): string {
   if (terminalWidth < 64) {
     return chatInputDisplayValue("Message · ^W logs · ^O attach", terminalWidth);
   }
-  return chatInputDisplayValue("Type a message · ^W logs · ^O attach", terminalWidth);
+  return chatInputDisplayValue("Type a message · ^W logs · Tab worker · ^O attach", terminalWidth);
 }
 
 export function chatBusyDisplayValue(terminalWidth: number): string {
