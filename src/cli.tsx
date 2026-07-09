@@ -9,22 +9,9 @@ import { prepareAppRoot } from "./core/app-root.js";
 import { configPath, withUiThemeOverride, writeDefaultConfig } from "./core/config.js";
 import { pathExists } from "./core/file-store.js";
 import { runDoctor } from "./doctor.js";
+import { helpText } from "./cli-help.js";
 import { App } from "./tui/App.js";
 import { version } from "./version.js";
-
-const helpText = `Usage: parallel-codex-tui [options]
-
-Options:
-  -w, --workspace <path>  Project workspace for worker sessions and edits
-      --app-root <path>   App root for configuration lookup
-  -t, --task <id>         Open an existing task session
-      --theme <name>      Temporarily use a TUI theme: codex, graphite, paper
-      --init              Write .parallel-codex/config.toml if missing
-      --doctor            Check local configuration and agent commands
-  -v, --version           Print the current version
-  -h, --help              Print this help message
-
-Options with values also accept --name=value and -x=value forms.`;
 
 main().catch((error) => {
   process.stderr.write(`${formatStartupError(error)}\n`);
