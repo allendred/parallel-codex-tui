@@ -200,6 +200,43 @@ describe("CLI doctor", () => {
     expect(result.stdout).not.toContain("claude: missing");
   });
 
+  it("reports the loaded TUI theme and color override count", async () => {
+    const appRoot = await mkdtemp(join(tmpdir(), "pct-cli-doctor-theme-"));
+
+    await mkdir(join(appRoot, ".parallel-codex"), { recursive: true });
+    await writeFile(
+      join(appRoot, ".parallel-codex", "config.toml"),
+      [
+        "[router]",
+        'defaultMode = "simple"',
+        "",
+        "[pairing]",
+        'main = "mock"',
+        "",
+        "[ui]",
+        'theme = "  paper  "',
+        "",
+        "[ui.colors]",
+        'accent = " #AABBCC "',
+        'chrome = " ansi256(001) "'
+      ].join("\n"),
+      "utf8"
+    );
+
+    const result = await runCli(["--app-root", appRoot, "--doctor"], {
+      env: {
+        PATH: ""
+      }
+    });
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stderr).toBe("");
+    expect(result.stdout).toContain("config: ok");
+    expect(result.stdout).toContain("theme: ok (paper, 2 color overrides)");
+    expect(result.stdout).not.toContain("codex: missing");
+    expect(result.stdout).not.toContain("claude: missing");
+  });
+
   it("reports missing worker model environment variables before workers start", async () => {
     const root = await mkdtemp(join(tmpdir(), "pct-cli-doctor-model-env-"));
     const binDir = join(root, "bin");

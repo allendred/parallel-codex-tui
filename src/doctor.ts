@@ -43,6 +43,7 @@ export async function runDoctor(appRoot: string, workspaceRoot: string, env: Nod
   try {
     config = await loadConfig(appRoot);
     lines.push(`config: ok (${localConfigPath})`);
+    lines.push(`theme: ok (${config.ui.theme}, ${themeOverrideSummary(config.ui.colors)})`);
   } catch (error) {
     ok = false;
     lines.push(`config: invalid (${localConfigPath}; ${(error as Error).message})`);
@@ -92,6 +93,11 @@ function configuredCommands(config: Awaited<ReturnType<typeof loadConfig>>): str
         .filter((command): command is string => Boolean(command) && command !== "mock")
     )
   );
+}
+
+function themeOverrideSummary(colors: Awaited<ReturnType<typeof loadConfig>>["ui"]["colors"]): string {
+  const count = Object.keys(colors).length;
+  return count === 1 ? "1 color override" : `${count} color overrides`;
 }
 
 function commandForEngine(config: Awaited<ReturnType<typeof loadConfig>>, engine: ConfiguredEngine): string | null {
