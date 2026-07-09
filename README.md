@@ -121,6 +121,12 @@ For quick previews without editing config, pass `--theme codex`, `--theme graphi
 parallel-codex-tui --theme graphite --doctor
 ```
 
+To compare every built-in palette without loading config or starting the TUI:
+
+```bash
+parallel-codex-tui --themes
+```
+
 The doctor output includes `preview:` and `semantic:` ANSI swatch rows so you can see the effective terminal colors before starting a worker session.
 
 ## Behavior

@@ -13,6 +13,7 @@ describe("parseCliArgs", () => {
     expect(parsed.init).toBe(false);
     expect(parsed.taskId).toBeNull();
     expect(parsed.theme).toBeNull();
+    expect(parsed.themes).toBe(false);
     expect(parsed.version).toBe(false);
   });
 
@@ -76,6 +77,15 @@ describe("parseCliArgs", () => {
     const parsed = parseCliArgs(["--doctor", "--workspace", "game"], "/app");
 
     expect(parsed.doctor).toBe(true);
+    expect(parsed.appRoot).toBe("/app");
+    expect(parsed.workspaceRoot).toBe("/app/game");
+    expect(parsed.explicitWorkspace).toBe("game");
+  });
+
+  it("accepts themes without changing workspace parsing", () => {
+    const parsed = parseCliArgs(["--themes", "--workspace", "game"], "/app");
+
+    expect(parsed.themes).toBe(true);
     expect(parsed.appRoot).toBe("/app");
     expect(parsed.workspaceRoot).toBe("/app/game");
     expect(parsed.explicitWorkspace).toBe("game");
@@ -192,6 +202,10 @@ describe("validateCliArgs", () => {
 
   it("validates normalized theme option values", () => {
     expect(validateCliArgs(["--theme", "  graphite  "])).toEqual([]);
+  });
+
+  it("accepts the theme catalog command", () => {
+    expect(validateCliArgs(["--themes"])).toEqual([]);
   });
 
   it("allows positional text after an option terminator", () => {

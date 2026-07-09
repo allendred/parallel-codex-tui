@@ -1,4 +1,4 @@
-import type { TuiTheme } from "./theme.js";
+import { resolveTuiTheme, TUI_THEME_NAMES, type TuiTheme } from "./theme.js";
 
 type AnsiColorMode = "background" | "foreground";
 
@@ -39,6 +39,27 @@ export function formatTuiThemePreview(theme: TuiTheme): string[] {
       themeSwatch("muted", theme.surface, theme.muted)
     ].join(" ")}`
   ];
+}
+
+export function formatTuiThemeCatalog(themeNames: readonly string[] = TUI_THEME_NAMES): string[] {
+  const lines = ["parallel-codex-tui themes"];
+
+  for (const themeName of themeNames) {
+    const theme = resolveTuiTheme({ theme: themeName });
+    lines.push(`${themeName}: ${formatTuiThemePalette(theme)}`);
+    lines.push(...formatTuiThemePreview(theme).map((line) => `  ${line}`));
+  }
+
+  return lines;
+}
+
+export function formatTuiThemePalette(theme: TuiTheme): string {
+  return [
+    `chrome=${theme.chrome}`,
+    `surface=${theme.surface}`,
+    `rail=${theme.rail}`,
+    `accent=${theme.accent}`
+  ].join(", ");
 }
 
 function themeSwatch(label: string, backgroundColor: string, foregroundColor: string): string {

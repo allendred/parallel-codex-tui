@@ -11,11 +11,12 @@ export interface CliArgs {
   workspaceRoot: string;
   taskId: string | null;
   theme: TuiThemeName | null;
+  themes: boolean;
   version: boolean;
 }
 
 const allowedValueOptions = new Set(["--app-root", "--workspace", "-w", "--task", "-t", "--theme"]);
-const allowedBooleanOptions = new Set(["--doctor", "--help", "-h", "--init", "--version", "-v"]);
+const allowedBooleanOptions = new Set(["--doctor", "--help", "-h", "--init", "--themes", "--version", "-v"]);
 
 export function parseCliArgs(args: string[], cwd: string): CliArgs {
   const optionArgs = argsBeforeTerminator(args);
@@ -35,6 +36,7 @@ export function parseCliArgs(args: string[], cwd: string): CliArgs {
   const doctor = optionArgs.includes("--doctor");
   const help = optionArgs.includes("--help") || optionArgs.includes("-h");
   const init = optionArgs.includes("--init");
+  const themes = optionArgs.includes("--themes");
   const version = optionArgs.includes("--version") || optionArgs.includes("-v");
   const appRootValue = flagValue(optionArgs, appRootFlagIndex);
   const appRoot = appRootValue ? resolvePathArg(cwd, appRootValue) : cwd;
@@ -52,6 +54,7 @@ export function parseCliArgs(args: string[], cwd: string): CliArgs {
     workspaceRoot,
     taskId,
     theme,
+    themes,
     version
   };
 }

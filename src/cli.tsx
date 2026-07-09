@@ -12,6 +12,7 @@ import { pathExists } from "./core/file-store.js";
 import { runDoctor } from "./doctor.js";
 import { helpText } from "./cli-help.js";
 import { App } from "./tui/App.js";
+import { formatTuiThemeCatalog } from "./tui/theme-preview.js";
 import { version } from "./version.js";
 
 main().catch((error) => {
@@ -28,7 +29,7 @@ async function main(): Promise<void> {
   }
 
   const cliArgs = parseCliArgs(rawArgs, process.cwd());
-  if (!cliArgs.help && !cliArgs.version) {
+  if (!cliArgs.help && !cliArgs.themes && !cliArgs.version) {
     await prepareAppRoot(cliArgs.appRoot);
   }
   const localConfigPath = configPath(cliArgs.appRoot);
@@ -37,6 +38,8 @@ async function main(): Promise<void> {
     console.log(helpText);
   } else if (cliArgs.version) {
     console.log(`parallel-codex-tui ${version}`);
+  } else if (cliArgs.themes) {
+    console.log(formatTuiThemeCatalog().join("\n"));
   } else if (cliArgs.doctor) {
     const workspaceRoot = await selectWorkspaceForCli({
       appRoot: cliArgs.appRoot,
