@@ -130,8 +130,8 @@ describe("ChatView", () => {
   });
 
   it("computes themed trailing fill for compact empty chat state rows", () => {
-    expect(chatEmptyStateTrailingFillWidth("/workspace/tetris", "task-20260630-093326-1980", 40)).toBe(10);
-    expect(chatEmptyStateTrailingFillWidth("/workspace/tetris", null, 40)).toBe(24);
+    expect(chatEmptyStateTrailingFillWidth("/workspace/tetris", "task-20260630-093326-1980", 40)).toBe(33);
+    expect(chatEmptyStateTrailingFillWidth("/workspace/tetris", null, 40)).toBe(33);
     expect(chatEmptyStateTrailingFillWidth("/tmp/并行编码终端超级长项目名称测试", "task-20260705-中文任务后缀超级长", 24)).toBe(1);
     expect(chatEmptyStateTrailingFillWidth("/workspace/tetris", null, 10)).toBe(2);
   });
@@ -180,7 +180,9 @@ describe("ChatView", () => {
 
     const frame = lastFrame() ?? "";
 
-    expect(frame).toContain("ready · tetris · 093326-1980");
+    expect(frame).toContain("ready");
+    expect(frame).not.toContain("ready · tetris");
+    expect(frame).not.toContain("093326-1980");
     expect(frame).not.toContain("ws · tetris");
     expect(frame).not.toContain("task · 093326-1980");
     expect(frame).not.toContain("Ready");
@@ -206,7 +208,7 @@ describe("ChatView", () => {
 
     expect(lines).toHaveLength(6);
     expect(lines.slice(0, 5).every((line) => line.trim() === "")).toBe(true);
-    expect(lines[5]).toBe("ready · tetris · 093326-1980");
+    expect(lines[5]).toBe("ready");
   });
 
   it("bottom-aligns real chat messages when a viewport height is provided", () => {
@@ -241,7 +243,8 @@ describe("ChatView", () => {
     );
 
     const frame = lastFrame() ?? "";
-    expect(frame).toContain("ready · tetris");
+    expect(frame).toContain("ready");
+    expect(frame).not.toContain("ready · tetris");
     expect(frame).not.toContain("Ready");
     expect(frame).not.toContain("workspace tetris");
     expect(frame).not.toContain("task");

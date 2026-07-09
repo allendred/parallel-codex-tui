@@ -894,6 +894,9 @@ function chatEmptyStateDisplayLine(cwd: string, activeTaskId: string | null, con
   if (contentWidth < 14) {
     return compactChatText(project || task || "ready", contentWidth);
   }
+  if (contentWidth >= 38) {
+    return "ready";
+  }
   const roomyPrefix = task ? `ready · ${project} · ` : "ready · ";
   const roomyValue = task || project;
   const roomy = `${roomyPrefix}${compactChatText(roomyValue, Math.max(1, contentWidth - displayWidth(roomyPrefix)))}`;

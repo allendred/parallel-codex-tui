@@ -27,44 +27,44 @@ describe("TUI theme", () => {
     expect(TUI_THEME_NAMES.every((name) => Object.isFrozen(TUI_THEME_PRESETS[name]))).toBe(true);
     expect(Object.keys(TUI_THEME_PRESETS)).toEqual(["codex", "graphite", "paper", "aurora", "studio"]);
     expect(resolveTuiTheme({ theme: "codex" })).toMatchObject({
-      chrome: "ansi256(234)",
+      chrome: "ansi256(17)",
       surface: "ansi256(235)",
-      rail: "ansi256(237)",
+      rail: "ansi256(236)",
       text: "ansi256(255)",
-      muted: "ansi256(250)",
-      accent: "ansi256(81)"
+      muted: "ansi256(247)",
+      accent: "ansi256(117)"
     });
     expect(resolveTuiTheme({ theme: "graphite" })).toMatchObject({
       chrome: "ansi256(236)",
       surface: "ansi256(233)",
       rail: "ansi256(238)",
       text: "ansi256(255)",
-      muted: "ansi256(248)",
-      accent: "ansi256(75)"
+      muted: "ansi256(246)",
+      accent: "ansi256(110)"
     });
     expect(resolveTuiTheme({ theme: "paper" })).toMatchObject({
       chrome: "ansi256(254)",
       surface: "ansi256(231)",
       rail: "ansi256(255)",
       text: "ansi256(235)",
-      muted: "ansi256(244)",
-      accent: "ansi256(25)"
+      muted: "ansi256(242)",
+      accent: "ansi256(31)"
     });
     expect(resolveTuiTheme({ theme: "aurora" })).toMatchObject({
       chrome: "ansi256(24)",
       surface: "ansi256(233)",
-      rail: "ansi256(236)",
+      rail: "ansi256(30)",
       text: "ansi256(255)",
-      muted: "ansi256(250)",
-      accent: "ansi256(122)"
+      muted: "ansi256(109)",
+      accent: "ansi256(159)"
     });
     expect(resolveTuiTheme({ theme: "studio" })).toMatchObject({
-      chrome: "ansi256(238)",
+      chrome: "ansi256(236)",
       surface: "ansi256(235)",
-      rail: "ansi256(236)",
+      rail: "ansi256(238)",
       text: "ansi256(254)",
-      muted: "ansi256(247)",
-      accent: "ansi256(110)"
+      muted: "ansi256(248)",
+      accent: "ansi256(147)"
     });
   });
 
@@ -72,35 +72,35 @@ describe("TUI theme", () => {
     expect(resolveTuiTheme({ theme: "codex" })).toMatchObject({
       successSurface: "ansi256(22)",
       dangerSurface: "ansi256(52)",
-      warning: "ansi256(222)",
-      success: "ansi256(120)",
+      warning: "ansi256(215)",
+      success: "ansi256(114)",
       danger: "ansi256(203)"
     });
     expect(resolveTuiTheme({ theme: "graphite" })).toMatchObject({
       successSurface: "ansi256(22)",
       dangerSurface: "ansi256(52)",
-      warning: "ansi256(221)",
+      warning: "ansi256(214)",
       success: "ansi256(150)",
-      danger: "ansi256(203)"
+      danger: "ansi256(210)"
     });
     expect(resolveTuiTheme({ theme: "paper" })).toMatchObject({
       successSurface: "ansi256(194)",
       dangerSurface: "ansi256(224)",
-      warning: "ansi256(130)",
+      warning: "ansi256(136)",
       success: "ansi256(28)",
       danger: "ansi256(160)"
     });
     expect(resolveTuiTheme({ theme: "aurora" })).toMatchObject({
       successSurface: "ansi256(29)",
       dangerSurface: "ansi256(52)",
-      warning: "ansi256(221)",
+      warning: "ansi256(222)",
       success: "ansi256(121)",
       danger: "ansi256(210)"
     });
     expect(resolveTuiTheme({ theme: "studio" })).toMatchObject({
       successSurface: "ansi256(22)",
       dangerSurface: "ansi256(52)",
-      warning: "ansi256(214)",
+      warning: "ansi256(215)",
       success: "ansi256(151)",
       danger: "ansi256(210)"
     });
