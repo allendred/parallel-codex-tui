@@ -274,6 +274,60 @@ describe("CLI worker layout smoke", () => {
     }
   }, 10000);
 
+  it("fills short worker code block rows with the themed rail", async () => {
+    const workspace = await mkdtemp(join(tmpdir(), "pct-cli-worker-code-fill-"));
+    const taskId = "task-20260705-000000-code-fill";
+    const taskDir = join(workspace, ".parallel-codex", "sessions", taskId);
+    const workerDir = join(taskDir, "actor-mock");
+    const chunks: string[] = [];
+    const screen = new NativeTerminalScreen({ cols: 80, rows: 18, scrollback: 1000 });
+    let screenWrites = Promise.resolve();
+
+    await mkdir(workerDir, { recursive: true });
+    await writeActorCodeBlockTaskFiles({ workspace, taskId, taskDir, workerDir });
+
+    const child = spawn(
+      process.execPath,
+      ["./node_modules/.bin/tsx", "src/cli.tsx", "--workspace", workspace, "--task", taskId],
+      {
+        cwd: process.cwd(),
+        cols: 80,
+        rows: 18,
+        name: "xterm-256color",
+        env: {
+          ...process.env,
+          TERM: "xterm-256color"
+        }
+      }
+    );
+
+    child.onData((chunk) => {
+      chunks.push(chunk);
+      screenWrites = screenWrites.then(() => screen.write(chunk));
+    });
+
+    try {
+      await waitForText(chunks, "ready");
+      await waitForScreenText(() => screenWrites, screen, "^W logs");
+      child.write("\x17");
+      await waitForScreenText(() => screenWrites, screen, "const x = 1");
+      await screenWrites;
+
+      const lines = screen.styledSnapshotLines();
+      const workerTitleLine = lines.find((line) => line.chunks.map((chunk) => chunk.text).join("").includes("actor/mock · 1/1"));
+      const workerTitleLineText = workerTitleLine?.chunks.map((chunk) => chunk.text).join("") ?? "";
+      const codeLine = lines.find((line) => line.chunks.map((chunk) => chunk.text).join("").includes("| const x = 1"));
+      const codeLineText = codeLine?.chunks.map((chunk) => chunk.text).join("") ?? "";
+      const codeBodyChunks = codeLine?.chunks.filter((chunk) => chunk.text.trim().length > 0 || chunk.style.backgroundColor === TUI_THEME_PRESETS.codex.rail) ?? [];
+
+      expect(codeLineText).toContain("| const x = 1");
+      expect(displayWidth(codeLineText)).toBe(displayWidth(workerTitleLineText));
+      expect(codeBodyChunks.every((chunk) => chunk.style.backgroundColor === TUI_THEME_PRESETS.codex.rail)).toBe(true);
+    } finally {
+      child.kill("SIGTERM");
+    }
+  }, 10000);
+
   it("keeps worker controls on one line in a compact terminal", async () => {
     const workspace = await mkdtemp(join(tmpdir(), "pct-cli-worker-compact-layout-"));
     const taskId = "task-20260705-000000-compact-layout";
@@ -593,6 +647,48 @@ async function writeUltraNarrowVerificationTaskFiles(input: {
   await writeFile(
     join(input.workerDir, "worklog.md"),
     "Verification: unit 18/18 · tests 30/30 · smoke passed · build passed · dev fallback\n"
+  );
+  await writeFile(join(input.workerDir, "output.log"), "");
+}
+
+async function writeActorCodeBlockTaskFiles(input: {
+  workspace: string;
+  taskId: string;
+  taskDir: string;
+  workerDir: string;
+}): Promise<void> {
+  await writeJson(
+    join(input.taskDir, "meta.json"),
+    TaskMetaSchema.parse({
+      id: input.taskId,
+      title: "worker code fill smoke",
+      created_at: "2026-07-05T00:00:00.000Z",
+      cwd: input.workspace,
+      mode: "complex",
+      status: "done"
+    })
+  );
+  await writeJson(
+    join(input.workerDir, "status.json"),
+    WorkerStatusSchema.parse({
+      worker_id: "actor-mock",
+      role: "actor",
+      engine: "mock",
+      state: "done",
+      phase: "process-exited",
+      last_event_at: "2026-07-05T00:00:00.000Z",
+      summary: "ready"
+    })
+  );
+  await writeFile(
+    join(input.workerDir, "worklog.md"),
+    [
+      "# Worklog",
+      "",
+      "```ts",
+      "const x = 1;",
+      "```"
+    ].join("\n")
   );
   await writeFile(join(input.workerDir, "output.log"), "");
 }

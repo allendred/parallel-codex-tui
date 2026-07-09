@@ -4301,6 +4301,7 @@ function WorkerOutputLine({ line, width }: { line: DisplayLine; width: number })
       <Box>
         <WorkerOutputIndent backgroundColor={fillBackground} />
         <Text {...theme} wrap="wrap">{line.text || " "}</Text>
+        <WorkerOutputTrailingFill backgroundColor={fillBackground} width={width} usedWidth={2 + displayWidth(line.text || " ")} />
       </Box>
     );
   }
