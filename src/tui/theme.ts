@@ -21,10 +21,10 @@ export interface TuiTheme {
   danger: InkColor;
 }
 
-export type TuiThemeName = "codex" | "graphite" | "paper";
-export type TuiThemeOverrides = Partial<Record<keyof TuiTheme, string>>;
+export const TUI_THEME_NAMES = Object.freeze(["codex", "graphite", "paper"] as const);
 
-export const TUI_THEME_NAMES: TuiThemeName[] = ["codex", "graphite", "paper"];
+export type TuiThemeName = typeof TUI_THEME_NAMES[number];
+export type TuiThemeOverrides = Partial<Record<keyof TuiTheme, string>>;
 
 export const TUI_THEME_PRESETS: Record<TuiThemeName, TuiTheme> = {
   codex: {
@@ -130,7 +130,7 @@ export function isTuiThemeColorValue(value: string): boolean {
   return false;
 }
 
-function isTuiThemeName(value: string | undefined): value is TuiThemeName {
+export function isTuiThemeName(value: string | null | undefined): value is TuiThemeName {
   return TUI_THEME_NAMES.includes(value as TuiThemeName);
 }
 

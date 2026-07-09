@@ -2,7 +2,7 @@ import { parse, stringify } from "@iarna/toml";
 import { join } from "node:path";
 import { z } from "zod";
 import { pathExists, readTextIfExists, writeText } from "./file-store.js";
-import { isTuiThemeColorValue } from "../tui/theme.js";
+import { isTuiThemeColorValue, TUI_THEME_NAMES } from "../tui/theme.js";
 
 const NativeSessionConfigSchema = z.object({
   enabled: z.boolean().default(true),
@@ -56,7 +56,7 @@ const CodexRouterConfigSchema = z.object({
 const UiConfigSchema = z.object({
   showStatusBar: z.boolean(),
   autoOpenFailedWorker: z.boolean(),
-  theme: z.enum(["codex", "graphite", "paper"]).default("codex"),
+  theme: z.enum(TUI_THEME_NAMES).default("codex"),
   colors: UiColorOverridesSchema
 }).strict();
 

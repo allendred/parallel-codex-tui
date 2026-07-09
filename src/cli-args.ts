@@ -1,6 +1,6 @@
 import { resolve } from "node:path";
 import { homedir } from "node:os";
-import { TUI_THEME_NAMES, type TuiThemeName } from "./tui/theme.js";
+import { isTuiThemeName, TUI_THEME_NAMES, type TuiThemeName } from "./tui/theme.js";
 
 export interface CliArgs {
   appRoot: string;
@@ -91,7 +91,7 @@ export function validateCliArgs(args: string[]): string[] {
 
   const themeFlagIndex = lastFlagIndex(optionArgs, (arg) => arg === "--theme" || arg.startsWith("--theme="));
   const themeValue = flagValue(optionArgs, themeFlagIndex);
-  if (themeValue && !isCliThemeName(themeValue)) {
+  if (themeValue && !isTuiThemeName(themeValue)) {
     errors.push(`Invalid --theme: ${themeValue} (expected ${TUI_THEME_NAMES.join(", ")})`);
   }
   return errors;
@@ -123,9 +123,5 @@ function flagValue(args: string[], flagIndex: number): string | null {
 }
 
 function cliThemeValue(value: string | null): TuiThemeName | null {
-  return isCliThemeName(value) ? value : null;
-}
-
-function isCliThemeName(value: string | null): value is TuiThemeName {
-  return TUI_THEME_NAMES.includes(value as TuiThemeName);
+  return isTuiThemeName(value) ? value : null;
 }
