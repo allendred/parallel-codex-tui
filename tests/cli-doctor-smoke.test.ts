@@ -66,6 +66,7 @@ describe("CLI doctor", () => {
     expect(result.stdout).toContain("Node.js: ok");
     expect(result.stdout).toContain("workspace: ok");
     expect(result.stdout).toContain("config: ok");
+    expect(result.stdout).toContain("theme: ok (codex; no color overrides)");
     expect(result.stdout).toContain("codex: ok");
     expect(result.stdout).toContain("claude: ok");
     await expect(pathExists(workspace)).resolves.toBe(true);
@@ -200,7 +201,7 @@ describe("CLI doctor", () => {
     expect(result.stdout).not.toContain("claude: missing");
   });
 
-  it("reports the loaded TUI theme and color override count", async () => {
+  it("reports the loaded TUI theme and normalized color overrides", async () => {
     const appRoot = await mkdtemp(join(tmpdir(), "pct-cli-doctor-theme-"));
 
     await mkdir(join(appRoot, ".parallel-codex"), { recursive: true });
@@ -232,7 +233,7 @@ describe("CLI doctor", () => {
     expect(result.exitCode).toBe(0);
     expect(result.stderr).toBe("");
     expect(result.stdout).toContain("config: ok");
-    expect(result.stdout).toContain("theme: ok (paper, 2 color overrides)");
+    expect(result.stdout).toContain("theme: ok (paper; colors: accent=#aabbcc, chrome=ansi256(1))");
     expect(result.stdout).not.toContain("codex: missing");
     expect(result.stdout).not.toContain("claude: missing");
   });
