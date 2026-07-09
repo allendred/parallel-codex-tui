@@ -16,19 +16,22 @@ describe("StatusBar", () => {
     const frame = lastFrame() ?? "";
 
     expect(frame).not.toContain("20260702-000000-wheel");
-    expect(frame).toContain("workers 3");
-    expect(frame).toContain("run 1");
-    expect(frame).toContain("done 1");
-    expect(frame).toContain("fail 1");
+    expect(frame).toContain("3 workers");
+    expect(frame).toContain("1 running");
+    expect(frame).toContain("1 done");
+    expect(frame).toContain("1 failed");
     expect(frame).toContain("@ critic/claude");
+    expect(frame).not.toContain("workers 3");
+    expect(frame).not.toContain("run 1");
+    expect(frame).not.toContain("fail 1");
     expect(frame).not.toContain("selected critic/claude");
     expect(frame).not.toContain("current critic/claude");
     expect(frame).not.toContain("w3");
     expect(frame).not.toContain("r1");
     expect(frame).not.toContain("d1");
     expect(frame).not.toContain("f1");
-    expect(frame.indexOf("fail 1")).toBeLessThan(frame.indexOf("run 1"));
-    expect(frame.indexOf("fail 1")).toBeLessThan(frame.indexOf("done 1"));
+    expect(frame.indexOf("1 failed")).toBeLessThan(frame.indexOf("1 running"));
+    expect(frame.indexOf("1 failed")).toBeLessThan(frame.indexOf("1 done"));
   });
 
   it("keeps status segments compact in narrow terminals", () => {
@@ -220,9 +223,9 @@ describe("StatusBar", () => {
     );
 
     const frame = lastFrame() ?? "";
-    expect(frame).toContain("workers 4");
-    expect(frame).toContain("fail 1");
-    expect(frame).toContain("done 3");
+    expect(frame).toContain("4 workers");
+    expect(frame).toContain("1 failed");
+    expect(frame).toContain("3 done");
     expect(frame).toContain("@ actor/codex");
     expect(frame).not.toContain("w4");
     expect(frame).not.toContain("f1");
@@ -254,8 +257,8 @@ describe("StatusBar", () => {
     const frame = lastFrame() ?? "";
 
     expect(frame).toContain("20260702-000000-wheel");
-    expect(frame).toContain("workers 3");
-    expect(frame).toContain("done 3");
+    expect(frame).toContain("3 workers");
+    expect(frame).toContain("3 done");
     expect(frame).not.toContain("w3");
     expect(frame).not.toContain("d3");
   });

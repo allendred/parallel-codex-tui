@@ -258,6 +258,12 @@ function statusSegmentDisplay(segment: Segment, compact: boolean): { label: stri
     if (label === "current") {
       return { label: "@", separator: " ", value: segment.value };
     }
+    if (label === "workers") {
+      return { label: "", separator: "", value: workerCountDisplay(segment.value) };
+    }
+    if (segment.tone && segment.tone !== "idle" && label === segment.tone) {
+      return { label: "", separator: "", value: statusCountDisplay(segment.tone, segment.value) };
+    }
     if (segment.tone && segment.tone !== "idle") {
       return { label: segment.tone, separator: " ", value: segment.value };
     }
@@ -286,6 +292,23 @@ function compactToneLabel(tone: Exclude<StatusTone, "idle">): string {
     return "f";
   }
   return "w";
+}
+
+function workerCountDisplay(value: string): string {
+  return `${value} ${value === "1" ? "worker" : "workers"}`;
+}
+
+function statusCountDisplay(tone: Exclude<StatusTone, "idle">, value: string): string {
+  if (tone === "run") {
+    return `${value} running`;
+  }
+  if (tone === "fail") {
+    return `${value} failed`;
+  }
+  if (tone === "wait") {
+    return `${value} waiting`;
+  }
+  return `${value} done`;
 }
 
 function isRoleStatusLabel(label: string): boolean {

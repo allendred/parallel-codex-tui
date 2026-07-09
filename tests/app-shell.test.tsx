@@ -122,7 +122,7 @@ describe("AppShell", () => {
     expect(frame).not.toContain("> Critic/mock");
     expect(frame).toContain("Role artifacts");
     expect(frame).toContain("Input area");
-    expect(frame).toContain("workers 2");
+    expect(frame).toContain("2 workers");
     expect(frame).toContain("@ critic/mock");
     expect(frame).toContain("critic/mock");
     expect(frame).not.toContain("w2");
@@ -170,7 +170,7 @@ describe("AppShell", () => {
     expect(frame).toContain("parallel-codex-tui");
     expect(frame).toContain("Role artifacts");
     expect(frame).toContain("Input area");
-    expect(frame).not.toContain("workers 2");
+    expect(frame).not.toContain("2 workers");
     expect(frame).not.toContain("@ critic/mock");
   });
 
