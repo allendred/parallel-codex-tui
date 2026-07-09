@@ -115,7 +115,7 @@ describe("CLI worker layout smoke", () => {
       const statusLineText = statusLine?.chunks.map((chunk) => chunk.text).join("") ?? "";
       const inputLine = screen
         .styledSnapshotLines()
-        .find((line) => line.chunks.map((chunk) => chunk.text).join("").includes("logs · read"));
+        .find((line) => line.chunks.map((chunk) => chunk.text).join("").includes("logs · wheel/Pg"));
       const inputLineText = inputLine?.chunks.map((chunk) => chunk.text).join("") ?? "";
       expect(snapshot).toContain("parallel-codex-tui");
       expect(snapshot).toContain("logs");
@@ -127,7 +127,8 @@ describe("CLI worker layout smoke", () => {
       expect(workerTitleContentChunks.some((chunk) => chunk.style.backgroundColor === TUI_THEME_PRESETS.codex.surface)).toBe(false);
       expect(displayWidth(workerTitleLineText)).toBe(137);
       expect(snapshot).toContain("line 80");
-      expect(snapshot).toContain("logs · read");
+      expect(snapshot).toContain("logs · wheel/Pg");
+      expect(snapshot).not.toContain("logs · read");
       expect(snapshot).toContain("^O attach");
       expect(inputLine?.chunks.some((chunk) => chunk.style.backgroundColor === TUI_THEME_PRESETS.codex.rail)).toBe(true);
       expect(displayWidth(inputLineText)).toBe(139);
@@ -202,12 +203,13 @@ describe("CLI worker layout smoke", () => {
       await waitForText(chunks, "ready");
       await waitForScreenText(() => screenWrites, screen, "^W logs");
       child.write("\x17");
-      await waitForScreenText(() => screenWrites, screen, "logs · read");
+      await waitForScreenText(() => screenWrites, screen, "logs · wheel/Pg");
       await screenWrites;
 
       const snapshot = screen.snapshot();
       expect(snapshot).toContain("critic/mock · 1/1");
-      expect(snapshot).toContain("logs · read");
+      expect(snapshot).toContain("logs · wheel/Pg");
+      expect(snapshot).not.toContain("logs · read");
       expect(snapshot).not.toContain("workers 1");
       expect(snapshot).not.toContain("done 1");
       expect(snapshot).not.toContain("@ critic/mock");
@@ -258,7 +260,7 @@ describe("CLI worker layout smoke", () => {
       const lines = screen.styledSnapshotLines();
       const headerLine = lines.find((line) => line.chunks.map((chunk) => chunk.text).join("").includes("parallel-codex-tui"));
       const workerTitleLine = lines.find((line) => line.chunks.map((chunk) => chunk.text).join("").includes("critic/mock · 1/1"));
-      const inputLine = lines.find((line) => line.chunks.map((chunk) => chunk.text).join("").includes("logs · read"));
+      const inputLine = lines.find((line) => line.chunks.map((chunk) => chunk.text).join("").includes("logs · wheel/Pg"));
       const statusLine = lines.find((line) => line.chunks.map((chunk) => chunk.text).join("").includes("workers 1"));
 
       expect(headerLine?.chunks.some((chunk) => chunk.style.backgroundColor === TUI_THEME_PRESETS.paper.chrome)).toBe(true);
@@ -266,7 +268,7 @@ describe("CLI worker layout smoke", () => {
       expect(inputLine?.chunks.some((chunk) => chunk.style.backgroundColor === TUI_THEME_PRESETS.paper.rail)).toBe(true);
       expect(statusLine?.chunks.some((chunk) => chunk.style.backgroundColor === TUI_THEME_PRESETS.paper.rail)).toBe(true);
       expect(headerLine?.chunks.some((chunk) => chunk.text.includes("^C") && chunk.style.color === TUI_THEME_PRESETS.paper.muted)).toBe(true);
-      expect(inputLine?.chunks.some((chunk) => chunk.text.includes("read") && chunk.style.color === TUI_THEME_PRESETS.paper.muted)).toBe(true);
+      expect(inputLine?.chunks.some((chunk) => chunk.text.includes("wheel/Pg") && chunk.style.color === TUI_THEME_PRESETS.paper.muted)).toBe(true);
       expect(statusLine?.chunks.some((chunk) => chunk.text === "1" && chunk.style.color === TUI_THEME_PRESETS.paper.text)).toBe(true);
       expect(headerLine?.chunks.some((chunk) => chunk.style.backgroundColor === TUI_THEME_PRESETS.codex.chrome)).toBe(false);
     } finally {

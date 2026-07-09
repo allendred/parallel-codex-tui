@@ -160,8 +160,9 @@ describe("InputBar", () => {
 
     const frame = lastFrame() ?? "";
     expect(frame).toContain("logs");
-    expect(frame).toContain("read");
+    expect(frame).toContain("wheel/Pg");
     expect(frame).toContain("^O attach");
+    expect(frame).not.toContain("read");
     expect(frame).not.toContain("Type a message");
     expect(frame).not.toContain("做个俄罗斯方块");
   });

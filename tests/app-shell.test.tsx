@@ -299,7 +299,7 @@ describe("AppShell", () => {
         taskId="task-20260705-000000-tiny"
         statusText="workers 1 | done 1 | critic/mock done"
         terminalWidth={16}
-        input={<TextLine text="logs · read" />}
+        input={<TextLine text="logs · wheel/Pg" />}
       >
         <TextLine text="critic 1/1" />
       </AppShell>
@@ -469,7 +469,7 @@ describe("AppShell", () => {
         taskId="task-20260705-中文任务后缀超级长超级长超级长"
         statusText="workers 1 | done 1 | actor/codex done"
         terminalWidth={42}
-        input={<TextLine text="logs · read" />}
+        input={<TextLine text="logs · wheel/Pg" />}
       >
         <TextLine text="Worker output" />
       </AppShell>

@@ -204,7 +204,7 @@ function workerInputHints(width: number): { label: string; detail: string } {
   if (width < 72) {
     return { label: "logs", detail: " · wheel/Pg · Tab · ^O · Esc" };
   }
-  return { label: "logs", detail: " · read · wheel/Pg · Tab worker · ^O attach · Esc chat" };
+  return { label: "logs", detail: " · wheel/Pg · Tab worker · ^O attach · Esc chat" };
 }
 
 function nativeInputHints(width: number, closed = false): { label: string; detail: string } {
