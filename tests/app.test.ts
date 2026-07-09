@@ -1,7 +1,7 @@
 import React from "react";
 import { render } from "ink-testing-library";
 import { afterEach, describe, expect, it } from "vitest";
-import { appContentHeight, chatEmptyStateTheme, chatLineTheme, chatMessageDisplayLines, chatViewportBlankLineTheme, ChatView, nativeAttachExitLine, nativeAttachStartingTheme, nativeAttachTerminalColumns, nativeAttachTitleDisplay, nativeTerminalScrollDisplay } from "../src/tui/App.js";
+import { appContentHeight, chatEmptyStateTheme, chatLineTheme, chatLineTrailingFillWidth, chatMessageDisplayLines, chatViewportBlankLineTheme, ChatView, nativeAttachExitLine, nativeAttachStartingTheme, nativeAttachTerminalColumns, nativeAttachTitleDisplay, nativeTerminalScrollDisplay } from "../src/tui/App.js";
 import { displayWidth } from "../src/tui/display-width.js";
 import { configureTuiTheme, resetTuiTheme, TUI_THEME_PRESETS } from "../src/tui/theme.js";
 
@@ -143,6 +143,13 @@ describe("ChatView", () => {
       color: TUI_THEME_PRESETS.paper.muted,
       dimColor: true
     });
+  });
+
+  it("computes themed trailing fill for short chat message rows by display width", () => {
+    expect(chatLineTrailingFillWidth({ from: "user", text: "> hi", continuation: false }, 12)).toBe(6);
+    expect(chatLineTrailingFillWidth({ from: "system", text: "你好", continuation: false }, 12)).toBe(6);
+    expect(chatLineTrailingFillWidth({ from: "system", text: "already wide", continuation: false }, 12)).toBe(0);
+    expect(chatLineTrailingFillWidth({ from: "system", text: "", continuation: false }, 12)).toBe(9);
   });
 
   it("renders a compact empty state instead of startup-log prose", () => {

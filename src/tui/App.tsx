@@ -664,12 +664,7 @@ export function ChatView({
     <Box flexDirection="column" height={height}>
       <ChatViewportSpacerLines count={spacerLines} terminalWidth={terminalWidth} />
       {lines.map((line, index) => (
-        <Text
-          key={`${line.from}-${index}`}
-          {...chatLineTheme(line)}
-        >
-          {line.text || " "}
-        </Text>
+        <ChatLine key={`${line.from}-${index}`} line={line} terminalWidth={terminalWidth} />
       ))}
     </Box>
   );
@@ -685,8 +680,12 @@ export function chatLineTheme(line: ChatDisplayLine): ChatLineTheme {
   return { backgroundColor: TUI_THEME.surface, color: TUI_THEME.text };
 }
 
+export function chatLineTrailingFillWidth(line: ChatDisplayLine, terminalWidth: number): number {
+  return Math.max(0, chatContentWidth(terminalWidth) - displayWidth(chatLineDisplayText(line)));
+}
+
 export function chatMessageDisplayLines(messages: Message[], terminalWidth: number, maxLines = 12): ChatDisplayLine[] {
-  const contentWidth = Math.max(8, terminalWidth - 2);
+  const contentWidth = chatContentWidth(terminalWidth);
   const rendered = messages.flatMap((message) => chatSingleMessageDisplayLines(message, contentWidth));
   return rendered.slice(-maxLines);
 }
@@ -714,7 +713,27 @@ function chatViewportSpacerLineCount(contentLines: number, viewportHeight: numbe
 }
 
 function chatViewportBlankLineWidth(terminalWidth: number): number {
-  return Math.max(1, Math.max(8, terminalWidth - 2));
+  return Math.max(1, chatContentWidth(terminalWidth));
+}
+
+function ChatLine({ line, terminalWidth }: { line: ChatDisplayLine; terminalWidth: number }) {
+  const theme = chatLineTheme(line);
+  const fillWidth = chatLineTrailingFillWidth(line, terminalWidth);
+
+  return (
+    <Text>
+      <Text {...theme}>{chatLineDisplayText(line)}</Text>
+      {fillWidth > 0 ? <Text backgroundColor={TUI_THEME.surface}>{" ".repeat(fillWidth)}</Text> : null}
+    </Text>
+  );
+}
+
+function chatLineDisplayText(line: ChatDisplayLine): string {
+  return line.text || " ";
+}
+
+function chatContentWidth(terminalWidth: number): number {
+  return Math.max(8, terminalWidth - 2);
 }
 
 function chatSingleMessageDisplayLines(message: Message, contentWidth: number): ChatDisplayLine[] {
