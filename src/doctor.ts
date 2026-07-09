@@ -6,6 +6,7 @@ import { formatConfigErrorMessage } from "./core/config-errors.js";
 import { configPath, loadConfig, withUiThemeOverride } from "./core/config.js";
 import { pathExists } from "./core/file-store.js";
 import { prepareWorkspace } from "./core/workspace.js";
+import { formatTuiThemePreview } from "./tui/theme-preview.js";
 import { resolveTuiTheme } from "./tui/theme.js";
 
 export interface DoctorResult {
@@ -53,6 +54,7 @@ export async function runDoctor(
     lines.push(`config: ok (${localConfigPath})`);
     lines.push(`theme: ok (${themeSummary(config.ui.theme, loadedConfig.ui.theme, options.theme ?? null)}; ${themeOverrideSummary(config.ui.colors)})`);
     lines.push(`palette: ${themePaletteSummary(config.ui.theme, config.ui.colors)}`);
+    lines.push(...formatTuiThemePreview(resolveTuiTheme({ theme: config.ui.theme, colors: config.ui.colors })));
   } catch (error) {
     ok = false;
     lines.push(`config: invalid (${localConfigPath})`);

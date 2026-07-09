@@ -154,7 +154,7 @@ describe("package metadata", () => {
     expect(readme).toContain("will not use that file path as the default folder to create");
     expect(readme).toContain("Router classification only receives the user request");
     expect(readme).toContain('`--doctor` checks the configured commands and any `{env:NAME}` references');
-    expect(readme).toContain("reports the loaded TUI theme, core palette values, and color override values");
+    expect(readme).toContain("reports the loaded TUI theme, core palette values, ANSI swatch previews, and color override values");
     expect(readme).toContain("including any temporary `--theme` override");
     expect(readme).toContain('OPENAI_API_KEY = "{env:OPENAI_API_KEY}"');
     expect(readme).toContain("In chat, press `Ctrl+W` to open worker logs");
@@ -170,6 +170,8 @@ describe("package metadata", () => {
     expect(readme).toContain("Color values are validated during config load");
     expect(readme).toContain("ansi256(0..255)");
     expect(readme).toContain("Unknown UI and color keys are rejected so typos fail fast");
+    expect(readme).toContain("parallel-codex-tui --theme graphite --doctor");
+    expect(readme).toContain("The doctor output includes `preview:` and `semantic:` ANSI swatch rows");
     expect(readme).toContain(".parallel-codex/config.toml");
     expect(readme).toContain(".parallel-codex/last-workspace");
     expect(readme).toContain(".parallel-codex/workspaces.json");

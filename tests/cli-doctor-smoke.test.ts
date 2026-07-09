@@ -68,6 +68,9 @@ describe("CLI doctor", () => {
     expect(result.stdout).toContain("config: ok");
     expect(result.stdout).toContain("theme: ok (codex; no color overrides)");
     expect(result.stdout).toContain("palette: chrome=ansi256(17), surface=ansi256(235), rail=ansi256(238), accent=ansi256(45)");
+    expect(result.stdout).toContain("preview:");
+    expect(result.stdout).toContain("semantic:");
+    expect(result.stdout).toContain("\u001b[48;5;17m");
     expect(result.stdout).toContain("codex: ok");
     expect(result.stdout).toContain("claude: ok");
     await expect(pathExists(workspace)).resolves.toBe(true);
@@ -236,6 +239,8 @@ describe("CLI doctor", () => {
     expect(result.stdout).toContain("config: ok");
     expect(result.stdout).toContain("theme: ok (paper; colors: accent=#aabbcc, chrome=ansi256(1))");
     expect(result.stdout).toContain("palette: chrome=ansi256(1), surface=ansi256(231), rail=ansi256(255), accent=#aabbcc");
+    expect(result.stdout).toContain("\u001b[48;5;1m");
+    expect(result.stdout).toContain("\u001b[38;2;170;187;204m");
     expect(result.stdout).not.toContain("codex: missing");
     expect(result.stdout).not.toContain("claude: missing");
   });

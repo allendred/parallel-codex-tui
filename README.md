@@ -60,7 +60,7 @@ parallel-codex-tui --doctor
 parallel-codex-tui --version
 ```
 
-`--doctor` checks the configured commands and any `{env:NAME}` references in active worker model environment settings before workers start. It also reports the loaded TUI theme, core palette values, and color override values, including any temporary `--theme` override.
+`--doctor` checks the configured commands and any `{env:NAME}` references in active worker model environment settings before workers start. It also reports the loaded TUI theme, core palette values, ANSI swatch previews, and color override values, including any temporary `--theme` override.
 
 ## Quick Start
 
@@ -115,7 +115,13 @@ Set `autoOpenFailedWorker = false` to keep the chat view open when a restored or
 
 `ui.colors` is optional and can override any theme key: `chrome`, `surface`, `rail`, `successSurface`, `dangerSurface`, `text`, `muted`, `accent`, `warning`, `success`, or `danger`. Color values are validated during config load and can use Chalk color names, `#rgb`/`#rrggbb`, `rgb(r,g,b)`, or `ansi256(0..255)`. Unknown UI and color keys are rejected so typos fail fast.
 
-For quick previews without editing config, pass `--theme codex`, `--theme graphite`, or `--theme paper` at startup.
+For quick previews without editing config, pass `--theme codex`, `--theme graphite`, or `--theme paper` with `--doctor`:
+
+```bash
+parallel-codex-tui --theme graphite --doctor
+```
+
+The doctor output includes `preview:` and `semantic:` ANSI swatch rows so you can see the effective terminal colors before starting a worker session.
 
 ## Behavior
 
