@@ -78,12 +78,8 @@ describe("CLI worker log scroll smoke", () => {
     try {
       await waitForText(chunks, "attach");
       await writeUntilText(child, chunks, "\x17", "tail");
-      let outputCursor = chunks.length;
-      child.write("\x1b[5~");
-      await waitForText(chunks, "back 20/", outputCursor);
-      outputCursor = chunks.length;
-      child.write("\x1b[6~");
-      await waitForText(chunks, "tail", outputCursor);
+      await writeUntilText(child, chunks, "\x1b[5~", "back 20/");
+      await writeUntilText(child, chunks, "\x1b[6~", "tail");
 
       expect(chunks.join("")).toContain("back 20/");
     } finally {
