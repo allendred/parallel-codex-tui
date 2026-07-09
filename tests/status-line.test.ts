@@ -71,6 +71,6 @@ describe("formatStatusLine", () => {
   it("keeps footer help short and mode aware", () => {
     expect(formatFooterHelp("chat")).toBe("^W logs · Tab worker · ^O attach");
     expect(formatFooterHelp("worker")).toBe("wheel/Pg · Tab worker · ^O attach · Esc chat");
-    expect(formatFooterHelp("native")).toBe("wheel/Pg · ^] detach");
+    expect(formatFooterHelp("native")).toBe("wheel/Pg · ^] logs");
   });
 });

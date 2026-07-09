@@ -259,7 +259,8 @@ describe("InputBar", () => {
     );
 
     const frame = lastFrame() ?? "";
-    expect(frame).toContain("native · wheel/Pg · ^] detach");
+    expect(frame).toContain("native · wheel/Pg · ^] logs");
+    expect(frame).not.toContain("detach");
     expect(frame.split("\n")).toHaveLength(1);
     expect(displayWidth(frame)).toBeLessThanOrEqual(80);
   });

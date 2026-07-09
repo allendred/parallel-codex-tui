@@ -120,7 +120,8 @@ describe("AppShell", () => {
     const frame = lastFrame() ?? "";
 
     expect(frame).toContain("native");
-    expect(frame).toContain("^] detach");
+    expect(frame).toContain("^] logs");
+    expect(frame).not.toContain("^] detach");
     expect(frame).not.toContain("Native agent");
     expect(frame).not.toContain("^C exit");
   });

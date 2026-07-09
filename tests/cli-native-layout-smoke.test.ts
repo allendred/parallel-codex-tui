@@ -71,7 +71,7 @@ describe("CLI native layout smoke", () => {
       expect(snapshot).not.toContain("Native agent");
       expect(snapshot).toContain("task ");
       expect(snapshot).toContain("native line 40");
-      expect(snapshot).toContain("native · wheel/Pg · ^] detach");
+      expect(snapshot).toContain("native · wheel/Pg · ^] logs");
       expect(nativeTitleLine?.chunks.some((chunk) => chunk.style.backgroundColor === TUI_THEME_PRESETS.codex.chrome)).toBe(true);
       expect(nativeTitleLine?.chunks.some((chunk) => chunk.style.backgroundColor === TUI_THEME_PRESETS.codex.rail)).toBe(false);
       expect(displayWidth(nativeTitleLineText)).toBe(137);

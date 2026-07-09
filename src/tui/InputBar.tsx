@@ -238,5 +238,5 @@ function nativeInputHints(width: number, closed = false): { label: string; detai
   if (width < 56) {
     return { label: "native", detail: " · wheel/Pg · ^]" };
   }
-  return { label: "native", detail: " · wheel/Pg · ^] detach" };
+  return { label: "native", detail: " · wheel/Pg · ^] logs" };
 }

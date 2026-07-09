@@ -270,7 +270,7 @@ function viewLabel(view: AppView): string {
 
 function shortcutHint(view: AppView): string {
   if (view === "native") {
-    return "^] detach";
+    return "^] logs";
   }
   return "^C exit";
 }
