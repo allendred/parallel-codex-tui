@@ -74,7 +74,7 @@ describe("nativeAttachTitleDisplay", () => {
   });
 
   it("includes closed process state without forcing a long title", () => {
-    expect(nativeAttachTitleDisplay("Critic (codex)", "abcdef1234567890", 2, 36)).toBe("native critic/codex · exit:2");
+    expect(nativeAttachTitleDisplay("Critic (codex)", "abcdef1234567890", 2, 36)).toBe("native critic/codex · exited 2");
   });
 
   it("adds native terminal scroll state to attach titles when scrollback exists", () => {

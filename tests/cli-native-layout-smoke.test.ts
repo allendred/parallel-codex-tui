@@ -319,13 +319,13 @@ describe("CLI native layout smoke", () => {
       await waitForText(chunks, "attach");
       child.write("\x0f");
       await waitForText(chunks, "process exited · code 7");
-      await waitForScreenText(() => screenWrites, screen, "exit:7");
+      await waitForScreenText(() => screenWrites, screen, "exited 7");
       await waitForScreenText(() => screenWrites, screen, "closed · wheel/Pg · ^]");
 
       const snapshot = screen.snapshot();
       expect(snapshot).toContain("native done");
       expect(snapshot).toContain("process exited · code 7");
-      expect(snapshot).toContain("native actor/mock · exit:7");
+      expect(snapshot).toContain("native actor/mock · exited 7");
       expect(snapshot).toContain("closed · wheel/Pg · ^]");
       expect(snapshot).not.toContain("closed · wheel/Pg · ^] logs");
       expect(snapshot).not.toContain("closed · wheel/Pg · ^] back");

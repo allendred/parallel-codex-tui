@@ -1075,6 +1075,7 @@ export function nativeAttachTitleDisplay(
   scrollLabel: string | null = null
 ): string {
   const exit = closedCode === null ? "" : `exit:${closedCode}`;
+  const exitReadable = closedCode === null ? "" : `exited ${closedCode}`;
   const contentWidth = Math.max(1, terminalWidth - 2);
 
   if (terminalWidth < 24) {
@@ -1086,6 +1087,13 @@ export function nativeAttachTitleDisplay(
 
   if (exit) {
     return firstNativeTitleThatFits(withNativeTitleSuffix([
+      ...(terminalWidth >= 32
+        ? [
+            `native ${compactLabel} · ${exitReadable}`,
+            `native ${roleLabel} · ${exitReadable}`,
+            `${roleLabel} ${exitReadable}`
+          ]
+        : []),
       `native ${compactLabel} · ${exit}`,
       `native ${roleLabel} · ${exit}`,
       `${roleLabel} ${exit}`
