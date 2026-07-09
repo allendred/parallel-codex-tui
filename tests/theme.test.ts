@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   TUI_THEME,
   configureTuiTheme,
+  isTuiThemeColorValue,
   resetTuiTheme,
   resolveTuiTheme,
   TUI_THEME_PRESETS
@@ -36,6 +37,20 @@ describe("TUI theme", () => {
       accent: "magenta",
       text: "black"
     });
+  });
+
+  it("recognizes the color formats Ink can render", () => {
+    expect(isTuiThemeColorValue("redBright")).toBe(true);
+    expect(isTuiThemeColorValue("#005cc5")).toBe(true);
+    expect(isTuiThemeColorValue("#0af")).toBe(true);
+    expect(isTuiThemeColorValue("ansi256(238)")).toBe(true);
+    expect(isTuiThemeColorValue("ansi256( 238 )")).toBe(true);
+    expect(isTuiThemeColorValue("rgb(232, 131, 136)")).toBe(true);
+
+    expect(isTuiThemeColorValue("not-a-color")).toBe(false);
+    expect(isTuiThemeColorValue("ansi256(256)")).toBe(false);
+    expect(isTuiThemeColorValue("rgb(300, 1, 1)")).toBe(false);
+    expect(isTuiThemeColorValue("#00zz00")).toBe(false);
   });
 
   it("lets rendered worker themes follow the active palette", () => {

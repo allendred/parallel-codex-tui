@@ -2,6 +2,7 @@ import { parse, stringify } from "@iarna/toml";
 import { join } from "node:path";
 import { z } from "zod";
 import { pathExists, readTextIfExists, writeText } from "./file-store.js";
+import { isTuiThemeColorValue } from "../tui/theme.js";
 
 const NativeSessionConfigSchema = z.object({
   enabled: z.boolean().default(true),
@@ -27,18 +28,22 @@ const RolePromptConfigSchema = z.object({
   instructions: z.array(z.string()).default([])
 });
 
+const TuiColorValueSchema = z.string().min(1).refine(isTuiThemeColorValue, {
+  message: "Invalid TUI color value. Use a Chalk color name, #rgb/#rrggbb, rgb(r,g,b), or ansi256(0..255)."
+});
+
 const UiColorOverridesSchema = z.object({
-  chrome: z.string().min(1).optional(),
-  surface: z.string().min(1).optional(),
-  rail: z.string().min(1).optional(),
-  successSurface: z.string().min(1).optional(),
-  dangerSurface: z.string().min(1).optional(),
-  text: z.string().min(1).optional(),
-  muted: z.string().min(1).optional(),
-  accent: z.string().min(1).optional(),
-  warning: z.string().min(1).optional(),
-  success: z.string().min(1).optional(),
-  danger: z.string().min(1).optional()
+  chrome: TuiColorValueSchema.optional(),
+  surface: TuiColorValueSchema.optional(),
+  rail: TuiColorValueSchema.optional(),
+  successSurface: TuiColorValueSchema.optional(),
+  dangerSurface: TuiColorValueSchema.optional(),
+  text: TuiColorValueSchema.optional(),
+  muted: TuiColorValueSchema.optional(),
+  accent: TuiColorValueSchema.optional(),
+  warning: TuiColorValueSchema.optional(),
+  success: TuiColorValueSchema.optional(),
+  danger: TuiColorValueSchema.optional()
 }).default({});
 
 const CodexRouterConfigSchema = z.object({

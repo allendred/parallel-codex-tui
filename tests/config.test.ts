@@ -244,6 +244,21 @@ describe("config", () => {
     await expect(loadConfig(root)).rejects.toThrow();
   });
 
+  it("rejects invalid TUI color overrides", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pct-config-invalid-theme-color-"));
+
+    await writeText(
+      join(root, ".parallel-codex", "config.toml"),
+      [
+        "[ui.colors]",
+        'accent = "cyan-ish"',
+        'chrome = "ansi256(999)"'
+      ].join("\n")
+    );
+
+    await expect(loadConfig(root)).rejects.toThrow(/Invalid TUI color value/);
+  });
+
   it("rejects invalid nested section types instead of silently using defaults", async () => {
     const cases = [
       ["workers.codex", '[workers]\ncodex = "bad"\n'],

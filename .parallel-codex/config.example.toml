@@ -63,7 +63,8 @@ autoOpenFailedWorker = true
 theme = "codex" # codex, graphite, paper
 
 [ui.colors]
-# Optional color overrides. Values can be Ink color names or ansi256(n).
+# Optional color overrides. Values can be Chalk color names,
+# #rgb/#rrggbb, rgb(r,g,b), or ansi256(0..255).
 # chrome = "ansi256(23)"
 # rail = "ansi256(236)"
 # accent = "cyan"

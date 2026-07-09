@@ -154,6 +154,8 @@ describe("package metadata", () => {
     expect(readme).toContain("## Theme");
     expect(readme).toContain('theme = "graphite"');
     expect(readme).toContain("successSurface");
+    expect(readme).toContain("Color values are validated during config load");
+    expect(readme).toContain("ansi256(0..255)");
     expect(readme).toContain(".parallel-codex/config.toml");
     expect(readme).toContain(".parallel-codex/last-workspace");
     expect(readme).toContain(".parallel-codex/workspaces.json");

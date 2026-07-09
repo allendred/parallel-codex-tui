@@ -1,4 +1,5 @@
 import type { TextProps } from "ink";
+import { foregroundColorNames } from "chalk";
 
 type InkBackground = NonNullable<TextProps["backgroundColor"]>;
 type InkColor = NonNullable<TextProps["color"]>;
@@ -102,8 +103,43 @@ export function resetTuiTheme(): TuiTheme {
   return TUI_THEME;
 }
 
+export function isTuiThemeColorValue(value: string): boolean {
+  const color = value.trim();
+  if (!color) {
+    return false;
+  }
+
+  if ((foregroundColorNames as readonly string[]).includes(color)) {
+    return true;
+  }
+
+  if (/^#[0-9a-f]{3}(?:[0-9a-f]{3})?$/i.test(color)) {
+    return true;
+  }
+
+  const ansiMatch = color.match(/^ansi256\(\s*(\d+)\s*\)$/);
+  if (ansiMatch) {
+    return isByteColorValue(ansiMatch[1] ?? "");
+  }
+
+  const rgbMatch = color.match(/^rgb\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*\)$/);
+  if (rgbMatch) {
+    return [rgbMatch[1], rgbMatch[2], rgbMatch[3]].every((part) => isByteColorValue(part ?? ""));
+  }
+
+  return false;
+}
+
 function isTuiThemeName(value: string | undefined): value is TuiThemeName {
   return TUI_THEME_NAMES.includes(value as TuiThemeName);
+}
+
+function isByteColorValue(value: string): boolean {
+  if (!/^\d+$/.test(value)) {
+    return false;
+  }
+  const number = Number(value);
+  return Number.isInteger(number) && number >= 0 && number <= 255;
 }
 
 function normalizeTuiThemeOverrides(colors: TuiThemeOverrides | undefined): Partial<TuiTheme> {
