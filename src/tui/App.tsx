@@ -313,7 +313,7 @@ export function App({
         if (chunk === "\u000f") {
           const worker = workersRef.current[selectedWorkerIndexRef.current];
           if (!worker) {
-            setAttachError("No worker selected. Run a complex task or wait for workers to load before attaching.");
+            setAttachError("Start a complex task to create workers before attaching.");
             return;
           }
           void attachSelectedWorkerRef.current(worker);
@@ -428,7 +428,7 @@ export function App({
     if (isAttachShortcut(inputKey, key)) {
       const worker = workers[selectedWorkerIndex];
       if (!worker) {
-        setAttachError("No worker selected. Run a complex task or wait for workers to load before attaching.");
+        setAttachError("Start a complex task to create workers before attaching.");
         return;
       }
       void attachSelectedWorker(worker);

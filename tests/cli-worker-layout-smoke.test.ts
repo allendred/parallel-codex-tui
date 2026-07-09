@@ -59,6 +59,43 @@ describe("CLI worker layout smoke", () => {
     }
   }, 10000);
 
+  it("shows a concise attach hint when no worker exists yet", async () => {
+    const workspace = await mkdtemp(join(tmpdir(), "pct-cli-idle-attach-hint-"));
+    const screen = new NativeTerminalScreen({ cols: 80, rows: 12, scrollback: 1000 });
+    let screenWrites = Promise.resolve();
+
+    const child = spawn(
+      process.execPath,
+      ["./node_modules/.bin/tsx", "src/cli.tsx", "--workspace", workspace],
+      {
+        cwd: process.cwd(),
+        cols: 80,
+        rows: 12,
+        name: "xterm-256color",
+        env: {
+          ...process.env,
+          TERM: "xterm-256color"
+        }
+      }
+    );
+
+    child.onData((chunk) => {
+      screenWrites = screenWrites.then(() => screen.write(chunk));
+    });
+
+    try {
+      await waitForScreenText(() => screenWrites, screen, "Type a message");
+      child.write("\x0f");
+      await waitForScreenText(() => screenWrites, screen, "Start a complex task");
+
+      const snapshot = screen.snapshot();
+      expect(snapshot).toContain("Start a complex task to create workers before attaching.");
+      expect(snapshot).not.toContain("Run a complex task");
+    } finally {
+      child.kill("SIGTERM");
+    }
+  }, 10000);
+
   it("keeps the app header visible when worker logs fill a short terminal", async () => {
     const workspace = await mkdtemp(join(tmpdir(), "pct-cli-worker-layout-"));
     const taskId = "task-20260705-000000-layout";

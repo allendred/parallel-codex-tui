@@ -126,7 +126,7 @@ async function readWorkerNativeSession(worker: WorkerLogRef): Promise<NativeSess
       return recovered;
     }
     throw new Error(
-      `No native session recorded for ${worker.label}. Run the worker once before attaching, or make sure ${worker.engine} persisted a resumable session.`
+      `No native session recorded for ${worker.label}. Open this worker once, or make sure ${worker.engine} saved a resumable session before attaching.`
     );
   }
   if (record.engine !== worker.engine) {

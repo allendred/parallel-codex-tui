@@ -79,7 +79,9 @@ describe("buildNativeAttachLaunch", () => {
           statusPath: join(workerDir, "status.json")
         }
       })
-    ).rejects.toThrow("No native session recorded");
+    ).rejects.toThrow(
+      "No native session recorded for Critic (claude). Open this worker once, or make sure claude saved a resumable session before attaching."
+    );
   });
 
   it("recovers a Codex native session from the worker output log when the worker file is missing", async () => {

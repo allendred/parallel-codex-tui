@@ -118,10 +118,12 @@ describe("WorkerOutputView", () => {
     );
 
     try {
-      await waitForFrame(lastFrame, "No worker selected");
+      await waitForFrame(lastFrame, "Start a complex task");
 
       const frame = lastFrame() ?? "";
-      expect(frame).toContain("No worker selected. Run a complex task to create logs.");
+      expect(frame).toContain("Start a complex task to view worker logs.");
+      expect(frame).not.toContain("No worker selected.");
+      expect(frame).not.toContain("Run a complex task");
       expect(frame).not.toContain("No worker log selected.");
     } finally {
       unmount();

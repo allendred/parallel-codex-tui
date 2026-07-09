@@ -29,7 +29,7 @@ describe("AppShell", () => {
         statusText="workers 1"
         terminalWidth={80}
         input={<TextLine text="> | Type a message · ^W logs · Tab worker · ^O attach" />}
-        error="No native session recorded for Critic (mock). Run the worker once before attaching."
+        error="No native session recorded for Critic (mock). Open this worker once, or make sure mock saved a resumable session before attaching."
       >
         <TextLine text="ready" />
       </AppShell>
