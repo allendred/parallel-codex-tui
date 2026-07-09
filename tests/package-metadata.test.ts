@@ -194,6 +194,8 @@ describe("package metadata", () => {
     expect(workflow).toContain("workflow_dispatch:");
     expect(workflow).toContain("tags:");
     expect(workflow).toContain("- \"v*\"");
+    expect(workflow).toContain("group: release-${{ github.event_name == 'workflow_dispatch' && inputs.version || github.ref_name }}");
+    expect(workflow).toContain("cancel-in-progress: false");
     expect(workflow).toContain("ref: ${{ github.event_name == 'workflow_dispatch' && inputs.version || github.ref }}");
     expect(workflow).toContain("id-token: write");
     expect(workflow).toContain('node-version: "26.x"');
