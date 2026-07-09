@@ -152,6 +152,71 @@ describe("CLI native layout smoke", () => {
     }
   }, 10000);
 
+  it("fills short native attach blank rows with the themed surface", async () => {
+    const workspace = await mkdtemp(join(tmpdir(), "pct-cli-native-short-fill-"));
+    const appRoot = await mkdtemp(join(tmpdir(), "pct-cli-native-short-fill-app-"));
+    const taskId = "task-20260705-000000-native-short-fill";
+    const taskDir = join(workspace, ".parallel-codex", "sessions", taskId);
+    const workerDir = join(taskDir, "actor-mock");
+    const agentScript = join(workspace, "fake-agent.cjs");
+    const chunks: string[] = [];
+    const screen = new NativeTerminalScreen({ cols: 64, rows: 18, scrollback: 1000 });
+    let screenWrites = Promise.resolve();
+
+    await mkdir(workerDir, { recursive: true });
+    await mkdir(join(appRoot, ".parallel-codex"), { recursive: true });
+    await writeFile(agentScript, "console.log('native short line'); setInterval(() => {}, 1000);");
+    await writeConfig(appRoot, agentScript);
+    await writeTaskFiles({ workspace, taskId, taskDir, workerDir, nativeSessionId: "native-short-fill" });
+
+    const child = spawn(
+      process.execPath,
+      ["./node_modules/.bin/tsx", "src/cli.tsx", "--app-root", appRoot, "--workspace", workspace, "--task", taskId],
+      {
+        cwd: process.cwd(),
+        cols: 64,
+        rows: 18,
+        name: "xterm-256color",
+        env: {
+          ...process.env,
+          TERM: "xterm-256color"
+        }
+      }
+    );
+
+    child.onData((chunk) => {
+      chunks.push(chunk);
+      screenWrites = screenWrites.then(() => screen.write(chunk));
+    });
+
+    try {
+      await waitForText(chunks, "ready");
+      await waitForText(chunks, "attach");
+      child.write("\x0f");
+      await waitForText(chunks, "native short line");
+      await waitForScreenText(() => screenWrites, screen, "native short line");
+
+      const lines = screen.styledSnapshotLines();
+      const nativeTitleLine = lines.find((line) => line.chunks.map((chunk) => chunk.text).join("").includes("native actor/mock"));
+      const nativeTitleLineText = nativeTitleLine?.chunks.map((chunk) => chunk.text).join("") ?? "";
+      const outputIndex = lines.findIndex((line) => line.chunks.map((chunk) => chunk.text).join("").includes("native short line"));
+      const inputIndex = lines.findIndex((line) => line.chunks.map((chunk) => chunk.text).join("").includes("native · wheel/Pg"));
+      const blankContentLines = lines.slice(outputIndex + 1, inputIndex).filter((line) => {
+        const text = line.chunks.map((chunk) => chunk.text).join("");
+        return text.trim().length === 0;
+      });
+
+      expect(outputIndex).toBeGreaterThanOrEqual(0);
+      expect(inputIndex).toBeGreaterThan(outputIndex);
+      expect(blankContentLines.length).toBeGreaterThan(0);
+      expect(blankContentLines.every((line) => displayWidth(line.chunks.map((chunk) => chunk.text).join("")) === displayWidth(nativeTitleLineText))).toBe(true);
+      expect(blankContentLines.every((line) => line.chunks.every((chunk) => chunk.style.backgroundColor === TUI_THEME_PRESETS.codex.surface))).toBe(true);
+    } finally {
+      child.write("\x1d");
+      child.kill("SIGTERM");
+    }
+  }, 10000);
+
   it("shows closed native guidance when the attached process exits", async () => {
     const workspace = await mkdtemp(join(tmpdir(), "pct-cli-native-closed-"));
     const appRoot = await mkdtemp(join(tmpdir(), "pct-cli-native-closed-app-"));

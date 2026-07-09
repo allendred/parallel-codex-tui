@@ -6,12 +6,20 @@ import { TUI_THEME } from "./theme.js";
 
 export interface TerminalOutputProps {
   lines: TerminalLine[];
+  minLines?: number;
   width?: number;
 }
 
-export function TerminalOutput({ lines, width }: TerminalOutputProps) {
+export function TerminalOutput({ lines, minLines, width }: TerminalOutputProps) {
+  const blankTailLineCount = terminalOutputBlankTailLineCount(lines.length === 0 ? 1 : lines.length, minLines);
+
   if (lines.length === 0) {
-    return <Text {...terminalOutputEmptyTheme()}>(no output yet)</Text>;
+    return (
+      <Box flexDirection="column">
+        <Text {...terminalOutputEmptyTheme()}>(no output yet)</Text>
+        <TerminalOutputBlankTailLines count={blankTailLineCount} width={width} />
+      </Box>
+    );
   }
 
   return (
@@ -30,6 +38,7 @@ export function TerminalOutput({ lines, width }: TerminalOutputProps) {
             </>}
         </Text>
       ))}
+      <TerminalOutputBlankTailLines count={blankTailLineCount} width={width} />
     </Box>
   );
 }
@@ -73,6 +82,22 @@ export function terminalOutputTrailingFillWidth(line: TerminalLine, width: numbe
 function TerminalOutputTrailingFill({ line, width }: { line: TerminalLine; width: number | undefined }) {
   const fillWidth = terminalOutputTrailingFillWidth(line, width);
   return fillWidth > 0 ? <Text {...terminalOutputBlankLineTheme()}>{" ".repeat(fillWidth)}</Text> : null;
+}
+
+function TerminalOutputBlankTailLines({ count, width }: { count: number; width: number | undefined }) {
+  return (
+    <>
+      {Array.from({ length: count }, (_, index) => (
+        <Text key={`blank-tail-${index}`} {...terminalOutputBlankLineTheme()}>
+          {" ".repeat(terminalOutputBlankLineWidth(width))}
+        </Text>
+      ))}
+    </>
+  );
+}
+
+function terminalOutputBlankTailLineCount(lineCount: number, minLines: number | undefined): number {
+  return minLines === undefined ? 0 : Math.max(0, minLines - lineCount);
 }
 
 function terminalOutputLineDisplayWidth(line: TerminalLine): number {

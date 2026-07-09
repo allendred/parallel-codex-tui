@@ -604,7 +604,7 @@ export function App({
       error={attachError}
     >
         {view === "native" ? (
-          <NativeAttachView attach={nativeAttach} />
+          <NativeAttachView attach={nativeAttach} viewportHeight={contentHeight} />
         ) : view === "chat" ? (
           <ChatView
             messages={messages}
@@ -987,7 +987,8 @@ export function appContentHeight(rows: number, hasError = false, showStatusBar =
 }
 
 function NativeAttachView({
-  attach
+  attach,
+  viewportHeight
 }: {
   attach: {
     launch: NativeAttachLaunch;
@@ -995,6 +996,7 @@ function NativeAttachView({
     screen: NativeTerminalScreen;
     closedCode: number | null;
   } | null;
+  viewportHeight: number;
 }) {
   if (!attach) {
     return <Text {...nativeAttachStartingTheme()}>Starting native attach...</Text>;
@@ -1010,11 +1012,12 @@ function NativeAttachView({
     panelWidth,
     scrollLabel
   );
+  const outputMinLines = Math.max(1, viewportHeight - 1);
 
   return (
     <Box flexDirection="column">
       <NativeAttachTitleRail title={title} width={panelWidth} />
-      <TerminalOutput lines={attach.screen.styledSnapshotLines({ showCursor: true })} width={panelWidth} />
+      <TerminalOutput lines={attach.screen.styledSnapshotLines({ showCursor: true })} minLines={outputMinLines} width={panelWidth} />
     </Box>
   );
 }
