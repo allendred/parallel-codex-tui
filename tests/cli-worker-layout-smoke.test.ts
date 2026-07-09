@@ -308,6 +308,8 @@ describe("CLI worker layout smoke", () => {
 
     try {
       await waitForScreenText(() => screenWrites, screen, "ready");
+      await waitForScreenText(() => screenWrites, screen, "workers 1");
+      await waitForScreenText(() => screenWrites, screen, "done 1");
       child.write("\x0f");
       await waitForScreenText(() => screenWrites, screen, "No native session recorded");
 
