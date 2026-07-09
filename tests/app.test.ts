@@ -1,7 +1,7 @@
 import React from "react";
 import { render } from "ink-testing-library";
 import { afterEach, describe, expect, it } from "vitest";
-import { appContentHeight, chatLineTheme, chatMessageDisplayLines, ChatView, nativeAttachExitLine, nativeAttachStartingTheme, nativeAttachTerminalColumns, nativeAttachTitleDisplay, nativeTerminalScrollDisplay } from "../src/tui/App.js";
+import { appContentHeight, chatEmptyStateTheme, chatLineTheme, chatMessageDisplayLines, ChatView, nativeAttachExitLine, nativeAttachStartingTheme, nativeAttachTerminalColumns, nativeAttachTitleDisplay, nativeTerminalScrollDisplay } from "../src/tui/App.js";
 import { displayWidth } from "../src/tui/display-width.js";
 import { configureTuiTheme, resetTuiTheme, TUI_THEME_PRESETS } from "../src/tui/theme.js";
 
@@ -109,6 +109,16 @@ describe("nativeAttachTitleDisplay", () => {
 });
 
 describe("ChatView", () => {
+  it("themes the empty chat state with the active surface", () => {
+    configureTuiTheme({ theme: "paper" });
+
+    expect(chatEmptyStateTheme()).toEqual({
+      backgroundColor: TUI_THEME_PRESETS.paper.surface,
+      bold: true,
+      color: TUI_THEME_PRESETS.paper.success
+    });
+  });
+
   it("uses active theme colors for chat message roles", () => {
     configureTuiTheme({ theme: "paper" });
 

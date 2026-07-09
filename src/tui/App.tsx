@@ -59,6 +59,7 @@ export interface ChatDisplayLine {
 }
 
 type ChatLineTheme = Pick<TextProps, "backgroundColor" | "color" | "dimColor">;
+type ChatEmptyStateTheme = Pick<TextProps, "backgroundColor" | "bold" | "color">;
 type NativeAttachStartingTheme = Pick<TextProps, "backgroundColor" | "color" | "dimColor">;
 
 export function App({
@@ -808,9 +809,17 @@ function ChatEmptyState({
 
   return (
     <Box flexDirection="column">
-      <Text color={TUI_THEME.success} bold>{chatEmptyStateDisplayLine(cwd, activeTaskId, contentWidth)}</Text>
+      <Text {...chatEmptyStateTheme()}>{chatEmptyStateDisplayLine(cwd, activeTaskId, contentWidth)}</Text>
     </Box>
   );
+}
+
+export function chatEmptyStateTheme(): ChatEmptyStateTheme {
+  return {
+    backgroundColor: TUI_THEME.surface,
+    bold: true,
+    color: TUI_THEME.success
+  };
 }
 
 function chatEmptyStateDisplayLine(cwd: string, activeTaskId: string | null, contentWidth: number): string {
