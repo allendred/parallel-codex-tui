@@ -1,7 +1,7 @@
 import React from "react";
 import { render } from "ink-testing-library";
 import { afterEach, describe, expect, it } from "vitest";
-import { appContentHeight, chatEmptyStateTheme, chatEmptyStateTrailingFillWidth, chatLineTheme, chatLineTrailingFillWidth, chatMessageDisplayLines, chatViewportBlankLineTheme, ChatView, nativeAttachExitLine, nativeAttachStartingTheme, nativeAttachTerminalColumns, nativeAttachTitleDisplay, nativeTerminalScrollDisplay } from "../src/tui/App.js";
+import { appContentHeight, chatEmptyStateTheme, chatEmptyStateTrailingFillWidth, chatLineTheme, chatLineTrailingFillWidth, chatMessageDisplayLines, chatViewportBlankLineTheme, ChatView, nativeAttachExitLine, nativeAttachStartingText, nativeAttachStartingTheme, nativeAttachTerminalColumns, nativeAttachTitleDisplay, nativeTerminalScrollDisplay } from "../src/tui/App.js";
 import { displayWidth } from "../src/tui/display-width.js";
 import { configureTuiTheme, resetTuiTheme, TUI_THEME_PRESETS } from "../src/tui/theme.js";
 
@@ -29,6 +29,7 @@ describe("nativeAttachTitleDisplay", () => {
   it("themes the native attach starting placeholder with the active palette", () => {
     configureTuiTheme({ theme: "paper" });
 
+    expect(nativeAttachStartingText()).toBe("Opening native session...");
     expect(nativeAttachStartingTheme()).toEqual({
       backgroundColor: TUI_THEME_PRESETS.paper.surface,
       color: TUI_THEME_PRESETS.paper.muted,

@@ -1004,7 +1004,7 @@ function NativeAttachView({
   viewportHeight: number;
 }) {
   if (!attach) {
-    return <Text {...nativeAttachStartingTheme()}>Starting native attach...</Text>;
+    return <Text {...nativeAttachStartingTheme()}>{nativeAttachStartingText()}</Text>;
   }
   const terminalWidth = process.stdout.columns || 120;
   const panelWidth = nativeAttachPanelRailWidth(terminalWidth);
@@ -1037,6 +1037,10 @@ export function nativeAttachStartingTheme(): NativeAttachStartingTheme {
     color: TUI_THEME.muted,
     dimColor: true
   };
+}
+
+export function nativeAttachStartingText(): string {
+  return "Opening native session...";
 }
 
 function NativeAttachTitleRail({ title, width }: { title: string; width: number }) {
