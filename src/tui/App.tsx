@@ -108,7 +108,7 @@ export function App({
   const exitRef = useRef(exit);
   const rawInputDecoderRef = useRef(createRawInputDecoder());
 
-  const contentHeight = appContentHeight(process.stdout.rows || 30, Boolean(attachError));
+  const contentHeight = appContentHeight(process.stdout.rows || 30, Boolean(attachError), config.ui.showStatusBar);
   const outputHeight = Math.max(1, contentHeight);
   const terminalWidth = process.stdout.columns || 120;
   const selectedWorkerStatus = formatSelectedWorkerStatus(status, selectedWorkerIndex);
@@ -583,6 +583,7 @@ export function App({
       taskId={activeTaskId}
       statusText={`${formatStatusLine(status)}${visibleWorkerStatus ? ` | ${visibleWorkerStatus}` : ""}`}
       contentHeight={contentHeight}
+      showStatusBar={config.ui.showStatusBar}
       input={
         <InputBar
           mode={view}
@@ -894,10 +895,10 @@ function workerTitle(workers: WorkerLogRef[], selectedWorkerIndex: number): stri
   return `${worker.label} output (${selectedWorkerIndex + 1}/${workers.length})`;
 }
 
-export function appContentHeight(rows: number, hasError = false): number {
+export function appContentHeight(rows: number, hasError = false, showStatusBar = true): number {
   const headerRows = 1;
   const inputRows = 1;
-  const statusRows = 1;
+  const statusRows = showStatusBar ? 1 : 0;
   const errorRows = hasError ? 1 : 0;
   return Math.max(2, rows - headerRows - inputRows - statusRows - errorRows);
 }

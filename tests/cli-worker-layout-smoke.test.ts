@@ -144,6 +144,64 @@ describe("CLI worker layout smoke", () => {
     }
   }, 10000);
 
+  it("honors showStatusBar=false in the rendered worker shell", async () => {
+    const workspace = await mkdtemp(join(tmpdir(), "pct-cli-worker-status-hidden-"));
+    const taskId = "task-20260705-000000-status-hidden";
+    const taskDir = join(workspace, ".parallel-codex", "sessions", taskId);
+    const workerDir = join(taskDir, "critic-mock");
+    const chunks: string[] = [];
+    const screen = new NativeTerminalScreen({ cols: 100, rows: 20, scrollback: 1000 });
+    let screenWrites = Promise.resolve();
+
+    await mkdir(workerDir, { recursive: true });
+    await writeFile(
+      join(workspace, ".parallel-codex", "config.toml"),
+      [
+        "[ui]",
+        "showStatusBar = false",
+        "autoOpenFailedWorker = true",
+        'theme = "codex"'
+      ].join("\n")
+    );
+    await writeTaskFiles({ workspace, taskId, taskDir, workerDir });
+
+    const child = spawn(
+      process.execPath,
+      ["./node_modules/.bin/tsx", "src/cli.tsx", "--app-root", workspace, "--workspace", workspace, "--task", taskId],
+      {
+        cwd: process.cwd(),
+        cols: 100,
+        rows: 20,
+        name: "xterm-256color",
+        env: {
+          ...process.env,
+          TERM: "xterm-256color"
+        }
+      }
+    );
+
+    child.onData((chunk) => {
+      chunks.push(chunk);
+      screenWrites = screenWrites.then(() => screen.write(chunk));
+    });
+
+    try {
+      await waitForText(chunks, "ready");
+      child.write("\x17");
+      await waitForScreenText(() => screenWrites, screen, "logs · read");
+      await screenWrites;
+
+      const snapshot = screen.snapshot();
+      expect(snapshot).toContain("critic/mock · 1/1");
+      expect(snapshot).toContain("logs · read");
+      expect(snapshot).not.toContain("workers 1");
+      expect(snapshot).not.toContain("done 1");
+      expect(snapshot).not.toContain("@ critic/mock");
+    } finally {
+      child.kill("SIGTERM");
+    }
+  }, 10000);
+
   it("applies the CLI theme override to the rendered terminal chrome", async () => {
     const workspace = await mkdtemp(join(tmpdir(), "pct-cli-worker-theme-"));
     const taskId = "task-20260705-000000-theme";

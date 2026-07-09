@@ -99,6 +99,7 @@ Set the TUI palette in `.parallel-codex/config.toml`:
 ```toml
 [ui]
 theme = "graphite" # codex, graphite, paper
+showStatusBar = true
 
 [ui.colors]
 accent = "ansi256(87)"
@@ -106,6 +107,8 @@ chrome = "ansi256(238)"
 rail = "#30363d"
 surface = "rgb(22, 27, 34)"
 ```
+
+Set `showStatusBar = false` to hide the bottom runtime status line and give that row back to the main content area.
 
 `ui.colors` is optional and can override any theme key: `chrome`, `surface`, `rail`, `successSurface`, `dangerSurface`, `text`, `muted`, `accent`, `warning`, `success`, or `danger`. Color values are validated during config load and can use Chalk color names, `#rgb`/`#rrggbb`, `rgb(r,g,b)`, or `ansi256(0..255)`. Unknown UI and color keys are rejected so typos fail fast.
 

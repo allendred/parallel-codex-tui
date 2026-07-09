@@ -16,6 +16,7 @@ export interface AppShellProps {
   statusText: string;
   contentHeight?: number;
   terminalWidth?: number;
+  showStatusBar?: boolean;
   children: React.ReactNode;
   input: React.ReactNode;
   error?: string | null;
@@ -28,6 +29,7 @@ export function AppShell({
   statusText,
   contentHeight = 20,
   terminalWidth = process.stdout.columns || 120,
+  showStatusBar = true,
   children,
   input,
   error = null
@@ -70,7 +72,7 @@ export function AppShell({
 
       {input}
 
-      <StatusBar text={statusText} terminalWidth={terminalWidth} />
+      {showStatusBar ? <StatusBar text={statusText} terminalWidth={terminalWidth} /> : null}
       {error ? (
         <Box paddingX={1}>
           <Text color={TUI_THEME.danger}>{error}</Text>

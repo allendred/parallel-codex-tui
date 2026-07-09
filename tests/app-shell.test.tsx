@@ -61,6 +61,29 @@ describe("AppShell", () => {
     expect(frame).not.toContain("^C exit");
   });
 
+  it("can hide the status bar without leaking status text", () => {
+    const { lastFrame } = render(
+      <AppShell
+        view="worker"
+        cwd="/tmp/project"
+        taskId="task-1"
+        statusText="workers 2 | critic/mock done"
+        showStatusBar={false}
+        input={<TextLine text="Input area" />}
+      >
+        <TextLine text="Role artifacts" />
+      </AppShell>
+    );
+
+    const frame = lastFrame() ?? "";
+
+    expect(frame).toContain("parallel-codex-tui");
+    expect(frame).toContain("Role artifacts");
+    expect(frame).toContain("Input area");
+    expect(frame).not.toContain("workers 2");
+    expect(frame).not.toContain("@ critic/mock");
+  });
+
   it("uses a compact task label in the header for long task ids", () => {
     const { lastFrame } = render(
       <AppShell

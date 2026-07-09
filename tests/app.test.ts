@@ -12,6 +12,12 @@ describe("App layout sizing", () => {
     expect(appContentHeight(8)).toBe(5);
     expect(appContentHeight(6)).toBe(3);
   });
+
+  it("returns the status row to content when the status bar is hidden", () => {
+    expect(appContentHeight(24, false, false)).toBe(22);
+    expect(appContentHeight(24, true, false)).toBe(21);
+    expect(appContentHeight(10, false, false)).toBe(8);
+  });
 });
 
 describe("nativeAttachTitleDisplay", () => {
