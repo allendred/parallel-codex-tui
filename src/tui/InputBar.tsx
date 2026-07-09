@@ -166,13 +166,7 @@ function chatTaskPlaceholderDisplayValue(terminalWidth: number): string {
   if (terminalWidth < 38) {
     return chatInputDisplayValue("Message · ^W · ^O", terminalWidth);
   }
-  if (terminalWidth < 48) {
-    return chatInputDisplayValue("Message · ^W logs · Tab · ^O attach", terminalWidth);
-  }
-  if (terminalWidth < 64) {
-    return chatInputDisplayValue("Message · ^W logs · Tab worker · ^O attach", terminalWidth);
-  }
-  return chatInputDisplayValue("Type a message · ^W logs · Tab worker · ^O attach", terminalWidth);
+  return chatInputDisplayValue("Message · ^W logs · Tab · ^O attach", terminalWidth);
 }
 
 export function chatBusyDisplayValue(terminalWidth: number): string {
@@ -204,7 +198,7 @@ function workerInputHints(width: number): { label: string; detail: string } {
   if (width < 72) {
     return { label: "logs", detail: " · scroll · Tab · ^O · Esc" };
   }
-  return { label: "logs", detail: " · scroll · Tab worker · ^O attach · Esc chat" };
+  return { label: "logs", detail: " · scroll · Tab · ^O attach · Esc chat" };
 }
 
 function nativeInputHints(width: number, closed = false): { label: string; detail: string } {

@@ -71,9 +71,9 @@ export function formatFooterHelp(mode: FooterHelpMode = "chat"): string {
     return "scroll · ^] logs";
   }
   if (mode === "worker") {
-    return "scroll · Tab worker · ^O attach · Esc chat";
+    return "scroll · Tab · ^O attach · Esc chat";
   }
-  return "^W logs · Tab worker · ^O attach";
+  return "^W logs · Tab · ^O attach";
 }
 
 function compactNativeSessionId(sessionId: string): string {

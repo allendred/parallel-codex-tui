@@ -194,7 +194,7 @@ describe("CLI worker layout smoke", () => {
       child.write("\x1b");
       await waitForScreenText(() => screenWrites, screen, "^W logs");
       const chatSnapshot = screen.snapshot();
-      expect(chatSnapshot).toContain("> | Type a message · ^W logs · Tab worker · ^O attach");
+      expect(chatSnapshot).toContain("> | Message · ^W logs · Tab · ^O attach");
       expect(chatSnapshot).toContain("1 worker");
       expect(chatSnapshot).toContain("1 done");
       expect(chatSnapshot).not.toContain("@ critic/mock");

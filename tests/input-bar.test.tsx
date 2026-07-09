@@ -63,7 +63,7 @@ describe("InputBar", () => {
   });
 
   it("shows task shortcuts in the empty chat prompt once workers exist", () => {
-    expect(chatPlaceholderDisplayValue(80, { hasWorkers: true })).toBe("Type a message · ^W logs · Tab worker · ^O attach");
+    expect(chatPlaceholderDisplayValue(80, { hasWorkers: true })).toBe("Message · ^W logs · Tab · ^O attach");
     expect(chatPlaceholderDisplayValue(42, { hasWorkers: true })).toBe("Message · ^W logs · Tab · ^O attach");
     expect(chatPlaceholderDisplayValue(30, { hasWorkers: true })).toBe("Message · ^W · ^O");
     expect(chatPlaceholderDisplayValue(20, { hasWorkers: true })).toBe("msg · ^W · ^O");
@@ -76,8 +76,9 @@ describe("InputBar", () => {
     );
 
     const frame = lastFrame() ?? "";
+    expect(frame).not.toContain("Type a message");
     expect(frame).toContain("^W logs");
-    expect(frame).toContain("Tab worker");
+    expect(frame).toContain("Tab");
     expect(frame).toContain("^O attach");
   });
 
@@ -161,7 +162,9 @@ describe("InputBar", () => {
     const frame = lastFrame() ?? "";
     expect(frame).toContain("logs");
     expect(frame).toContain("scroll");
+    expect(frame).toContain("Tab");
     expect(frame).toContain("^O attach");
+    expect(frame).not.toContain("Tab worker");
     expect(frame).not.toContain("wheel/Pg");
     expect(frame).not.toContain("read");
     expect(frame).not.toContain("Type a message");
