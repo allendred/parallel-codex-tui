@@ -57,7 +57,7 @@ describe("formatStatusLine", () => {
     ).toBe("093326-1980 | workers 2 | fail 1 done 1");
   });
 
-  it("formats runtime worker status with phase and summary", () => {
+  it("formats runtime worker status as readable status text", () => {
     expect(
       formatWorkerRuntimeStatus({
         state: "failed",
@@ -65,7 +65,18 @@ describe("formatStatusLine", () => {
         summary: "claude produced no output for 300000ms",
         native_session_id: "abc123"
       })
-    ).toBe("failed/process-idle-timeout native:abc123: claude produced no output for 300000ms");
+    ).toBe("failed · idle timeout · session abc123 · claude produced no output for 300000ms");
+  });
+
+  it("keeps runtime worker status compact when the session id is long", () => {
+    expect(
+      formatWorkerRuntimeStatus({
+        state: "done",
+        phase: "process-exited",
+        summary: "",
+        native_session_id: "019f1b9b-768b-7753-9c3b-33b17f25bc6b"
+      })
+    ).toBe("done · exited · session 019f1b9b... · no summary");
   });
 
   it("keeps footer help short and mode aware", () => {

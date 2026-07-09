@@ -55,8 +55,12 @@ export function formatSelectedWorkerStatus(state: StatusLineState | null, select
 }
 
 export function formatWorkerRuntimeStatus(status: RuntimeWorkerStatus): string {
-  const native = status.native_session_id ? ` native:${compactNativeSessionId(status.native_session_id)}` : "";
-  const detail = `${status.state}/${status.phase}${native}: ${status.summary.trim() || "no summary"}`;
+  const detail = [
+    status.state.trim() || "idle",
+    humanizeWorkerPhase(status.phase),
+    status.native_session_id ? `session ${compactNativeSessionId(status.native_session_id)}` : "",
+    status.summary.trim() || "no summary"
+  ].filter(Boolean).join(" · ");
   return detail.length > 96 ? `${detail.slice(0, 93)}...` : detail;
 }
 
@@ -72,6 +76,20 @@ export function formatFooterHelp(mode: FooterHelpMode = "chat"): string {
 
 function compactNativeSessionId(sessionId: string): string {
   return sessionId.length > 12 ? `${sessionId.slice(0, 8)}...` : sessionId;
+}
+
+function humanizeWorkerPhase(phase: string): string {
+  const normalized = phase.trim().toLowerCase();
+  if (normalized === "process-idle-timeout") {
+    return "idle timeout";
+  }
+  if (normalized === "process-exited") {
+    return "exited";
+  }
+  if (normalized === "native-resume-failed") {
+    return "resume failed";
+  }
+  return normalized.replace(/[-_]+/g, " ") || "status";
 }
 
 function formatWorkerSummary(workers: NonNullable<StatusLineState["workers"]>): string {
