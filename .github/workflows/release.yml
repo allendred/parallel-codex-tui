@@ -99,19 +99,46 @@ jobs:
         if: steps.npm.outputs.published != 'true'
         shell: bash
         run: |
-          if [ -n "$NODE_AUTH_TOKEN" ]; then
-            echo "Publishing to npm with NPM_TOKEN."
-          else
-            echo "NPM_TOKEN is not set; trying npm trusted publishing via GitHub OIDC."
+          remove_auth_token_config() {
             if [ -n "${NPM_CONFIG_USERCONFIG:-}" ] && [ -f "$NPM_CONFIG_USERCONFIG" ]; then
               sed -i '/_authToken/d' "$NPM_CONFIG_USERCONFIG"
             fi
+          }
+
+          restore_auth_token_config() {
+            if [ -n "${NPM_CONFIG_USERCONFIG:-}" ] && [ -f "$NPM_CONFIG_USERCONFIG" ]; then
+              printf '%s\n' '//registry.npmjs.org/:_authToken=${NODE_AUTH_TOKEN}' >> "$NPM_CONFIG_USERCONFIG"
+            fi
+          }
+
+          if [ -n "${ACTIONS_ID_TOKEN_REQUEST_TOKEN:-}" ] && [ -n "${ACTIONS_ID_TOKEN_REQUEST_URL:-}" ]; then
+            echo "Trying npm trusted publishing via GitHub OIDC."
+            remove_auth_token_config
             unset NODE_AUTH_TOKEN
+
+            trusted_log="$(mktemp)"
+            if npm publish --access public --provenance 2>&1 | tee "$trusted_log"; then
+              exit 0
+            fi
+
+            if grep -Eq "ENEEDAUTH|E401" "$trusted_log"; then
+              echo "Trusted publishing was not accepted; falling back to NPM_TOKEN if available."
+            else
+              exit 1
+            fi
           fi
 
+          if [ -z "$NPM_TOKEN" ]; then
+            echo "No NPM_TOKEN fallback is configured." >&2
+            exit 1
+          fi
+
+          echo "Publishing to npm with NPM_TOKEN."
+          export NODE_AUTH_TOKEN="$NPM_TOKEN"
+          restore_auth_token_config
           npm publish --access public --provenance
         env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
 
       - name: Create GitHub release
         uses: softprops/action-gh-release@v2
