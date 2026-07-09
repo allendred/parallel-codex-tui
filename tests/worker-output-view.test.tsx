@@ -1495,9 +1495,10 @@ describe("WorkerOutputView", () => {
         "",
         "> Critic should see readable notes.",
         "",
-        "| Area | Status |",
-        "| --- | --- |",
-        "| Logs | Improved |",
+        "| Area | Status | Owner |",
+        "| --- | --- | --- |",
+        "| Logs | Improved | Actor |",
+        "| Long markdown column | OK | Critic |",
         "",
         "```bash",
         "npm test",
@@ -1534,8 +1535,10 @@ describe("WorkerOutputView", () => {
       expect(frame).toContain("Critic should see readable notes.");
       expect(frame).toContain("Area");
       expect(frame).toContain("Status");
+      expect(frame).toContain("Owner");
       expect(frame).toContain("Logs");
       expect(frame).toContain("Improved");
+      expect(frame).toContain("Long markdown column  OK        Critic");
       expect(frame).toContain("$ npm test");
       expect(frame).toContain("$ npm run build");
       expect(frame).toContain("| const x = 1;");

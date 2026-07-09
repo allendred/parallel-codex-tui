@@ -1065,13 +1065,10 @@ function renderSectionContent(section: WorkerOutputSection, renderedArtifactFile
       }
     }
 
-    if (isMarkdownTableSeparator(trimmed)) {
-      index += 1;
-      continue;
-    }
-    if (isMarkdownTableRow(trimmed)) {
-      lines.push({ kind: "table", text: renderMarkdownTableRow(trimmed) });
-      index += 1;
+    const tableBlock = collectMarkdownTableBlock(rawLines, index);
+    if (tableBlock) {
+      lines.push(...tableBlock.lines);
+      index = tableBlock.nextIndex;
       continue;
     }
 
@@ -3590,12 +3587,73 @@ function isMarkdownTableRow(line: string): boolean {
   return line.startsWith("|") && line.endsWith("|") && line.split("|").length > 2;
 }
 
-function renderMarkdownTableRow(line: string): string {
+function collectMarkdownTableBlock(rawLines: string[], startIndex: number): { lines: RenderLine[]; nextIndex: number } | null {
+  const rows: string[][] = [];
+  let index = startIndex;
+  let consumed = false;
+
+  while (index < rawLines.length) {
+    const line = stripAnsi(rawLines[index] ?? "").replace(/\r/g, "").trim();
+    if (!line) {
+      break;
+    }
+    if (isMarkdownTableSeparator(line)) {
+      consumed = true;
+      index += 1;
+      continue;
+    }
+    if (!isMarkdownTableRow(line)) {
+      break;
+    }
+    const row = parseMarkdownTableRow(line);
+    if (row.length > 0) {
+      rows.push(row);
+    }
+    consumed = true;
+    index += 1;
+  }
+
+  if (!consumed) {
+    return null;
+  }
+  return {
+    lines: renderMarkdownTableRows(rows),
+    nextIndex: index
+  };
+}
+
+function parseMarkdownTableRow(line: string): string[] {
   return line
     .split("|")
     .map((cell) => stripInlineMarkdown(cell.trim()))
-    .filter(Boolean)
-    .join("  ");
+    .filter(Boolean);
+}
+
+function renderMarkdownTableRows(rows: string[][]): RenderLine[] {
+  if (rows.length === 0) {
+    return [];
+  }
+  const columnWidths = markdownTableColumnWidths(rows);
+  return rows.map((row) => ({
+    kind: "table",
+    text: row
+      .map((cell, index) =>
+        index === row.length - 1
+          ? cell
+          : `${cell}${" ".repeat(Math.max(0, (columnWidths[index] ?? 0) - displayWidth(cell)))}`
+      )
+      .join("  ")
+  }));
+}
+
+function markdownTableColumnWidths(rows: string[][]): number[] {
+  const widths: number[] = [];
+  for (const row of rows) {
+    row.forEach((cell, index) => {
+      widths[index] = Math.max(widths[index] ?? 0, displayWidth(cell));
+    });
+  }
+  return widths;
 }
 
 function stripInlineMarkdown(text: string): string {
