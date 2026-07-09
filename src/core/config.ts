@@ -27,6 +27,20 @@ const RolePromptConfigSchema = z.object({
   instructions: z.array(z.string()).default([])
 });
 
+const UiColorOverridesSchema = z.object({
+  chrome: z.string().min(1).optional(),
+  surface: z.string().min(1).optional(),
+  rail: z.string().min(1).optional(),
+  successSurface: z.string().min(1).optional(),
+  dangerSurface: z.string().min(1).optional(),
+  text: z.string().min(1).optional(),
+  muted: z.string().min(1).optional(),
+  accent: z.string().min(1).optional(),
+  warning: z.string().min(1).optional(),
+  success: z.string().min(1).optional(),
+  danger: z.string().min(1).optional()
+}).default({});
+
 const CodexRouterConfigSchema = z.object({
   command: z.string().min(1).default("codex"),
   args: z.array(z.string()).default(["exec", "--skip-git-repo-check", "--sandbox", "workspace-write", "--color", "never", "-"]),
@@ -71,7 +85,9 @@ const AppConfigSchema = z.object({
   }),
   ui: z.object({
     showStatusBar: z.boolean(),
-    autoOpenFailedWorker: z.boolean()
+    autoOpenFailedWorker: z.boolean(),
+    theme: z.enum(["codex", "graphite", "paper"]).default("codex"),
+    colors: UiColorOverridesSchema
   })
 });
 
@@ -184,7 +200,9 @@ export function defaultConfig(projectRoot: string): AppConfig {
     },
     ui: {
       showStatusBar: true,
-      autoOpenFailedWorker: true
+      autoOpenFailedWorker: true,
+      theme: "codex",
+      colors: {}
     }
   };
 }
@@ -301,7 +319,11 @@ export async function loadConfig(projectRoot: string): Promise<AppConfig> {
     },
     ui: {
       ...base.ui,
-      ...(parsed.ui ?? {})
+      ...(parsed.ui ?? {}),
+      colors: {
+        ...base.ui.colors,
+        ...(parsed.ui?.colors ?? {})
+      }
     }
   };
 
@@ -334,7 +356,8 @@ function assertObjectSections(parsed: Partial<AppConfig>): void {
     ["roles.judge", parsed.roles?.judge],
     ["roles.actor", parsed.roles?.actor],
     ["roles.critic", parsed.roles?.critic],
-    ["ui", parsed.ui]
+    ["ui", parsed.ui],
+    ["ui.colors", parsed.ui?.colors]
   ];
 
   for (const [path, value] of sections) {

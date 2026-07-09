@@ -49,8 +49,6 @@ export type WorkerOutputLineKind =
   | "diff-remove";
 
 type WorkerOutputLineTheme = Pick<TextProps, "backgroundColor" | "bold" | "color" | "dimColor">;
-const WORKER_PANEL_BACKGROUND: NonNullable<TextProps["backgroundColor"]> = TUI_THEME.surface;
-const WORKER_PANEL_TITLE_BACKGROUND: NonNullable<TextProps["backgroundColor"]> = TUI_THEME.chrome;
 
 interface RenderLine {
   kind: WorkerOutputLineKind;
@@ -214,8 +212,8 @@ function WorkerOutputTitleRail({ title, width }: { title: string; width: number 
 
   return (
     <Box>
-      <Text backgroundColor={WORKER_PANEL_TITLE_BACKGROUND} color={TUI_THEME.text} bold>{titleText}</Text>
-      {trailingWidth > 0 ? <Text backgroundColor={WORKER_PANEL_TITLE_BACKGROUND}>{" ".repeat(trailingWidth)}</Text> : null}
+      <Text backgroundColor={TUI_THEME.chrome} color={TUI_THEME.text} bold>{titleText}</Text>
+      {trailingWidth > 0 ? <Text backgroundColor={TUI_THEME.chrome}>{" ".repeat(trailingWidth)}</Text> : null}
     </Box>
   );
 }
@@ -4298,8 +4296,8 @@ function WorkerOutputLine({ line, width }: { line: DisplayLine; width: number })
       return (
         <Box>
           <WorkerOutputIndent backgroundColor={fillBackground} />
-          <Text backgroundColor={WORKER_PANEL_BACKGROUND} color={TUI_THEME.muted}>{sourceParts.gutter}</Text>
-          <Text backgroundColor={WORKER_PANEL_BACKGROUND} color={TUI_THEME.text} wrap="truncate-end">{sourceParts.code}</Text>
+          <Text backgroundColor={TUI_THEME.surface} color={TUI_THEME.muted}>{sourceParts.gutter}</Text>
+          <Text backgroundColor={TUI_THEME.surface} color={TUI_THEME.text} wrap="truncate-end">{sourceParts.code}</Text>
           <WorkerOutputTrailingFill backgroundColor={fillBackground} width={width} usedWidth={usedWidth} />
         </Box>
       );

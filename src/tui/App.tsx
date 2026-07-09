@@ -23,7 +23,7 @@ import { WorkerOutputView } from "./WorkerOutputView.js";
 import { compactEndByDisplayWidth, displayWidth, wrapByDisplayWidth } from "./display-width.js";
 import { isAttachShortcut, isExitShortcut, isLogsShortcut, mouseScrollDelta, scrollDelta } from "./keyboard.js";
 import { createRawInputDecoder } from "./raw-input-decoder.js";
-import { TUI_THEME } from "./theme.js";
+import { configureTuiTheme, TUI_THEME } from "./theme.js";
 import {
   buildNativeAttachLaunch,
   startNativeAttachProcess,
@@ -66,6 +66,11 @@ export function App({
   prepareNativeAttach,
   startNativeAttach
 }: AppProps) {
+  configureTuiTheme({
+    theme: config.ui.theme,
+    colors: config.ui.colors
+  });
+
   const [input, setInput] = useState("");
   const [messages, setMessages] = useState<Message[]>([]);
   const [busy, setBusy] = useState(false);
@@ -680,11 +685,7 @@ function chatSingleMessageDisplayLines(message: Message, contentWidth: number): 
 
     wrapped.forEach((chunk, chunkIndex) => {
       const continuation = !isFirstRawLine || chunkIndex > 0;
-      const prefix = message.from === "user"
-        ? continuation
-          ? "  "
-          : "> "
-        : "";
+      const prefix = chatLinePrefix(message.from, rawLine, continuation, chunkIndex > 0);
       const lineWidth = Math.max(1, contentWidth - displayWidth(prefix));
       const fitted = displayWidth(chunk) > lineWidth
         ? wrapByDisplayWidth(chunk, lineWidth)
@@ -700,6 +701,21 @@ function chatSingleMessageDisplayLines(message: Message, contentWidth: number): 
   });
 
   return rendered;
+}
+
+function chatLinePrefix(
+  from: Message["from"],
+  rawLine: string,
+  continuation: boolean,
+  wrappedContinuation: boolean
+): string {
+  if (from === "user") {
+    return continuation ? "  " : "> ";
+  }
+  if (from === "system" && wrappedContinuation && isCompactChatSummaryLine(rawLine)) {
+    return "  ";
+  }
+  return "";
 }
 
 function chatSystemDisplayLines(text: string): string[] {
@@ -760,6 +776,10 @@ function cleanChatSummaryLine(line: string): string {
 
 function isChatSummaryHeading(line: string): boolean {
   return /^(?:requirements|actor work|worklog|critic review|review|critic findings)$/i.test(line);
+}
+
+function isCompactChatSummaryLine(line: string): boolean {
+  return /^(?:done|requirements|actor|review|findings) · /i.test(line.trim());
 }
 
 function ChatEmptyState({
@@ -927,7 +947,7 @@ function NativeAttachTitleRail({ title, width }: { title: string; width: number 
   return (
     <Box>
       <Text backgroundColor={TUI_THEME.chrome} color={TUI_THEME.text} bold>{titleText}</Text>
-      {trailingWidth > 0 ? <Text backgroundColor={TUI_THEME.rail}>{" ".repeat(trailingWidth)}</Text> : null}
+      {trailingWidth > 0 ? <Text backgroundColor={TUI_THEME.chrome}>{" ".repeat(trailingWidth)}</Text> : null}
     </Box>
   );
 }

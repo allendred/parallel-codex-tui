@@ -60,3 +60,10 @@ instructions = ["Review Actor work against Judge requirements. Lead with blockin
 [ui]
 showStatusBar = true
 autoOpenFailedWorker = true
+theme = "codex" # codex, graphite, paper
+
+[ui.colors]
+# Optional color overrides. Values can be Ink color names or ansi256(n).
+# chrome = "ansi256(23)"
+# rail = "ansi256(236)"
+# accent = "cyan"

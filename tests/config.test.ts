@@ -38,6 +38,8 @@ describe("config", () => {
     expect(config.pairing.critic).toBe("codex");
     expect(config.roles.actor.title).toBe("Actor");
     expect(config.roles.critic.instructions.join("\n")).toContain("blocking findings");
+    expect(config.ui.theme).toBe("codex");
+    expect(config.ui.colors).toEqual({});
     expect(config.workers.claude.args).toEqual([
       "--print",
       "--permission-mode",
@@ -68,6 +70,33 @@ describe("config", () => {
 
     expect(config.workers.codex.command).toBe("codex");
     expect(config.ui.showStatusBar).toBe(true);
+  });
+
+  it("loads TUI theme and color overrides", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pct-config-theme-"));
+
+    await writeText(
+      join(root, ".parallel-codex", "config.toml"),
+      [
+        "[ui]",
+        'theme = "graphite"',
+        "showStatusBar = true",
+        "autoOpenFailedWorker = false",
+        "",
+        "[ui.colors]",
+        'chrome = "ansi256(238)"',
+        'accent = "magenta"'
+      ].join("\n")
+    );
+
+    const config = await loadConfig(root);
+
+    expect(config.ui.theme).toBe("graphite");
+    expect(config.ui.autoOpenFailedWorker).toBe(false);
+    expect(config.ui.colors).toEqual({
+      chrome: "ansi256(238)",
+      accent: "magenta"
+    });
   });
 
   it("keeps default worker timeouts when TOML overrides only command fields", async () => {
@@ -208,7 +237,8 @@ describe("config", () => {
     const cases = [
       ["workers.codex", '[workers]\ncodex = "bad"\n'],
       ["router.codex", '[router]\ncodex = "bad"\n'],
-      ["roles.actor", '[roles]\nactor = "bad"\n']
+      ["roles.actor", '[roles]\nactor = "bad"\n'],
+      ["ui.colors", '[ui]\ncolors = "bad"\n']
     ];
 
     for (const [label, text] of cases) {

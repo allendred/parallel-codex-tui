@@ -354,6 +354,40 @@ describe("ChatView", () => {
     expect(lines.some((line) => line.text.includes("(empty)"))).toBe(false);
   });
 
+  it("indents wrapped complex summary continuations in narrow chat views", () => {
+    const lines = chatMessageDisplayLines(
+      [
+        {
+          from: "system",
+          text: [
+            "Complex task completed.",
+            "",
+            "Requirements:",
+            "- Build a playable falling-blocks game with scoring, preview, hold, keyboard controls, and smoke tests.",
+            "",
+            "Actor work:",
+            "- Implemented the browser game runtime.",
+            "",
+            "Critic review:",
+            "APPROVED",
+            "",
+            "Critic findings:",
+            "(empty)"
+          ].join("\n")
+        }
+      ],
+      34,
+      12
+    );
+
+    const wrapped = lines.map((line) => line.text);
+    expect(wrapped).toContain("requirements · Build a playable");
+    expect(wrapped).toContain("  falling-blocks game with");
+    expect(wrapped).toContain("  scoring, preview, hold,");
+    expect(wrapped.some((line) => line.startsWith("falling-blocks"))).toBe(false);
+    expect(wrapped.some((line) => line.startsWith("scoring,"))).toBe(false);
+  });
+
   it("wraps long chat messages by display width with aligned user continuations", () => {
     const messages = [
       {

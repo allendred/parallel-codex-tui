@@ -149,6 +149,9 @@ describe("package metadata", () => {
     expect(readme).toContain('OPENAI_API_KEY = "{env:OPENAI_API_KEY}"');
     expect(readme).toContain("parallel-codex-tui --help");
     expect(readme).toContain("parallel-codex-tui --version");
+    expect(readme).toContain("## Theme");
+    expect(readme).toContain('theme = "graphite"');
+    expect(readme).toContain("successSurface");
     expect(readme).toContain(".parallel-codex/config.toml");
     expect(readme).toContain(".parallel-codex/last-workspace");
     expect(readme).toContain(".parallel-codex/workspaces.json");

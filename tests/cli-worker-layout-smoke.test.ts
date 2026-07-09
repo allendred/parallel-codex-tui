@@ -7,6 +7,7 @@ import { writeJson } from "../src/core/file-store.js";
 import { TaskMetaSchema, WorkerStatusSchema } from "../src/domain/schemas.js";
 import { displayWidth } from "../src/tui/display-width.js";
 import { NativeTerminalScreen } from "../src/tui/terminal-screen.js";
+import { TUI_THEME_PRESETS } from "../src/tui/theme.js";
 
 describe("CLI worker layout smoke", () => {
   it("keeps the app header visible when worker logs fill a short terminal", async () => {
@@ -70,20 +71,20 @@ describe("CLI worker layout smoke", () => {
       expect(snapshot).toContain("logs");
       expect(snapshot).not.toContain("Worker logs");
       expect(snapshot).toContain("task ");
-      expect(headerLine?.chunks.some((chunk) => chunk.style.backgroundColor === "ansi256(24)")).toBe(true);
+      expect(headerLine?.chunks.some((chunk) => chunk.style.backgroundColor === TUI_THEME_PRESETS.codex.chrome)).toBe(true);
       expect(displayWidth(headerLineText)).toBe(139);
-      expect(workerTitleLine?.chunks.some((chunk) => chunk.style.backgroundColor === "ansi256(24)")).toBe(true);
-      expect(workerTitleLine?.chunks.some((chunk) => chunk.style.backgroundColor === "ansi256(235)")).toBe(false);
+      expect(workerTitleLine?.chunks.some((chunk) => chunk.style.backgroundColor === TUI_THEME_PRESETS.codex.chrome)).toBe(true);
+      expect(workerTitleLine?.chunks.some((chunk) => chunk.style.backgroundColor === TUI_THEME_PRESETS.codex.surface)).toBe(false);
       expect(displayWidth(workerTitleLineText)).toBe(137);
       expect(snapshot).toContain("line 80");
       expect(snapshot).toContain("logs · read");
       expect(snapshot).toContain("^O attach");
-      expect(inputLine?.chunks.some((chunk) => chunk.style.backgroundColor === "ansi256(236)")).toBe(true);
+      expect(inputLine?.chunks.some((chunk) => chunk.style.backgroundColor === TUI_THEME_PRESETS.codex.rail)).toBe(true);
       expect(displayWidth(inputLineText)).toBe(139);
       expect(snapshot).toContain("workers 1");
       expect(snapshot).toContain("done 1");
       expect(snapshot).toContain("@ critic/mock");
-      expect(statusLine?.chunks.some((chunk) => chunk.style.backgroundColor === "ansi256(236)")).toBe(true);
+      expect(statusLine?.chunks.some((chunk) => chunk.style.backgroundColor === TUI_THEME_PRESETS.codex.rail)).toBe(true);
       expect(displayWidth(statusLineText)).toBe(139);
       expect(snapshot).not.toContain("Type a message");
 

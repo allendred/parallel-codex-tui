@@ -8,6 +8,7 @@ import { writeJson } from "../src/core/file-store.js";
 import { NativeSessionSchema, TaskMetaSchema, WorkerStatusSchema } from "../src/domain/schemas.js";
 import { displayWidth } from "../src/tui/display-width.js";
 import { NativeTerminalScreen } from "../src/tui/terminal-screen.js";
+import { TUI_THEME_PRESETS } from "../src/tui/theme.js";
 
 describe("CLI native layout smoke", () => {
   it("keeps the outer app chrome visible when native attach output fills a short terminal", async () => {
@@ -71,8 +72,8 @@ describe("CLI native layout smoke", () => {
       expect(snapshot).toContain("task ");
       expect(snapshot).toContain("native line 40");
       expect(snapshot).toContain("native · wheel/Pg · ^] detach");
-      expect(nativeTitleLine?.chunks.some((chunk) => chunk.style.backgroundColor === "ansi256(24)")).toBe(true);
-      expect(nativeTitleLine?.chunks.some((chunk) => chunk.style.backgroundColor === "ansi256(236)")).toBe(true);
+      expect(nativeTitleLine?.chunks.some((chunk) => chunk.style.backgroundColor === TUI_THEME_PRESETS.codex.chrome)).toBe(true);
+      expect(nativeTitleLine?.chunks.some((chunk) => chunk.style.backgroundColor === TUI_THEME_PRESETS.codex.rail)).toBe(false);
       expect(displayWidth(nativeTitleLineText)).toBe(137);
     } finally {
       child.write("\x1d");

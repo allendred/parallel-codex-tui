@@ -91,6 +91,22 @@ Then start the TUI:
 parallel-codex-tui --workspace /path/to/project
 ```
 
+## Theme
+
+Set the TUI palette in `.parallel-codex/config.toml`:
+
+```toml
+[ui]
+theme = "graphite" # codex, graphite, paper
+
+[ui.colors]
+accent = "cyan"
+chrome = "ansi256(238)"
+rail = "ansi256(236)"
+```
+
+`ui.colors` is optional and can override any theme key: `chrome`, `surface`, `rail`, `successSurface`, `dangerSurface`, `text`, `muted`, `accent`, `warning`, `success`, or `danger`.
+
 ## Behavior
 
 - Requests are routed by Codex by default, with a configured simple/complex fallback if the router process fails.

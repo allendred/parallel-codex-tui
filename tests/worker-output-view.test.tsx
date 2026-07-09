@@ -22,6 +22,7 @@ import {
   workerOutputVisibleStart
 } from "../src/tui/WorkerOutputView.js";
 import { displayWidth } from "../src/tui/display-width.js";
+import { TUI_THEME_PRESETS } from "../src/tui/theme.js";
 
 describe("WorkerOutputView", () => {
   it("renders actor role artifact logs before raw process output", async () => {
@@ -3110,19 +3111,20 @@ describe("WorkerOutputView", () => {
   });
 
   it("assigns subtle background colors to dense log row types", () => {
-    expect(workerOutputLineTheme("section").backgroundColor).toBe("ansi256(236)");
-    expect(workerOutputLineTheme("command").backgroundColor).toBe("ansi256(24)");
-    expect(workerOutputLineTheme("error").backgroundColor).toBe("ansi256(52)");
-    expect(workerOutputLineTheme("diff-add").backgroundColor).toBe("ansi256(22)");
-    expect(workerOutputLineTheme("diff-remove").backgroundColor).toBe("ansi256(52)");
-    expect(workerOutputLineTheme("diff-file")).toMatchObject({ bold: true, color: "cyan" });
-    expect(workerOutputLineTheme("diff-summary")).toEqual({ color: "white" });
-    expect(workerOutputLineTheme("code").backgroundColor).toBe("ansi256(236)");
-    expect(workerOutputLineTheme("json")).toMatchObject({ backgroundColor: "ansi256(236)", color: "cyan" });
-    expect(workerOutputLineTheme("source-line").backgroundColor).toBe("ansi256(235)");
-    expect(workerOutputLineFillTheme("group")).toBe("ansi256(24)");
-    expect(workerOutputLineFillTheme("section")).toBe("ansi256(236)");
-    expect(workerOutputLineFillTheme("command")).toBe("ansi256(24)");
+    const theme = TUI_THEME_PRESETS.codex;
+    expect(workerOutputLineTheme("section").backgroundColor).toBe(theme.rail);
+    expect(workerOutputLineTheme("command").backgroundColor).toBe(theme.chrome);
+    expect(workerOutputLineTheme("error").backgroundColor).toBe(theme.dangerSurface);
+    expect(workerOutputLineTheme("diff-add").backgroundColor).toBe(theme.successSurface);
+    expect(workerOutputLineTheme("diff-remove").backgroundColor).toBe(theme.dangerSurface);
+    expect(workerOutputLineTheme("diff-file")).toMatchObject({ bold: true, color: theme.accent });
+    expect(workerOutputLineTheme("diff-summary")).toEqual({ color: theme.text });
+    expect(workerOutputLineTheme("code").backgroundColor).toBe(theme.rail);
+    expect(workerOutputLineTheme("json")).toMatchObject({ backgroundColor: theme.rail, color: theme.accent });
+    expect(workerOutputLineTheme("source-line").backgroundColor).toBe(theme.surface);
+    expect(workerOutputLineFillTheme("group")).toBe(theme.chrome);
+    expect(workerOutputLineFillTheme("section")).toBe(theme.rail);
+    expect(workerOutputLineFillTheme("command")).toBe(theme.chrome);
     expect(workerOutputLineFillTheme("content")).toBeNull();
   });
 
