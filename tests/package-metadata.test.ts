@@ -221,6 +221,12 @@ describe("package metadata", () => {
     expect(workflow).toContain("npm config set //registry.npmjs.org/:_authToken");
     expect(workflow).toContain("NPM_TOKEN requires a one-time password");
     expect(workflow).toContain("sed -i '/_authToken/d'");
+    expect(workflow).toContain("Verify published package");
+    expect(workflow).toContain('PACKAGE_SPEC="parallel-codex-tui@$PACKAGE_VERSION"');
+    expect(workflow).toContain('npm view "$PACKAGE_SPEC" version --json');
+    expect(workflow).toContain('npm install --global --prefix "$VERIFY_PREFIX" "$PACKAGE_SPEC"');
+    expect(workflow).toContain('"$VERIFY_PREFIX/bin/parallel-codex-tui" --version');
+    expect(workflow).toContain('grep -F "parallel-codex-tui $PACKAGE_VERSION"');
     expect(workflow).toContain("softprops/action-gh-release@v2");
     expect(workflow).toContain("NPM_TOKEN");
   });
