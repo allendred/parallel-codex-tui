@@ -59,6 +59,7 @@ export interface ChatDisplayLine {
 }
 
 type ChatLineTheme = Pick<TextProps, "color" | "dimColor">;
+type NativeAttachStartingTheme = Pick<TextProps, "backgroundColor" | "color" | "dimColor">;
 
 export function App({
   config,
@@ -925,7 +926,7 @@ function NativeAttachView({
   } | null;
 }) {
   if (!attach) {
-    return <Text>Starting native attach...</Text>;
+    return <Text {...nativeAttachStartingTheme()}>Starting native attach...</Text>;
   }
   const terminalWidth = process.stdout.columns || 120;
   const panelWidth = nativeAttachPanelRailWidth(terminalWidth);
@@ -945,6 +946,14 @@ function NativeAttachView({
       <TerminalOutput lines={attach.screen.styledSnapshotLines({ showCursor: true })} />
     </Box>
   );
+}
+
+export function nativeAttachStartingTheme(): NativeAttachStartingTheme {
+  return {
+    backgroundColor: TUI_THEME.surface,
+    color: TUI_THEME.muted,
+    dimColor: true
+  };
 }
 
 function NativeAttachTitleRail({ title, width }: { title: string; width: number }) {

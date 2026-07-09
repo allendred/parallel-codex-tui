@@ -1,7 +1,7 @@
 import React from "react";
 import { render } from "ink-testing-library";
 import { afterEach, describe, expect, it } from "vitest";
-import { appContentHeight, chatLineTheme, chatMessageDisplayLines, ChatView, nativeAttachExitLine, nativeAttachTerminalColumns, nativeAttachTitleDisplay, nativeTerminalScrollDisplay } from "../src/tui/App.js";
+import { appContentHeight, chatLineTheme, chatMessageDisplayLines, ChatView, nativeAttachExitLine, nativeAttachStartingTheme, nativeAttachTerminalColumns, nativeAttachTitleDisplay, nativeTerminalScrollDisplay } from "../src/tui/App.js";
 import { displayWidth } from "../src/tui/display-width.js";
 import { configureTuiTheme, resetTuiTheme, TUI_THEME_PRESETS } from "../src/tui/theme.js";
 
@@ -26,6 +26,16 @@ describe("App layout sizing", () => {
 });
 
 describe("nativeAttachTitleDisplay", () => {
+  it("themes the native attach starting placeholder with the active palette", () => {
+    configureTuiTheme({ theme: "paper" });
+
+    expect(nativeAttachStartingTheme()).toEqual({
+      backgroundColor: TUI_THEME_PRESETS.paper.surface,
+      color: TUI_THEME_PRESETS.paper.muted,
+      dimColor: true
+    });
+  });
+
   it("sizes the embedded native terminal to the padded content width", () => {
     expect(nativeAttachTerminalColumns(120)).toBe(118);
     expect(nativeAttachTerminalColumns(24)).toBe(22);
