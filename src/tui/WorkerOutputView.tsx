@@ -273,7 +273,7 @@ function workerOutputContentKey(role: WorkerRole | undefined, logPath: string | 
 export function workerOutputTitleDisplay(title: string, width: number): string {
   const match = title.match(/^(.+?)\s+\(([^)]+)\)\s+output(?:\s+\((\d+\/\d+)\))?$/i);
   if (!match) {
-    return title.replace(/\s+output\b/i, "");
+    return compactEndByDisplayWidth(title.replace(/\s+output\b/i, "").trim(), width);
   }
 
   const role = (match[1] ?? "").trim().toLowerCase();

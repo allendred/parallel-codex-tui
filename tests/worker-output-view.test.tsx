@@ -3390,6 +3390,14 @@ describe("WorkerOutputView", () => {
     expect(workerOutputScrollDisplay(474, 474, 80)).toBe("top");
   });
 
+  it("keeps non-standard worker output titles inside the header width", () => {
+    const title = workerOutputTitleDisplay("Third Party Reviewer output with an unusually long label", 18);
+
+    expect(title).toContain("...");
+    expect(title).not.toContain("output");
+    expect(displayWidth(title)).toBeLessThanOrEqual(18);
+  });
+
   it("bottom-aligns short worker tail bodies only when scrollback exists", () => {
     expect(workerOutputTailTopPaddingLines(0, 20, 4, 8)).toBe(4);
     expect(workerOutputTailTopPaddingLines(0, 20, 6, 8)).toBe(0);
