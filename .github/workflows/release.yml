@@ -107,7 +107,7 @@ jobs:
 
           restore_auth_token_config() {
             if [ -n "${NPM_CONFIG_USERCONFIG:-}" ] && [ -f "$NPM_CONFIG_USERCONFIG" ]; then
-              printf '%s\n' '//registry.npmjs.org/:_authToken=${NODE_AUTH_TOKEN}' >> "$NPM_CONFIG_USERCONFIG"
+              npm config set //registry.npmjs.org/:_authToken "$NODE_AUTH_TOKEN" --userconfig "$NPM_CONFIG_USERCONFIG"
             fi
           }
 
@@ -136,7 +136,16 @@ jobs:
           echo "Publishing to npm with NPM_TOKEN."
           export NODE_AUTH_TOKEN="$NPM_TOKEN"
           restore_auth_token_config
-          npm publish --access public --provenance
+          token_log="$(mktemp)"
+          if npm publish --access public --provenance 2>&1 | tee "$token_log"; then
+            exit 0
+          fi
+
+          if grep -q "EOTP" "$token_log"; then
+            echo "::error::NPM_TOKEN requires a one-time password. Replace it with an npm automation token or configure Trusted Publishing."
+          fi
+
+          exit 1
         env:
           NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
 

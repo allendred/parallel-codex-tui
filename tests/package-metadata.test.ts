@@ -215,6 +215,8 @@ describe("package metadata", () => {
     expect(workflow).toContain("Trying npm trusted publishing via GitHub OIDC");
     expect(workflow).toContain("Trusted publishing was not accepted; falling back to NPM_TOKEN if available.");
     expect(workflow).toContain("restore_auth_token_config");
+    expect(workflow).toContain("npm config set //registry.npmjs.org/:_authToken");
+    expect(workflow).toContain("NPM_TOKEN requires a one-time password");
     expect(workflow).toContain("sed -i '/_authToken/d'");
     expect(workflow).toContain("softprops/action-gh-release@v2");
     expect(workflow).toContain("NPM_TOKEN");
