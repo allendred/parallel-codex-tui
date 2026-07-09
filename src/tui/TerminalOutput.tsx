@@ -4,7 +4,7 @@ import type { TerminalLine, TerminalTextStyle } from "./terminal-screen.js";
 import { displayWidth } from "./display-width.js";
 import { TUI_THEME } from "./theme.js";
 
-const TERMINAL_OUTPUT_EMPTY_TEXT = "No native output yet.";
+const TERMINAL_OUTPUT_EMPTY_TEXT = "Waiting for native output...";
 
 export interface TerminalOutputProps {
   lines: TerminalLine[];

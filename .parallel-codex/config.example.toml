@@ -60,7 +60,7 @@ instructions = ["Review Actor work against Judge requirements. Lead with blockin
 [ui]
 showStatusBar = true
 autoOpenFailedWorker = true
-theme = "codex" # codex, graphite, paper, aurora
+theme = "codex" # codex, graphite, paper, aurora, studio
 
 [ui.colors]
 # Optional color overrides. Values can be Chalk color names,

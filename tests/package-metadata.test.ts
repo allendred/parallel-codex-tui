@@ -146,6 +146,7 @@ describe("package metadata", () => {
     expect(readme).toContain("parallel-codex-tui --doctor");
     expect(readme).toContain("parallel-codex-tui --workspace /path/to/project");
     expect(readme).toContain("parallel-codex-tui --theme aurora --workspace /path/to/project");
+    expect(readme).toContain("parallel-codex-tui --theme studio --workspace /path/to/project");
     expect(readme).toContain("--workspace=/path/to/project");
     expect(readme).toContain("--theme=paper");
     expect(readme).toContain("-w=/path/to/project");
@@ -173,6 +174,7 @@ describe("package metadata", () => {
     expect(readme).toContain("ansi256(0..255)");
     expect(readme).toContain("Unknown UI and color keys are rejected so typos fail fast");
     expect(readme).toContain("parallel-codex-tui --theme graphite --doctor");
+    expect(readme).toContain("parallel-codex-tui --theme studio --doctor");
     expect(readme).toContain("parallel-codex-tui --themes");
     expect(readme).toContain("parallel-codex-tui --theme paper --themes");
     expect(readme).toContain("complete palette groups for every built-in theme");

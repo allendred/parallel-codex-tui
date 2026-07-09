@@ -17,7 +17,7 @@ describe("CLI help and version", () => {
     expect(stdout).toContain("--app-root <path>");
     expect(stdout).toContain("--task <id>");
     expect(stdout).toContain("--theme <name>");
-    expect(stdout).toContain("codex, graphite, paper, aurora");
+    expect(stdout).toContain("codex, graphite, paper, aurora, studio");
     expect(stdout).toContain("--themes");
     expect(stdout).toContain("List built-in TUI theme palettes");
     expect(stdout).toContain("combine with --theme to filter");
@@ -54,6 +54,7 @@ describe("CLI help and version", () => {
     expect(stdout).toContain("graphite: chrome=ansi256(236), surface=ansi256(233), rail=ansi256(238), accent=ansi256(75)");
     expect(stdout).toContain("paper: chrome=ansi256(254), surface=ansi256(231), rail=ansi256(255), accent=ansi256(25)");
     expect(stdout).toContain("aurora: chrome=ansi256(23), surface=ansi256(234), rail=ansi256(236), accent=ansi256(121)");
+    expect(stdout).toContain("studio: chrome=ansi256(236), surface=ansi256(234), rail=ansi256(237), accent=ansi256(117)");
     expect(stdout).toContain("  palette:");
     expect(stdout).toContain("    text=ansi256(255), muted=ansi256(250), accent=ansi256(81)");
     expect(stdout).toContain("    successSurface=ansi256(194), success=ansi256(28), warning=ansi256(130)");

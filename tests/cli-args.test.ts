@@ -53,9 +53,9 @@ describe("parseCliArgs", () => {
   });
 
   it("accepts a separate theme value", () => {
-    const parsed = parseCliArgs(["--theme", "paper"], "/app");
+    const parsed = parseCliArgs(["--theme", "studio"], "/app");
 
-    expect(parsed.theme).toBe("paper");
+    expect(parsed.theme).toBe("studio");
   });
 
   it("normalizes theme option whitespace", () => {
@@ -196,7 +196,7 @@ describe("validateCliArgs", () => {
 
   it("rejects invalid theme names before startup can continue", () => {
     expect(validateCliArgs(["--theme", "solarized"])).toEqual([
-      "Invalid --theme: solarized (expected codex, graphite, paper, aurora)"
+      "Invalid --theme: solarized (expected codex, graphite, paper, aurora, studio)"
     ]);
   });
 
