@@ -330,6 +330,20 @@ export async function loadConfig(projectRoot: string): Promise<AppConfig> {
   return AppConfigSchema.parse(merged);
 }
 
+export function withUiThemeOverride(config: AppConfig, theme: AppConfig["ui"]["theme"] | null): AppConfig {
+  if (!theme) {
+    return config;
+  }
+
+  return {
+    ...config,
+    ui: {
+      ...config.ui,
+      theme
+    }
+  };
+}
+
 function assertObjectSections(parsed: Partial<AppConfig>): void {
   const sections: Array<[string, unknown]> = [
     ["router", parsed.router],

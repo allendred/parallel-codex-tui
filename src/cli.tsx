@@ -6,7 +6,7 @@ import { parseCliArgs, validateCliArgs } from "./cli-args.js";
 import { selectWorkspaceForCli } from "./cli-workspace.js";
 import { createRuntime } from "./bootstrap.js";
 import { prepareAppRoot } from "./core/app-root.js";
-import { configPath, writeDefaultConfig } from "./core/config.js";
+import { configPath, withUiThemeOverride, writeDefaultConfig } from "./core/config.js";
 import { pathExists } from "./core/file-store.js";
 import { runDoctor } from "./doctor.js";
 import { App } from "./tui/App.js";
@@ -18,6 +18,7 @@ Options:
   -w, --workspace <path>  Project workspace for worker sessions and edits
       --app-root <path>   App root for configuration lookup
   -t, --task <id>         Open an existing task session
+      --theme <name>      Temporarily use a TUI theme: codex, graphite, paper
       --init              Write .parallel-codex/config.toml if missing
       --doctor            Check local configuration and agent commands
   -v, --version           Print the current version
@@ -83,7 +84,7 @@ async function main(): Promise<void> {
 
     render(
       <App
-        config={runtime.config}
+        config={withUiThemeOverride(runtime.config, cliArgs.theme)}
         orchestrator={runtime.orchestrator}
         cwd={runtime.workspaceRoot}
         initialTaskId={initialTaskId}

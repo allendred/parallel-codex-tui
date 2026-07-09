@@ -24,6 +24,7 @@ cd /path/to/project
 parallel-codex-tui --init
 parallel-codex-tui --doctor
 parallel-codex-tui --workspace /path/to/project
+parallel-codex-tui --theme graphite --workspace /path/to/project
 ```
 
 Startup resolves the worker project before routing:
@@ -49,7 +50,7 @@ For development without linking, run:
 npm run dev -- --workspace /path/to/project
 ```
 
-CLI options with values can also be passed as `--workspace=/path/to/project`, `--app-root=/path/to/app`, `--task=task-id`, `-w=/path/to/project`, and `-t=task-id`.
+CLI options with values can also be passed as `--workspace=/path/to/project`, `--app-root=/path/to/app`, `--task=task-id`, `--theme=paper`, `-w=/path/to/project`, and `-t=task-id`.
 
 Check available flags or the installed version without starting the TUI:
 
@@ -106,6 +107,8 @@ rail = "ansi256(236)"
 ```
 
 `ui.colors` is optional and can override any theme key: `chrome`, `surface`, `rail`, `successSurface`, `dangerSurface`, `text`, `muted`, `accent`, `warning`, `success`, or `danger`.
+
+For quick previews without editing config, pass `--theme codex`, `--theme graphite`, or `--theme paper` at startup.
 
 ## Behavior
 

@@ -12,6 +12,7 @@ describe("parseCliArgs", () => {
     expect(parsed.help).toBe(false);
     expect(parsed.init).toBe(false);
     expect(parsed.taskId).toBeNull();
+    expect(parsed.theme).toBeNull();
     expect(parsed.version).toBe(false);
   });
 
@@ -25,7 +26,7 @@ describe("parseCliArgs", () => {
 
   it("accepts equals-style long option values", () => {
     const parsed = parseCliArgs(
-      ["--app-root=/tmp/app", "--workspace=/tmp/work", "--task=task-1234"],
+      ["--app-root=/tmp/app", "--workspace=/tmp/work", "--task=task-1234", "--theme=graphite"],
       "/repo"
     );
 
@@ -33,6 +34,7 @@ describe("parseCliArgs", () => {
     expect(parsed.workspaceRoot).toBe("/tmp/work");
     expect(parsed.explicitWorkspace).toBe("/tmp/work");
     expect(parsed.taskId).toBe("task-1234");
+    expect(parsed.theme).toBe("graphite");
   });
 
   it("accepts equals-style short option values", () => {
@@ -47,6 +49,12 @@ describe("parseCliArgs", () => {
     const parsed = parseCliArgs(["--task", "task-1234"], "/app");
 
     expect(parsed.taskId).toBe("task-1234");
+  });
+
+  it("accepts a separate theme value", () => {
+    const parsed = parseCliArgs(["--theme", "paper"], "/app");
+
+    expect(parsed.theme).toBe("paper");
   });
 
   it("accepts init without changing workspace parsing", () => {
@@ -94,7 +102,10 @@ describe("parseCliArgs", () => {
         "-w=/tmp/second-work",
         "--task",
         "task-first",
-        "-t=task-second"
+        "-t=task-second",
+        "--theme",
+        "codex",
+        "--theme=paper"
       ],
       "/repo"
     );
@@ -103,6 +114,7 @@ describe("parseCliArgs", () => {
     expect(parsed.workspaceRoot).toBe("/tmp/second-work");
     expect(parsed.explicitWorkspace).toBe("/tmp/second-work");
     expect(parsed.taskId).toBe("task-second");
+    expect(parsed.theme).toBe("paper");
   });
 
   it("does not treat another flag as a workspace value", () => {
@@ -127,13 +139,21 @@ describe("parseCliArgs", () => {
     expect(parsed.taskId).toBeNull();
   });
 
+  it("does not treat another flag as a theme value", () => {
+    const parsed = parseCliArgs(["--theme", "--doctor"], "/app");
+
+    expect(parsed.doctor).toBe(true);
+    expect(parsed.theme).toBeNull();
+  });
+
   it("ignores empty equals-style option values", () => {
-    const parsed = parseCliArgs(["--workspace=", "--app-root=", "--task="], "/app");
+    const parsed = parseCliArgs(["--workspace=", "--app-root=", "--task=", "--theme="], "/app");
 
     expect(parsed.appRoot).toBe("/app");
     expect(parsed.explicitWorkspace).toBeNull();
     expect(parsed.workspaceRoot).toBe("/app");
     expect(parsed.taskId).toBeNull();
+    expect(parsed.theme).toBeNull();
   });
 
   it("does not let empty equals-style option values consume the next argument", () => {
@@ -156,6 +176,12 @@ describe("parseCliArgs", () => {
 describe("validateCliArgs", () => {
   it("reports unknown options before startup can continue", () => {
     expect(validateCliArgs(["--workspacce", "/tmp/project"])).toEqual(["Unknown option: --workspacce"]);
+  });
+
+  it("rejects invalid theme names before startup can continue", () => {
+    expect(validateCliArgs(["--theme", "solarized"])).toEqual([
+      "Invalid --theme: solarized (expected codex, graphite, paper)"
+    ]);
   });
 
   it("allows positional text after an option terminator", () => {

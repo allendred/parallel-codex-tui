@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { writeText } from "../src/core/file-store.js";
-import { loadConfig, writeDefaultConfig } from "../src/core/config.js";
+import { loadConfig, withUiThemeOverride, writeDefaultConfig } from "../src/core/config.js";
 
 describe("config", () => {
   it("returns defaults when config file is absent", async () => {
@@ -97,6 +97,17 @@ describe("config", () => {
       chrome: "ansi256(238)",
       accent: "magenta"
     });
+  });
+
+  it("applies a transient UI theme override without mutating loaded config", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pct-config-theme-override-"));
+    const config = await loadConfig(root);
+
+    const overridden = withUiThemeOverride(config, "paper");
+
+    expect(overridden.ui.theme).toBe("paper");
+    expect(config.ui.theme).toBe("codex");
+    expect(overridden.ui.colors).toEqual(config.ui.colors);
   });
 
   it("keeps default worker timeouts when TOML overrides only command fields", async () => {

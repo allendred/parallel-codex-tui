@@ -100,6 +100,59 @@ describe("CLI worker layout smoke", () => {
     }
   }, 10000);
 
+  it("applies the CLI theme override to the rendered terminal chrome", async () => {
+    const workspace = await mkdtemp(join(tmpdir(), "pct-cli-worker-theme-"));
+    const taskId = "task-20260705-000000-theme";
+    const taskDir = join(workspace, ".parallel-codex", "sessions", taskId);
+    const workerDir = join(taskDir, "critic-mock");
+    const chunks: string[] = [];
+    const screen = new NativeTerminalScreen({ cols: 100, rows: 24, scrollback: 1000 });
+    let screenWrites = Promise.resolve();
+
+    await mkdir(workerDir, { recursive: true });
+    await writeTaskFiles({ workspace, taskId, taskDir, workerDir });
+
+    const child = spawn(
+      process.execPath,
+      ["./node_modules/.bin/tsx", "src/cli.tsx", "--theme", "paper", "--workspace", workspace, "--task", taskId],
+      {
+        cwd: process.cwd(),
+        cols: 100,
+        rows: 24,
+        name: "xterm-256color",
+        env: {
+          ...process.env,
+          TERM: "xterm-256color"
+        }
+      }
+    );
+
+    child.onData((chunk) => {
+      chunks.push(chunk);
+      screenWrites = screenWrites.then(() => screen.write(chunk));
+    });
+
+    try {
+      await waitForText(chunks, "ready");
+      child.write("\x17");
+      await waitForScreenText(() => screenWrites, screen, "line 80");
+
+      const lines = screen.styledSnapshotLines();
+      const headerLine = lines.find((line) => line.chunks.map((chunk) => chunk.text).join("").includes("parallel-codex-tui"));
+      const workerTitleLine = lines.find((line) => line.chunks.map((chunk) => chunk.text).join("").includes("critic/mock · 1/1"));
+      const inputLine = lines.find((line) => line.chunks.map((chunk) => chunk.text).join("").includes("logs · read"));
+      const statusLine = lines.find((line) => line.chunks.map((chunk) => chunk.text).join("").includes("workers 1"));
+
+      expect(headerLine?.chunks.some((chunk) => chunk.style.backgroundColor === TUI_THEME_PRESETS.paper.chrome)).toBe(true);
+      expect(workerTitleLine?.chunks.some((chunk) => chunk.style.backgroundColor === TUI_THEME_PRESETS.paper.chrome)).toBe(true);
+      expect(inputLine?.chunks.some((chunk) => chunk.style.backgroundColor === TUI_THEME_PRESETS.paper.rail)).toBe(true);
+      expect(statusLine?.chunks.some((chunk) => chunk.style.backgroundColor === TUI_THEME_PRESETS.paper.rail)).toBe(true);
+      expect(headerLine?.chunks.some((chunk) => chunk.style.backgroundColor === TUI_THEME_PRESETS.codex.chrome)).toBe(false);
+    } finally {
+      child.kill("SIGTERM");
+    }
+  }, 10000);
+
   it("keeps worker controls on one line in a compact terminal", async () => {
     const workspace = await mkdtemp(join(tmpdir(), "pct-cli-worker-compact-layout-"));
     const taskId = "task-20260705-000000-compact-layout";

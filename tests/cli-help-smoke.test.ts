@@ -16,6 +16,8 @@ describe("CLI help and version", () => {
     expect(stdout).toContain("--workspace <path>");
     expect(stdout).toContain("--app-root <path>");
     expect(stdout).toContain("--task <id>");
+    expect(stdout).toContain("--theme <name>");
+    expect(stdout).toContain("codex, graphite, paper");
     expect(stdout).toContain("--init");
     expect(stdout).toContain("--doctor");
     expect(stdout).toContain("--version");

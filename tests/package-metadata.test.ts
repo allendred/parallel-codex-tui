@@ -139,7 +139,9 @@ describe("package metadata", () => {
     expect(readme).toContain("parallel-codex-tui --init");
     expect(readme).toContain("parallel-codex-tui --doctor");
     expect(readme).toContain("parallel-codex-tui --workspace /path/to/project");
+    expect(readme).toContain("parallel-codex-tui --theme graphite --workspace /path/to/project");
     expect(readme).toContain("--workspace=/path/to/project");
+    expect(readme).toContain("--theme=paper");
     expect(readme).toContain("-w=/path/to/project");
     expect(readme).toContain("shows remembered projects from `.parallel-codex/workspaces.json`");
     expect(readme).toContain("If `--workspace <path>` points to an existing file");

@@ -1,5 +1,6 @@
 import { resolve } from "node:path";
 import { homedir } from "node:os";
+import { TUI_THEME_NAMES, type TuiThemeName } from "./tui/theme.js";
 
 export interface CliArgs {
   appRoot: string;
@@ -9,10 +10,11 @@ export interface CliArgs {
   init: boolean;
   workspaceRoot: string;
   taskId: string | null;
+  theme: TuiThemeName | null;
   version: boolean;
 }
 
-const allowedValueOptions = new Set(["--app-root", "--workspace", "-w", "--task", "-t"]);
+const allowedValueOptions = new Set(["--app-root", "--workspace", "-w", "--task", "-t", "--theme"]);
 const allowedBooleanOptions = new Set(["--doctor", "--help", "-h", "--init", "--version", "-v"]);
 
 export function parseCliArgs(args: string[], cwd: string): CliArgs {
@@ -26,6 +28,10 @@ export function parseCliArgs(args: string[], cwd: string): CliArgs {
     optionArgs,
     (arg) => arg === "--task" || arg.startsWith("--task=") || arg === "-t" || arg.startsWith("-t=")
   );
+  const themeFlagIndex = lastFlagIndex(
+    optionArgs,
+    (arg) => arg === "--theme" || arg.startsWith("--theme=")
+  );
   const doctor = optionArgs.includes("--doctor");
   const help = optionArgs.includes("--help") || optionArgs.includes("-h");
   const init = optionArgs.includes("--init");
@@ -35,6 +41,7 @@ export function parseCliArgs(args: string[], cwd: string): CliArgs {
   const explicitWorkspace = flagValue(optionArgs, workspaceFlagIndex);
   const workspaceRoot = explicitWorkspace ? resolvePathArg(cwd, explicitWorkspace) : cwd;
   const taskId = flagValue(optionArgs, taskFlagIndex);
+  const theme = cliThemeValue(flagValue(optionArgs, themeFlagIndex));
 
   return {
     appRoot,
@@ -44,6 +51,7 @@ export function parseCliArgs(args: string[], cwd: string): CliArgs {
     init,
     workspaceRoot,
     taskId,
+    theme,
     version
   };
 }
@@ -62,7 +70,8 @@ function resolvePathArg(cwd: string, value: string): string {
 
 export function validateCliArgs(args: string[]): string[] {
   const errors: string[] = [];
-  for (const arg of argsBeforeTerminator(args)) {
+  const optionArgs = argsBeforeTerminator(args);
+  for (const arg of optionArgs) {
     if (!arg.startsWith("-") || arg === "-") {
       continue;
     }
@@ -78,6 +87,12 @@ export function validateCliArgs(args: string[]): string[] {
     }
 
     errors.push(`Unknown option: ${arg}`);
+  }
+
+  const themeFlagIndex = lastFlagIndex(optionArgs, (arg) => arg === "--theme" || arg.startsWith("--theme="));
+  const themeValue = flagValue(optionArgs, themeFlagIndex);
+  if (themeValue && !isCliThemeName(themeValue)) {
+    errors.push(`Invalid --theme: ${themeValue} (expected ${TUI_THEME_NAMES.join(", ")})`);
   }
   return errors;
 }
@@ -105,4 +120,12 @@ function flagValue(args: string[], flagIndex: number): string | null {
 
   const value = flagIndex >= 0 ? args[flagIndex + 1] : null;
   return value && !value.startsWith("-") ? value : null;
+}
+
+function cliThemeValue(value: string | null): TuiThemeName | null {
+  return isCliThemeName(value) ? value : null;
+}
+
+function isCliThemeName(value: string | null): value is TuiThemeName {
+  return TUI_THEME_NAMES.includes(value as TuiThemeName);
 }
