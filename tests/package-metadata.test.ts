@@ -162,8 +162,12 @@ describe("package metadata", () => {
     expect(readme).toContain("npm `^11.5.1`");
     expect(readme).toContain("npm install -g npm@^11.15.0");
     expect(readme).toContain(
-      "npm trust github parallel-codex-tui --repo allendred/parallel-codex-tui --file release.yml --allow-publish",
+      "npm trust github parallel-codex-tui --repo allendred/parallel-codex-tui --file release.yml --allow-publish --dry-run",
     );
+    expect(readme).toContain(
+      "npm trust github parallel-codex-tui --repo allendred/parallel-codex-tui --file release.yml --allow-publish --yes",
+    );
+    expect(readme).toContain("may require npm two-factor authentication");
     expect(readme).toContain("allowed action `npm publish`");
     expect(readme).toContain("npm returns `ENEEDAUTH` or `E401`");
     expect(readme).toContain("fix the npm Trusted Publishing package settings rather than adding a token fallback");

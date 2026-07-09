@@ -175,8 +175,11 @@ Releases publish to npm through npm Trusted Publishing with GitHub OIDC. Do not 
 
 ```bash
 npm install -g npm@^11.15.0
-npm trust github parallel-codex-tui --repo allendred/parallel-codex-tui --file release.yml --allow-publish
+npm trust github parallel-codex-tui --repo allendred/parallel-codex-tui --file release.yml --allow-publish --dry-run
+npm trust github parallel-codex-tui --repo allendred/parallel-codex-tui --file release.yml --allow-publish --yes
 ```
+
+Creating or listing trusted publishers may require npm two-factor authentication in the browser.
 
 The release job installs npm `^11.5.1`, runs on Node `26.x`, publishes the prepared tarball through OIDC, waits for the package to become visible on npm, installs it globally in a temporary prefix, and checks `parallel-codex-tui --version` before creating the GitHub Release. If npm returns `ENEEDAUTH` or `E401`, fix the npm Trusted Publishing package settings rather than adding a token fallback.
 
