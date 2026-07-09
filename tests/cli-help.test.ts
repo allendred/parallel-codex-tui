@@ -7,6 +7,7 @@ describe("buildCliHelpText", () => {
 
     expect(help).toContain("Temporarily use a TUI theme: alpha, beta");
     expect(help).toContain("List built-in TUI theme palettes");
+    expect(help).toContain("combine with --theme to filter");
     expect(help).toContain("theme palette");
     expect(help).not.toContain("codex, graphite, paper");
   });

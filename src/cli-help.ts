@@ -8,7 +8,7 @@ Options:
       --app-root <path>   App root for configuration lookup
   -t, --task <id>         Open an existing task session
       --theme <name>      Temporarily use a TUI theme: ${themeNames.join(", ")}
-      --themes            List built-in TUI theme palettes
+      --themes            List built-in TUI theme palettes; combine with --theme to filter
       --init              Write .parallel-codex/config.toml if missing
       --doctor            Check config, agent commands, and theme palette preview
   -v, --version           Print the current version

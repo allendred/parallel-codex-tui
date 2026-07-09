@@ -433,6 +433,59 @@ describe("CLI worker layout smoke", () => {
     }
   }, 10000);
 
+  it("keeps wrapped source rows inside the worker panel width", async () => {
+    const workspace = await mkdtemp(join(tmpdir(), "pct-cli-worker-source-width-"));
+    const taskId = "task-20260705-000000-source-width";
+    const taskDir = join(workspace, ".parallel-codex", "sessions", taskId);
+    const workerDir = join(taskDir, "actor-mock");
+    const chunks: string[] = [];
+    const screen = new NativeTerminalScreen({ cols: 72, rows: 20, scrollback: 1000 });
+    let screenWrites = Promise.resolve();
+
+    await mkdir(workerDir, { recursive: true });
+    await writeSourceWidthTaskFiles({ workspace, taskId, taskDir, workerDir });
+
+    const child = spawn(
+      process.execPath,
+      ["./node_modules/.bin/tsx", "src/cli.tsx", "--workspace", workspace, "--task", taskId],
+      {
+        cwd: process.cwd(),
+        cols: 72,
+        rows: 20,
+        name: "xterm-256color",
+        env: {
+          ...process.env,
+          TERM: "xterm-256color"
+        }
+      }
+    );
+
+    child.onData((chunk) => {
+      chunks.push(chunk);
+      screenWrites = screenWrites.then(() => screen.write(chunk));
+    });
+
+    try {
+      await waitForScreenText(() => screenWrites, screen, "ready");
+      child.write("\x17");
+      await waitForScreenText(() => screenWrites, screen, "keep source tail");
+
+      const lines = screen.styledSnapshotLines();
+      const titleLine = lines.find((line) => line.chunks.map((chunk) => chunk.text).join("").includes("actor/mock"));
+      const titleLineText = titleLine?.chunks.map((chunk) => chunk.text).join("") ?? "";
+      const sourceLines = lines.filter((line) => {
+        const text = line.chunks.map((chunk) => chunk.text).join("");
+        return /(?:sourceValue|sourceTail|keep source tail|中文源码行|aligned continuation)/.test(text);
+      });
+
+      expect(sourceLines.length).toBeGreaterThan(0);
+      expect(sourceLines.every((line) => displayWidth(line.chunks.map((chunk) => chunk.text).join("")) <= displayWidth(titleLineText))).toBe(true);
+      expect(sourceLines.every((line) => line.chunks.every((chunk) => chunk.style.backgroundColor))).toBe(true);
+    } finally {
+      child.kill("SIGTERM");
+    }
+  }, 10000);
+
   it("fills nano worker rows to the themed content width", async () => {
     const workspace = await mkdtemp(join(tmpdir(), "pct-cli-worker-nano-fill-"));
     const taskId = "task-20260705-000000-nano-fill";
@@ -897,6 +950,47 @@ async function writeDiffWidthTaskFiles(input: {
     ].join("\n")
   );
   await writeFile(join(input.workerDir, "output.log"), "raw done\n");
+}
+
+async function writeSourceWidthTaskFiles(input: {
+  workspace: string;
+  taskId: string;
+  taskDir: string;
+  workerDir: string;
+}): Promise<void> {
+  await writeJson(
+    join(input.taskDir, "meta.json"),
+    TaskMetaSchema.parse({
+      id: input.taskId,
+      title: "worker source width smoke",
+      created_at: "2026-07-05T00:00:00.000Z",
+      cwd: input.workspace,
+      mode: "complex",
+      status: "done"
+    })
+  );
+  await writeJson(
+    join(input.workerDir, "status.json"),
+    WorkerStatusSchema.parse({
+      worker_id: "actor-mock",
+      role: "actor",
+      engine: "mock",
+      state: "done",
+      phase: "process-exited",
+      last_event_at: "2026-07-05T00:00:00.000Z",
+      summary: "ready"
+    })
+  );
+  await writeFile(
+    join(input.workerDir, "output.log"),
+    [
+      "exec",
+      '/bin/zsh -lc "nl -ba src/source-width.ts | sed -n \'1,4p\'"',
+      "succeeded in 0ms:",
+      '1\tconst sourceValue = "中文源码行 mixed with ascii punctuation should wrap inside panel and keep source tail";',
+      '2\tconst sourceTail = "aligned continuation stays on themed surface and preserves keep source tail";'
+    ].join("\n")
+  );
 }
 
 async function writeNanoProcessTaskFiles(input: {

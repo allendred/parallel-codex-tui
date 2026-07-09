@@ -39,7 +39,7 @@ async function main(): Promise<void> {
   } else if (cliArgs.version) {
     console.log(`parallel-codex-tui ${version}`);
   } else if (cliArgs.themes) {
-    console.log(formatTuiThemeCatalog().join("\n"));
+    console.log(formatTuiThemeCatalog(cliArgs.theme ? [cliArgs.theme] : undefined).join("\n"));
   } else if (cliArgs.doctor) {
     const workspaceRoot = await selectWorkspaceForCli({
       appRoot: cliArgs.appRoot,

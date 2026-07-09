@@ -172,6 +172,7 @@ describe("package metadata", () => {
     expect(readme).toContain("Unknown UI and color keys are rejected so typos fail fast");
     expect(readme).toContain("parallel-codex-tui --theme graphite --doctor");
     expect(readme).toContain("parallel-codex-tui --themes");
+    expect(readme).toContain("parallel-codex-tui --theme paper --themes");
     expect(readme).toContain("complete palette groups for every built-in theme");
     expect(readme).toContain("The doctor output includes `preview:` and `semantic:` ANSI swatch rows");
     expect(readme).toContain(".parallel-codex/config.toml");

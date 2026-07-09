@@ -125,6 +125,7 @@ To compare every built-in palette without loading config or starting the TUI:
 
 ```bash
 parallel-codex-tui --themes
+parallel-codex-tui --theme paper --themes
 ```
 
 The theme catalog includes complete palette groups for every built-in theme plus the same `preview:` and `semantic:` ANSI swatch rows.

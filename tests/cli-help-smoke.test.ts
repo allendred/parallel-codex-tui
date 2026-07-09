@@ -20,6 +20,7 @@ describe("CLI help and version", () => {
     expect(stdout).toContain("codex, graphite, paper");
     expect(stdout).toContain("--themes");
     expect(stdout).toContain("List built-in TUI theme palettes");
+    expect(stdout).toContain("combine with --theme to filter");
     expect(stdout).toContain("--init");
     expect(stdout).toContain("--doctor");
     expect(stdout).toContain("theme palette");
@@ -58,6 +59,24 @@ describe("CLI help and version", () => {
     expect(stdout).toContain("preview:");
     expect(stdout).toContain("semantic:");
     expect(stdout).toContain("\u001b[48;5;234m");
+  });
+
+  it("filters the theme catalog with the temporary theme option", async () => {
+    const { stdout, stderr } = await execFileAsync(
+      process.execPath,
+      ["./node_modules/.bin/tsx", "src/cli.tsx", "--theme", "paper", "--themes"],
+      {
+        cwd: process.cwd(),
+        timeout: 5000
+      }
+    );
+
+    expect(stderr).toBe("");
+    expect(stdout).toContain("parallel-codex-tui themes");
+    expect(stdout).toContain("paper: chrome=ansi256(254), surface=ansi256(231), rail=ansi256(255), accent=ansi256(25)");
+    expect(stdout).toContain("    text=ansi256(235), muted=ansi256(244), accent=ansi256(25)");
+    expect(stdout).not.toContain("codex: chrome=");
+    expect(stdout).not.toContain("graphite: chrome=");
   });
 
   it("rejects unknown options before doing other command work", async () => {
