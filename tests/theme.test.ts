@@ -3,6 +3,7 @@ import {
   TUI_THEME,
   configureTuiTheme,
   isTuiThemeColorValue,
+  normalizeTuiThemeName,
   resetTuiTheme,
   resolveTuiTheme,
   TUI_THEME_FIELDS,
@@ -35,6 +36,13 @@ describe("TUI theme", () => {
 
   it("normalizes theme names before selecting a palette", () => {
     expect(resolveTuiTheme({ theme: "  paper  " }).text).toBe("black");
+  });
+
+  it("provides one shared theme-name normalizer", () => {
+    expect(normalizeTuiThemeName("  graphite  ")).toBe("graphite");
+    expect(normalizeTuiThemeName("unknown")).toBeNull();
+    expect(normalizeTuiThemeName("   ")).toBeNull();
+    expect(normalizeTuiThemeName(null)).toBeNull();
   });
 
   it("merges user color overrides over the selected palette", () => {

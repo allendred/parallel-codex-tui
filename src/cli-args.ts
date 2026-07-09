@@ -1,6 +1,6 @@
 import { resolve } from "node:path";
 import { homedir } from "node:os";
-import { isTuiThemeName, TUI_THEME_NAMES, type TuiThemeName } from "./tui/theme.js";
+import { normalizeTuiThemeName, TUI_THEME_NAMES, type TuiThemeName } from "./tui/theme.js";
 
 export interface CliArgs {
   appRoot: string;
@@ -90,9 +90,9 @@ export function validateCliArgs(args: string[]): string[] {
   }
 
   const themeFlagIndex = lastFlagIndex(optionArgs, (arg) => arg === "--theme" || arg.startsWith("--theme="));
-  const themeValue = normalizedThemeValue(flagValue(optionArgs, themeFlagIndex));
-  if (themeValue && !isTuiThemeName(themeValue)) {
-    errors.push(`Invalid --theme: ${themeValue} (expected ${TUI_THEME_NAMES.join(", ")})`);
+  const rawThemeValue = flagValue(optionArgs, themeFlagIndex);
+  if (rawThemeValue?.trim() && !normalizeTuiThemeName(rawThemeValue)) {
+    errors.push(`Invalid --theme: ${rawThemeValue.trim()} (expected ${TUI_THEME_NAMES.join(", ")})`);
   }
   return errors;
 }
@@ -123,11 +123,5 @@ function flagValue(args: string[], flagIndex: number): string | null {
 }
 
 function cliThemeValue(value: string | null): TuiThemeName | null {
-  const theme = normalizedThemeValue(value);
-  return isTuiThemeName(theme) ? theme : null;
-}
-
-function normalizedThemeValue(value: string | null): string | null {
-  const theme = value?.trim();
-  return theme ? theme : null;
+  return normalizeTuiThemeName(value);
 }

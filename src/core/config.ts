@@ -3,7 +3,7 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { z, type ZodOptional } from "zod";
 import { pathExists, readTextIfExists, writeText } from "./file-store.js";
-import { isTuiThemeColorValue, TUI_THEME_FIELDS, TUI_THEME_NAMES, type TuiThemeField } from "../tui/theme.js";
+import { isTuiThemeColorValue, normalizeTuiThemeName, TUI_THEME_FIELDS, TUI_THEME_NAMES, type TuiThemeField } from "../tui/theme.js";
 
 const NativeSessionConfigSchema = z.object({
   enabled: z.boolean().default(true),
@@ -34,7 +34,7 @@ const TuiColorValueSchema = z.string().min(1).refine(isTuiThemeColorValue, {
 }).transform((value) => value.trim());
 
 const TuiThemeNameSchema = z.preprocess(
-  (value) => typeof value === "string" ? value.trim() : value,
+  (value) => typeof value === "string" ? normalizeTuiThemeName(value) ?? value.trim() : value,
   z.enum(TUI_THEME_NAMES)
 ).default("codex");
 

@@ -136,7 +136,7 @@ export function isTuiThemeName(value: string | null | undefined): value is TuiTh
   return TUI_THEME_NAMES.includes(value as TuiThemeName);
 }
 
-function normalizeTuiThemeName(value: string | null | undefined): TuiThemeName | null {
+export function normalizeTuiThemeName(value: string | null | undefined): TuiThemeName | null {
   const name = value?.trim();
   return isTuiThemeName(name) ? name : null;
 }
