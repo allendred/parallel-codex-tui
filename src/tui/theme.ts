@@ -22,9 +22,23 @@ export interface TuiTheme {
 }
 
 export const TUI_THEME_NAMES = Object.freeze(["codex", "graphite", "paper"] as const);
+export const TUI_THEME_FIELDS = Object.freeze([
+  "chrome",
+  "surface",
+  "rail",
+  "successSurface",
+  "dangerSurface",
+  "text",
+  "muted",
+  "accent",
+  "warning",
+  "success",
+  "danger"
+] as const satisfies readonly (keyof TuiTheme)[]);
 
 export type TuiThemeName = typeof TUI_THEME_NAMES[number];
-export type TuiThemeOverrides = Partial<Record<keyof TuiTheme, string>>;
+export type TuiThemeField = typeof TUI_THEME_FIELDS[number];
+export type TuiThemeOverrides = Partial<Record<TuiThemeField, string>>;
 
 export const TUI_THEME_PRESETS: Record<TuiThemeName, TuiTheme> = {
   codex: {
@@ -69,19 +83,6 @@ export const TUI_THEME_PRESETS: Record<TuiThemeName, TuiTheme> = {
 };
 
 const DEFAULT_TUI_THEME_NAME: TuiThemeName = "codex";
-const TUI_THEME_FIELDS: Array<keyof TuiTheme> = [
-  "chrome",
-  "surface",
-  "rail",
-  "successSurface",
-  "dangerSurface",
-  "text",
-  "muted",
-  "accent",
-  "warning",
-  "success",
-  "danger"
-];
 
 export let TUI_THEME: TuiTheme = TUI_THEME_PRESETS[DEFAULT_TUI_THEME_NAME];
 

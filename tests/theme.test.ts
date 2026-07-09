@@ -5,6 +5,7 @@ import {
   isTuiThemeColorValue,
   resetTuiTheme,
   resolveTuiTheme,
+  TUI_THEME_FIELDS,
   TUI_THEME_NAMES,
   TUI_THEME_PRESETS
 } from "../src/tui/theme.js";
@@ -18,6 +19,8 @@ describe("TUI theme", () => {
   it("provides named palettes for the main terminal surfaces", () => {
     expect(Object.isFrozen(TUI_THEME_NAMES)).toBe(true);
     expect(TUI_THEME_NAMES).toEqual(Object.keys(TUI_THEME_PRESETS));
+    expect(Object.isFrozen(TUI_THEME_FIELDS)).toBe(true);
+    expect(TUI_THEME_FIELDS).toEqual(Object.keys(TUI_THEME_PRESETS.codex));
     expect(Object.keys(TUI_THEME_PRESETS)).toEqual(["codex", "graphite", "paper"]);
     expect(resolveTuiTheme({ theme: "codex" }).chrome).toBe("ansi256(23)");
     expect(resolveTuiTheme({ theme: "graphite" }).accent).toBe("ansi256(110)");
