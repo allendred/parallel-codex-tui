@@ -82,6 +82,9 @@ function compactNativeSessionId(sessionId: string): string {
 
 function humanizeWorkerPhase(phase: string): string {
   const normalized = phase.trim().toLowerCase();
+  if (!normalized) {
+    return "";
+  }
   if (normalized === "process-idle-timeout") {
     return "idle timeout";
   }
@@ -91,7 +94,7 @@ function humanizeWorkerPhase(phase: string): string {
   if (normalized === "native-resume-failed") {
     return "resume failed";
   }
-  return normalized.replace(/[-_]+/g, " ") || "status";
+  return normalized.replace(/[-_]+/g, " ");
 }
 
 function formatWorkerSummary(workers: NonNullable<StatusLineState["workers"]>): string {

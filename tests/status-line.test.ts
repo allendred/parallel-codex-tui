@@ -92,6 +92,16 @@ describe("formatStatusLine", () => {
     expect(displayWidth(status)).toBeLessThanOrEqual(96);
   });
 
+  it("omits empty runtime worker phases instead of showing filler text", () => {
+    expect(
+      formatWorkerRuntimeStatus({
+        state: "running",
+        phase: "",
+        summary: "writing files"
+      })
+    ).toBe("running · writing files");
+  });
+
   it("keeps footer help short and mode aware", () => {
     expect(formatFooterHelp("chat")).toBe("^W logs · Tab worker · ^O attach");
     expect(formatFooterHelp("worker")).toBe("wheel/Pg · Tab worker · ^O attach · Esc chat");
