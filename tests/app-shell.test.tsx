@@ -1,11 +1,25 @@
 import React from "react";
 import { Text } from "ink";
 import { render } from "ink-testing-library";
-import { describe, expect, it } from "vitest";
-import { AppShell } from "../src/tui/AppShell.js";
+import { afterEach, describe, expect, it } from "vitest";
+import { AppShell, appShellErrorLineTheme } from "../src/tui/AppShell.js";
 import { displayWidth } from "../src/tui/display-width.js";
+import { configureTuiTheme, resetTuiTheme, TUI_THEME_PRESETS } from "../src/tui/theme.js";
+
+afterEach(() => {
+  resetTuiTheme();
+});
 
 describe("AppShell", () => {
+  it("themes error rows with the active danger surface", () => {
+    configureTuiTheme({ theme: "paper" });
+
+    expect(appShellErrorLineTheme()).toEqual({
+      backgroundColor: TUI_THEME_PRESETS.paper.dangerSurface,
+      color: TUI_THEME_PRESETS.paper.danger
+    });
+  });
+
   it("renders a structured worker interface with header, full-width content, input, and status", () => {
     const { lastFrame } = render(
       <AppShell

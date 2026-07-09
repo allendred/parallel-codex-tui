@@ -3,7 +3,7 @@ import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { render } from "ink-testing-library";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import {
   WorkerOutputView,
   workerOutputBodyDisplayLines,
@@ -14,6 +14,7 @@ import {
   workerOutputLineFillTheme,
   workerOutputLineLayout,
   workerOutputLineTheme,
+  workerOutputEmptyFallbackTheme,
   workerOutputScrollDisplay,
   workerOutputSourceColumns,
   workerOutputSourceDisplayLines,
@@ -22,9 +23,23 @@ import {
   workerOutputVisibleStart
 } from "../src/tui/WorkerOutputView.js";
 import { displayWidth } from "../src/tui/display-width.js";
-import { TUI_THEME_PRESETS } from "../src/tui/theme.js";
+import { configureTuiTheme, resetTuiTheme, TUI_THEME_PRESETS } from "../src/tui/theme.js";
+
+afterEach(() => {
+  resetTuiTheme();
+});
 
 describe("WorkerOutputView", () => {
+  it("themes fallback empty log text with the active surface", () => {
+    configureTuiTheme({ theme: "paper" });
+
+    expect(workerOutputEmptyFallbackTheme()).toEqual({
+      backgroundColor: TUI_THEME_PRESETS.paper.surface,
+      color: TUI_THEME_PRESETS.paper.muted,
+      dimColor: true
+    });
+  });
+
   it("renders an actionable empty state when no worker log is selected", async () => {
     const { lastFrame, unmount } = render(
       <WorkerOutputView

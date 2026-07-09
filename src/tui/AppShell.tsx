@@ -1,11 +1,13 @@
 import React from "react";
 import { basename } from "node:path";
 import { Box, Text } from "ink";
+import type { TextProps } from "ink";
 import { StatusBar } from "./StatusBar.js";
 import { compactEndByDisplayWidth, displayWidth } from "./display-width.js";
 import { TUI_THEME } from "./theme.js";
 
 export type AppView = "chat" | "worker" | "native";
+type AppShellErrorLineTheme = Pick<TextProps, "backgroundColor" | "color">;
 const APP_HEADER_ROOMY_SEPARATOR = " · ";
 const APP_HEADER_COMPACT_SEPARATOR = "  ";
 
@@ -45,6 +47,8 @@ export function AppShell({
   const headerTrailingWidth = headerBarWidth === null
     ? 0
     : Math.max(0, headerBarWidth - headerLeadingWidth - headerSegmentsDisplayWidth(headerSegments, headerSeparatorText));
+  const errorRow = error ? appShellErrorRow(error, terminalWidth) : null;
+  const errorTheme = appShellErrorLineTheme();
 
   return (
     <Box flexDirection="column">
@@ -73,13 +77,35 @@ export function AppShell({
       {input}
 
       {showStatusBar ? <StatusBar text={statusText} terminalWidth={terminalWidth} /> : null}
-      {error ? (
-        <Box paddingX={1}>
-          <Text color={TUI_THEME.danger}>{error}</Text>
+      {errorRow ? (
+        <Box>
+          <Text {...errorTheme}> </Text>
+          <Text {...errorTheme}>{errorRow.text}</Text>
+          <Text {...errorTheme}>{" ".repeat(errorRow.trailingWidth + 1)}</Text>
         </Box>
       ) : null}
     </Box>
   );
+}
+
+export function appShellErrorLineTheme(): AppShellErrorLineTheme {
+  return {
+    backgroundColor: TUI_THEME.dangerSurface,
+    color: TUI_THEME.danger
+  };
+}
+
+function appShellErrorRow(error: string, terminalWidth: number): { text: string; trailingWidth: number } {
+  const renderWidth = typeof process.stdout.columns === "number"
+    ? Math.max(1, Math.min(terminalWidth, process.stdout.columns))
+    : terminalWidth;
+  const contentWidth = Math.max(1, renderWidth - 2);
+  const text = compactEndByDisplayWidth(error, contentWidth);
+
+  return {
+    text,
+    trailingWidth: Math.max(0, contentWidth - displayWidth(text))
+  };
 }
 
 function headerSegmentsDisplayWidth(segments: Array<{ text: string }>, separator: string): number {

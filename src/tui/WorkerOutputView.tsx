@@ -198,7 +198,7 @@ export function WorkerOutputView({
             ? <WorkerOutputNanoLine key={index} line={line} width={terminalWidth} />
             : <WorkerOutputLine key={index} line={line} width={panelWidth} />
         )
-        : <Text>(empty log)</Text>}
+        : <Text {...workerOutputEmptyFallbackTheme()}>(empty log)</Text>}
     </Box>
   );
 }
@@ -3894,6 +3894,14 @@ export function workerOutputLineTheme(kind: WorkerOutputLineKind): WorkerOutputL
     return { backgroundColor: TUI_THEME.surface, color: TUI_THEME.muted };
   }
   return {};
+}
+
+export function workerOutputEmptyFallbackTheme(): WorkerOutputLineTheme {
+  return {
+    backgroundColor: TUI_THEME.surface,
+    color: TUI_THEME.muted,
+    dimColor: true
+  };
 }
 
 export function workerOutputLineFillTheme(kind: WorkerOutputLineKind): NonNullable<TextProps["backgroundColor"]> | null {
