@@ -47,7 +47,8 @@ export async function runDoctor(appRoot: string, workspaceRoot: string, env: Nod
     lines.push(`theme: ok (${config.ui.theme}; ${themeOverrideSummary(config.ui.colors)})`);
   } catch (error) {
     ok = false;
-    lines.push(`config: invalid (${localConfigPath}; ${formatConfigErrorMessage(error)})`);
+    lines.push(`config: invalid (${localConfigPath})`);
+    lines.push(...formatConfigErrorMessage(error).split("\n").map((line) => `config error: ${line}`));
     return {
       ok,
       text: `${lines.join("\n")}\n`

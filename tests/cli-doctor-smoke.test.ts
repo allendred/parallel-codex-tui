@@ -256,9 +256,9 @@ describe("CLI doctor", () => {
 
     expect(result.exitCode).toBe(1);
     expect(result.stderr).toBe("");
-    expect(result.stdout).toContain("config: invalid");
-    expect(result.stdout).toContain("ui.colors.accent: Invalid TUI color value");
-    expect(result.stdout).toContain("ui.colors.chrome: Invalid TUI color value");
+    expect(result.stdout).toContain(`config: invalid (${join(appRoot, ".parallel-codex", "config.toml")})`);
+    expect(result.stdout).toContain("config error: ui.colors.accent: Invalid TUI color value");
+    expect(result.stdout).toContain("config error: ui.colors.chrome: Invalid TUI color value");
     expect(result.stdout).not.toContain("ZodError");
     expect(result.stdout).not.toContain("\"path\"");
     expect(result.stdout).not.toContain("at ");
