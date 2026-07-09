@@ -41,12 +41,18 @@ describe("CLI worker layout smoke", () => {
       await screenWrites;
 
       const lines = screen.styledSnapshotLines();
+      const snapshot = screen.snapshot();
+      const headerLineText = lines[0]?.chunks.map((chunk) => chunk.text).join("") ?? "";
       const inputIndex = lines.findIndex((line) => line.chunks.map((chunk) => chunk.text).join("").includes("Type a message"));
       const statusLine = lines[inputIndex + 1];
       const statusLineText = statusLine?.chunks.map((chunk) => chunk.text).join("") ?? "";
       const contentLines = lines.slice(1, inputIndex);
 
       expect(inputIndex).toBeGreaterThanOrEqual(0);
+      expect(headerLineText).toContain("parallel-codex-tui");
+      expect(headerLineText).toContain("chat");
+      expect(headerLineText).not.toContain("task none");
+      expect(snapshot).not.toContain("task none");
       expect(contentLines.length).toBeGreaterThan(0);
       expect(
         contentLines.every((line) => line.chunks.every((chunk) => chunk.style.backgroundColor === TUI_THEME_PRESETS.codex.surface))

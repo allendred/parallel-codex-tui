@@ -70,6 +70,31 @@ describe("AppShell", () => {
     expect(displayWidth(errorLine)).toBeLessThanOrEqual(47);
   });
 
+  it("omits empty task labels from roomy idle headers", () => {
+    const { lastFrame } = render(
+      <AppShell
+        view="chat"
+        cwd="/tmp/project"
+        taskId={null}
+        statusText="idle"
+        terminalWidth={80}
+        input={<TextLine text="> | Type a message" />}
+      >
+        <TextLine text="Ready" />
+      </AppShell>
+    );
+
+    const frame = lastFrame() ?? "";
+    const headerRow = frame.split("\n")[0] ?? "";
+
+    expect(headerRow).toContain("parallel-codex-tui");
+    expect(headerRow).toContain("chat");
+    expect(headerRow).toContain("project");
+    expect(headerRow).toContain("^C exit");
+    expect(headerRow).not.toContain("task none");
+    expect(headerRow).not.toContain("none");
+  });
+
   it("renders a structured worker interface with header, full-width content, input, and status", () => {
     const { lastFrame } = render(
       <AppShell

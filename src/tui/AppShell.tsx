@@ -193,7 +193,7 @@ function headerParts(input: { view: AppView; cwd: string; taskId: string | null;
   const veryNarrow = input.terminalWidth < 56;
   const ultraNarrow = input.terminalWidth < 40;
   const task = compactHeaderTaskId(input.taskId);
-  const showTask = input.terminalWidth >= 24 && !(task === "none" && input.terminalWidth < 32);
+  const showTask = Boolean(task) && input.terminalWidth >= 24;
   const contentWidth = Math.max(1, input.terminalWidth - 2);
   const separator = headerSeparator(input.terminalWidth);
 
@@ -308,7 +308,7 @@ function ultraCompactTaskId(taskId: string): string {
 
 function compactHeaderTaskId(taskId: string | null): string {
   if (!taskId) {
-    return "none";
+    return "";
   }
   const match = taskId.match(/^task-\d{8}-(.+)$/);
   if (match) {
