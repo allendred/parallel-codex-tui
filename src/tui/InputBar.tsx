@@ -68,7 +68,8 @@ export function InputBar({
       <InputRail terminalWidth={terminalWidth} textWidth={displayWidth(`${prompt} ${displayValue}|`)}>
         <Text backgroundColor={INPUT_BAR_BACKGROUND} color="cyan" bold>{prompt}</Text>
         <Text backgroundColor={INPUT_BAR_BACKGROUND}> </Text>
-        <Text backgroundColor={INPUT_BAR_BACKGROUND}>{displayValue}|</Text>
+        <Text backgroundColor={INPUT_BAR_BACKGROUND} color="white">{displayValue}</Text>
+        <Text backgroundColor={INPUT_BAR_BACKGROUND} color="cyan" bold>|</Text>
       </InputRail>
     );
   }
@@ -87,7 +88,7 @@ export function InputBar({
     >
       <Text backgroundColor={INPUT_BAR_BACKGROUND} color="cyan" bold>{prompt}</Text>
       {hasLeadingPromptSpace ? <Text backgroundColor={INPUT_BAR_BACKGROUND}> </Text> : null}
-      <Text backgroundColor={INPUT_BAR_BACKGROUND}>|</Text>
+      <Text backgroundColor={INPUT_BAR_BACKGROUND} color="cyan" bold>|</Text>
       <Text backgroundColor={INPUT_BAR_BACKGROUND} dimColor>{placeholder}</Text>
     </InputRail>
   );

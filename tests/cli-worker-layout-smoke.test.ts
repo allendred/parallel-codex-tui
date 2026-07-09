@@ -73,7 +73,7 @@ describe("CLI worker layout smoke", () => {
       expect(headerLine?.chunks.some((chunk) => chunk.style.backgroundColor === "ansi256(235)")).toBe(true);
       expect(displayWidth(headerLineText)).toBe(139);
       expect(workerTitleLine?.chunks.some((chunk) => chunk.style.backgroundColor === "ansi256(24)")).toBe(true);
-      expect(workerTitleLine?.chunks.some((chunk) => chunk.style.backgroundColor === "ansi256(235)")).toBe(true);
+      expect(workerTitleLine?.chunks.some((chunk) => chunk.style.backgroundColor === "ansi256(235)")).toBe(false);
       expect(displayWidth(workerTitleLineText)).toBe(137);
       expect(snapshot).toContain("line 80");
       expect(snapshot).toContain("logs · read");

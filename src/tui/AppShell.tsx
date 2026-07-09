@@ -6,6 +6,8 @@ import { compactEndByDisplayWidth, displayWidth } from "./display-width.js";
 
 export type AppView = "chat" | "worker" | "native";
 const APP_HEADER_BACKGROUND: NonNullable<TextProps["backgroundColor"]> = "ansi256(235)";
+const APP_HEADER_ROOMY_SEPARATOR = " · ";
+const APP_HEADER_COMPACT_SEPARATOR = "  ";
 
 export interface AppShellProps {
   view: AppView;
@@ -32,6 +34,7 @@ export function AppShell({
 }: AppShellProps) {
   const header = headerParts({ view, cwd, taskId, terminalWidth });
   const headerSegments = headerDisplaySegments(header);
+  const headerSeparatorText = headerSeparator(terminalWidth);
   const headerLeadingWidth = terminalWidth > 1 ? 1 : 0;
   const headerRenderWidth = typeof process.stdout.columns === "number"
     ? Math.max(1, Math.min(terminalWidth, process.stdout.columns))
@@ -39,7 +42,7 @@ export function AppShell({
   const headerBarWidth = headerRenderWidth === null ? null : Math.max(1, headerRenderWidth - 1);
   const headerTrailingWidth = headerBarWidth === null
     ? 0
-    : Math.max(0, headerBarWidth - headerLeadingWidth - headerSegmentsDisplayWidth(headerSegments));
+    : Math.max(0, headerBarWidth - headerLeadingWidth - headerSegmentsDisplayWidth(headerSegments, headerSeparatorText));
 
   return (
     <Box flexDirection="column">
@@ -47,7 +50,7 @@ export function AppShell({
         {headerLeadingWidth > 0 ? <Text backgroundColor={APP_HEADER_BACKGROUND}>{" ".repeat(headerLeadingWidth)}</Text> : null}
         {headerSegments.map((segment, index) => (
           <Box key={`${segment.kind}-${index}`} flexShrink={0}>
-            {index > 0 ? <Text backgroundColor={APP_HEADER_BACKGROUND} dimColor>  </Text> : null}
+            {index > 0 ? <Text backgroundColor={APP_HEADER_BACKGROUND} dimColor>{headerSeparatorText}</Text> : null}
             <Text
               backgroundColor={APP_HEADER_BACKGROUND}
               color={segment.kind === "brand" ? "cyan" : segment.kind === "view" ? "white" : undefined}
@@ -77,8 +80,8 @@ export function AppShell({
   );
 }
 
-function headerSegmentsDisplayWidth(segments: Array<{ text: string }>): number {
-  return segments.reduce((sum, segment, index) => sum + displayWidth(segment.text) + (index > 0 ? 2 : 0), 0);
+function headerSegmentsDisplayWidth(segments: Array<{ text: string }>, separator: string): number {
+  return segments.reduce((sum, segment, index) => sum + displayWidth(segment.text) + (index > 0 ? displayWidth(separator) : 0), 0);
 }
 
 function headerDisplaySegments(parts: { brand: string; view: string; task: string; project: string; shortcut: string }): Array<{
@@ -105,6 +108,7 @@ function headerParts(input: { view: AppView; cwd: string; taskId: string | null;
   const task = compactHeaderTaskId(input.taskId);
   const showTask = input.terminalWidth >= 24 && !(task === "none" && input.terminalWidth < 32);
   const contentWidth = Math.max(1, input.terminalWidth - 2);
+  const separator = headerSeparator(input.terminalWidth);
 
   return fitHeaderParts({
     brand: narrow ? "pct" : "parallel-codex-tui",
@@ -112,47 +116,48 @@ function headerParts(input: { view: AppView; cwd: string; taskId: string | null;
     task: showTask ? ultraNarrow ? ultraCompactTaskId(task) : narrow ? task : `task ${task}` : "",
     project: tiny || ultraNarrow ? "" : compactHeaderProject(input.cwd, veryNarrow ? 10 : narrow ? 16 : 40),
     shortcut: narrow ? shortShortcutHint(input.view) : shortcutHint(input.view)
-  }, contentWidth);
+  }, contentWidth, separator);
 }
 
 function fitHeaderParts(
   parts: { brand: string; view: string; task: string; project: string; shortcut: string },
-  contentWidth: number
+  contentWidth: number,
+  separator: string
 ): { brand: string; view: string; task: string; project: string; shortcut: string } {
   const fitted = { ...parts };
-  if (headerLineLength(fitted) <= contentWidth) {
+  if (headerLineLength(fitted, separator) <= contentWidth) {
     return fitted;
   }
 
   fitted.project = "";
-  if (headerLineLength(fitted) <= contentWidth) {
+  if (headerLineLength(fitted, separator) <= contentWidth) {
     return fitted;
   }
 
-  const taskBudget = Math.max(3, contentWidth - headerLineLength({ ...fitted, task: "" }) - 2);
+  const taskBudget = Math.max(3, contentWidth - headerLineLength({ ...fitted, task: "" }, separator) - displayWidth(separator));
   fitted.task = compactHeaderText(fitted.task, taskBudget);
-  if (headerLineLength(fitted) <= contentWidth) {
+  if (headerLineLength(fitted, separator) <= contentWidth) {
     return fitted;
   }
 
-  const viewBudget = Math.max(3, contentWidth - headerLineLength({ ...fitted, view: "" }) - 2);
+  const viewBudget = Math.max(3, contentWidth - headerLineLength({ ...fitted, view: "" }, separator) - displayWidth(separator));
   fitted.view = compactHeaderText(fitted.view, viewBudget);
-  if (headerLineLength(fitted) <= contentWidth) {
+  if (headerLineLength(fitted, separator) <= contentWidth) {
     return fitted;
   }
 
   fitted.shortcut = "";
-  if (headerLineLength(fitted) <= contentWidth) {
+  if (headerLineLength(fitted, separator) <= contentWidth) {
     return fitted;
   }
 
   fitted.task = "";
-  if (headerLineLength(fitted) <= contentWidth) {
+  if (headerLineLength(fitted, separator) <= contentWidth) {
     return fitted;
   }
 
   fitted.view = "";
-  if (headerLineLength(fitted) <= contentWidth) {
+  if (headerLineLength(fitted, separator) <= contentWidth) {
     return fitted;
   }
 
@@ -160,12 +165,16 @@ function fitHeaderParts(
   return fitted;
 }
 
-function headerLineLength(parts: { brand: string; view: string; task: string; project: string; shortcut: string }): number {
-  return displayWidth(headerPartList(parts).join("  "));
+function headerLineLength(parts: { brand: string; view: string; task: string; project: string; shortcut: string }, separator: string): number {
+  return displayWidth(headerPartList(parts).join(separator));
 }
 
 function headerPartList(parts: { brand: string; view: string; task: string; project: string; shortcut: string }): string[] {
   return [parts.brand, parts.view, parts.task, parts.project, parts.shortcut].filter(Boolean);
+}
+
+function headerSeparator(terminalWidth: number): string {
+  return terminalWidth >= 56 ? APP_HEADER_ROOMY_SEPARATOR : APP_HEADER_COMPACT_SEPARATOR;
 }
 
 function viewLabel(view: AppView): string {

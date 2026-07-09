@@ -20,9 +20,11 @@ describe("AppShell", () => {
     );
 
     const frame = lastFrame() ?? "";
+    const firstLine = frame.split("\n")[0] ?? "";
 
     expect(frame).toContain("parallel-codex-tui");
     expect(frame).toContain("logs");
+    expect(firstLine).toContain("parallel-codex-tui · logs");
     expect(frame).toContain("^C exit");
     expect(frame).toContain("project");
     expect(frame).not.toContain("/tmp/project");

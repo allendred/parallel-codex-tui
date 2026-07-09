@@ -214,7 +214,7 @@ function WorkerOutputTitleRail({ title, width }: { title: string; width: number 
   return (
     <Box>
       <Text backgroundColor={WORKER_PANEL_TITLE_BACKGROUND} color="white" bold>{titleText}</Text>
-      {trailingWidth > 0 ? <Text backgroundColor={WORKER_PANEL_BACKGROUND}>{" ".repeat(trailingWidth)}</Text> : null}
+      {trailingWidth > 0 ? <Text backgroundColor={WORKER_PANEL_TITLE_BACKGROUND}>{" ".repeat(trailingWidth)}</Text> : null}
     </Box>
   );
 }
