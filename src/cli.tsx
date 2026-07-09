@@ -86,11 +86,26 @@ function canRenderInteractiveTui(): boolean {
 }
 
 function formatStartupError(error: unknown): string {
-  const message = error instanceof Error ? error.message : String(error);
+  const message = formatStartupErrorMessage(error);
   if (isConfigStartupError(error)) {
     return `Config error: ${message}\nRun parallel-codex-tui --doctor for details.`;
   }
   return `Startup error: ${message}`;
+}
+
+function formatStartupErrorMessage(error: unknown): string {
+  if (error instanceof ZodError) {
+    return error.issues
+      .map((issue) => ({
+        message: issue.message,
+        path: issue.path.map(String).join(".") || "<config>"
+      }))
+      .sort((left, right) => left.path.localeCompare(right.path))
+      .map((issue) => `${issue.path}: ${issue.message}`)
+      .join("\n");
+  }
+
+  return error instanceof Error ? error.message : String(error);
 }
 
 function isConfigStartupError(error: unknown): boolean {

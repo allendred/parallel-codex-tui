@@ -34,6 +34,43 @@ describe("CLI startup", () => {
     expect(stderr).not.toContain("at ");
   });
 
+  it("prints config paths for invalid TUI color values", async () => {
+    const appRoot = await mkdtemp(join(tmpdir(), "pct-cli-startup-invalid-theme-color-"));
+    const workspace = await mkdtemp(join(tmpdir(), "pct-cli-startup-invalid-theme-workspace-"));
+    await mkdir(join(appRoot, ".parallel-codex"), { recursive: true });
+    await writeFile(
+      join(appRoot, ".parallel-codex", "config.toml"),
+      [
+        "[ui.colors]",
+        'accent = "cyan-ish"',
+        'chrome = "ansi256(999)"'
+      ].join("\n"),
+      "utf8"
+    );
+
+    let stderr = "";
+    await expect(
+      execFileAsync(process.execPath, ["./node_modules/.bin/tsx", "src/cli.tsx", "--app-root", appRoot, "--workspace", workspace], {
+        cwd: process.cwd(),
+        timeout: 5000
+      })
+        .catch((error) => {
+          stderr = String((error as { stderr?: string }).stderr ?? "");
+          throw error;
+        })
+    ).rejects.toMatchObject({
+      code: 1,
+      stdout: "",
+      stderr: expect.stringContaining("Config error:")
+    });
+
+    expect(stderr).toContain("ui.colors.accent: Invalid TUI color value");
+    expect(stderr).toContain("ui.colors.chrome: Invalid TUI color value");
+    expect(stderr).toContain("Run parallel-codex-tui --doctor for details.");
+    expect(stderr).not.toContain("ZodError");
+    expect(stderr).not.toContain("at ");
+  });
+
   it("does not label workspace startup errors as config errors", async () => {
     const root = await mkdtemp(join(tmpdir(), "pct-cli-startup-workspace-error-"));
     const appRoot = join(root, "app");
