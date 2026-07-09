@@ -172,10 +172,11 @@ describe("InputBar", () => {
     );
 
     const frame = lastFrame() ?? "";
-    expect(frame).toContain("logs · Pg · Tab · ^O · Esc");
+    expect(frame).toContain("logs · Pg/wheel · Tab · ^O · Esc");
     expect(frame).not.toContain("attach");
-    expect(frame).not.toContain("wheel/Pg ·");
+    expect(frame).not.toContain("read");
     expect(frame.split("\n")).toHaveLength(1);
+    expect(displayWidth(frame)).toBeLessThanOrEqual(42);
   });
 
   it("keeps actionable worker shortcuts visible in small terminals", () => {

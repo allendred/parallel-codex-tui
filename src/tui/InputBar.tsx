@@ -195,7 +195,7 @@ function workerInputHints(width: number): { label: string; detail: string } {
   if (width < 28) {
     return { label: "logs", detail: " · Pg · ^O" };
   }
-  if (width < 56) {
+  if (width < 36) {
     return { label: "logs", detail: " · Pg · Tab · ^O · Esc" };
   }
   if (width < 72) {
