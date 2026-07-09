@@ -90,6 +90,7 @@ export function App({
   const [workerScrollOffset, setWorkerScrollOffset] = useState(0);
   const [workerMaxScrollOffset, setWorkerMaxScrollOffset] = useState(0);
   const [nativeAttach, setNativeAttach] = useState<{
+    hasOutput: boolean;
     launch: NativeAttachLaunch;
     process: NativeAttachProcessRef;
     screen: NativeTerminalScreen;
@@ -462,6 +463,7 @@ export function App({
               current && current.screen === screen
                 ? {
                     ...current,
+                    hasOutput: true,
                     snapshot: screen.snapshot()
                   }
                 : current
@@ -474,6 +476,7 @@ export function App({
               current && current.screen === screen
                 ? {
                     ...current,
+                    hasOutput: true,
                     closedCode: code,
                     snapshot: screen.snapshot()
                   }
@@ -486,6 +489,7 @@ export function App({
         }
       });
       setNativeAttach({
+        hasOutput: false,
         launch: sizedLaunch,
         process: processRef,
         screen,
@@ -991,6 +995,7 @@ function NativeAttachView({
   viewportHeight
 }: {
   attach: {
+    hasOutput: boolean;
     launch: NativeAttachLaunch;
     snapshot: string;
     screen: NativeTerminalScreen;
@@ -1017,7 +1022,11 @@ function NativeAttachView({
   return (
     <Box flexDirection="column">
       <NativeAttachTitleRail title={title} width={panelWidth} />
-      <TerminalOutput lines={attach.screen.styledSnapshotLines({ showCursor: true })} minLines={outputMinLines} width={panelWidth} />
+      <TerminalOutput
+        lines={attach.hasOutput ? attach.screen.styledSnapshotLines({ showCursor: true }) : []}
+        minLines={outputMinLines}
+        width={panelWidth}
+      />
     </Box>
   );
 }

@@ -4,6 +4,8 @@ import type { TerminalLine, TerminalTextStyle } from "./terminal-screen.js";
 import { displayWidth } from "./display-width.js";
 import { TUI_THEME } from "./theme.js";
 
+const TERMINAL_OUTPUT_EMPTY_TEXT = "(no output yet)";
+
 export interface TerminalOutputProps {
   lines: TerminalLine[];
   minLines?: number;
@@ -16,7 +18,10 @@ export function TerminalOutput({ lines, minLines, width }: TerminalOutputProps) 
   if (lines.length === 0) {
     return (
       <Box flexDirection="column">
-        <Text {...terminalOutputEmptyTheme()}>(no output yet)</Text>
+        <Text>
+          <Text {...terminalOutputEmptyTheme()}>{TERMINAL_OUTPUT_EMPTY_TEXT}</Text>
+          <TerminalOutputEmptyTrailingFill width={width} />
+        </Text>
         <TerminalOutputBlankTailLines count={blankTailLineCount} width={width} />
       </Box>
     );
@@ -81,6 +86,11 @@ export function terminalOutputTrailingFillWidth(line: TerminalLine, width: numbe
 
 function TerminalOutputTrailingFill({ line, width }: { line: TerminalLine; width: number | undefined }) {
   const fillWidth = terminalOutputTrailingFillWidth(line, width);
+  return fillWidth > 0 ? <Text {...terminalOutputBlankLineTheme()}>{" ".repeat(fillWidth)}</Text> : null;
+}
+
+function TerminalOutputEmptyTrailingFill({ width }: { width: number | undefined }) {
+  const fillWidth = width === undefined ? 0 : Math.max(0, width - displayWidth(TERMINAL_OUTPUT_EMPTY_TEXT));
   return fillWidth > 0 ? <Text {...terminalOutputBlankLineTheme()}>{" ".repeat(fillWidth)}</Text> : null;
 }
 
