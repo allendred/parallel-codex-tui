@@ -52,10 +52,10 @@ export function AppShell({
         {headerLeadingWidth > 0 ? <Text backgroundColor={TUI_THEME.chrome}>{" ".repeat(headerLeadingWidth)}</Text> : null}
         {headerSegments.map((segment, index) => (
           <Box key={`${segment.kind}-${index}`} flexShrink={0}>
-            {index > 0 ? <Text backgroundColor={TUI_THEME.chrome} dimColor>{headerSeparatorText}</Text> : null}
+            {index > 0 ? <Text backgroundColor={TUI_THEME.chrome} color={TUI_THEME.muted} dimColor>{headerSeparatorText}</Text> : null}
             <Text
               backgroundColor={TUI_THEME.chrome}
-              color={segment.kind === "brand" ? TUI_THEME.accent : segment.kind === "view" ? TUI_THEME.text : undefined}
+              color={segment.kind === "brand" ? TUI_THEME.accent : segment.kind === "view" ? TUI_THEME.text : TUI_THEME.muted}
               bold={segment.kind === "brand"}
               dimColor={segment.kind !== "brand" && segment.kind !== "view"}
             >

@@ -259,6 +259,9 @@ describe("CLI worker layout smoke", () => {
       expect(workerTitleLine?.chunks.some((chunk) => chunk.style.backgroundColor === TUI_THEME_PRESETS.paper.chrome)).toBe(true);
       expect(inputLine?.chunks.some((chunk) => chunk.style.backgroundColor === TUI_THEME_PRESETS.paper.rail)).toBe(true);
       expect(statusLine?.chunks.some((chunk) => chunk.style.backgroundColor === TUI_THEME_PRESETS.paper.rail)).toBe(true);
+      expect(headerLine?.chunks.some((chunk) => chunk.text.includes("^C") && chunk.style.color === TUI_THEME_PRESETS.paper.muted)).toBe(true);
+      expect(inputLine?.chunks.some((chunk) => chunk.text.includes("read") && chunk.style.color === TUI_THEME_PRESETS.paper.muted)).toBe(true);
+      expect(statusLine?.chunks.some((chunk) => chunk.text === "1" && chunk.style.color === TUI_THEME_PRESETS.paper.text)).toBe(true);
       expect(headerLine?.chunks.some((chunk) => chunk.style.backgroundColor === TUI_THEME_PRESETS.codex.chrome)).toBe(false);
     } finally {
       child.kill("SIGTERM");

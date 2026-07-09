@@ -29,7 +29,7 @@ export function InputBar({
     return (
       <InputRail terminalWidth={terminalWidth} textWidth={displayWidth(`${hints.label}${hints.detail}`)}>
         <Text backgroundColor={TUI_THEME.rail} color={TUI_THEME.accent} bold>{hints.label}</Text>
-        {hints.detail ? <Text backgroundColor={TUI_THEME.rail} dimColor>{hints.detail}</Text> : null}
+        {hints.detail ? <Text backgroundColor={TUI_THEME.rail} color={TUI_THEME.muted} dimColor>{hints.detail}</Text> : null}
       </InputRail>
     );
   }
@@ -39,7 +39,7 @@ export function InputBar({
     return (
       <InputRail terminalWidth={terminalWidth} textWidth={displayWidth(`${hints.label}${hints.detail}`)}>
         <Text backgroundColor={TUI_THEME.rail} color={TUI_THEME.accent} bold>{hints.label}</Text>
-        {hints.detail ? <Text backgroundColor={TUI_THEME.rail} dimColor>{hints.detail}</Text> : null}
+        {hints.detail ? <Text backgroundColor={TUI_THEME.rail} color={TUI_THEME.muted} dimColor>{hints.detail}</Text> : null}
       </InputRail>
     );
   }
@@ -88,7 +88,7 @@ export function InputBar({
       <Text backgroundColor={TUI_THEME.rail} color={TUI_THEME.accent} bold>{prompt}</Text>
       {hasLeadingPromptSpace ? <Text backgroundColor={TUI_THEME.rail}> </Text> : null}
       <Text backgroundColor={TUI_THEME.rail} color={TUI_THEME.accent} bold>|</Text>
-      <Text backgroundColor={TUI_THEME.rail} dimColor>{placeholder}</Text>
+      <Text backgroundColor={TUI_THEME.rail} color={TUI_THEME.muted} dimColor>{placeholder}</Text>
     </InputRail>
   );
 }

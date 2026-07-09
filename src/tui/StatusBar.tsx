@@ -109,7 +109,7 @@ function StatusSegment({ segment, compact, isLast }: { segment: Segment; compact
           >
             {display.label}
           </Text>
-          <Text backgroundColor={TUI_THEME.rail} dimColor>{display.separator}</Text>
+          <Text backgroundColor={TUI_THEME.rail} color={TUI_THEME.muted} dimColor>{display.separator}</Text>
         </>
       ) : null}
       <Text
@@ -120,7 +120,7 @@ function StatusSegment({ segment, compact, isLast }: { segment: Segment; compact
       >
         {display.value}
       </Text>
-      {!isLast ? <Text backgroundColor={TUI_THEME.rail} dimColor>{statusSegmentSeparator(compact)}</Text> : null}
+      {!isLast ? <Text backgroundColor={TUI_THEME.rail} color={TUI_THEME.muted} dimColor>{statusSegmentSeparator(compact)}</Text> : null}
     </Box>
   );
 }
@@ -420,5 +420,5 @@ function valueColorForTone(tone: StatusTone | undefined): TextProps["color"] {
   if (tone === "run" || tone === "done" || tone === "fail" || tone === "wait") {
     return colorForTone(tone);
   }
-  return undefined;
+  return TUI_THEME.text;
 }
