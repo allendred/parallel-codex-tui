@@ -191,7 +191,7 @@ export function WorkerOutputView({
   return (
     <Box flexDirection="column">
       <WorkerOutputTitleRail title={displayTitle} width={panelWidth} />
-      {Array.from({ length: topPaddingLines }, (_, index) => <Text key={`tail-pad-${index}`}> </Text>)}
+      {Array.from({ length: topPaddingLines }, (_, index) => <WorkerOutputBlankLine key={`tail-pad-${index}`} width={panelWidth} />)}
       {visibleLines.length > 0
         ? visibleLines.map((line, index) =>
           nanoRender
@@ -3848,6 +3848,9 @@ export function workerOutputLineTheme(kind: WorkerOutputLineKind): WorkerOutputL
   if (kind === "rule") {
     return { color: TUI_THEME.muted, dimColor: true };
   }
+  if (kind === "blank") {
+    return { backgroundColor: TUI_THEME.surface };
+  }
   if (kind === "code") {
     return { backgroundColor: TUI_THEME.rail, color: TUI_THEME.muted };
   }
@@ -4258,7 +4261,7 @@ function WorkerOutputLine({ line, width }: { line: DisplayLine; width: number })
   const theme = workerOutputLineTheme(line.kind);
   const fillBackground = workerOutputLineFillTheme(line.kind);
   if (line.kind === "blank") {
-    return <Text> </Text>;
+    return <WorkerOutputBlankLine width={width} />;
   }
   if (line.kind === "group") {
     const body = ` ${line.text} `;
@@ -4285,7 +4288,7 @@ function WorkerOutputLine({ line, width }: { line: DisplayLine; width: number })
   if (line.kind === "code") {
     return (
       <Box>
-        <Text dimColor>  </Text>
+        <WorkerOutputIndent backgroundColor={fillBackground} />
         <Text {...theme} wrap="wrap">{line.text || " "}</Text>
       </Box>
     );
@@ -4352,9 +4355,15 @@ function WorkerOutputLine({ line, width }: { line: DisplayLine; width: number })
 }
 
 function WorkerOutputIndent({ backgroundColor }: { backgroundColor: NonNullable<TextProps["backgroundColor"]> | null }) {
-  return backgroundColor && shouldRenderWorkerOutputRailFill()
+  return backgroundColor
     ? <Text backgroundColor={backgroundColor}>  </Text>
-    : <Text dimColor>  </Text>;
+    : <Text color={TUI_THEME.muted} dimColor>  </Text>;
+}
+
+function WorkerOutputBlankLine({ width }: { width: number }) {
+  const theme = workerOutputLineTheme("blank");
+  const fillWidth = shouldRenderWorkerOutputRailFill() ? Math.max(1, width) : 1;
+  return <Text {...theme}>{" ".repeat(fillWidth)}</Text>;
 }
 
 function WorkerOutputTrailingFill({

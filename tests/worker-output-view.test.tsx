@@ -3175,9 +3175,11 @@ describe("WorkerOutputView", () => {
     expect(workerOutputLineTheme("code").backgroundColor).toBe(theme.rail);
     expect(workerOutputLineTheme("json")).toMatchObject({ backgroundColor: theme.rail, color: theme.accent });
     expect(workerOutputLineTheme("source-line").backgroundColor).toBe(theme.surface);
+    expect(workerOutputLineTheme("blank").backgroundColor).toBe(theme.surface);
     expect(workerOutputLineFillTheme("group")).toBe(theme.chrome);
     expect(workerOutputLineFillTheme("section")).toBe(theme.rail);
     expect(workerOutputLineFillTheme("command")).toBe(theme.chrome);
+    expect(workerOutputLineFillTheme("blank")).toBe(theme.surface);
     expect(workerOutputLineFillTheme("diff-file")).toBe(theme.surface);
     expect(workerOutputLineFillTheme("diff-summary")).toBe(theme.surface);
     expect(workerOutputLineFillTheme("diff-context")).toBe(theme.surface);
