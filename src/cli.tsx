@@ -44,7 +44,7 @@ async function main(): Promise<void> {
       explicitWorkspace: cliArgs.explicitWorkspace,
       interactive: false
     });
-    const result = await runDoctor(cliArgs.appRoot, workspaceRoot);
+    const result = await runDoctor(cliArgs.appRoot, workspaceRoot, process.env, { theme: cliArgs.theme });
     process.stdout.write(result.text);
     process.exitCode = result.ok ? 0 : 1;
   } else if (cliArgs.init) {

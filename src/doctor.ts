@@ -3,7 +3,7 @@ import { access } from "node:fs/promises";
 import { delimiter, join } from "node:path";
 import { prepareAppRoot } from "./core/app-root.js";
 import { formatConfigErrorMessage } from "./core/config-errors.js";
-import { configPath, loadConfig } from "./core/config.js";
+import { configPath, loadConfig, withUiThemeOverride } from "./core/config.js";
 import { pathExists } from "./core/file-store.js";
 import { prepareWorkspace } from "./core/workspace.js";
 
@@ -15,7 +15,12 @@ export interface DoctorResult {
 type ConfiguredEngine = "router-codex" | "codex" | "claude" | "mock";
 type WorkerEngine = "codex" | "claude";
 
-export async function runDoctor(appRoot: string, workspaceRoot: string, env: NodeJS.ProcessEnv = process.env): Promise<DoctorResult> {
+export async function runDoctor(
+  appRoot: string,
+  workspaceRoot: string,
+  env: NodeJS.ProcessEnv = process.env,
+  options: { theme?: Awaited<ReturnType<typeof loadConfig>>["ui"]["theme"] | null } = {}
+): Promise<DoctorResult> {
   const lines = ["parallel-codex-tui doctor"];
   let ok = true;
   await prepareAppRoot(appRoot);
@@ -42,7 +47,7 @@ export async function runDoctor(appRoot: string, workspaceRoot: string, env: Nod
 
   let config: Awaited<ReturnType<typeof loadConfig>>;
   try {
-    config = await loadConfig(appRoot);
+    config = withUiThemeOverride(await loadConfig(appRoot), options.theme ?? null);
     lines.push(`config: ok (${localConfigPath})`);
     lines.push(`theme: ok (${config.ui.theme}; ${themeOverrideSummary(config.ui.colors)})`);
   } catch (error) {

@@ -238,6 +238,40 @@ describe("CLI doctor", () => {
     expect(result.stdout).not.toContain("claude: missing");
   });
 
+  it("reports the effective TUI theme after a CLI theme override", async () => {
+    const appRoot = await mkdtemp(join(tmpdir(), "pct-cli-doctor-theme-override-"));
+
+    await mkdir(join(appRoot, ".parallel-codex"), { recursive: true });
+    await writeFile(
+      join(appRoot, ".parallel-codex", "config.toml"),
+      [
+        "[router]",
+        'defaultMode = "simple"',
+        "",
+        "[pairing]",
+        'main = "mock"',
+        "",
+        "[ui]",
+        'theme = "graphite"',
+        "",
+        "[ui.colors]",
+        'accent = " #AABBCC "'
+      ].join("\n"),
+      "utf8"
+    );
+
+    const result = await runCli(["--app-root", appRoot, "--theme", "paper", "--doctor"], {
+      env: {
+        PATH: ""
+      }
+    });
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stderr).toBe("");
+    expect(result.stdout).toContain("theme: ok (paper; colors: accent=#aabbcc)");
+    expect(result.stdout).not.toContain("theme: ok (graphite");
+  });
+
   it("prints config paths for invalid TUI color values", async () => {
     const appRoot = await mkdtemp(join(tmpdir(), "pct-cli-doctor-invalid-theme-color-"));
 

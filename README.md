@@ -60,7 +60,7 @@ parallel-codex-tui --doctor
 parallel-codex-tui --version
 ```
 
-`--doctor` checks the configured commands and any `{env:NAME}` references in active worker model environment settings before workers start. It also reports the loaded TUI theme and color override values.
+`--doctor` checks the configured commands and any `{env:NAME}` references in active worker model environment settings before workers start. It also reports the loaded TUI theme and color override values, including any temporary `--theme` override.
 
 ## Quick Start
 
