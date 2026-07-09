@@ -158,6 +158,7 @@ describe("package metadata", () => {
     expect(workflow).toContain("npm run typecheck");
     expect(workflow).toContain("npm pack --dry-run --json");
     expect(workflow).toContain("npm test");
+    expect(workflow).toContain('CI: "0"');
     expect(workflow).toContain("git diff --check");
   });
 
@@ -170,6 +171,7 @@ describe("package metadata", () => {
     expect(workflow).toContain("- \"v*\"");
     expect(workflow).toContain('node-version: "26.x"');
     expect(workflow).toContain("npm run typecheck");
+    expect(workflow).toContain('CI: "0"');
     expect(workflow).toContain("npm pack --json");
     expect(workflow).toContain('PACKAGE_VERSION=$(node -p "require(\'./package.json\').version")');
     expect(workflow).toContain('if [ "v$PACKAGE_VERSION" != "$RELEASE_VERSION" ]; then');

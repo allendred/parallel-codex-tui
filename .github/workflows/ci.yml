@@ -37,6 +37,8 @@ jobs:
 
       - name: Test
         run: npm test
+        env:
+          CI: "0"
 
       - name: Check whitespace
         run: git diff --check
