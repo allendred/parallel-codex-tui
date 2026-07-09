@@ -107,6 +107,15 @@ describe("nativeAttachTitleDisplay", () => {
       expect(displayWidth(title)).toBeLessThanOrEqual(Math.max(1, width - 2));
     }
   });
+
+  it("preserves native attach exit state for long non-standard labels", () => {
+    expect(
+      nativeAttachTitleDisplay("Third Party Reviewer With Extremely Long Name", "abcdef1234567890", 7, 24)
+    ).toBe("exit:7");
+    expect(
+      nativeAttachTitleDisplay("Third Party Reviewer With Extremely Long Name", "abcdef1234567890", 7, 32)
+    ).toBe("exited 7");
+  });
 });
 
 describe("ChatView", () => {

@@ -1091,12 +1091,14 @@ export function nativeAttachTitleDisplay(
         ? [
             `native ${compactLabel} · ${exitReadable}`,
             `native ${roleLabel} · ${exitReadable}`,
-            `${roleLabel} ${exitReadable}`
+            `${roleLabel} ${exitReadable}`,
+            exitReadable
           ]
         : []),
       `native ${compactLabel} · ${exit}`,
       `native ${roleLabel} · ${exit}`,
-      `${roleLabel} ${exit}`
+      `${roleLabel} ${exit}`,
+      exit
     ], scrollLabel), contentWidth);
   }
 
