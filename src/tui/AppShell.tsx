@@ -8,6 +8,7 @@ import { TUI_THEME } from "./theme.js";
 
 export type AppView = "chat" | "worker" | "native";
 type AppShellErrorLineTheme = Pick<TextProps, "backgroundColor" | "color">;
+type AppShellContentGutterTheme = Pick<TextProps, "backgroundColor">;
 const APP_HEADER_ROOMY_SEPARATOR = " · ";
 const APP_HEADER_COMPACT_SEPARATOR = "  ";
 
@@ -70,9 +71,9 @@ export function AppShell({
         {headerTrailingWidth > 0 ? <Text backgroundColor={TUI_THEME.chrome}>{" ".repeat(headerTrailingWidth)}</Text> : null}
       </Box>
 
-      <Box flexDirection="column" height={contentHeight} paddingX={1}>
+      <AppShellContentFrame contentHeight={contentHeight} terminalWidth={terminalWidth}>
         {children}
-      </Box>
+      </AppShellContentFrame>
 
       {input}
 
@@ -88,11 +89,64 @@ export function AppShell({
   );
 }
 
+function AppShellContentFrame({
+  contentHeight,
+  terminalWidth,
+  children
+}: {
+  contentHeight: number;
+  terminalWidth: number;
+  children: React.ReactNode;
+}) {
+  const layout = appShellContentFrameLayout(contentHeight, terminalWidth);
+  const gutterTheme = appShellContentGutterTheme();
+
+  return (
+    <Box height={layout.height}>
+      {layout.leadingWidth > 0 ? <Text {...gutterTheme}>{appShellContentGutterText(layout.height, layout.leadingWidth)}</Text> : null}
+      <Box flexDirection="column" height={layout.height} width={layout.contentWidth}>
+        {children}
+      </Box>
+    </Box>
+  );
+}
+
 export function appShellErrorLineTheme(): AppShellErrorLineTheme {
   return {
     backgroundColor: TUI_THEME.dangerSurface,
     color: TUI_THEME.danger
   };
+}
+
+export function appShellContentGutterTheme(): AppShellContentGutterTheme {
+  return {
+    backgroundColor: TUI_THEME.surface
+  };
+}
+
+export function appShellContentFrameLayout(contentHeight: number, terminalWidth: number): {
+  height: number;
+  leadingWidth: number;
+  contentWidth: number;
+} {
+  const height = Math.max(1, contentHeight);
+  const renderWidth = typeof process.stdout.columns === "number"
+    ? Math.max(1, Math.min(terminalWidth, process.stdout.columns))
+    : Math.max(1, terminalWidth);
+  const leadingWidth = renderWidth > 1 ? 1 : 0;
+  const reservedWrapColumnWidth = renderWidth > 2 ? 1 : 0;
+
+  return {
+    height,
+    leadingWidth,
+    contentWidth: Math.max(1, renderWidth - leadingWidth - reservedWrapColumnWidth)
+  };
+}
+
+export function appShellContentGutterText(contentHeight: number, gutterWidth: number): string {
+  const height = Math.max(1, contentHeight);
+  const width = Math.max(0, gutterWidth);
+  return Array.from({ length: height }, () => " ".repeat(width)).join("\n");
 }
 
 function appShellErrorRow(error: string, terminalWidth: number): { text: string; trailingWidth: number } {

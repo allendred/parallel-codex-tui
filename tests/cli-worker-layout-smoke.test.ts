@@ -44,8 +44,13 @@ describe("CLI worker layout smoke", () => {
       const inputIndex = lines.findIndex((line) => line.chunks.map((chunk) => chunk.text).join("").includes("Type a message"));
       const statusLine = lines[inputIndex + 1];
       const statusLineText = statusLine?.chunks.map((chunk) => chunk.text).join("") ?? "";
+      const contentLines = lines.slice(1, inputIndex);
 
       expect(inputIndex).toBeGreaterThanOrEqual(0);
+      expect(contentLines.length).toBeGreaterThan(0);
+      expect(
+        contentLines.every((line) => line.chunks.every((chunk) => chunk.style.backgroundColor === TUI_THEME_PRESETS.codex.surface))
+      ).toBe(true);
       expect(statusLineText.trim()).toBe("");
       expect(displayWidth(statusLineText)).toBe(79);
       expect(statusLine?.chunks.some((chunk) => chunk.style.backgroundColor === TUI_THEME_PRESETS.codex.rail)).toBe(true);
@@ -103,6 +108,7 @@ describe("CLI worker layout smoke", () => {
         .styledSnapshotLines()
         .find((line) => line.chunks.map((chunk) => chunk.text).join("").includes("critic/mock · 1/1"));
       const workerTitleLineText = workerTitleLine?.chunks.map((chunk) => chunk.text).join("") ?? "";
+      const workerTitleContentChunks = workerTitleLine?.chunks.filter((chunk) => chunk.text.trim().length > 0) ?? [];
       const statusLine = screen
         .styledSnapshotLines()
         .find((line) => line.chunks.map((chunk) => chunk.text).join("").includes("workers 1"));
@@ -118,7 +124,7 @@ describe("CLI worker layout smoke", () => {
       expect(headerLine?.chunks.some((chunk) => chunk.style.backgroundColor === TUI_THEME_PRESETS.codex.chrome)).toBe(true);
       expect(displayWidth(headerLineText)).toBe(139);
       expect(workerTitleLine?.chunks.some((chunk) => chunk.style.backgroundColor === TUI_THEME_PRESETS.codex.chrome)).toBe(true);
-      expect(workerTitleLine?.chunks.some((chunk) => chunk.style.backgroundColor === TUI_THEME_PRESETS.codex.surface)).toBe(false);
+      expect(workerTitleContentChunks.some((chunk) => chunk.style.backgroundColor === TUI_THEME_PRESETS.codex.surface)).toBe(false);
       expect(displayWidth(workerTitleLineText)).toBe(137);
       expect(snapshot).toContain("line 80");
       expect(snapshot).toContain("logs · read");
