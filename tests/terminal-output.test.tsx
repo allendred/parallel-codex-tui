@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it } from "vitest";
 import {
   terminalOutputBlankLineTheme,
+  terminalOutputEmptyText,
   terminalOutputEmptyTheme,
   terminalOutputTrailingFillWidth,
   terminalOutputTextProps
@@ -15,6 +16,7 @@ describe("TerminalOutput theme helpers", () => {
   it("themes outer empty native output states without changing native ANSI chunk colors", () => {
     configureTuiTheme({ theme: "paper" });
 
+    expect(terminalOutputEmptyText()).toBe("No native output yet.");
     expect(terminalOutputEmptyTheme()).toEqual({
       backgroundColor: TUI_THEME_PRESETS.paper.surface,
       color: TUI_THEME_PRESETS.paper.muted,

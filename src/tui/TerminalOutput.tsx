@@ -4,7 +4,7 @@ import type { TerminalLine, TerminalTextStyle } from "./terminal-screen.js";
 import { displayWidth } from "./display-width.js";
 import { TUI_THEME } from "./theme.js";
 
-const TERMINAL_OUTPUT_EMPTY_TEXT = "(no output yet)";
+const TERMINAL_OUTPUT_EMPTY_TEXT = "No native output yet.";
 
 export interface TerminalOutputProps {
   lines: TerminalLine[];
@@ -56,6 +56,10 @@ export function terminalOutputEmptyTheme(): TerminalOutputTheme {
     color: TUI_THEME.muted,
     dimColor: true
   };
+}
+
+export function terminalOutputEmptyText(): string {
+  return TERMINAL_OUTPUT_EMPTY_TEXT;
 }
 
 export function terminalOutputBlankLineTheme(): TerminalOutputTheme {
