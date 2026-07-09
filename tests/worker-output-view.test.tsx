@@ -1487,6 +1487,7 @@ describe("WorkerOutputView", () => {
         "# Requirements",
         "",
         "Use `npm test` and **keep output readable**. See [docs](https://example.test).",
+        "Open [worklog.md](/tmp/worklog.md:1) and [dist page](file:///workspace/tetris/dist/index.html).",
         "",
         "- [x] Parse task list",
         "- [ ] Render table",
@@ -1528,6 +1529,7 @@ describe("WorkerOutputView", () => {
 
       const frame = lastFrame() ?? "";
       expect(frame).toContain("Use npm test and keep output readable. See docs <https://example.test>.");
+      expect(frame).toContain("Open worklog.md and dist page.");
       expect(frame).toContain("☑ Parse task list");
       expect(frame).toContain("☐ Render table");
       expect(frame).toContain("1. Read files");
@@ -1545,6 +1547,8 @@ describe("WorkerOutputView", () => {
       expect(frame).toContain("────");
       expect(frame).not.toContain("`npm test`");
       expect(frame).not.toContain("**keep output readable**");
+      expect(frame).not.toContain("/tmp/worklog.md");
+      expect(frame).not.toContain("file:///workspace");
       expect(frame).not.toContain("| --- | --- |");
       expect(frame).not.toContain("| npm test");
     } finally {

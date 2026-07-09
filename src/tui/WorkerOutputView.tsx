@@ -3658,13 +3658,36 @@ function markdownTableColumnWidths(rows: string[][]): number[] {
 
 function stripInlineMarkdown(text: string): string {
   return text
-    .replace(/\[([^\]]+)\]\(([^)]+)\)/g, "$1 <$2>")
+    .replace(/\[([^\]]+)\]\(([^)]+)\)/g, (_match, label: string, target: string) => formatMarkdownLink(label, target))
     .replace(/`([^`]+)`/g, "$1")
     .replace(/\*\*([^*]+)\*\*/g, "$1")
     .replace(/__([^_]+)__/g, "$1")
     .replace(/\*([^*]+)\*/g, "$1")
     .replace(/_([^_]+)_/g, "$1")
     .trim();
+}
+
+function formatMarkdownLink(label: string, target: string): string {
+  const text = stripInlineMarkdownLinkText(label);
+  const href = target.trim();
+  if (!href) {
+    return text;
+  }
+  return isExternalMarkdownLinkTarget(href) ? `${text} <${href}>` : text;
+}
+
+function stripInlineMarkdownLinkText(text: string): string {
+  return text
+    .replace(/`([^`]+)`/g, "$1")
+    .replace(/\*\*([^*]+)\*\*/g, "$1")
+    .replace(/__([^_]+)__/g, "$1")
+    .replace(/\*([^*]+)\*/g, "$1")
+    .replace(/_([^_]+)_/g, "$1")
+    .trim();
+}
+
+function isExternalMarkdownLinkTarget(target: string): boolean {
+  return /^(?:https?:|mailto:)/i.test(target);
 }
 
 function decodeHtmlEntities(text: string): string {
