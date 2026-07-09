@@ -171,7 +171,7 @@ If a native resume fails because the underlying CLI reports that its context win
 
 GitHub Actions runs CI on pushes and pull requests to `main`.
 
-Configure npm Trusted Publishing for this GitHub Actions workflow with organization/user `allendred`, repository `parallel-codex-tui`, and workflow filename `release.yml`. The release job installs npm `^11.5.1`, which is required for trusted publishing. Alternatively, add an `NPM_TOKEN` repository secret with npm publish permission. To publish a release, update `package.json` and `src/version.ts` to the same version, then push a matching tag:
+Configure npm Trusted Publishing for this GitHub Actions workflow with organization/user `allendred`, repository `parallel-codex-tui`, and workflow filename `release.yml`. The release job installs npm `^11.5.1`, which is required for trusted publishing. Alternatively, add an `NPM_TOKEN` repository secret with npm publish permission; it must be an npm automation token so CI can publish without an interactive one-time password. If npm returns `EOTP`, replace the secret with an automation token or remove the secret and use Trusted Publishing. To publish a release, update `package.json` and `src/version.ts` to the same version, then push a matching tag:
 
 ```bash
 git tag v0.1.2

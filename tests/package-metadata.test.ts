@@ -159,6 +159,8 @@ describe("package metadata", () => {
     expect(readme).toContain('workflow filename `release.yml`');
     expect(readme).toContain("npm `^11.5.1`");
     expect(readme).toContain("add an `NPM_TOKEN` repository secret");
+    expect(readme).toContain("npm automation token");
+    expect(readme).toContain("If npm returns `EOTP`");
     expect(readme).toContain("git tag v0.1.2");
     expect(readme).toContain("git push origin v0.1.2");
     expect(readme).toContain("The release tag must match `package.json`");
