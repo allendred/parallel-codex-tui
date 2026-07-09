@@ -174,7 +174,7 @@ describe("AppShell", () => {
     expect(frame).not.toContain("@ critic/mock");
   });
 
-  it("uses a compact task label in the header for long task ids", () => {
+  it("uses a lightweight task marker in roomy headers for long task ids", () => {
     const { lastFrame } = render(
       <AppShell
         view="worker"
@@ -189,7 +189,8 @@ describe("AppShell", () => {
 
     const frame = lastFrame() ?? "";
 
-    expect(frame).toContain("task 093326-1980");
+    expect(frame).toContain("#093326-1980");
+    expect(frame).not.toContain("task 093326-1980");
     expect(frame).not.toContain("task task-20260630-093326-1980");
     expect(frame).toContain("tetris");
   });

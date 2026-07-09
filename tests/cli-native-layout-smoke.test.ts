@@ -69,7 +69,8 @@ describe("CLI native layout smoke", () => {
       expect(snapshot).toContain("parallel-codex-tui");
       expect(snapshot).toContain("native");
       expect(snapshot).not.toContain("Native agent");
-      expect(snapshot).toContain("task ");
+      expect(snapshot).toContain("#000000-native-layout");
+      expect(snapshot).not.toContain("task 000000-native-layout");
       expect(snapshot).toContain("native line 40");
       expect(snapshot).toContain("native · wheel/Pg · ^] logs");
       expect(nativeTitleLine?.chunks.some((chunk) => chunk.style.backgroundColor === TUI_THEME_PRESETS.codex.chrome)).toBe(true);

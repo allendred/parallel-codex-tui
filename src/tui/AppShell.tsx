@@ -200,7 +200,7 @@ function headerParts(input: { view: AppView; cwd: string; taskId: string | null;
   return fitHeaderParts({
     brand: narrow ? "pct" : "parallel-codex-tui",
     view: nano ? "" : input.terminalWidth <= 24 && input.view === "native" ? "nat" : narrow ? shortViewLabel(input.view) : viewLabel(input.view),
-    task: showTask ? ultraNarrow ? ultraCompactTaskId(task) : narrow ? task : `task ${task}` : "",
+    task: showTask ? ultraNarrow ? ultraCompactTaskId(task) : narrow ? task : `#${task}` : "",
     project: tiny || ultraNarrow ? "" : compactHeaderProject(input.cwd, veryNarrow ? 10 : narrow ? 16 : 40),
     shortcut: narrow ? shortShortcutHint(input.view) : shortcutHint(input.view)
   }, contentWidth, separator);

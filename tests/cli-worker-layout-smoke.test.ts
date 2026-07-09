@@ -163,7 +163,8 @@ describe("CLI worker layout smoke", () => {
       expect(snapshot).toContain("parallel-codex-tui");
       expect(snapshot).toContain("logs");
       expect(snapshot).not.toContain("Worker logs");
-      expect(snapshot).toContain("task ");
+      expect(snapshot).toContain("#000000-layout");
+      expect(snapshot).not.toContain("task 000000-layout");
       expect(headerLine?.chunks.some((chunk) => chunk.style.backgroundColor === TUI_THEME_PRESETS.codex.chrome)).toBe(true);
       expect(displayWidth(headerLineText)).toBe(139);
       expect(workerTitleLine?.chunks.some((chunk) => chunk.style.backgroundColor === TUI_THEME_PRESETS.codex.chrome)).toBe(true);
