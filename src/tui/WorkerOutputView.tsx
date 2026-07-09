@@ -114,7 +114,7 @@ export function WorkerOutputView({
       if (!logPath) {
         setContentState({
           key: loadKey,
-          lines: [{ kind: "content", text: "No worker log selected." }]
+          lines: [{ kind: "content", text: "No worker selected. Run a complex task to create logs." }]
         });
         return;
       }

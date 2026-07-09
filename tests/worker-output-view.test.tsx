@@ -25,6 +25,26 @@ import { displayWidth } from "../src/tui/display-width.js";
 import { TUI_THEME_PRESETS } from "../src/tui/theme.js";
 
 describe("WorkerOutputView", () => {
+  it("renders an actionable empty state when no worker log is selected", async () => {
+    const { lastFrame, unmount } = render(
+      <WorkerOutputView
+        title="Worker output"
+        logPath={null}
+        height={5}
+      />
+    );
+
+    try {
+      await waitForFrame(lastFrame, "No worker selected");
+
+      const frame = lastFrame() ?? "";
+      expect(frame).toContain("No worker selected. Run a complex task to create logs.");
+      expect(frame).not.toContain("No worker log selected.");
+    } finally {
+      unmount();
+    }
+  });
+
   it("renders actor role artifact logs before raw process output", async () => {
     const root = await mkdtemp(join(tmpdir(), "pct-worker-output-"));
     const workerDir = join(root, "actor-mock");

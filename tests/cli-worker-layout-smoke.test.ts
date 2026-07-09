@@ -194,6 +194,7 @@ describe("CLI worker layout smoke", () => {
 
     try {
       await waitForText(chunks, "ready");
+      await waitForScreenText(() => screenWrites, screen, "^W logs");
       child.write("\x17");
       await waitForScreenText(() => screenWrites, screen, "logs · read");
       await screenWrites;
