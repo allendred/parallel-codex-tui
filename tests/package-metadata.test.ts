@@ -155,14 +155,16 @@ describe("package metadata", () => {
     expect(readme).toContain(".parallel-codex/sessions/");
     expect(readme).toContain("## Release");
     expect(readme).toContain("GitHub Actions runs CI on pushes and pull requests to `main`");
-    expect(readme).toContain("Configure npm Trusted Publishing");
+    expect(readme).toContain("npm Trusted Publishing with GitHub OIDC");
+    expect(readme).toContain("In npm, configure Trusted Publishing");
     expect(readme).toContain('workflow filename `release.yml`');
+    expect(readme).toContain("Do not configure `NPM_TOKEN` for the release workflow");
     expect(readme).toContain("npm `^11.5.1`");
-    expect(readme).toContain("add an `NPM_TOKEN` repository secret");
-    expect(readme).toContain("npm automation token");
-    expect(readme).toContain("If npm returns `EOTP`");
-    expect(readme).toContain("git tag v0.1.3");
-    expect(readme).toContain("git push origin v0.1.3");
+    expect(readme).toContain("allowed action `npm publish`");
+    expect(readme).toContain("npm returns `ENEEDAUTH` or `E401`");
+    expect(readme).toContain("fix the npm Trusted Publishing package settings rather than adding a token fallback");
+    expect(readme).toContain("git tag v0.1.4");
+    expect(readme).toContain("git push origin v0.1.4");
     expect(readme).toContain("The release tag must match `package.json`");
   });
 
@@ -179,7 +181,8 @@ describe("package metadata", () => {
 
     expect(workflow).toContain("name: CI");
     expect(workflow).toContain("pull_request:");
-    expect(workflow).toContain("actions/setup-node@v4");
+    expect(workflow).toContain("actions/checkout@v6");
+    expect(workflow).toContain("actions/setup-node@v6");
     expect(workflow).toContain('node-version: "26.x"');
     expect(workflow).toContain("npm ci");
     expect(workflow).toContain("npm run typecheck");
@@ -200,7 +203,10 @@ describe("package metadata", () => {
     expect(workflow).toContain("cancel-in-progress: false");
     expect(workflow).toContain("ref: ${{ github.event_name == 'workflow_dispatch' && inputs.version || github.ref }}");
     expect(workflow).toContain("id-token: write");
+    expect(workflow).toContain("actions/checkout@v6");
+    expect(workflow).toContain("actions/setup-node@v6");
     expect(workflow).toContain('node-version: "26.x"');
+    expect(workflow).toContain("package-manager-cache: false");
     expect(workflow).toContain("npm install -g npm@^11.5.1");
     expect(workflow).toContain("npm --version");
     expect(workflow).toContain("npm run typecheck");
@@ -214,13 +220,14 @@ describe("package metadata", () => {
     expect(workflow).toContain('published=$PUBLISHED');
     expect(workflow).toContain("if: steps.npm.outputs.published != 'true'");
     expect(workflow).toContain('PACKAGE_TARBALL="${{ steps.pack.outputs.tarball }}"');
-    expect(workflow).toContain('npm publish --access public --provenance "$PACKAGE_TARBALL"');
-    expect(workflow).toContain("Trying npm trusted publishing via GitHub OIDC");
-    expect(workflow).toContain("Trusted publishing was not accepted; falling back to NPM_TOKEN if available.");
-    expect(workflow).toContain("restore_auth_token_config");
-    expect(workflow).toContain("npm config set //registry.npmjs.org/:_authToken");
-    expect(workflow).toContain("NPM_TOKEN requires a one-time password");
-    expect(workflow).toContain("sed -i '/_authToken/d'");
+    expect(workflow).toContain('npm publish --access public "$PACKAGE_TARBALL"');
+    expect(workflow).toContain("Publishing to npm with Trusted Publishing via GitHub OIDC");
+    expect(workflow).toContain("Trusted Publishing was not accepted");
+    expect(workflow).toContain("workflow filename release.yml");
+    expect(workflow).not.toContain("NPM_TOKEN");
+    expect(workflow).not.toContain("NODE_AUTH_TOKEN");
+    expect(workflow).not.toContain("fallback");
+    expect(workflow).not.toContain("_authToken");
     expect(workflow).toContain("Verify published package");
     expect(workflow).toContain('PACKAGE_SPEC="parallel-codex-tui@$PACKAGE_VERSION"');
     expect(workflow).toContain('npm view "$PACKAGE_SPEC" version --json');
@@ -228,6 +235,5 @@ describe("package metadata", () => {
     expect(workflow).toContain('"$VERIFY_PREFIX/bin/parallel-codex-tui" --version');
     expect(workflow).toContain('grep -F "parallel-codex-tui $PACKAGE_VERSION"');
     expect(workflow).toContain("softprops/action-gh-release@v2");
-    expect(workflow).toContain("NPM_TOKEN");
   });
 });

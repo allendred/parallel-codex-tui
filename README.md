@@ -171,14 +171,18 @@ If a native resume fails because the underlying CLI reports that its context win
 
 GitHub Actions runs CI on pushes and pull requests to `main`.
 
-Configure npm Trusted Publishing for this GitHub Actions workflow with organization/user `allendred`, repository `parallel-codex-tui`, and workflow filename `release.yml`. The release job installs npm `^11.5.1`, which is required for trusted publishing. Alternatively, add an `NPM_TOKEN` repository secret with npm publish permission; it must be an npm automation token so CI can publish without an interactive one-time password. If npm returns `EOTP`, replace the secret with an automation token or remove the secret and use Trusted Publishing. To publish a release, update `package.json` and `src/version.ts` to the same version, then push a matching tag:
+Releases publish to npm through npm Trusted Publishing with GitHub OIDC. Do not configure `NPM_TOKEN` for the release workflow. In npm, configure Trusted Publishing for organization/user `allendred`, repository `parallel-codex-tui`, workflow filename `release.yml`, and allowed action `npm publish`. The package already exists on npm, so future releases can use Trusted Publishing directly.
+
+The release job installs npm `^11.5.1`, runs on Node `26.x`, publishes the prepared tarball through OIDC, waits for the package to become visible on npm, installs it globally in a temporary prefix, and checks `parallel-codex-tui --version` before creating the GitHub Release. If npm returns `ENEEDAUTH` or `E401`, fix the npm Trusted Publishing package settings rather than adding a token fallback.
+
+To publish a release, update `package.json` and `src/version.ts` to the same version, then push a matching tag:
 
 ```bash
-git tag v0.1.3
-git push origin v0.1.3
+git tag v0.1.4
+git push origin v0.1.4
 ```
 
-You can also run the Release workflow manually and enter the same tag value. The release tag must match `package.json`; for example, package version `0.1.3` requires tag `v0.1.3`.
+You can also run the Release workflow manually and enter the same tag value. The release tag must match `package.json`; for example, package version `0.1.4` requires tag `v0.1.4`.
 
 ## Publishing Hygiene
 

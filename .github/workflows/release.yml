@@ -26,16 +26,16 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           ref: ${{ github.event_name == 'workflow_dispatch' && inputs.version || github.ref }}
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: "26.x"
-          cache: npm
           registry-url: https://registry.npmjs.org
+          package-manager-cache: false
 
       - name: Setup npm
         run: |
@@ -120,55 +120,22 @@ jobs:
             exit 1
           fi
 
-          remove_auth_token_config() {
-            if [ -n "${NPM_CONFIG_USERCONFIG:-}" ] && [ -f "$NPM_CONFIG_USERCONFIG" ]; then
-              sed -i '/_authToken/d' "$NPM_CONFIG_USERCONFIG"
-            fi
-          }
-
-          restore_auth_token_config() {
-            if [ -n "${NPM_CONFIG_USERCONFIG:-}" ] && [ -f "$NPM_CONFIG_USERCONFIG" ]; then
-              npm config set //registry.npmjs.org/:_authToken "$NODE_AUTH_TOKEN" --userconfig "$NPM_CONFIG_USERCONFIG"
-            fi
-          }
-
-          if [ -n "${ACTIONS_ID_TOKEN_REQUEST_TOKEN:-}" ] && [ -n "${ACTIONS_ID_TOKEN_REQUEST_URL:-}" ]; then
-            echo "Trying npm trusted publishing via GitHub OIDC."
-            remove_auth_token_config
-            unset NODE_AUTH_TOKEN
-
-            trusted_log="$(mktemp)"
-            if npm publish --access public --provenance "$PACKAGE_TARBALL" 2>&1 | tee "$trusted_log"; then
-              exit 0
-            fi
-
-            if grep -Eq "ENEEDAUTH|E401" "$trusted_log"; then
-              echo "Trusted publishing was not accepted; falling back to NPM_TOKEN if available."
-            else
-              exit 1
-            fi
-          fi
-
-          if [ -z "$NPM_TOKEN" ]; then
-            echo "No NPM_TOKEN fallback is configured." >&2
+          if [ -z "${ACTIONS_ID_TOKEN_REQUEST_TOKEN:-}" ] || [ -z "${ACTIONS_ID_TOKEN_REQUEST_URL:-}" ]; then
+            echo "GitHub OIDC is not available. Check that permissions.id-token is set to write." >&2
             exit 1
           fi
 
-          echo "Publishing to npm with NPM_TOKEN."
-          export NODE_AUTH_TOKEN="$NPM_TOKEN"
-          restore_auth_token_config
-          token_log="$(mktemp)"
-          if npm publish --access public --provenance "$PACKAGE_TARBALL" 2>&1 | tee "$token_log"; then
+          echo "Publishing to npm with Trusted Publishing via GitHub OIDC."
+          trusted_log="$(mktemp)"
+          if npm publish --access public "$PACKAGE_TARBALL" 2>&1 | tee "$trusted_log"; then
             exit 0
           fi
 
-          if grep -q "EOTP" "$token_log"; then
-            echo "::error::NPM_TOKEN requires a one-time password. Replace it with an npm automation token or configure Trusted Publishing."
+          if grep -Eq "ENEEDAUTH|E401" "$trusted_log"; then
+            echo "::error::Trusted Publishing was not accepted. Configure npm Trusted Publishing for repository allendred/parallel-codex-tui, workflow filename release.yml, and allowed action npm publish."
           fi
 
           exit 1
-        env:
-          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
 
       - name: Verify published package
         shell: bash
