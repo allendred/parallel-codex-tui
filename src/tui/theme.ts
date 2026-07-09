@@ -87,7 +87,8 @@ const DEFAULT_TUI_THEME_NAME: TuiThemeName = "codex";
 export let TUI_THEME: TuiTheme = TUI_THEME_PRESETS[DEFAULT_TUI_THEME_NAME];
 
 export function resolveTuiTheme(options: { theme?: string; colors?: TuiThemeOverrides } = {}): TuiTheme {
-  const name = isTuiThemeName(options.theme) ? options.theme : DEFAULT_TUI_THEME_NAME;
+  const theme = normalizeTuiThemeName(options.theme);
+  const name = theme ?? DEFAULT_TUI_THEME_NAME;
   return freezeTuiTheme({
     ...TUI_THEME_PRESETS[name],
     ...normalizeTuiThemeOverrides(options.colors)
@@ -133,6 +134,11 @@ export function isTuiThemeColorValue(value: string): boolean {
 
 export function isTuiThemeName(value: string | null | undefined): value is TuiThemeName {
   return TUI_THEME_NAMES.includes(value as TuiThemeName);
+}
+
+function normalizeTuiThemeName(value: string | null | undefined): TuiThemeName | null {
+  const name = value?.trim();
+  return isTuiThemeName(name) ? name : null;
 }
 
 function isByteColorValue(value: string): boolean {

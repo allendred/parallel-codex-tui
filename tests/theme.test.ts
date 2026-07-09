@@ -33,6 +33,10 @@ describe("TUI theme", () => {
     expect(resolveTuiTheme({ theme: "unknown" })).toEqual(TUI_THEME_PRESETS.codex);
   });
 
+  it("normalizes theme names before selecting a palette", () => {
+    expect(resolveTuiTheme({ theme: "  paper  " }).text).toBe("black");
+  });
+
   it("merges user color overrides over the selected palette", () => {
     expect(resolveTuiTheme({
       theme: "paper",
