@@ -98,7 +98,7 @@ Set the TUI palette in `.parallel-codex/config.toml`:
 
 ```toml
 [ui]
-theme = "graphite" # codex, graphite, paper
+theme = "codex" # codex, graphite, paper
 showStatusBar = true
 autoOpenFailedWorker = true
 

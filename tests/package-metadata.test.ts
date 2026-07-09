@@ -160,7 +160,7 @@ describe("package metadata", () => {
     expect(readme).toContain("parallel-codex-tui --help");
     expect(readme).toContain("parallel-codex-tui --version");
     expect(readme).toContain("## Theme");
-    expect(readme).toContain('theme = "graphite"');
+    expect(readme).toContain('theme = "codex"');
     expect(readme).toContain("showStatusBar = false");
     expect(readme).toContain("autoOpenFailedWorker = false");
     expect(readme).toContain("successSurface");
