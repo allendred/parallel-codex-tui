@@ -44,7 +44,7 @@ const UiColorOverridesSchema = z.object({
   warning: TuiColorValueSchema.optional(),
   success: TuiColorValueSchema.optional(),
   danger: TuiColorValueSchema.optional()
-}).default({});
+}).strict().default({});
 
 const CodexRouterConfigSchema = z.object({
   command: z.string().min(1).default("codex"),

@@ -279,6 +279,21 @@ describe("config", () => {
     await expect(loadConfig(root)).rejects.toThrow(/Invalid TUI color value/);
   });
 
+  it("rejects unknown TUI color override keys", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pct-config-unknown-theme-color-key-"));
+
+    await writeText(
+      join(root, ".parallel-codex", "config.toml"),
+      [
+        "[ui.colors]",
+        'accent = "cyan"',
+        'acccent = "magenta"'
+      ].join("\n")
+    );
+
+    await expect(loadConfig(root)).rejects.toThrow(/acccent/);
+  });
+
   it("rejects invalid nested section types instead of silently using defaults", async () => {
     const cases = [
       ["workers.codex", '[workers]\ncodex = "bad"\n'],

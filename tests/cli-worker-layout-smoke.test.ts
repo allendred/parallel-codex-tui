@@ -317,6 +317,7 @@ describe("CLI worker layout smoke", () => {
       child.write("\t");
       await waitForScreenText(() => screenWrites, screen, "judge/mock · 1/2");
       await waitForScreenText(() => screenWrites, screen, "judge healthy details");
+      await waitForScreenText(() => screenWrites, screen, "@ judge/mock");
       const switchedSnapshot = screen.snapshot();
       expect(switchedSnapshot).toContain("judge healthy details");
       expect(switchedSnapshot).toContain("@ judge/mock");
