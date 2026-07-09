@@ -55,3 +55,7 @@ export function nextSubmitMemoryState(
     activeTaskId: result.mode === "complex" ? result.taskId : null
   };
 }
+
+export function shouldClearWorkersForSubmit(target: SubmitTarget): boolean {
+  return target.kind !== "task-question";
+}

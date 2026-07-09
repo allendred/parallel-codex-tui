@@ -16,7 +16,7 @@ import { AppShell } from "./AppShell.js";
 import { InputBar } from "./InputBar.js";
 import { applyNativeInputChunk } from "./native-input.js";
 import { nextScrollOffset } from "./scrolling.js";
-import { chooseSubmitTarget, nextSubmitMemoryState } from "./task-memory.js";
+import { chooseSubmitTarget, nextSubmitMemoryState, shouldClearWorkersForSubmit } from "./task-memory.js";
 import { TerminalOutput } from "./TerminalOutput.js";
 import { NativeTerminalScreen } from "./terminal-screen.js";
 import { WorkerOutputView } from "./WorkerOutputView.js";
@@ -501,13 +501,6 @@ export function App({
     setInput("");
     busyRef.current = true;
     setBusy(true);
-    setWorkers([]);
-    selectedWorkerIndexRef.current = 0;
-    autoSelectedFailedWorkerRef.current = false;
-    userSelectedWorkerRef.current = false;
-    setSelectedWorkerIndex(0);
-    setWorkerScrollOffset(0);
-    setWorkerMaxScrollOffset(0);
     setMessages((current) => [...current, { from: "user", text: request }]);
 
     try {
@@ -531,6 +524,15 @@ export function App({
             })
           : undefined;
       const target = chooseSubmitTarget(memory, followUpRoute);
+      if (shouldClearWorkersForSubmit(target)) {
+        setWorkers([]);
+        selectedWorkerIndexRef.current = 0;
+        autoSelectedFailedWorkerRef.current = false;
+        userSelectedWorkerRef.current = false;
+        setSelectedWorkerIndex(0);
+        setWorkerScrollOffset(0);
+        setWorkerMaxScrollOffset(0);
+      }
       const result =
         target.kind === "task-turn"
           ? await orchestrator.handleTaskTurn({

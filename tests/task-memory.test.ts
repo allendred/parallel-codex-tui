@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { chooseSubmitTarget, nextSubmitMemoryState } from "../src/tui/task-memory.js";
+import { chooseSubmitTarget, nextSubmitMemoryState, shouldClearWorkersForSubmit } from "../src/tui/task-memory.js";
 
 describe("chooseSubmitTarget", () => {
   it("continues the active complex task for follow-up input", () => {
@@ -122,5 +122,28 @@ describe("chooseSubmitTarget", () => {
       activeTaskId: "task-a",
       activeMode: "complex"
     });
+  });
+
+  it("keeps existing worker refs for simple active-task questions", () => {
+    expect(
+      shouldClearWorkersForSubmit({
+        kind: "task-question",
+        taskId: "task-a"
+      })
+    ).toBe(false);
+  });
+
+  it("clears worker refs for task turns and new requests", () => {
+    expect(
+      shouldClearWorkersForSubmit({
+        kind: "task-turn",
+        taskId: "task-a"
+      })
+    ).toBe(true);
+    expect(
+      shouldClearWorkersForSubmit({
+        kind: "new-request"
+      })
+    ).toBe(true);
   });
 });
