@@ -76,6 +76,8 @@ describe("TUI theme", () => {
   });
 
   it("provides one shared theme-color normalizer", () => {
+    expect(normalizeTuiThemeColorValue("  #ABC  ")).toBe("#abc");
+    expect(normalizeTuiThemeColorValue("#AABBCC")).toBe("#aabbcc");
     expect(normalizeTuiThemeColorValue("  ansi256(238)  ")).toBe("ansi256(238)");
     expect(normalizeTuiThemeColorValue("ansi256( 238 )")).toBe("ansi256(238)");
     expect(normalizeTuiThemeColorValue("rgb(232, 131, 136)")).toBe("rgb(232,131,136)");

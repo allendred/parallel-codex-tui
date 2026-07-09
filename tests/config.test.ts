@@ -118,7 +118,8 @@ describe("config", () => {
         "[ui.colors]",
         'chrome = "  ansi256( 238 )  "',
         'surface = " rgb(22, 27, 34) "',
-        'accent = "  magenta  "'
+        'accent = "  magenta  "',
+        'warning = " #AABBCC "'
       ].join("\n")
     );
 
@@ -127,7 +128,8 @@ describe("config", () => {
     expect(config.ui.colors).toEqual({
       chrome: "ansi256(238)",
       surface: "rgb(22,27,34)",
-      accent: "magenta"
+      accent: "magenta",
+      warning: "#aabbcc"
     });
   });
 

@@ -119,7 +119,7 @@ export function normalizeTuiThemeColorValue(value: string | null | undefined): s
   }
 
   if (/^#[0-9a-f]{3}(?:[0-9a-f]{3})?$/i.test(color)) {
-    return color;
+    return color.toLowerCase();
   }
 
   const ansiMatch = color.match(/^ansi256\(\s*(\d+)\s*\)$/);
