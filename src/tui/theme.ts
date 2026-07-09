@@ -21,7 +21,7 @@ export interface TuiTheme {
   danger: InkColor;
 }
 
-export const TUI_THEME_NAMES = Object.freeze(["codex", "graphite", "paper"] as const);
+export const TUI_THEME_NAMES = Object.freeze(["codex", "graphite", "paper", "aurora"] as const);
 export const TUI_THEME_FIELDS = Object.freeze([
   "chrome",
   "surface",
@@ -79,6 +79,19 @@ export const TUI_THEME_PRESETS: Readonly<Record<TuiThemeName, Readonly<TuiTheme>
     warning: fg("ansi256(130)"),
     success: fg("ansi256(28)"),
     danger: fg("ansi256(160)")
+  }),
+  aurora: freezeTuiTheme({
+    chrome: bg("ansi256(23)"),
+    surface: bg("ansi256(234)"),
+    rail: bg("ansi256(237)"),
+    successSurface: bg("ansi256(22)"),
+    dangerSurface: bg("ansi256(52)"),
+    text: fg("ansi256(255)"),
+    muted: fg("ansi256(250)"),
+    accent: fg("ansi256(80)"),
+    warning: fg("ansi256(222)"),
+    success: fg("ansi256(120)"),
+    danger: fg("ansi256(203)")
   })
 });
 

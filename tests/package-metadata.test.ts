@@ -145,7 +145,7 @@ describe("package metadata", () => {
     expect(readme).toContain("parallel-codex-tui --init");
     expect(readme).toContain("parallel-codex-tui --doctor");
     expect(readme).toContain("parallel-codex-tui --workspace /path/to/project");
-    expect(readme).toContain("parallel-codex-tui --theme graphite --workspace /path/to/project");
+    expect(readme).toContain("parallel-codex-tui --theme aurora --workspace /path/to/project");
     expect(readme).toContain("--workspace=/path/to/project");
     expect(readme).toContain("--theme=paper");
     expect(readme).toContain("-w=/path/to/project");

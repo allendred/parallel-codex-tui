@@ -25,7 +25,7 @@ describe("TUI theme", () => {
     expect(TUI_THEME_FIELDS).toEqual(Object.keys(TUI_THEME_PRESETS.codex));
     expect(Object.isFrozen(TUI_THEME_PRESETS)).toBe(true);
     expect(TUI_THEME_NAMES.every((name) => Object.isFrozen(TUI_THEME_PRESETS[name]))).toBe(true);
-    expect(Object.keys(TUI_THEME_PRESETS)).toEqual(["codex", "graphite", "paper"]);
+    expect(Object.keys(TUI_THEME_PRESETS)).toEqual(["codex", "graphite", "paper", "aurora"]);
     expect(resolveTuiTheme({ theme: "codex" })).toMatchObject({
       chrome: "ansi256(17)",
       surface: "ansi256(235)",
@@ -50,6 +50,14 @@ describe("TUI theme", () => {
       muted: "ansi256(244)",
       accent: "ansi256(25)"
     });
+    expect(resolveTuiTheme({ theme: "aurora" })).toMatchObject({
+      chrome: "ansi256(23)",
+      surface: "ansi256(234)",
+      rail: "ansi256(237)",
+      text: "ansi256(255)",
+      muted: "ansi256(250)",
+      accent: "ansi256(80)"
+    });
   });
 
   it("keeps semantic colors distinct across the bundled palettes", () => {
@@ -73,6 +81,13 @@ describe("TUI theme", () => {
       warning: "ansi256(130)",
       success: "ansi256(28)",
       danger: "ansi256(160)"
+    });
+    expect(resolveTuiTheme({ theme: "aurora" })).toMatchObject({
+      successSurface: "ansi256(22)",
+      dangerSurface: "ansi256(52)",
+      warning: "ansi256(222)",
+      success: "ansi256(120)",
+      danger: "ansi256(203)"
     });
   });
 
@@ -99,6 +114,7 @@ describe("TUI theme", () => {
 
   it("provides one shared theme-name normalizer", () => {
     expect(normalizeTuiThemeName("  graphite  ")).toBe("graphite");
+    expect(normalizeTuiThemeName("  aurora  ")).toBe("aurora");
     expect(normalizeTuiThemeName("unknown")).toBeNull();
     expect(normalizeTuiThemeName("   ")).toBeNull();
     expect(normalizeTuiThemeName(null)).toBeNull();

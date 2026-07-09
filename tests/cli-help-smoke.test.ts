@@ -17,7 +17,7 @@ describe("CLI help and version", () => {
     expect(stdout).toContain("--app-root <path>");
     expect(stdout).toContain("--task <id>");
     expect(stdout).toContain("--theme <name>");
-    expect(stdout).toContain("codex, graphite, paper");
+    expect(stdout).toContain("codex, graphite, paper, aurora");
     expect(stdout).toContain("--themes");
     expect(stdout).toContain("List built-in TUI theme palettes");
     expect(stdout).toContain("combine with --theme to filter");
@@ -53,6 +53,7 @@ describe("CLI help and version", () => {
     expect(stdout).toContain("codex: chrome=ansi256(17), surface=ansi256(235), rail=ansi256(236), accent=ansi256(117)");
     expect(stdout).toContain("graphite: chrome=ansi256(236), surface=ansi256(233), rail=ansi256(238), accent=ansi256(75)");
     expect(stdout).toContain("paper: chrome=ansi256(254), surface=ansi256(231), rail=ansi256(255), accent=ansi256(25)");
+    expect(stdout).toContain("aurora: chrome=ansi256(23), surface=ansi256(234), rail=ansi256(237), accent=ansi256(80)");
     expect(stdout).toContain("  palette:");
     expect(stdout).toContain("    text=ansi256(255), muted=ansi256(247), accent=ansi256(117)");
     expect(stdout).toContain("    successSurface=ansi256(194), success=ansi256(28), warning=ansi256(130)");
@@ -64,7 +65,7 @@ describe("CLI help and version", () => {
   it("filters the theme catalog with the temporary theme option", async () => {
     const { stdout, stderr } = await execFileAsync(
       process.execPath,
-      ["./node_modules/.bin/tsx", "src/cli.tsx", "--theme", "paper", "--themes"],
+      ["./node_modules/.bin/tsx", "src/cli.tsx", "--theme", "aurora", "--themes"],
       {
         cwd: process.cwd(),
         timeout: 5000
@@ -73,10 +74,11 @@ describe("CLI help and version", () => {
 
     expect(stderr).toBe("");
     expect(stdout).toContain("parallel-codex-tui themes");
-    expect(stdout).toContain("paper: chrome=ansi256(254), surface=ansi256(231), rail=ansi256(255), accent=ansi256(25)");
-    expect(stdout).toContain("    text=ansi256(235), muted=ansi256(244), accent=ansi256(25)");
+    expect(stdout).toContain("aurora: chrome=ansi256(23), surface=ansi256(234), rail=ansi256(237), accent=ansi256(80)");
+    expect(stdout).toContain("    text=ansi256(255), muted=ansi256(250), accent=ansi256(80)");
     expect(stdout).not.toContain("codex: chrome=");
     expect(stdout).not.toContain("graphite: chrome=");
+    expect(stdout).not.toContain("paper: chrome=");
   });
 
   it("rejects unknown options before doing other command work", async () => {

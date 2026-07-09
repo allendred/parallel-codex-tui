@@ -196,7 +196,7 @@ describe("validateCliArgs", () => {
 
   it("rejects invalid theme names before startup can continue", () => {
     expect(validateCliArgs(["--theme", "solarized"])).toEqual([
-      "Invalid --theme: solarized (expected codex, graphite, paper)"
+      "Invalid --theme: solarized (expected codex, graphite, paper, aurora)"
     ]);
   });
 

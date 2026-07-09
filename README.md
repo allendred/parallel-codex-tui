@@ -24,7 +24,7 @@ cd /path/to/project
 parallel-codex-tui --init
 parallel-codex-tui --doctor
 parallel-codex-tui --workspace /path/to/project
-parallel-codex-tui --theme graphite --workspace /path/to/project
+parallel-codex-tui --theme aurora --workspace /path/to/project
 ```
 
 Startup resolves the worker project before routing:
@@ -98,7 +98,7 @@ Set the TUI palette in `.parallel-codex/config.toml`:
 
 ```toml
 [ui]
-theme = "codex" # codex, graphite, paper
+theme = "codex" # codex, graphite, paper, aurora
 showStatusBar = true
 autoOpenFailedWorker = true
 
@@ -115,7 +115,7 @@ Set `autoOpenFailedWorker = false` to keep the chat view open when a restored or
 
 `ui.colors` is optional and can override any theme key: `chrome`, `surface`, `rail`, `successSurface`, `dangerSurface`, `text`, `muted`, `accent`, `warning`, `success`, or `danger`. Color values are validated during config load and can use Chalk color names, `#rgb`/`#rrggbb`, `rgb(r,g,b)`, or `ansi256(0..255)`. Unknown UI and color keys are rejected so typos fail fast.
 
-For quick previews without editing config, pass `--theme codex`, `--theme graphite`, or `--theme paper` with `--doctor`:
+For quick previews without editing config, pass `--theme codex`, `--theme graphite`, `--theme paper`, or `--theme aurora` with `--doctor`:
 
 ```bash
 parallel-codex-tui --theme graphite --doctor
