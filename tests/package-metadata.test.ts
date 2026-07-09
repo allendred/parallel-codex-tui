@@ -3,6 +3,7 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { describe, expect, it } from "vitest";
+import { TUI_THEME_FIELDS } from "../src/tui/theme.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -125,6 +126,9 @@ describe("package metadata", () => {
 
     expect(example).toContain("[router]");
     expect(example).toContain("[workers.mock]");
+    for (const field of TUI_THEME_FIELDS) {
+      expect(example).toContain(`# ${field} = `);
+    }
     expect(example).not.toContain("danger-full-access");
     expect(example).not.toContain("bypassPermissions");
   });
