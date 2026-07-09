@@ -5,7 +5,7 @@ export function formatConfigErrorMessage(error: unknown): string {
     return error.issues
       .map((issue) => ({
         message: issue.message,
-        path: issue.path.map(String).join(".") || "<config>"
+        path: issue.path.map(String).join(".") || "config"
       }))
       .sort((left, right) => left.path.localeCompare(right.path))
       .map((issue) => `${issue.path}: ${issue.message}`)
