@@ -1120,8 +1120,8 @@ export function nativeAttachTerminalColumns(terminalWidth = process.stdout.colum
 export function nativeAttachExitLine(code: number, nativeTerminalCols: number): string {
   const contentWidth = Math.max(1, nativeTerminalCols);
   const candidates = [
-    `[process exited with code ${code}]`,
-    `[exit ${code}]`,
+    `process exited · code ${code}`,
+    `exit code ${code}`,
     `exit:${code}`
   ];
   return firstNativeTitleThatFits(candidates, contentWidth);

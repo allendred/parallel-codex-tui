@@ -43,8 +43,8 @@ describe("nativeAttachTitleDisplay", () => {
   });
 
   it("keeps native process exit lines from wrapping in narrow terminals", () => {
-    expect(nativeAttachExitLine(7, 40)).toBe("[process exited with code 7]");
-    expect(nativeAttachExitLine(7, 18)).toBe("[exit 7]");
+    expect(nativeAttachExitLine(7, 40)).toBe("process exited · code 7");
+    expect(nativeAttachExitLine(7, 18)).toBe("exit code 7");
     expect(nativeAttachExitLine(7, 6)).toBe("exit:7");
   });
 
