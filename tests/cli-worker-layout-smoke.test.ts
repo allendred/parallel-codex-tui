@@ -328,6 +328,63 @@ describe("CLI worker layout smoke", () => {
     }
   }, 10000);
 
+  it("fills nano worker rows to the themed content width", async () => {
+    const workspace = await mkdtemp(join(tmpdir(), "pct-cli-worker-nano-fill-"));
+    const taskId = "task-20260705-000000-nano-fill";
+    const taskDir = join(workspace, ".parallel-codex", "sessions", taskId);
+    const workerDir = join(taskDir, "critic-mock");
+    const chunks: string[] = [];
+    const screen = new NativeTerminalScreen({ cols: 12, rows: 12, scrollback: 1000 });
+    let screenWrites = Promise.resolve();
+
+    await mkdir(workerDir, { recursive: true });
+    await writeNanoProcessTaskFiles({ workspace, taskId, taskDir, workerDir });
+
+    const child = spawn(
+      process.execPath,
+      ["./node_modules/.bin/tsx", "src/cli.tsx", "--workspace", workspace, "--task", taskId],
+      {
+        cwd: process.cwd(),
+        cols: 12,
+        rows: 12,
+        name: "xterm-256color",
+        env: {
+          ...process.env,
+          TERM: "xterm-256color"
+        }
+      }
+    );
+
+    child.onData((chunk) => {
+      chunks.push(chunk);
+      screenWrites = screenWrites.then(() => screen.write(chunk));
+    });
+
+    try {
+      await waitForScreenText(() => screenWrites, screen, "w1 d1");
+      child.write("\x17");
+      await waitForScreenText(() => screenWrites, screen, "ok");
+      await screenWrites;
+
+      const lines = screen.styledSnapshotLines();
+      const titleLineText = lines.find((line) => line.chunks.map((chunk) => chunk.text).join("").includes("c 1/1"))
+        ?.chunks.map((chunk) => chunk.text).join("") ?? "";
+      const processLine = lines.find((line) => line.chunks.map((chunk) => chunk.text).join("").includes("process"));
+      const okLine = lines.find((line) => line.chunks.map((chunk) => chunk.text).join("").includes("ok"));
+      const processLineText = processLine?.chunks.map((chunk) => chunk.text).join("") ?? "";
+      const okLineText = okLine?.chunks.map((chunk) => chunk.text).join("") ?? "";
+
+      expect(processLineText).toContain("process");
+      expect(okLineText).toContain("ok");
+      expect(displayWidth(processLineText)).toBe(displayWidth(titleLineText));
+      expect(displayWidth(okLineText)).toBe(displayWidth(titleLineText));
+      expect(processLine?.chunks.every((chunk) => chunk.style.backgroundColor)).toBe(true);
+      expect(okLine?.chunks.every((chunk) => chunk.style.backgroundColor)).toBe(true);
+    } finally {
+      child.kill("SIGTERM");
+    }
+  }, 10000);
+
   it("keeps worker controls on one line in a compact terminal", async () => {
     const workspace = await mkdtemp(join(tmpdir(), "pct-cli-worker-compact-layout-"));
     const taskId = "task-20260705-000000-compact-layout";
@@ -691,6 +748,38 @@ async function writeActorCodeBlockTaskFiles(input: {
     ].join("\n")
   );
   await writeFile(join(input.workerDir, "output.log"), "");
+}
+
+async function writeNanoProcessTaskFiles(input: {
+  workspace: string;
+  taskId: string;
+  taskDir: string;
+  workerDir: string;
+}): Promise<void> {
+  await writeJson(
+    join(input.taskDir, "meta.json"),
+    TaskMetaSchema.parse({
+      id: input.taskId,
+      title: "worker nano fill smoke",
+      created_at: "2026-07-05T00:00:00.000Z",
+      cwd: input.workspace,
+      mode: "complex",
+      status: "done"
+    })
+  );
+  await writeJson(
+    join(input.workerDir, "status.json"),
+    WorkerStatusSchema.parse({
+      worker_id: "critic-mock",
+      role: "critic",
+      engine: "mock",
+      state: "done",
+      phase: "process-exited",
+      last_event_at: "2026-07-05T00:00:00.000Z",
+      summary: "ready"
+    })
+  );
+  await writeFile(join(input.workerDir, "output.log"), "ok\n");
 }
 
 async function writeFailedFirstTaskFiles(input: {

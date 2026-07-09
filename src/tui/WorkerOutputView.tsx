@@ -195,7 +195,7 @@ export function WorkerOutputView({
       {visibleLines.length > 0
         ? visibleLines.map((line, index) =>
           nanoRender
-            ? <WorkerOutputNanoLine key={index} line={line} width={terminalWidth} />
+            ? <WorkerOutputNanoLine key={index} fillWidth={panelWidth} line={line} width={terminalWidth} />
             : <WorkerOutputLine key={index} line={line} width={panelWidth} />
         )
         : <Text {...workerOutputEmptyFallbackTheme()}>(empty log)</Text>}
@@ -4398,10 +4398,17 @@ function shouldRenderWorkerOutputRailFill(): boolean {
   return process.stdout.isTTY === true && typeof process.stdout.columns === "number";
 }
 
-function WorkerOutputNanoLine({ line, width }: { line: DisplayLine; width: number }) {
+function WorkerOutputNanoLine({ fillWidth, line, width }: { fillWidth: number; line: DisplayLine; width: number }) {
   const theme = workerOutputLineTheme(line.kind);
+  const fillBackground = workerOutputLineFillTheme(line.kind);
   const text = compactEndByDisplayWidth(workerOutputNanoLineText(line), Math.max(1, width));
-  return <Text {...theme} wrap="truncate-end">{text || " "}</Text>;
+  const body = text || " ";
+  return (
+    <Box>
+      <Text {...theme} wrap="truncate-end">{body}</Text>
+      <WorkerOutputTrailingFill backgroundColor={fillBackground} width={fillWidth} usedWidth={displayWidth(body)} />
+    </Box>
+  );
 }
 
 function workerOutputNanoLineText(line: DisplayLine): string {
