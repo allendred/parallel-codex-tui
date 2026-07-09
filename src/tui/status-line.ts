@@ -1,3 +1,5 @@
+import { compactEndByDisplayWidth } from "./display-width.js";
+
 export interface StatusLineState {
   taskId: string;
   main?: string;
@@ -61,7 +63,7 @@ export function formatWorkerRuntimeStatus(status: RuntimeWorkerStatus): string {
     status.native_session_id ? `session ${compactNativeSessionId(status.native_session_id)}` : "",
     status.summary.trim() || "no summary"
   ].filter(Boolean).join(" · ");
-  return detail.length > 96 ? `${detail.slice(0, 93)}...` : detail;
+  return compactEndByDisplayWidth(detail, 96);
 }
 
 export function formatFooterHelp(mode: FooterHelpMode = "chat"): string {

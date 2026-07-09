@@ -5,6 +5,7 @@ import {
   formatStatusLine,
   formatWorkerRuntimeStatus
 } from "../src/tui/status-line.js";
+import { displayWidth } from "../src/tui/display-width.js";
 
 describe("formatStatusLine", () => {
   it("formats idle state", () => {
@@ -77,6 +78,18 @@ describe("formatStatusLine", () => {
         native_session_id: "019f1b9b-768b-7753-9c3b-33b17f25bc6b"
       })
     ).toBe("done · exited · session 019f1b9b... · no summary");
+  });
+
+  it("truncates runtime worker status by terminal display width", () => {
+    const status = formatWorkerRuntimeStatus({
+      state: "running",
+      phase: "editing",
+      summary: "正在编写俄罗斯方块游戏界面并修复状态栏中文显示宽度问题让底部提示在窄屏也稳定",
+      native_session_id: "abc123"
+    });
+
+    expect(status).toContain("...");
+    expect(displayWidth(status)).toBeLessThanOrEqual(96);
   });
 
   it("keeps footer help short and mode aware", () => {
