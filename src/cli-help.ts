@@ -9,7 +9,7 @@ Options:
   -t, --task <id>         Open an existing task session
       --theme <name>      Temporarily use a TUI theme: ${themeNames.join(", ")}
       --init              Write .parallel-codex/config.toml if missing
-      --doctor            Check local configuration and agent commands
+      --doctor            Check config, agent commands, and theme palette
   -v, --version           Print the current version
   -h, --help              Print this help message
 

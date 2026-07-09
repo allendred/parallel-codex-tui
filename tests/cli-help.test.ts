@@ -6,6 +6,7 @@ describe("buildCliHelpText", () => {
     const help = buildCliHelpText(["alpha", "beta"]);
 
     expect(help).toContain("Temporarily use a TUI theme: alpha, beta");
+    expect(help).toContain("theme palette");
     expect(help).not.toContain("codex, graphite, paper");
   });
 });
