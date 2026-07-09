@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
 import { basename } from "node:path";
-import { Box, Text, useApp, useInput, useStdin } from "ink";
+import { Box, Text, useApp, useInput, useStdin, type TextProps } from "ink";
 import type { AppConfig } from "../core/config.js";
 import { readJson } from "../core/file-store.js";
 import { WorkerStatusSchema } from "../domain/schemas.js";
@@ -57,6 +57,8 @@ export interface ChatDisplayLine {
   text: string;
   continuation: boolean;
 }
+
+type ChatLineTheme = Pick<TextProps, "color" | "dimColor">;
 
 export function App({
   config,
@@ -656,14 +658,23 @@ export function ChatView({
       {lines.map((line, index) => (
         <Text
           key={`${line.from}-${index}`}
-          color={line.from === "user" ? TUI_THEME.accent : undefined}
-          dimColor={line.from === "system" && !line.text.trim()}
+          {...chatLineTheme(line)}
         >
           {line.text || " "}
         </Text>
       ))}
     </Box>
   );
+}
+
+export function chatLineTheme(line: ChatDisplayLine): ChatLineTheme {
+  if (line.from === "user") {
+    return { color: TUI_THEME.accent };
+  }
+  if (!line.text.trim()) {
+    return { color: TUI_THEME.muted, dimColor: true };
+  }
+  return { color: TUI_THEME.text };
 }
 
 export function chatMessageDisplayLines(messages: Message[], terminalWidth: number, maxLines = 12): ChatDisplayLine[] {

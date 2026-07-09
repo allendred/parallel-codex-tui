@@ -1,8 +1,13 @@
 import React from "react";
 import { render } from "ink-testing-library";
-import { describe, expect, it } from "vitest";
-import { appContentHeight, chatMessageDisplayLines, ChatView, nativeAttachExitLine, nativeAttachTerminalColumns, nativeAttachTitleDisplay, nativeTerminalScrollDisplay } from "../src/tui/App.js";
+import { afterEach, describe, expect, it } from "vitest";
+import { appContentHeight, chatLineTheme, chatMessageDisplayLines, ChatView, nativeAttachExitLine, nativeAttachTerminalColumns, nativeAttachTitleDisplay, nativeTerminalScrollDisplay } from "../src/tui/App.js";
 import { displayWidth } from "../src/tui/display-width.js";
+import { configureTuiTheme, resetTuiTheme, TUI_THEME_PRESETS } from "../src/tui/theme.js";
+
+afterEach(() => {
+  resetTuiTheme();
+});
 
 describe("App layout sizing", () => {
   it("budgets content height so shell chrome stays visible in short terminals", () => {
@@ -94,6 +99,21 @@ describe("nativeAttachTitleDisplay", () => {
 });
 
 describe("ChatView", () => {
+  it("uses active theme colors for chat message roles", () => {
+    configureTuiTheme({ theme: "paper" });
+
+    expect(chatLineTheme({ from: "user", text: "> 你好", continuation: false })).toEqual({
+      color: TUI_THEME_PRESETS.paper.accent
+    });
+    expect(chatLineTheme({ from: "system", text: "继续优化中。", continuation: false })).toEqual({
+      color: TUI_THEME_PRESETS.paper.text
+    });
+    expect(chatLineTheme({ from: "system", text: "", continuation: false })).toEqual({
+      color: TUI_THEME_PRESETS.paper.muted,
+      dimColor: true
+    });
+  });
+
   it("renders a compact empty state instead of startup-log prose", () => {
     const { lastFrame } = render(
       React.createElement(ChatView, {
