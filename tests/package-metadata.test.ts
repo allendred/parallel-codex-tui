@@ -53,7 +53,7 @@ describe("package metadata", () => {
     expect(pkg.private).not.toBe(true);
     expect(pkg.license).toBe("MIT");
     expect(pkg.description).toContain("parallel coding");
-    expect(pkg.engines?.node).toBe(">=22.13.0");
+    expect(pkg.engines?.node).toBe(">=26.0.0");
     expect(pkg.keywords).toEqual([
       "codex",
       "claude",
@@ -109,7 +109,7 @@ describe("package metadata", () => {
     const readme = await readFile(join(process.cwd(), "README.md"), "utf8");
 
     expect(readme).toContain("## Requirements");
-    expect(readme).toContain("Node.js 22.13+");
+    expect(readme).toContain("Node.js 26+");
     expect(readme).toContain("Codex CLI");
     expect(readme).toContain("Claude CLI");
     expect(readme).toContain("## Install");
@@ -153,7 +153,7 @@ describe("package metadata", () => {
     expect(workflow).toContain("name: CI");
     expect(workflow).toContain("pull_request:");
     expect(workflow).toContain("actions/setup-node@v4");
-    expect(workflow).toContain('node-version: "22.13.0"');
+    expect(workflow).toContain('node-version: "26.x"');
     expect(workflow).toContain("npm ci");
     expect(workflow).toContain("npm run typecheck");
     expect(workflow).toContain("npm pack --dry-run --json");
@@ -168,7 +168,7 @@ describe("package metadata", () => {
     expect(workflow).toContain("workflow_dispatch:");
     expect(workflow).toContain("tags:");
     expect(workflow).toContain("- \"v*\"");
-    expect(workflow).toContain('node-version: "22.13.0"');
+    expect(workflow).toContain('node-version: "26.x"');
     expect(workflow).toContain("npm run typecheck");
     expect(workflow).toContain("npm pack --json");
     expect(workflow).toContain('PACKAGE_VERSION=$(node -p "require(\'./package.json\').version")');
