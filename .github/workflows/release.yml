@@ -35,7 +35,7 @@ jobs:
 
       - name: Setup npm
         run: |
-          npm install -g npm@latest
+          npm install -g npm@^11.5.1
           npm --version
 
       - name: Resolve release version

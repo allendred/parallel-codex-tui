@@ -18,6 +18,10 @@ interface PackageJson {
   keywords?: string[];
   license?: string;
   private?: boolean;
+  publishConfig?: {
+    access?: string;
+    registry?: string;
+  };
   repository?: {
     type?: string;
     url?: string;
@@ -67,6 +71,10 @@ describe("package metadata", () => {
     });
     expect(pkg.bugs?.url).toBe("https://github.com/allendred/parallel-codex-tui/issues");
     expect(pkg.homepage).toBe("https://github.com/allendred/parallel-codex-tui#readme");
+    expect(pkg.publishConfig).toEqual({
+      access: "public",
+      registry: "https://registry.npmjs.org/"
+    });
     expect(pkg.engines?.node).toBe(">=26.0.0");
     expect(pkg.keywords).toEqual([
       "codex",
@@ -149,6 +157,7 @@ describe("package metadata", () => {
     expect(readme).toContain("GitHub Actions runs CI on pushes and pull requests to `main`");
     expect(readme).toContain("Configure npm Trusted Publishing");
     expect(readme).toContain('workflow filename `release.yml`');
+    expect(readme).toContain("npm `^11.5.1`");
     expect(readme).toContain("add an `NPM_TOKEN` repository secret");
     expect(readme).toContain("git tag v0.1.2");
     expect(readme).toContain("git push origin v0.1.2");
@@ -188,7 +197,7 @@ describe("package metadata", () => {
     expect(workflow).toContain("ref: ${{ github.event_name == 'workflow_dispatch' && inputs.version || github.ref }}");
     expect(workflow).toContain("id-token: write");
     expect(workflow).toContain('node-version: "26.x"');
-    expect(workflow).toContain("npm install -g npm@latest");
+    expect(workflow).toContain("npm install -g npm@^11.5.1");
     expect(workflow).toContain("npm --version");
     expect(workflow).toContain("npm run typecheck");
     expect(workflow).toContain('CI: "0"');

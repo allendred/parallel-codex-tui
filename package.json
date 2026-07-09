@@ -12,6 +12,10 @@
     "url": "https://github.com/allendred/parallel-codex-tui/issues"
   },
   "homepage": "https://github.com/allendred/parallel-codex-tui#readme",
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
+  },
   "keywords": [
     "codex",
     "claude",
