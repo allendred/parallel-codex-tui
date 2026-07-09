@@ -133,7 +133,7 @@ function fitStatusSegments(segments: Segment[], terminalWidth: number, compact: 
       const nextValueWidth = Math.max(1, displayWidth(currentDisplay.value) - overflow);
       const fitted = segments.map((segment, index) =>
         index === currentIndex
-          ? { ...segment, value: compactStatusTextEnd(segment.value, nextValueWidth) }
+          ? { ...segment, value: compactCurrentStatusValue(segment.value, nextValueWidth) }
           : segment
       );
       if (statusSegmentsWidth(fitted, compact) <= contentWidth) {
@@ -213,6 +213,25 @@ function statusSegmentSeparator(compact: boolean): string {
 
 function compactStatusTextEnd(text: string, maxLength: number): string {
   return compactEndByDisplayWidth(text, maxLength);
+}
+
+function compactCurrentStatusValue(text: string, maxLength: number): string {
+  if (displayWidth(text) <= maxLength) {
+    return text;
+  }
+  const role = workerIdentityRole(text);
+  if (role && displayWidth(role) <= maxLength) {
+    return role;
+  }
+  return compactStatusTextEnd(text, maxLength);
+}
+
+function workerIdentityRole(text: string): string | null {
+  const match = text.trim().match(/^(main|judge|actor|critic)\/.+$/i);
+  if (!match) {
+    return null;
+  }
+  return displayRoleStatusLabel((match[1] ?? "").toLowerCase());
 }
 
 function statusSegmentDisplay(segment: Segment, compact: boolean): { label: string; separator: string; value: string } {

@@ -62,8 +62,9 @@ describe("StatusBar", () => {
     const frame = lastFrame() ?? "";
     expect(frame).toContain("w1");
     expect(frame).toContain("d1");
-    expect(frame).toContain("@ actor/super-long");
-    expect(frame).toContain("...");
+    expect(frame).toContain("@ actor");
+    expect(frame).not.toContain("@ actor/");
+    expect(frame).not.toContain("...");
     expect(frame).not.toContain("third-party-provider-name");
     expect(Math.max(...frame.split("\n").map((line) => displayWidth(line)))).toBeLessThanOrEqual(32);
   });
@@ -79,8 +80,9 @@ describe("StatusBar", () => {
     const frame = lastFrame() ?? "";
     expect(frame).toContain("w1");
     expect(frame).toContain("d1");
-    expect(frame).toContain("@ actor/");
-    expect(frame).toContain("...");
+    expect(frame).toContain("@ actor");
+    expect(frame).not.toContain("@ actor/");
+    expect(frame).not.toContain("...");
     expect(frame).not.toContain("第三方模型提供商超级长名称");
     expect(Math.max(...frame.split("\n").map((line) => displayWidth(line)))).toBeLessThanOrEqual(32);
   });
