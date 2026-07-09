@@ -6,6 +6,7 @@ import { formatConfigErrorMessage } from "./core/config-errors.js";
 import { configPath, loadConfig, withUiThemeOverride } from "./core/config.js";
 import { pathExists } from "./core/file-store.js";
 import { prepareWorkspace } from "./core/workspace.js";
+import { resolveTuiTheme } from "./tui/theme.js";
 
 export interface DoctorResult {
   ok: boolean;
@@ -51,6 +52,7 @@ export async function runDoctor(
     config = withUiThemeOverride(loadedConfig, options.theme ?? null);
     lines.push(`config: ok (${localConfigPath})`);
     lines.push(`theme: ok (${themeSummary(config.ui.theme, loadedConfig.ui.theme, options.theme ?? null)}; ${themeOverrideSummary(config.ui.colors)})`);
+    lines.push(`palette: ${themePaletteSummary(config.ui.theme, config.ui.colors)}`);
   } catch (error) {
     ok = false;
     lines.push(`config: invalid (${localConfigPath})`);
@@ -110,6 +112,19 @@ function themeOverrideSummary(colors: Awaited<ReturnType<typeof loadConfig>>["ui
   }
 
   return `colors: ${entries.map(([key, value]) => `${key}=${value}`).join(", ")}`;
+}
+
+function themePaletteSummary(
+  themeName: Awaited<ReturnType<typeof loadConfig>>["ui"]["theme"],
+  colors: Awaited<ReturnType<typeof loadConfig>>["ui"]["colors"]
+): string {
+  const theme = resolveTuiTheme({ theme: themeName, colors });
+  return [
+    `chrome=${theme.chrome}`,
+    `surface=${theme.surface}`,
+    `rail=${theme.rail}`,
+    `accent=${theme.accent}`
+  ].join(", ");
 }
 
 function themeSummary(
