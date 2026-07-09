@@ -1,4 +1,4 @@
-import { mkdtemp } from "node:fs/promises";
+import { mkdtemp, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -70,6 +70,16 @@ describe("config", () => {
 
     expect(config.workers.codex.command).toBe("codex");
     expect(config.ui.showStatusBar).toBe(true);
+  });
+
+  it("writes the curated example config for init", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pct-config-init-example-"));
+
+    await writeDefaultConfig(root);
+
+    const configText = await readFile(join(root, ".parallel-codex", "config.toml"), "utf8");
+    const exampleText = await readFile(join(process.cwd(), ".parallel-codex", "config.example.toml"), "utf8");
+    expect(configText).toBe(exampleText);
   });
 
   it("loads TUI theme and color overrides", async () => {

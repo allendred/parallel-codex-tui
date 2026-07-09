@@ -1,4 +1,5 @@
-import { parse, stringify } from "@iarna/toml";
+import { parse } from "@iarna/toml";
+import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { z, type ZodOptional } from "zod";
 import { pathExists, readTextIfExists, writeText } from "./file-store.js";
@@ -386,14 +387,9 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
 }
 
 export async function writeDefaultConfig(projectRoot: string): Promise<void> {
-  const config = defaultConfig(projectRoot);
-  const tomlText = stringify({
-    router: config.router,
-    workers: config.workers,
-    pairing: config.pairing,
-    roles: config.roles,
-    ui: config.ui
-  });
+  await writeText(configPath(projectRoot), await readExampleConfig());
+}
 
-  await writeText(configPath(projectRoot), tomlText);
+async function readExampleConfig(): Promise<string> {
+  return readFile(new URL("../../.parallel-codex/config.example.toml", import.meta.url), "utf8");
 }
