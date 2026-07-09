@@ -3117,14 +3117,22 @@ describe("WorkerOutputView", () => {
     expect(workerOutputLineTheme("error").backgroundColor).toBe(theme.dangerSurface);
     expect(workerOutputLineTheme("diff-add").backgroundColor).toBe(theme.successSurface);
     expect(workerOutputLineTheme("diff-remove").backgroundColor).toBe(theme.dangerSurface);
-    expect(workerOutputLineTheme("diff-file")).toMatchObject({ bold: true, color: theme.accent });
-    expect(workerOutputLineTheme("diff-summary")).toEqual({ color: theme.text });
+    expect(workerOutputLineTheme("diff-file")).toMatchObject({
+      backgroundColor: theme.surface,
+      bold: true,
+      color: theme.accent
+    });
+    expect(workerOutputLineTheme("diff-summary")).toEqual({ backgroundColor: theme.surface, color: theme.text });
+    expect(workerOutputLineTheme("diff-context")).toEqual({ backgroundColor: theme.surface, color: theme.muted });
     expect(workerOutputLineTheme("code").backgroundColor).toBe(theme.rail);
     expect(workerOutputLineTheme("json")).toMatchObject({ backgroundColor: theme.rail, color: theme.accent });
     expect(workerOutputLineTheme("source-line").backgroundColor).toBe(theme.surface);
     expect(workerOutputLineFillTheme("group")).toBe(theme.chrome);
     expect(workerOutputLineFillTheme("section")).toBe(theme.rail);
     expect(workerOutputLineFillTheme("command")).toBe(theme.chrome);
+    expect(workerOutputLineFillTheme("diff-file")).toBe(theme.surface);
+    expect(workerOutputLineFillTheme("diff-summary")).toBe(theme.surface);
+    expect(workerOutputLineFillTheme("diff-context")).toBe(theme.surface);
     expect(workerOutputLineFillTheme("content")).toBeNull();
   });
 

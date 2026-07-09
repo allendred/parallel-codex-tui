@@ -3871,10 +3871,10 @@ export function workerOutputLineTheme(kind: WorkerOutputLineKind): WorkerOutputL
     return { backgroundColor: TUI_THEME.dangerSurface, color: TUI_THEME.danger };
   }
   if (kind === "diff-file") {
-    return { bold: true, color: TUI_THEME.accent };
+    return { backgroundColor: TUI_THEME.surface, bold: true, color: TUI_THEME.accent };
   }
   if (kind === "diff-summary") {
-    return { color: TUI_THEME.text };
+    return { backgroundColor: TUI_THEME.surface, color: TUI_THEME.text };
   }
   if (kind === "diff-hunk" || kind === "diff-meta") {
     return { backgroundColor: TUI_THEME.rail, color: TUI_THEME.muted };
@@ -3886,7 +3886,7 @@ export function workerOutputLineTheme(kind: WorkerOutputLineKind): WorkerOutputL
     return { backgroundColor: TUI_THEME.dangerSurface, color: TUI_THEME.danger };
   }
   if (kind === "diff-context") {
-    return { color: TUI_THEME.muted };
+    return { backgroundColor: TUI_THEME.surface, color: TUI_THEME.muted };
   }
   return {};
 }
