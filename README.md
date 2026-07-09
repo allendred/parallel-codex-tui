@@ -167,6 +167,19 @@ While viewing a worker log, press `Ctrl+O` to attach to the worker's native sess
 
 If a native resume fails because the underlying CLI reports that its context window is full, configure `fallback = "new"` under `[workers.<engine>.nativeSession]`. The old native session is archived as `native-session.retired.json`, removed from active use, and the worker is retried once with the normal fresh-session command.
 
+## Release
+
+GitHub Actions runs CI on pushes and pull requests to `main`.
+
+Add an `NPM_TOKEN` repository secret with npm publish permission. To publish a release, update `package.json` and `src/version.ts` to the same version, then push a matching tag:
+
+```bash
+git tag v0.1.0
+git push origin v0.1.0
+```
+
+You can also run the Release workflow manually and enter the same tag value. The release tag must match `package.json`; for example, package version `0.1.0` requires tag `v0.1.0`.
+
 ## Publishing Hygiene
 
 - `.parallel-codex/config.toml` is local-only and ignored.

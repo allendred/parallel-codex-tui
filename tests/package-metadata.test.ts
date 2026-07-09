@@ -131,6 +131,12 @@ describe("package metadata", () => {
     expect(readme).toContain(".parallel-codex/last-workspace");
     expect(readme).toContain(".parallel-codex/workspaces.json");
     expect(readme).toContain(".parallel-codex/sessions/");
+    expect(readme).toContain("## Release");
+    expect(readme).toContain("GitHub Actions runs CI on pushes and pull requests to `main`");
+    expect(readme).toContain("Add an `NPM_TOKEN` repository secret");
+    expect(readme).toContain("git tag v0.1.0");
+    expect(readme).toContain("git push origin v0.1.0");
+    expect(readme).toContain("The release tag must match `package.json`");
   });
 
   it("publishes the CLI bin as an executable file", async () => {
@@ -139,5 +145,35 @@ describe("package metadata", () => {
     const cliFile = pack.files.find((file) => file.path === "dist/cli.js");
 
     expect(cliFile?.mode).toBe(0o755);
+  });
+
+  it("runs CI checks on GitHub Actions", async () => {
+    const workflow = await readFile(join(process.cwd(), ".github", "workflows", "ci.yml"), "utf8");
+
+    expect(workflow).toContain("name: CI");
+    expect(workflow).toContain("pull_request:");
+    expect(workflow).toContain("actions/setup-node@v4");
+    expect(workflow).toContain('node-version: "22.5.1"');
+    expect(workflow).toContain("npm ci");
+    expect(workflow).toContain("npm run typecheck");
+    expect(workflow).toContain("npm pack --dry-run --json");
+    expect(workflow).toContain("npm test");
+    expect(workflow).toContain("git diff --check");
+  });
+
+  it("publishes tagged releases through GitHub Actions", async () => {
+    const workflow = await readFile(join(process.cwd(), ".github", "workflows", "release.yml"), "utf8");
+
+    expect(workflow).toContain("name: Release");
+    expect(workflow).toContain("workflow_dispatch:");
+    expect(workflow).toContain("tags:");
+    expect(workflow).toContain("- \"v*\"");
+    expect(workflow).toContain("npm run typecheck");
+    expect(workflow).toContain("npm pack --json");
+    expect(workflow).toContain('PACKAGE_VERSION=$(node -p "require(\'./package.json\').version")');
+    expect(workflow).toContain('if [ "v$PACKAGE_VERSION" != "$RELEASE_VERSION" ]; then');
+    expect(workflow).toContain("npm publish --access public");
+    expect(workflow).toContain("softprops/action-gh-release@v2");
+    expect(workflow).toContain("NPM_TOKEN");
   });
 });
