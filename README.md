@@ -6,7 +6,7 @@ Built with Codex-assisted development.
 
 ## Requirements
 
-- Node.js 22.5+.
+- Node.js 22.13+.
 - Codex CLI available as `codex` for Codex routing and Codex workers.
 - Claude CLI available as `claude` only when you configure Claude workers.
 - A project workspace you are comfortable letting configured workers edit.
