@@ -57,6 +57,12 @@ describe("parseCliArgs", () => {
     expect(parsed.theme).toBe("paper");
   });
 
+  it("normalizes theme option whitespace", () => {
+    const parsed = parseCliArgs(["--theme", "  paper  "], "/app");
+
+    expect(parsed.theme).toBe("paper");
+  });
+
   it("accepts init without changing workspace parsing", () => {
     const parsed = parseCliArgs(["--init", "--workspace", "game"], "/app");
 
@@ -182,6 +188,10 @@ describe("validateCliArgs", () => {
     expect(validateCliArgs(["--theme", "solarized"])).toEqual([
       "Invalid --theme: solarized (expected codex, graphite, paper)"
     ]);
+  });
+
+  it("validates normalized theme option values", () => {
+    expect(validateCliArgs(["--theme", "  graphite  "])).toEqual([]);
   });
 
   it("allows positional text after an option terminator", () => {

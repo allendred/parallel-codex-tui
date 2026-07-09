@@ -90,7 +90,7 @@ export function validateCliArgs(args: string[]): string[] {
   }
 
   const themeFlagIndex = lastFlagIndex(optionArgs, (arg) => arg === "--theme" || arg.startsWith("--theme="));
-  const themeValue = flagValue(optionArgs, themeFlagIndex);
+  const themeValue = normalizedThemeValue(flagValue(optionArgs, themeFlagIndex));
   if (themeValue && !isTuiThemeName(themeValue)) {
     errors.push(`Invalid --theme: ${themeValue} (expected ${TUI_THEME_NAMES.join(", ")})`);
   }
@@ -123,5 +123,11 @@ function flagValue(args: string[], flagIndex: number): string | null {
 }
 
 function cliThemeValue(value: string | null): TuiThemeName | null {
-  return isTuiThemeName(value) ? value : null;
+  const theme = normalizedThemeValue(value);
+  return isTuiThemeName(theme) ? theme : null;
+}
+
+function normalizedThemeValue(value: string | null): string | null {
+  const theme = value?.trim();
+  return theme ? theme : null;
 }
