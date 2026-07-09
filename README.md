@@ -103,8 +103,8 @@ showStatusBar = true
 autoOpenFailedWorker = true
 
 [ui.colors]
-accent = "ansi256(45)"
-chrome = "ansi256(17)"
+accent = "ansi256(81)"
+chrome = "ansi256(234)"
 rail = "ansi256(238)"
 surface = "ansi256(235)"
 ```

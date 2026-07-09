@@ -42,16 +42,16 @@ export type TuiThemeOverrides = Partial<Record<TuiThemeField, string>>;
 
 export const TUI_THEME_PRESETS: Readonly<Record<TuiThemeName, Readonly<TuiTheme>>> = Object.freeze({
   codex: freezeTuiTheme({
-    chrome: bg("ansi256(17)"),
+    chrome: bg("ansi256(234)"),
     surface: bg("ansi256(235)"),
     rail: bg("ansi256(238)"),
     successSurface: bg("ansi256(22)"),
     dangerSurface: bg("ansi256(52)"),
     text: fg("ansi256(255)"),
     muted: fg("ansi256(250)"),
-    accent: fg("ansi256(45)"),
-    warning: fg("ansi256(220)"),
-    success: fg("ansi256(114)"),
+    accent: fg("ansi256(81)"),
+    warning: fg("ansi256(214)"),
+    success: fg("ansi256(115)"),
     danger: fg("ansi256(203)")
   }),
   graphite: freezeTuiTheme({
