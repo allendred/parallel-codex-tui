@@ -129,6 +129,22 @@ describe("config", () => {
     });
   });
 
+  it("normalizes the TUI theme name during config load", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pct-config-theme-name-normalized-"));
+
+    await writeText(
+      join(root, ".parallel-codex", "config.toml"),
+      [
+        "[ui]",
+        'theme = "  graphite  "'
+      ].join("\n")
+    );
+
+    const config = await loadConfig(root);
+
+    expect(config.ui.theme).toBe("graphite");
+  });
+
   it("applies a transient UI theme override without mutating loaded config", async () => {
     const root = await mkdtemp(join(tmpdir(), "pct-config-theme-override-"));
     const config = await loadConfig(root);

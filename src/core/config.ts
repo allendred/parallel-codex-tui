@@ -33,6 +33,11 @@ const TuiColorValueSchema = z.string().min(1).refine(isTuiThemeColorValue, {
   message: "Invalid TUI color value. Use a Chalk color name, #rgb/#rrggbb, rgb(r,g,b), or ansi256(0..255)."
 }).transform((value) => value.trim());
 
+const TuiThemeNameSchema = z.preprocess(
+  (value) => typeof value === "string" ? value.trim() : value,
+  z.enum(TUI_THEME_NAMES)
+).default("codex");
+
 const UiColorOverridesSchema = z.object(
   Object.fromEntries(TUI_THEME_FIELDS.map((field) => [field, TuiColorValueSchema.optional()])) as Record<
     TuiThemeField,
@@ -50,7 +55,7 @@ const CodexRouterConfigSchema = z.object({
 const UiConfigSchema = z.object({
   showStatusBar: z.boolean(),
   autoOpenFailedWorker: z.boolean(),
-  theme: z.enum(TUI_THEME_NAMES).default("codex"),
+  theme: TuiThemeNameSchema,
   colors: UiColorOverridesSchema
 }).strict();
 
