@@ -162,6 +162,7 @@ describe("package metadata", () => {
     expect(readme).toContain("## Theme");
     expect(readme).toContain('theme = "graphite"');
     expect(readme).toContain("showStatusBar = false");
+    expect(readme).toContain("autoOpenFailedWorker = false");
     expect(readme).toContain("successSurface");
     expect(readme).toContain("Color values are validated during config load");
     expect(readme).toContain("ansi256(0..255)");
