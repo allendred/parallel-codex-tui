@@ -53,6 +53,13 @@ const CodexRouterConfigSchema = z.object({
   fallback: z.enum(["simple", "complex"]).default("complex")
 });
 
+const UiConfigSchema = z.object({
+  showStatusBar: z.boolean(),
+  autoOpenFailedWorker: z.boolean(),
+  theme: z.enum(["codex", "graphite", "paper"]).default("codex"),
+  colors: UiColorOverridesSchema
+}).strict();
+
 const WorkerCommandSchema = z.object({
   command: z.string().min(1),
   args: z.array(z.string()).default([]),
@@ -88,12 +95,7 @@ const AppConfigSchema = z.object({
     actor: RolePromptConfigSchema,
     critic: RolePromptConfigSchema
   }),
-  ui: z.object({
-    showStatusBar: z.boolean(),
-    autoOpenFailedWorker: z.boolean(),
-    theme: z.enum(["codex", "graphite", "paper"]).default("codex"),
-    colors: UiColorOverridesSchema
-  })
+  ui: UiConfigSchema
 });
 
 export type AppConfig = z.infer<typeof AppConfigSchema>;

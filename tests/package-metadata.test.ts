@@ -158,7 +158,7 @@ describe("package metadata", () => {
     expect(readme).toContain("successSurface");
     expect(readme).toContain("Color values are validated during config load");
     expect(readme).toContain("ansi256(0..255)");
-    expect(readme).toContain("Unknown color keys are rejected so typos fail fast");
+    expect(readme).toContain("Unknown UI and color keys are rejected so typos fail fast");
     expect(readme).toContain(".parallel-codex/config.toml");
     expect(readme).toContain(".parallel-codex/last-workspace");
     expect(readme).toContain(".parallel-codex/workspaces.json");
