@@ -6,6 +6,7 @@ import { pathExists, readTextIfExists } from "../core/file-store.js";
 import type { WorkerRole } from "../domain/schemas.js";
 import { compactEndByDisplayWidth, displayWidth, wrapByDisplayWidth } from "./display-width.js";
 import { selectViewportLines } from "./scrolling.js";
+import { TUI_THEME } from "./theme.js";
 
 interface WorkerOutputSection {
   group: "role" | "feature" | "process";
@@ -48,8 +49,8 @@ export type WorkerOutputLineKind =
   | "diff-remove";
 
 type WorkerOutputLineTheme = Pick<TextProps, "backgroundColor" | "bold" | "color" | "dimColor">;
-const WORKER_PANEL_BACKGROUND: NonNullable<TextProps["backgroundColor"]> = "ansi256(235)";
-const WORKER_PANEL_TITLE_BACKGROUND: NonNullable<TextProps["backgroundColor"]> = "ansi256(24)";
+const WORKER_PANEL_BACKGROUND: NonNullable<TextProps["backgroundColor"]> = TUI_THEME.surface;
+const WORKER_PANEL_TITLE_BACKGROUND: NonNullable<TextProps["backgroundColor"]> = TUI_THEME.chrome;
 
 interface RenderLine {
   kind: WorkerOutputLineKind;
@@ -213,7 +214,7 @@ function WorkerOutputTitleRail({ title, width }: { title: string; width: number 
 
   return (
     <Box>
-      <Text backgroundColor={WORKER_PANEL_TITLE_BACKGROUND} color="white" bold>{titleText}</Text>
+      <Text backgroundColor={WORKER_PANEL_TITLE_BACKGROUND} color={TUI_THEME.text} bold>{titleText}</Text>
       {trailingWidth > 0 ? <Text backgroundColor={WORKER_PANEL_TITLE_BACKGROUND}>{" ".repeat(trailingWidth)}</Text> : null}
     </Box>
   );
@@ -3830,64 +3831,64 @@ function groupTitle(group: WorkerOutputSection["group"]): string {
 
 export function workerOutputLineTheme(kind: WorkerOutputLineKind): WorkerOutputLineTheme {
   if (kind === "group") {
-    return { backgroundColor: "ansi256(24)", bold: true, color: "white" };
+    return { backgroundColor: TUI_THEME.chrome, bold: true, color: TUI_THEME.text };
   }
   if (kind === "section") {
-    return { backgroundColor: "ansi256(236)", color: "yellow" };
+    return { backgroundColor: TUI_THEME.rail, color: TUI_THEME.warning };
   }
   if (kind === "heading") {
-    return { backgroundColor: "ansi256(235)", bold: true, color: "white" };
+    return { backgroundColor: TUI_THEME.surface, bold: true, color: TUI_THEME.text };
   }
   if (kind === "quote") {
-    return { backgroundColor: "ansi256(235)", color: "gray" };
+    return { backgroundColor: TUI_THEME.surface, color: TUI_THEME.muted };
   }
   if (kind === "table") {
-    return { backgroundColor: "ansi256(236)", color: "white" };
+    return { backgroundColor: TUI_THEME.rail, color: TUI_THEME.text };
   }
   if (kind === "rule") {
-    return { color: "gray", dimColor: true };
+    return { color: TUI_THEME.muted, dimColor: true };
   }
   if (kind === "code") {
-    return { backgroundColor: "ansi256(236)", color: "gray" };
+    return { backgroundColor: TUI_THEME.rail, color: TUI_THEME.muted };
   }
   if (kind === "source-line") {
-    return { backgroundColor: "ansi256(235)", color: "white" };
+    return { backgroundColor: TUI_THEME.surface, color: TUI_THEME.text };
   }
   if (kind === "summary") {
-    return { backgroundColor: "ansi256(236)", color: "gray" };
+    return { backgroundColor: TUI_THEME.rail, color: TUI_THEME.muted };
   }
   if (kind === "json") {
-    return { backgroundColor: "ansi256(53)", color: "magenta" };
+    return { backgroundColor: TUI_THEME.rail, color: TUI_THEME.accent };
   }
   if (kind === "json-message") {
-    return { backgroundColor: "ansi256(235)" };
+    return { backgroundColor: TUI_THEME.surface };
   }
   if (kind === "command") {
-    return { backgroundColor: "ansi256(17)", color: "cyan" };
+    return { backgroundColor: TUI_THEME.chrome, color: TUI_THEME.accent };
   }
   if (kind === "success") {
-    return { backgroundColor: "ansi256(22)", color: "green" };
+    return { backgroundColor: TUI_THEME.successSurface, color: TUI_THEME.success };
   }
   if (kind === "error") {
-    return { backgroundColor: "ansi256(52)", color: "red" };
+    return { backgroundColor: TUI_THEME.dangerSurface, color: TUI_THEME.danger };
   }
   if (kind === "diff-file") {
-    return { bold: true, color: "cyan" };
+    return { bold: true, color: TUI_THEME.accent };
   }
   if (kind === "diff-summary") {
-    return { color: "white" };
+    return { color: TUI_THEME.text };
   }
   if (kind === "diff-hunk" || kind === "diff-meta") {
-    return { backgroundColor: "ansi256(236)", color: "gray" };
+    return { backgroundColor: TUI_THEME.rail, color: TUI_THEME.muted };
   }
   if (kind === "diff-add") {
-    return { backgroundColor: "ansi256(22)", color: "green" };
+    return { backgroundColor: TUI_THEME.successSurface, color: TUI_THEME.success };
   }
   if (kind === "diff-remove") {
-    return { backgroundColor: "ansi256(52)", color: "red" };
+    return { backgroundColor: TUI_THEME.dangerSurface, color: TUI_THEME.danger };
   }
   if (kind === "diff-context") {
-    return { color: "gray" };
+    return { color: TUI_THEME.muted };
   }
   return {};
 }
@@ -4297,8 +4298,8 @@ function WorkerOutputLine({ line, width }: { line: DisplayLine; width: number })
       return (
         <Box>
           <WorkerOutputIndent backgroundColor={fillBackground} />
-          <Text backgroundColor={WORKER_PANEL_BACKGROUND} color="gray">{sourceParts.gutter}</Text>
-          <Text backgroundColor={WORKER_PANEL_BACKGROUND} color="white" wrap="truncate-end">{sourceParts.code}</Text>
+          <Text backgroundColor={WORKER_PANEL_BACKGROUND} color={TUI_THEME.muted}>{sourceParts.gutter}</Text>
+          <Text backgroundColor={WORKER_PANEL_BACKGROUND} color={TUI_THEME.text} wrap="truncate-end">{sourceParts.code}</Text>
           <WorkerOutputTrailingFill backgroundColor={fillBackground} width={width} usedWidth={usedWidth} />
         </Box>
       );

@@ -1,6 +1,7 @@
 import React from "react";
-import { Box, Text, type TextProps } from "ink";
+import { Box, Text } from "ink";
 import { compactTailByDisplayWidth, displayWidth } from "./display-width.js";
+import { TUI_THEME } from "./theme.js";
 
 export interface InputBarProps {
   mode: "chat" | "worker" | "native";
@@ -12,8 +13,6 @@ export interface InputBarProps {
   onChange?: (value: string) => void;
   onSubmit?: (value: string) => void;
 }
-
-const INPUT_BAR_BACKGROUND: NonNullable<TextProps["backgroundColor"]> = "ansi256(234)";
 
 export function InputBar({
   mode,
@@ -29,8 +28,8 @@ export function InputBar({
     const hints = workerInputHints(terminalWidth);
     return (
       <InputRail terminalWidth={terminalWidth} textWidth={displayWidth(`${hints.label}${hints.detail}`)}>
-        <Text backgroundColor={INPUT_BAR_BACKGROUND} color="cyan" bold>{hints.label}</Text>
-        {hints.detail ? <Text backgroundColor={INPUT_BAR_BACKGROUND} dimColor>{hints.detail}</Text> : null}
+        <Text backgroundColor={TUI_THEME.rail} color={TUI_THEME.accent} bold>{hints.label}</Text>
+        {hints.detail ? <Text backgroundColor={TUI_THEME.rail} dimColor>{hints.detail}</Text> : null}
       </InputRail>
     );
   }
@@ -39,8 +38,8 @@ export function InputBar({
     const hints = nativeInputHints(terminalWidth, nativeClosed);
     return (
       <InputRail terminalWidth={terminalWidth} textWidth={displayWidth(`${hints.label}${hints.detail}`)}>
-        <Text backgroundColor={INPUT_BAR_BACKGROUND} color="cyan" bold>{hints.label}</Text>
-        {hints.detail ? <Text backgroundColor={INPUT_BAR_BACKGROUND} dimColor>{hints.detail}</Text> : null}
+        <Text backgroundColor={TUI_THEME.rail} color={TUI_THEME.accent} bold>{hints.label}</Text>
+        {hints.detail ? <Text backgroundColor={TUI_THEME.rail} dimColor>{hints.detail}</Text> : null}
       </InputRail>
     );
   }
@@ -51,11 +50,11 @@ export function InputBar({
   if (busy) {
     return (
       <InputRail terminalWidth={terminalWidth} textWidth={displayWidth(busyText ? `${prompt} ${busyText}` : prompt)}>
-        <Text backgroundColor={INPUT_BAR_BACKGROUND} color="yellow" bold>{prompt}</Text>
+        <Text backgroundColor={TUI_THEME.rail} color={TUI_THEME.warning} bold>{prompt}</Text>
         {busyText ? (
           <>
-            <Text backgroundColor={INPUT_BAR_BACKGROUND}> </Text>
-            <Text backgroundColor={INPUT_BAR_BACKGROUND} color="yellow">{busyText}</Text>
+            <Text backgroundColor={TUI_THEME.rail}> </Text>
+            <Text backgroundColor={TUI_THEME.rail} color={TUI_THEME.warning}>{busyText}</Text>
           </>
         ) : null}
       </InputRail>
@@ -66,10 +65,10 @@ export function InputBar({
     const displayValue = chatInputDisplayValue(value, terminalWidth);
     return (
       <InputRail terminalWidth={terminalWidth} textWidth={displayWidth(`${prompt} ${displayValue}|`)}>
-        <Text backgroundColor={INPUT_BAR_BACKGROUND} color="cyan" bold>{prompt}</Text>
-        <Text backgroundColor={INPUT_BAR_BACKGROUND}> </Text>
-        <Text backgroundColor={INPUT_BAR_BACKGROUND} color="white">{displayValue}</Text>
-        <Text backgroundColor={INPUT_BAR_BACKGROUND} color="cyan" bold>|</Text>
+        <Text backgroundColor={TUI_THEME.rail} color={TUI_THEME.accent} bold>{prompt}</Text>
+        <Text backgroundColor={TUI_THEME.rail}> </Text>
+        <Text backgroundColor={TUI_THEME.rail} color={TUI_THEME.text}>{displayValue}</Text>
+        <Text backgroundColor={TUI_THEME.rail} color={TUI_THEME.accent} bold>|</Text>
       </InputRail>
     );
   }
@@ -86,10 +85,10 @@ export function InputBar({
       terminalWidth={terminalWidth}
       textWidth={displayWidth(`${prompt}${hasLeadingPromptSpace ? " " : ""}|${placeholder}`)}
     >
-      <Text backgroundColor={INPUT_BAR_BACKGROUND} color="cyan" bold>{prompt}</Text>
-      {hasLeadingPromptSpace ? <Text backgroundColor={INPUT_BAR_BACKGROUND}> </Text> : null}
-      <Text backgroundColor={INPUT_BAR_BACKGROUND} color="cyan" bold>|</Text>
-      <Text backgroundColor={INPUT_BAR_BACKGROUND} dimColor>{placeholder}</Text>
+      <Text backgroundColor={TUI_THEME.rail} color={TUI_THEME.accent} bold>{prompt}</Text>
+      {hasLeadingPromptSpace ? <Text backgroundColor={TUI_THEME.rail}> </Text> : null}
+      <Text backgroundColor={TUI_THEME.rail} color={TUI_THEME.accent} bold>|</Text>
+      <Text backgroundColor={TUI_THEME.rail} dimColor>{placeholder}</Text>
     </InputRail>
   );
 }
@@ -114,9 +113,9 @@ function InputRail({
 
   return (
     <Box>
-      {leadingWidth > 0 ? <Text backgroundColor={INPUT_BAR_BACKGROUND}>{" ".repeat(leadingWidth)}</Text> : null}
+      {leadingWidth > 0 ? <Text backgroundColor={TUI_THEME.rail}>{" ".repeat(leadingWidth)}</Text> : null}
       {children}
-      {trailingWidth > 0 ? <Text backgroundColor={INPUT_BAR_BACKGROUND}>{" ".repeat(trailingWidth)}</Text> : null}
+      {trailingWidth > 0 ? <Text backgroundColor={TUI_THEME.rail}>{" ".repeat(trailingWidth)}</Text> : null}
     </Box>
   );
 }

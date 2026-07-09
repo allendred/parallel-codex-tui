@@ -72,7 +72,7 @@ describe("CLI native layout smoke", () => {
       expect(snapshot).toContain("native line 40");
       expect(snapshot).toContain("native · wheel/Pg · ^] detach");
       expect(nativeTitleLine?.chunks.some((chunk) => chunk.style.backgroundColor === "ansi256(24)")).toBe(true);
-      expect(nativeTitleLine?.chunks.some((chunk) => chunk.style.backgroundColor === "ansi256(235)")).toBe(true);
+      expect(nativeTitleLine?.chunks.some((chunk) => chunk.style.backgroundColor === "ansi256(236)")).toBe(true);
       expect(displayWidth(nativeTitleLineText)).toBe(137);
     } finally {
       child.write("\x1d");

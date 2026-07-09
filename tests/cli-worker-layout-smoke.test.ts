@@ -70,7 +70,7 @@ describe("CLI worker layout smoke", () => {
       expect(snapshot).toContain("logs");
       expect(snapshot).not.toContain("Worker logs");
       expect(snapshot).toContain("task ");
-      expect(headerLine?.chunks.some((chunk) => chunk.style.backgroundColor === "ansi256(235)")).toBe(true);
+      expect(headerLine?.chunks.some((chunk) => chunk.style.backgroundColor === "ansi256(24)")).toBe(true);
       expect(displayWidth(headerLineText)).toBe(139);
       expect(workerTitleLine?.chunks.some((chunk) => chunk.style.backgroundColor === "ansi256(24)")).toBe(true);
       expect(workerTitleLine?.chunks.some((chunk) => chunk.style.backgroundColor === "ansi256(235)")).toBe(false);
@@ -78,7 +78,7 @@ describe("CLI worker layout smoke", () => {
       expect(snapshot).toContain("line 80");
       expect(snapshot).toContain("logs · read");
       expect(snapshot).toContain("^O attach");
-      expect(inputLine?.chunks.some((chunk) => chunk.style.backgroundColor === "ansi256(234)")).toBe(true);
+      expect(inputLine?.chunks.some((chunk) => chunk.style.backgroundColor === "ansi256(236)")).toBe(true);
       expect(displayWidth(inputLineText)).toBe(139);
       expect(snapshot).toContain("workers 1");
       expect(snapshot).toContain("done 1");

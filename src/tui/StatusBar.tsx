@@ -1,6 +1,7 @@
 import React from "react";
 import { Box, Text, type TextProps } from "ink";
 import { compactEndByDisplayWidth, displayWidth } from "./display-width.js";
+import { TUI_THEME } from "./theme.js";
 
 export interface StatusBarProps {
   text: string;
@@ -15,7 +16,6 @@ interface Segment {
 }
 
 type StatusTone = "idle" | "run" | "done" | "fail" | "wait";
-const STATUS_BAR_BACKGROUND: NonNullable<TextProps["backgroundColor"]> = "ansi256(236)";
 
 export function StatusBar({ text, terminalWidth = process.stdout.columns || 120, showTask = false }: StatusBarProps) {
   const parsedSegments = parseStatusText(text, { hideTask: !showTask || terminalWidth < 40 });
@@ -53,7 +53,7 @@ export function StatusBar({ text, terminalWidth = process.stdout.columns || 120,
 
   return (
     <Box>
-      {leadingWidth > 0 ? <Text backgroundColor={STATUS_BAR_BACKGROUND}>{" ".repeat(leadingWidth)}</Text> : null}
+      {leadingWidth > 0 ? <Text backgroundColor={TUI_THEME.rail}>{" ".repeat(leadingWidth)}</Text> : null}
       {fittedSegments.map((segment, index) => (
         <StatusSegment
           key={`${segment.label}-${index}`}
@@ -62,7 +62,7 @@ export function StatusBar({ text, terminalWidth = process.stdout.columns || 120,
           isLast={index === fittedSegments.length - 1}
         />
       ))}
-      {trailingWidth > 0 ? <Text backgroundColor={STATUS_BAR_BACKGROUND}>{" ".repeat(trailingWidth)}</Text> : null}
+      {trailingWidth > 0 ? <Text backgroundColor={TUI_THEME.rail}>{" ".repeat(trailingWidth)}</Text> : null}
     </Box>
   );
 }
@@ -95,24 +95,24 @@ function StatusSegment({ segment, compact, isLast }: { segment: Segment; compact
       {display.label ? (
         <>
           <Text
-            backgroundColor={STATUS_BAR_BACKGROUND}
+            backgroundColor={TUI_THEME.rail}
             color={colorForTone(segment.tone)}
             dimColor={segment.tone === undefined || segment.tone === "idle"}
           >
             {display.label}
           </Text>
-          <Text backgroundColor={STATUS_BAR_BACKGROUND} dimColor>{display.separator}</Text>
+          <Text backgroundColor={TUI_THEME.rail} dimColor>{display.separator}</Text>
         </>
       ) : null}
       <Text
-        backgroundColor={STATUS_BAR_BACKGROUND}
+        backgroundColor={TUI_THEME.rail}
         color={valueColorForTone(segment.tone)}
         bold={segment.tone !== undefined && segment.tone !== "idle"}
         wrap="truncate-end"
       >
         {display.value}
       </Text>
-      {!isLast ? <Text backgroundColor={STATUS_BAR_BACKGROUND} dimColor>{statusSegmentSeparator(compact)}</Text> : null}
+      {!isLast ? <Text backgroundColor={TUI_THEME.rail} dimColor>{statusSegmentSeparator(compact)}</Text> : null}
     </Box>
   );
 }
@@ -394,23 +394,23 @@ function normalizeTone(value: string): StatusTone {
 
 function colorForTone(tone: StatusTone | undefined): TextProps["color"] {
   if (tone === "run") {
-    return "cyan";
+    return TUI_THEME.accent;
   }
   if (tone === "done") {
-    return "green";
+    return TUI_THEME.success;
   }
   if (tone === "fail") {
-    return "red";
+    return TUI_THEME.danger;
   }
   if (tone === "wait") {
-    return "yellow";
+    return TUI_THEME.warning;
   }
-  return "gray";
+  return TUI_THEME.muted;
 }
 
 function valueColorForTone(tone: StatusTone | undefined): TextProps["color"] {
   if (tone === "fail") {
-    return "red";
+    return TUI_THEME.danger;
   }
   return undefined;
 }

@@ -3111,17 +3111,18 @@ describe("WorkerOutputView", () => {
 
   it("assigns subtle background colors to dense log row types", () => {
     expect(workerOutputLineTheme("section").backgroundColor).toBe("ansi256(236)");
-    expect(workerOutputLineTheme("command").backgroundColor).toBe("ansi256(17)");
+    expect(workerOutputLineTheme("command").backgroundColor).toBe("ansi256(24)");
     expect(workerOutputLineTheme("error").backgroundColor).toBe("ansi256(52)");
     expect(workerOutputLineTheme("diff-add").backgroundColor).toBe("ansi256(22)");
     expect(workerOutputLineTheme("diff-remove").backgroundColor).toBe("ansi256(52)");
     expect(workerOutputLineTheme("diff-file")).toMatchObject({ bold: true, color: "cyan" });
     expect(workerOutputLineTheme("diff-summary")).toEqual({ color: "white" });
     expect(workerOutputLineTheme("code").backgroundColor).toBe("ansi256(236)");
+    expect(workerOutputLineTheme("json")).toMatchObject({ backgroundColor: "ansi256(236)", color: "cyan" });
     expect(workerOutputLineTheme("source-line").backgroundColor).toBe("ansi256(235)");
     expect(workerOutputLineFillTheme("group")).toBe("ansi256(24)");
     expect(workerOutputLineFillTheme("section")).toBe("ansi256(236)");
-    expect(workerOutputLineFillTheme("command")).toBe("ansi256(17)");
+    expect(workerOutputLineFillTheme("command")).toBe("ansi256(24)");
     expect(workerOutputLineFillTheme("content")).toBeNull();
   });
 

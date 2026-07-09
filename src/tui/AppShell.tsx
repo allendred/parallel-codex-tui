@@ -1,11 +1,11 @@
 import React from "react";
 import { basename } from "node:path";
-import { Box, Text, type TextProps } from "ink";
+import { Box, Text } from "ink";
 import { StatusBar } from "./StatusBar.js";
 import { compactEndByDisplayWidth, displayWidth } from "./display-width.js";
+import { TUI_THEME } from "./theme.js";
 
 export type AppView = "chat" | "worker" | "native";
-const APP_HEADER_BACKGROUND: NonNullable<TextProps["backgroundColor"]> = "ansi256(235)";
 const APP_HEADER_ROOMY_SEPARATOR = " · ";
 const APP_HEADER_COMPACT_SEPARATOR = "  ";
 
@@ -47,13 +47,13 @@ export function AppShell({
   return (
     <Box flexDirection="column">
       <Box>
-        {headerLeadingWidth > 0 ? <Text backgroundColor={APP_HEADER_BACKGROUND}>{" ".repeat(headerLeadingWidth)}</Text> : null}
+        {headerLeadingWidth > 0 ? <Text backgroundColor={TUI_THEME.chrome}>{" ".repeat(headerLeadingWidth)}</Text> : null}
         {headerSegments.map((segment, index) => (
           <Box key={`${segment.kind}-${index}`} flexShrink={0}>
-            {index > 0 ? <Text backgroundColor={APP_HEADER_BACKGROUND} dimColor>{headerSeparatorText}</Text> : null}
+            {index > 0 ? <Text backgroundColor={TUI_THEME.chrome} dimColor>{headerSeparatorText}</Text> : null}
             <Text
-              backgroundColor={APP_HEADER_BACKGROUND}
-              color={segment.kind === "brand" ? "cyan" : segment.kind === "view" ? "white" : undefined}
+              backgroundColor={TUI_THEME.chrome}
+              color={segment.kind === "brand" ? TUI_THEME.accent : segment.kind === "view" ? TUI_THEME.text : undefined}
               bold={segment.kind === "brand"}
               dimColor={segment.kind !== "brand" && segment.kind !== "view"}
             >
@@ -61,7 +61,7 @@ export function AppShell({
             </Text>
           </Box>
         ))}
-        {headerTrailingWidth > 0 ? <Text backgroundColor={APP_HEADER_BACKGROUND}>{" ".repeat(headerTrailingWidth)}</Text> : null}
+        {headerTrailingWidth > 0 ? <Text backgroundColor={TUI_THEME.chrome}>{" ".repeat(headerTrailingWidth)}</Text> : null}
       </Box>
 
       <Box flexDirection="column" height={contentHeight} paddingX={1}>
@@ -73,7 +73,7 @@ export function AppShell({
       <StatusBar text={statusText} terminalWidth={terminalWidth} />
       {error ? (
         <Box paddingX={1}>
-          <Text color="red">{error}</Text>
+          <Text color={TUI_THEME.danger}>{error}</Text>
         </Box>
       ) : null}
     </Box>

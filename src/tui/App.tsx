@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
 import { basename } from "node:path";
-import { Box, Text, useApp, useInput, useStdin, type TextProps } from "ink";
+import { Box, Text, useApp, useInput, useStdin } from "ink";
 import type { AppConfig } from "../core/config.js";
 import { readJson } from "../core/file-store.js";
 import { WorkerStatusSchema } from "../domain/schemas.js";
@@ -23,6 +23,7 @@ import { WorkerOutputView } from "./WorkerOutputView.js";
 import { compactEndByDisplayWidth, displayWidth, wrapByDisplayWidth } from "./display-width.js";
 import { isAttachShortcut, isExitShortcut, isLogsShortcut, mouseScrollDelta, scrollDelta } from "./keyboard.js";
 import { createRawInputDecoder } from "./raw-input-decoder.js";
+import { TUI_THEME } from "./theme.js";
 import {
   buildNativeAttachLaunch,
   startNativeAttachProcess,
@@ -45,9 +46,6 @@ export interface AppProps {
     }
   ) => NativeAttachProcessRef;
 }
-
-const NATIVE_PANEL_BACKGROUND: NonNullable<TextProps["backgroundColor"]> = "ansi256(235)";
-const NATIVE_PANEL_TITLE_BACKGROUND: NonNullable<TextProps["backgroundColor"]> = "ansi256(24)";
 
 export interface Message {
   from: "user" | "system";
@@ -715,7 +713,7 @@ function ChatEmptyState({
 
   return (
     <Box flexDirection="column">
-      <Text color="green" bold>{chatEmptyStateDisplayLine(cwd, activeTaskId, contentWidth)}</Text>
+      <Text color={TUI_THEME.success} bold>{chatEmptyStateDisplayLine(cwd, activeTaskId, contentWidth)}</Text>
     </Box>
   );
 }
@@ -866,8 +864,8 @@ function NativeAttachTitleRail({ title, width }: { title: string; width: number 
 
   return (
     <Box>
-      <Text backgroundColor={NATIVE_PANEL_TITLE_BACKGROUND} color="white" bold>{titleText}</Text>
-      {trailingWidth > 0 ? <Text backgroundColor={NATIVE_PANEL_BACKGROUND}>{" ".repeat(trailingWidth)}</Text> : null}
+      <Text backgroundColor={TUI_THEME.chrome} color={TUI_THEME.text} bold>{titleText}</Text>
+      {trailingWidth > 0 ? <Text backgroundColor={TUI_THEME.rail}>{" ".repeat(trailingWidth)}</Text> : null}
     </Box>
   );
 }
