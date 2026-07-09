@@ -97,12 +97,12 @@ describe("WorkerOutputView", () => {
     );
 
     try {
-      expect(lastFrame() ?? "").toContain("Loading log...");
-      await waitForFrame(lastFrame, "No worker output");
+      expect(lastFrame() ?? "").toContain("Loading worker output...");
+      await waitForFrame(lastFrame, "Waiting for worker output...");
 
       const frame = lastFrame() ?? "";
-      expect(frame).toContain("No worker output yet. Logs will appear here.");
-      expect(frame).not.toContain("Loading worker log");
+      expect(frame).toContain("Waiting for worker output...");
+      expect(frame).not.toContain("Loading log...");
     } finally {
       unmount();
     }
@@ -145,10 +145,10 @@ describe("WorkerOutputView", () => {
     );
 
     try {
-      await waitForFrame(lastFrame, "No worker output");
+      await waitForFrame(lastFrame, "Waiting for worker output...");
 
       const frame = lastFrame() ?? "";
-      expect(frame).toContain("No worker output yet. Logs will appear here.");
+      expect(frame).toContain("Waiting for worker output...");
       expect(frame).not.toContain("No worker output.");
       expect(frame).not.toContain("No worker selected.");
     } finally {

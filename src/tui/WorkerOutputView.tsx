@@ -66,7 +66,8 @@ interface WorkerOutputContentState {
   lines: RenderLine[];
 }
 
-const EMPTY_WORKER_OUTPUT_TEXT = "No worker output yet. Logs will appear here.";
+const EMPTY_WORKER_OUTPUT_TEXT = "Waiting for worker output...";
+const LOADING_WORKER_OUTPUT_TEXT = "Loading worker output...";
 
 interface ParsedDiffFile {
   title: string;
@@ -153,7 +154,7 @@ export function WorkerOutputView({
 
   const content = contentState.key === contentKey
     ? contentState.lines
-    : [{ kind: "placeholder" as const, text: "Loading log..." }];
+    : [{ kind: "placeholder" as const, text: LOADING_WORKER_OUTPUT_TEXT }];
   const sourceLines = isNanoWorkerOutputWidth(terminalWidth) ? tinyWorkerOutputSourceLines(content, height) : content;
   const panelWidth = workerOutputPanelRailWidth(terminalWidth);
   const nanoRender = isNanoWorkerOutputWidth(terminalWidth);
@@ -202,7 +203,7 @@ export function WorkerOutputView({
             ? <WorkerOutputNanoLine key={index} fillWidth={panelWidth} line={line} width={terminalWidth} />
             : <WorkerOutputLine key={index} line={line} width={panelWidth} />
         )
-        : <Text {...workerOutputEmptyFallbackTheme()}>(empty log)</Text>}
+        : <Text {...workerOutputEmptyFallbackTheme()}>{EMPTY_WORKER_OUTPUT_TEXT}</Text>}
     </Box>
   );
 }
