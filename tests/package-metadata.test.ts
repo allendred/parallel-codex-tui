@@ -22,6 +22,7 @@ interface PackageJson {
     access?: string;
     registry?: string;
   };
+  dependencies?: Record<string, string>;
   repository?: {
     type?: string;
     url?: string;
@@ -89,6 +90,7 @@ describe("package metadata", () => {
       "LICENSE",
       ".parallel-codex/config.example.toml"
     ]);
+    expect(pkg.dependencies?.chalk).toBe("^5.3.0");
     expect(pkg.scripts?.prepack).toBe("npm run build");
     expect(pkg.scripts?.prepare).toBeUndefined();
   });
