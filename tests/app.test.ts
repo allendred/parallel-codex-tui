@@ -308,6 +308,52 @@ describe("ChatView", () => {
     expect(frame).not.toContain("ready");
   });
 
+  it("compacts complex task summaries for the chat surface", () => {
+    const lines = chatMessageDisplayLines(
+      [
+        {
+          from: "system",
+          text: [
+            "Complex task completed.",
+            "",
+            "Requirements:",
+            "# Requirements",
+            "",
+            "- Build a playable falling-blocks game.",
+            "",
+            "Actor work:",
+            "# Worklog",
+            "",
+            "- Implemented board controls and scoring.",
+            "",
+            "Critic review:",
+            "# Review",
+            "",
+            "APPROVED",
+            "",
+            "No blockers.",
+            "",
+            "Critic findings:",
+            "(empty)"
+          ].join("\n")
+        }
+      ],
+      80,
+      8
+    );
+
+    expect(lines.map((line) => line.text)).toEqual([
+      "done · complex task completed",
+      "requirements · Build a playable falling-blocks game.",
+      "actor · Implemented board controls and scoring.",
+      "review · APPROVED",
+      "findings · none"
+    ]);
+    expect(lines.some((line) => line.text.includes("Requirements:"))).toBe(false);
+    expect(lines.some((line) => line.text.includes("# Worklog"))).toBe(false);
+    expect(lines.some((line) => line.text.includes("(empty)"))).toBe(false);
+  });
+
   it("wraps long chat messages by display width with aligned user continuations", () => {
     const messages = [
       {

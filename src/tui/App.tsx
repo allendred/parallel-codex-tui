@@ -650,7 +650,7 @@ export function ChatView({
       {lines.map((line, index) => (
         <Text
           key={`${line.from}-${index}`}
-          color={line.from === "user" ? "cyan" : undefined}
+          color={line.from === "user" ? TUI_THEME.accent : undefined}
           dimColor={line.from === "system" && !line.text.trim()}
         >
           {line.text || " "}
@@ -667,7 +667,9 @@ export function chatMessageDisplayLines(messages: Message[], terminalWidth: numb
 }
 
 function chatSingleMessageDisplayLines(message: Message, contentWidth: number): ChatDisplayLine[] {
-  const rawLines = message.text.split(/\r?\n/);
+  const rawLines = message.from === "system"
+    ? chatSystemDisplayLines(message.text)
+    : message.text.split(/\r?\n/);
   const rendered: ChatDisplayLine[] = [];
 
   rawLines.forEach((rawLine, rawIndex) => {
@@ -698,6 +700,66 @@ function chatSingleMessageDisplayLines(message: Message, contentWidth: number): 
   });
 
   return rendered;
+}
+
+function chatSystemDisplayLines(text: string): string[] {
+  return compactSupervisorSummaryForChat(text) ?? text.split(/\r?\n/);
+}
+
+function compactSupervisorSummaryForChat(text: string): string[] | null {
+  const rawLines = text.split(/\r?\n/);
+  if (!/^Complex task completed\.$/i.test((rawLines[0] ?? "").trim())) {
+    return null;
+  }
+
+  const sections = [
+    { label: "requirements", heading: "Requirements:" },
+    { label: "actor", heading: "Actor work:" },
+    { label: "review", heading: "Critic review:" },
+    { label: "findings", heading: "Critic findings:" }
+  ];
+  const indexes = sections.map((section) => rawLines.findIndex((line) => line.trim() === section.heading));
+  if (indexes.every((index) => index < 0)) {
+    return null;
+  }
+
+  return [
+    "done · complex task completed",
+    ...sections.map((section, index) => {
+      const start = indexes[index] ?? -1;
+      const nextStarts = indexes.slice(index + 1).filter((item) => item > start);
+      const end = nextStarts.length > 0 ? Math.min(...nextStarts) : rawLines.length;
+      const value = start >= 0 ? chatSummarySectionValue(rawLines.slice(start + 1, end)) : "none";
+      return `${section.label} · ${value}`;
+    })
+  ];
+}
+
+function chatSummarySectionValue(lines: string[]): string {
+  for (const line of lines) {
+    const cleaned = cleanChatSummaryLine(line);
+    if (cleaned && !isChatSummaryHeading(cleaned)) {
+      return cleaned;
+    }
+  }
+  return "none";
+}
+
+function cleanChatSummaryLine(line: string): string {
+  const cleaned = line
+    .trim()
+    .replace(/^#{1,6}\s+/, "")
+    .replace(/^[-*]\s+/, "")
+    .replace(/^\d+\.\s+/, "")
+    .replace(/`([^`]+)`/g, "$1")
+    .replace(/\*\*([^*]+)\*\*/g, "$1")
+    .replace(/__([^_]+)__/g, "$1")
+    .trim();
+  return cleaned === "(empty)" ? "none" : cleaned;
+}
+
+function isChatSummaryHeading(line: string): boolean {
+  return /^(?:requirements|actor work|worklog|critic review|review|critic findings)$/i.test(line);
 }
 
 function ChatEmptyState({
