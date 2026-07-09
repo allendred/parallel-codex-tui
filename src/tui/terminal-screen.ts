@@ -232,10 +232,14 @@ function sameStyle(left: TerminalTextStyle, right: TerminalTextStyle): boolean {
 
 function trimTrailingBlankTerminalLines(lines: TerminalLine[]): TerminalLine[] {
   let end = lines.length;
-  while (end > 0 && terminalLineText(lines[end - 1]).trim() === "") {
+  while (end > 0 && isUnstyledBlankTerminalLine(lines[end - 1])) {
     end -= 1;
   }
   return lines.slice(0, end);
+}
+
+function isUnstyledBlankTerminalLine(line: TerminalLine): boolean {
+  return terminalLineText(line).trim() === "" && line.chunks.every((chunk) => Object.keys(chunk.style).length === 0);
 }
 
 function terminalLineText(line: TerminalLine): string {

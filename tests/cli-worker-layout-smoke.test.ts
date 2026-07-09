@@ -10,6 +10,50 @@ import { NativeTerminalScreen } from "../src/tui/terminal-screen.js";
 import { TUI_THEME_PRESETS } from "../src/tui/theme.js";
 
 describe("CLI worker layout smoke", () => {
+  it("keeps the idle chat status row on the themed rail", async () => {
+    const workspace = await mkdtemp(join(tmpdir(), "pct-cli-idle-status-"));
+    const chunks: string[] = [];
+    const screen = new NativeTerminalScreen({ cols: 80, rows: 12, scrollback: 1000 });
+    let screenWrites = Promise.resolve();
+
+    const child = spawn(
+      process.execPath,
+      ["./node_modules/.bin/tsx", "src/cli.tsx", "--workspace", workspace],
+      {
+        cwd: process.cwd(),
+        cols: 80,
+        rows: 12,
+        name: "xterm-256color",
+        env: {
+          ...process.env,
+          TERM: "xterm-256color"
+        }
+      }
+    );
+
+    child.onData((chunk) => {
+      chunks.push(chunk);
+      screenWrites = screenWrites.then(() => screen.write(chunk));
+    });
+
+    try {
+      await waitForScreenText(() => screenWrites, screen, "Type a message");
+      await screenWrites;
+
+      const lines = screen.styledSnapshotLines();
+      const inputIndex = lines.findIndex((line) => line.chunks.map((chunk) => chunk.text).join("").includes("Type a message"));
+      const statusLine = lines[inputIndex + 1];
+      const statusLineText = statusLine?.chunks.map((chunk) => chunk.text).join("") ?? "";
+
+      expect(inputIndex).toBeGreaterThanOrEqual(0);
+      expect(statusLineText.trim()).toBe("");
+      expect(displayWidth(statusLineText)).toBe(79);
+      expect(statusLine?.chunks.some((chunk) => chunk.style.backgroundColor === TUI_THEME_PRESETS.codex.rail)).toBe(true);
+    } finally {
+      child.kill("SIGTERM");
+    }
+  }, 10000);
+
   it("keeps the app header visible when worker logs fill a short terminal", async () => {
     const workspace = await mkdtemp(join(tmpdir(), "pct-cli-worker-layout-"));
     const taskId = "task-20260705-000000-layout";

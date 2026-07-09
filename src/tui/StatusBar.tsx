@@ -20,11 +20,7 @@ type StatusTone = "idle" | "run" | "done" | "fail" | "wait";
 export function StatusBar({ text, terminalWidth = process.stdout.columns || 120, showTask = false }: StatusBarProps) {
   const parsedSegments = parseStatusText(text, { hideTask: !showTask || terminalWidth < 40 });
   if (isIdleStatus(parsedSegments)) {
-    return (
-      <Box>
-        <Text> </Text>
-      </Box>
-    );
+    return <IdleStatusRail terminalWidth={terminalWidth} />;
   }
 
   const segments = omitTinyCurrentSegment(
@@ -35,11 +31,7 @@ export function StatusBar({ text, terminalWidth = process.stdout.columns || 120,
   const fittedSegments = fitStatusSegments(segments, terminalWidth, compact);
 
   if (isIdleStatus(fittedSegments)) {
-    return (
-      <Box>
-        <Text> </Text>
-      </Box>
-    );
+    return <IdleStatusRail terminalWidth={terminalWidth} />;
   }
 
   const leadingWidth = terminalWidth > 1 ? 1 : 0;
@@ -65,6 +57,22 @@ export function StatusBar({ text, terminalWidth = process.stdout.columns || 120,
       {trailingWidth > 0 ? <Text backgroundColor={TUI_THEME.rail}>{" ".repeat(trailingWidth)}</Text> : null}
     </Box>
   );
+}
+
+function IdleStatusRail({ terminalWidth }: { terminalWidth: number }) {
+  const width = statusRailWidth(terminalWidth);
+  return (
+    <Box>
+      <Text backgroundColor={TUI_THEME.rail}>{" ".repeat(width)}</Text>
+    </Box>
+  );
+}
+
+function statusRailWidth(terminalWidth: number): number {
+  const renderWidth = typeof process.stdout.columns === "number"
+    ? Math.max(1, Math.min(terminalWidth, process.stdout.columns))
+    : terminalWidth;
+  return Math.max(1, renderWidth - 1);
 }
 
 function omitTinyCurrentSegment(segments: Segment[], terminalWidth: number): Segment[] {
