@@ -106,11 +106,18 @@ export function resetTuiTheme(): TuiTheme {
 }
 
 export function isTuiThemeColorValue(value: string): boolean {
-  const color = value.trim();
-  if (!color) {
-    return false;
-  }
+  return normalizeTuiThemeColorValue(value) !== null;
+}
 
+export function normalizeTuiThemeColorValue(value: string | null | undefined): string | null {
+  const color = value?.trim();
+  if (!color) {
+    return null;
+  }
+  return isNormalizedTuiThemeColorValue(color) ? color : null;
+}
+
+function isNormalizedTuiThemeColorValue(color: string): boolean {
   if ((foregroundColorNames as readonly string[]).includes(color)) {
     return true;
   }
@@ -156,7 +163,7 @@ function normalizeTuiThemeOverrides(colors: TuiThemeOverrides | undefined): Part
   }
 
   for (const field of TUI_THEME_FIELDS) {
-    const value = colors[field]?.trim();
+    const value = normalizeTuiThemeColorValue(colors[field]);
     if (value) {
       normalized[field] = value as TuiTheme[typeof field];
     }

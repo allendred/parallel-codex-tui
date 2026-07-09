@@ -3,6 +3,7 @@ import {
   TUI_THEME,
   configureTuiTheme,
   isTuiThemeColorValue,
+  normalizeTuiThemeColorValue,
   normalizeTuiThemeName,
   resetTuiTheme,
   resolveTuiTheme,
@@ -72,6 +73,14 @@ describe("TUI theme", () => {
     expect(isTuiThemeColorValue("ansi256(256)")).toBe(false);
     expect(isTuiThemeColorValue("rgb(300, 1, 1)")).toBe(false);
     expect(isTuiThemeColorValue("#00zz00")).toBe(false);
+  });
+
+  it("provides one shared theme-color normalizer", () => {
+    expect(normalizeTuiThemeColorValue("  ansi256(238)  ")).toBe("ansi256(238)");
+    expect(normalizeTuiThemeColorValue("rgb(232, 131, 136)")).toBe("rgb(232, 131, 136)");
+    expect(normalizeTuiThemeColorValue("not-a-color")).toBeNull();
+    expect(normalizeTuiThemeColorValue("   ")).toBeNull();
+    expect(normalizeTuiThemeColorValue(null)).toBeNull();
   });
 
   it("lets rendered worker themes follow the active palette", () => {

@@ -3,7 +3,13 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { z, type ZodOptional } from "zod";
 import { pathExists, readTextIfExists, writeText } from "./file-store.js";
-import { isTuiThemeColorValue, normalizeTuiThemeName, TUI_THEME_FIELDS, TUI_THEME_NAMES, type TuiThemeField } from "../tui/theme.js";
+import {
+  normalizeTuiThemeColorValue,
+  normalizeTuiThemeName,
+  TUI_THEME_FIELDS,
+  TUI_THEME_NAMES,
+  type TuiThemeField
+} from "../tui/theme.js";
 
 const NativeSessionConfigSchema = z.object({
   enabled: z.boolean().default(true),
@@ -29,9 +35,9 @@ const RolePromptConfigSchema = z.object({
   instructions: z.array(z.string()).default([])
 });
 
-const TuiColorValueSchema = z.string().min(1).refine(isTuiThemeColorValue, {
+const TuiColorValueSchema = z.string().min(1).refine((value) => normalizeTuiThemeColorValue(value) !== null, {
   message: "Invalid TUI color value. Use a Chalk color name, #rgb/#rrggbb, rgb(r,g,b), or ansi256(0..255)."
-}).transform((value) => value.trim());
+}).transform((value) => normalizeTuiThemeColorValue(value) ?? value.trim());
 
 const TuiThemeNameSchema = z.preprocess(
   (value) => typeof value === "string" ? normalizeTuiThemeName(value) ?? value.trim() : value,
