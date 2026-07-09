@@ -101,7 +101,7 @@ Set the TUI palette in `.parallel-codex/config.toml`:
 theme = "graphite" # codex, graphite, paper
 
 [ui.colors]
-accent = "cyan"
+accent = "ansi256(87)"
 chrome = "ansi256(238)"
 rail = "#30363d"
 surface = "rgb(22, 27, 34)"

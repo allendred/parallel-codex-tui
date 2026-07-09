@@ -47,21 +47,21 @@ export const TUI_THEME_PRESETS: Readonly<Record<TuiThemeName, Readonly<TuiTheme>
     rail: bg("ansi256(236)"),
     successSurface: bg("ansi256(22)"),
     dangerSurface: bg("ansi256(52)"),
-    text: fg("white"),
-    muted: fg("gray"),
-    accent: fg("ansi256(81)"),
+    text: fg("ansi256(254)"),
+    muted: fg("ansi256(245)"),
+    accent: fg("ansi256(87)"),
     warning: fg("ansi256(221)"),
-    success: fg("ansi256(114)"),
+    success: fg("ansi256(120)"),
     danger: fg("ansi256(203)")
   }),
   graphite: freezeTuiTheme({
-    chrome: bg("ansi256(238)"),
-    surface: bg("ansi256(234)"),
-    rail: bg("ansi256(236)"),
+    chrome: bg("ansi256(237)"),
+    surface: bg("ansi256(233)"),
+    rail: bg("ansi256(235)"),
     successSurface: bg("ansi256(22)"),
     dangerSurface: bg("ansi256(52)"),
-    text: fg("white"),
-    muted: fg("gray"),
+    text: fg("ansi256(254)"),
+    muted: fg("ansi256(246)"),
     accent: fg("ansi256(110)"),
     warning: fg("ansi256(222)"),
     success: fg("ansi256(149)"),
@@ -69,16 +69,16 @@ export const TUI_THEME_PRESETS: Readonly<Record<TuiThemeName, Readonly<TuiTheme>
   }),
   paper: freezeTuiTheme({
     chrome: bg("ansi256(255)"),
-    surface: bg("ansi256(254)"),
+    surface: bg("ansi256(253)"),
     rail: bg("ansi256(250)"),
     successSurface: bg("ansi256(194)"),
     dangerSurface: bg("ansi256(224)"),
-    text: fg("black"),
-    muted: fg("ansi256(240)"),
-    accent: fg("blue"),
+    text: fg("ansi256(235)"),
+    muted: fg("ansi256(241)"),
+    accent: fg("ansi256(25)"),
     warning: fg("ansi256(136)"),
-    success: fg("green"),
-    danger: fg("red")
+    success: fg("ansi256(28)"),
+    danger: fg("ansi256(160)")
   })
 });
 

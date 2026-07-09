@@ -47,9 +47,10 @@ export async function runDoctor(
 
   let config: Awaited<ReturnType<typeof loadConfig>>;
   try {
-    config = withUiThemeOverride(await loadConfig(appRoot), options.theme ?? null);
+    const loadedConfig = await loadConfig(appRoot);
+    config = withUiThemeOverride(loadedConfig, options.theme ?? null);
     lines.push(`config: ok (${localConfigPath})`);
-    lines.push(`theme: ok (${config.ui.theme}; ${themeOverrideSummary(config.ui.colors)})`);
+    lines.push(`theme: ok (${themeSummary(config.ui.theme, loadedConfig.ui.theme, options.theme ?? null)}; ${themeOverrideSummary(config.ui.colors)})`);
   } catch (error) {
     ok = false;
     lines.push(`config: invalid (${localConfigPath})`);
@@ -109,6 +110,18 @@ function themeOverrideSummary(colors: Awaited<ReturnType<typeof loadConfig>>["ui
   }
 
   return `colors: ${entries.map(([key, value]) => `${key}=${value}`).join(", ")}`;
+}
+
+function themeSummary(
+  effectiveTheme: Awaited<ReturnType<typeof loadConfig>>["ui"]["theme"],
+  configTheme: Awaited<ReturnType<typeof loadConfig>>["ui"]["theme"],
+  cliTheme: Awaited<ReturnType<typeof loadConfig>>["ui"]["theme"] | null
+): string {
+  if (cliTheme && cliTheme !== configTheme) {
+    return `${effectiveTheme} via --theme; config ${configTheme}`;
+  }
+
+  return effectiveTheme;
 }
 
 function commandForEngine(config: Awaited<ReturnType<typeof loadConfig>>, engine: ConfiguredEngine): string | null {

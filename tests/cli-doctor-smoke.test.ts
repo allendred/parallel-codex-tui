@@ -268,8 +268,7 @@ describe("CLI doctor", () => {
 
     expect(result.exitCode).toBe(0);
     expect(result.stderr).toBe("");
-    expect(result.stdout).toContain("theme: ok (paper; colors: accent=#aabbcc)");
-    expect(result.stdout).not.toContain("theme: ok (graphite");
+    expect(result.stdout).toContain("theme: ok (paper via --theme; config graphite; colors: accent=#aabbcc)");
   });
 
   it("prints config paths for invalid TUI color values", async () => {
