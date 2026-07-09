@@ -327,6 +327,8 @@ describe("CLI native layout smoke", () => {
       expect(snapshot).toContain("process exited · code 7");
       expect(snapshot).toContain("native actor/mock · exit:7");
       expect(snapshot).toContain("closed · wheel/Pg · ^]");
+      expect(snapshot).not.toContain("closed · wheel/Pg · ^] logs");
+      expect(snapshot).not.toContain("closed · wheel/Pg · ^] back");
       expect(snapshot).not.toContain("native · wheel/Pg · ^]");
     } finally {
       child.write("\x1d");

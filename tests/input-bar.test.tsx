@@ -270,7 +270,8 @@ describe("InputBar", () => {
     const roomy = render(
       <InputBar mode="native" value="" nativeClosed terminalWidth={80} onChange={() => {}} />
     );
-    expect(roomy.lastFrame()).toContain("closed · wheel/Pg · ^] back");
+    expect(roomy.lastFrame()).toContain("closed · wheel/Pg · ^] logs");
+    expect(roomy.lastFrame()).not.toContain("back");
     roomy.unmount();
 
     const tiny = render(

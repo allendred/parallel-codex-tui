@@ -224,7 +224,7 @@ function nativeInputHints(width: number, closed = false): { label: string; detai
     if (width < 56) {
       return { label: "closed", detail: " · wheel/Pg · ^]" };
     }
-    return { label: "closed", detail: " · wheel/Pg · ^] back" };
+    return { label: "closed", detail: " · wheel/Pg · ^] logs" };
   }
   if (width < 12) {
     return { label: "nat", detail: " ^]" };
