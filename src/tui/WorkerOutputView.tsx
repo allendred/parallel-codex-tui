@@ -65,6 +65,8 @@ interface WorkerOutputContentState {
   lines: RenderLine[];
 }
 
+const EMPTY_WORKER_OUTPUT_TEXT = "No worker output yet. Logs will appear here.";
+
 interface ParsedDiffFile {
   title: string;
   added: number;
@@ -591,13 +593,13 @@ async function loadWorkerOutputSections(role: WorkerRole | undefined, logPath: s
 async function loadNanoWorkerOutputLines(logPath: string, height: number): Promise<RenderLine[]> {
   const rawOutput = (await readTextIfExists(logPath)).trimEnd();
   if (!rawOutput) {
-    return [{ kind: "content", text: "No worker output." }];
+    return [{ kind: "content", text: EMPTY_WORKER_OUTPUT_TEXT }];
   }
 
   const lines = renderNanoProcessContent(compactNanoProcessText(rawOutput, height));
   return lines.length > 0
     ? [{ kind: "group", text: "process" }, ...lines]
-    : [{ kind: "content", text: "No worker output." }];
+    : [{ kind: "content", text: EMPTY_WORKER_OUTPUT_TEXT }];
 }
 
 function renderNanoProcessContent(text: string): RenderLine[] {
@@ -894,7 +896,7 @@ function renderLinesFromSections(
     }
   }
 
-  return lines;
+  return lines.length > 0 ? lines : [{ kind: "content", text: EMPTY_WORKER_OUTPUT_TEXT }];
 }
 
 function compactNanoProcessText(text: string, height: number): string {

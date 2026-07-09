@@ -45,6 +45,34 @@ describe("WorkerOutputView", () => {
     }
   });
 
+  it("renders a quiet pending state when the selected worker has no output yet", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pct-worker-output-empty-"));
+    const workerDir = join(root, "actor-mock");
+
+    await mkdir(workerDir, { recursive: true });
+    await writeFile(join(workerDir, "output.log"), "");
+
+    const { lastFrame, unmount } = render(
+      <WorkerOutputView
+        title="Actor (mock) output"
+        role="actor"
+        logPath={join(workerDir, "output.log")}
+        height={5}
+      />
+    );
+
+    try {
+      await waitForFrame(lastFrame, "No worker output");
+
+      const frame = lastFrame() ?? "";
+      expect(frame).toContain("No worker output yet. Logs will appear here.");
+      expect(frame).not.toContain("No worker output.");
+      expect(frame).not.toContain("No worker selected.");
+    } finally {
+      unmount();
+    }
+  });
+
   it("renders actor role artifact logs before raw process output", async () => {
     const root = await mkdtemp(join(tmpdir(), "pct-worker-output-"));
     const workerDir = join(root, "actor-mock");
