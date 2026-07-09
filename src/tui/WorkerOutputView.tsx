@@ -3722,17 +3722,22 @@ function renderJsonLine(line: string): RenderLine[] {
 }
 
 function summarizeJsonRecord(value: Record<string, unknown>): { meta: string; message: string } {
-  const severity = stringField(value, "severity");
-  const id = stringField(value, "id");
-  const target = stringField(value, "to") || stringField(value, "from");
+  const state = stringField(value, "status") || stringField(value, "severity");
+  const id = stringField(value, "id") || stringField(value, "finding_id") || stringField(value, "findingId");
+  const to = stringField(value, "to");
+  const from = stringField(value, "from");
+  const direction = from && to ? `${from} -> ${to}` : to ? `to ${to}` : from ? `from ${from}` : "";
   const file = stringField(value, "file") || stringField(value, "path");
+  const line = numberLikeField(value, "line");
+  const column = numberLikeField(value, "column") || numberLikeField(value, "col");
+  const location = formatJsonRecordLocation(file, line, column);
   const message = stringField(value, "message") || stringField(value, "summary") || JSON.stringify(value);
-  const meta = [
-    severity ? `[${severity}]` : "",
-    id,
-    target ? `to ${target}` : "",
-    file
-  ].filter(Boolean).join(" ");
+  const marker = state ? `[${state}]` : "";
+  const lead = [marker, id].filter(Boolean).join(" ");
+  const details = [direction, location].filter(Boolean);
+  const meta = id
+    ? [lead, ...details].filter(Boolean).join(" · ")
+    : [lead, ...details].filter(Boolean).join(" ");
   return {
     meta: meta || "json",
     message
@@ -3742,6 +3747,28 @@ function summarizeJsonRecord(value: Record<string, unknown>): { meta: string; me
 function stringField(value: Record<string, unknown>, key: string): string {
   const field = value[key];
   return typeof field === "string" ? field.trim() : "";
+}
+
+function numberLikeField(value: Record<string, unknown>, key: string): string {
+  const field = value[key];
+  if (typeof field === "number" && Number.isFinite(field)) {
+    return String(field);
+  }
+  if (typeof field !== "string") {
+    return "";
+  }
+  const trimmed = field.trim();
+  return /^\d+$/.test(trimmed) ? trimmed : "";
+}
+
+function formatJsonRecordLocation(file: string, line: string, column: string): string {
+  if (!file) {
+    return "";
+  }
+  if (!line) {
+    return file;
+  }
+  return column ? `${file}:${line}:${column}` : `${file}:${line}`;
 }
 
 function stripAnsi(value: string): string {

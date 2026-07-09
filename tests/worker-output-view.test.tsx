@@ -97,6 +97,60 @@ describe("WorkerOutputView", () => {
     }
   });
 
+  it("renders worker jsonl records with finding ids and source locations", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pct-worker-output-jsonl-summary-"));
+    const criticDir = join(root, "critic-mock");
+    const actorDir = join(root, "actor-mock");
+
+    await mkdir(criticDir, { recursive: true });
+    await mkdir(actorDir, { recursive: true });
+    await writeFile(
+      join(criticDir, "critic-findings.jsonl"),
+      "{\"id\":\"C-017\",\"severity\":\"high\",\"file\":\"src/input.ts\",\"line\":42,\"message\":\"Chinese input drops the final character\"}\n"
+    );
+    await writeFile(join(criticDir, "output.log"), "critic cli transcript\n");
+    await writeFile(
+      join(actorDir, "actor-replies.jsonl"),
+      "{\"finding_id\":\"C-017\",\"status\":\"fixed\",\"to\":\"critic\",\"message\":\"Buffered IME commits before submit\"}\n"
+    );
+    await writeFile(join(actorDir, "output.log"), "actor cli transcript\n");
+
+    const critic = render(
+      <WorkerOutputView
+        title="Critic (mock) output"
+        role="critic"
+        logPath={join(criticDir, "output.log")}
+        height={16}
+      />
+    );
+    const actor = render(
+      <WorkerOutputView
+        title="Actor (mock) output"
+        role="actor"
+        logPath={join(actorDir, "output.log")}
+        height={16}
+      />
+    );
+
+    try {
+      await waitForFrame(critic.lastFrame, "Chinese input drops the final character");
+      await waitForFrame(actor.lastFrame, "Buffered IME commits before submit");
+
+      const criticFrame = critic.lastFrame() ?? "";
+      expect(criticFrame).toContain("[high] C-017 · src/input.ts:42");
+      expect(criticFrame).toContain("Chinese input drops the final character");
+      expect(criticFrame).not.toContain("\"line\":42");
+
+      const actorFrame = actor.lastFrame() ?? "";
+      expect(actorFrame).toContain("[fixed] C-017 · to critic");
+      expect(actorFrame).toContain("Buffered IME commits before submit");
+      expect(actorFrame).not.toContain("\"finding_id\"");
+    } finally {
+      critic.unmount();
+      actor.unmount();
+    }
+  });
+
   it("keeps judge worker briefs out of the primary log view", async () => {
     const root = await mkdtemp(join(tmpdir(), "pct-worker-output-judge-briefs-"));
     const workerDir = join(root, "judge-mock");
