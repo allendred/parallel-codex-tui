@@ -160,6 +160,8 @@ describe("package metadata", () => {
     expect(readme).toContain("In chat, press `Ctrl+W` to open worker logs");
     expect(readme).toContain("In worker-log views, scroll with the mouse wheel or PageUp/PageDown");
     expect(readme).toContain("In chat or worker-log views, press `Ctrl+O`");
+    expect(readme).toContain("Press `Ctrl+]` to return to worker logs");
+    expect(readme).not.toContain("Press `Ctrl+]` to detach and return to worker logs");
     expect(readme).toContain("parallel-codex-tui --help");
     expect(readme).toContain("parallel-codex-tui --version");
     expect(readme).toContain("## Theme");
