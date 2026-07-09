@@ -378,6 +378,59 @@ describe("CLI worker layout smoke", () => {
     }
   }, 10000);
 
+  it("keeps wrapped diff rows inside the worker panel width", async () => {
+    const workspace = await mkdtemp(join(tmpdir(), "pct-cli-worker-diff-width-"));
+    const taskId = "task-20260705-000000-diff-width";
+    const taskDir = join(workspace, ".parallel-codex", "sessions", taskId);
+    const workerDir = join(taskDir, "actor-mock");
+    const chunks: string[] = [];
+    const screen = new NativeTerminalScreen({ cols: 72, rows: 20, scrollback: 1000 });
+    let screenWrites = Promise.resolve();
+
+    await mkdir(workerDir, { recursive: true });
+    await writeDiffWidthTaskFiles({ workspace, taskId, taskDir, workerDir });
+
+    const child = spawn(
+      process.execPath,
+      ["./node_modules/.bin/tsx", "src/cli.tsx", "--workspace", workspace, "--task", taskId],
+      {
+        cwd: process.cwd(),
+        cols: 72,
+        rows: 20,
+        name: "xterm-256color",
+        env: {
+          ...process.env,
+          TERM: "xterm-256color"
+        }
+      }
+    );
+
+    child.onData((chunk) => {
+      chunks.push(chunk);
+      screenWrites = screenWrites.then(() => screen.write(chunk));
+    });
+
+    try {
+      await waitForScreenText(() => screenWrites, screen, "ready");
+      child.write("\x17");
+      await waitForScreenText(() => screenWrites, screen, "preserve tail");
+
+      const lines = screen.styledSnapshotLines();
+      const titleLine = lines.find((line) => line.chunks.map((chunk) => chunk.text).join("").includes("actor/mock"));
+      const titleLineText = titleLine?.chunks.map((chunk) => chunk.text).join("") ?? "";
+      const diffLines = lines.filter((line) => {
+        const text = line.chunks.map((chunk) => chunk.text).join("");
+        return /(?:oldValue|newValue|contextValue|punctuation|aligned|preserve tail|wrap and should)/.test(text);
+      });
+
+      expect(diffLines.length).toBeGreaterThan(0);
+      expect(diffLines.every((line) => displayWidth(line.chunks.map((chunk) => chunk.text).join("")) <= displayWidth(titleLineText))).toBe(true);
+      expect(diffLines.every((line) => line.chunks.every((chunk) => chunk.style.backgroundColor))).toBe(true);
+    } finally {
+      child.kill("SIGTERM");
+    }
+  }, 10000);
+
   it("fills nano worker rows to the themed content width", async () => {
     const workspace = await mkdtemp(join(tmpdir(), "pct-cli-worker-nano-fill-"));
     const taskId = "task-20260705-000000-nano-fill";
@@ -798,6 +851,50 @@ async function writeActorCodeBlockTaskFiles(input: {
     ].join("\n")
   );
   await writeFile(join(input.workerDir, "output.log"), "");
+}
+
+async function writeDiffWidthTaskFiles(input: {
+  workspace: string;
+  taskId: string;
+  taskDir: string;
+  workerDir: string;
+}): Promise<void> {
+  await writeJson(
+    join(input.taskDir, "meta.json"),
+    TaskMetaSchema.parse({
+      id: input.taskId,
+      title: "worker diff width smoke",
+      created_at: "2026-07-05T00:00:00.000Z",
+      cwd: input.workspace,
+      mode: "complex",
+      status: "done"
+    })
+  );
+  await writeJson(
+    join(input.workerDir, "status.json"),
+    WorkerStatusSchema.parse({
+      worker_id: "actor-mock",
+      role: "actor",
+      engine: "mock",
+      state: "done",
+      phase: "process-exited",
+      last_event_at: "2026-07-05T00:00:00.000Z",
+      summary: "ready"
+    })
+  );
+  await writeFile(
+    join(input.workerDir, "patch.diff"),
+    [
+      "diff --git a/src/very-long-file-name.ts b/src/very-long-file-name.ts",
+      "--- a/src/very-long-file-name.ts",
+      "+++ b/src/very-long-file-name.ts",
+      "@@ -1,2 +1,3 @@",
+      '-const oldValue = "一段很长的中文内容 mixed with ascii and punctuation that should wrap but keep the line number gutter aligned";',
+      '+const newValue = "一段很长的中文内容 mixed with ascii and punctuation that should wrap but keep the line number gutter aligned and preserve tail";',
+      ' const contextValue = "context line that is also long enough to wrap and should remain visible";'
+    ].join("\n")
+  );
+  await writeFile(join(input.workerDir, "output.log"), "raw done\n");
 }
 
 async function writeNanoProcessTaskFiles(input: {

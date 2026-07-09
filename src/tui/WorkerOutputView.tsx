@@ -154,7 +154,12 @@ export function WorkerOutputView({
     ? contentState.lines
     : [{ kind: "content" as const, text: "Loading worker log..." }];
   const sourceLines = isNanoWorkerOutputWidth(terminalWidth) ? tinyWorkerOutputSourceLines(content, height) : content;
-  const displayLines = renderDisplayLines(sourceLines, terminalWidth);
+  const panelWidth = workerOutputPanelRailWidth(terminalWidth);
+  const nanoRender = isNanoWorkerOutputWidth(terminalWidth);
+  const displayLines = renderDisplayLines(sourceLines, terminalWidth, {
+    contentWidth: nanoRender ? undefined : Math.max(1, panelWidth - 2),
+    nano: nanoRender
+  });
   const selection = selectViewportLines(displayLines.map((line) => line.text).join("\n"), height, scrollOffset);
   const end = displayLines.length - selection.clampedOffset;
   const rawStart = Math.max(0, end - Math.max(1, height));
@@ -179,14 +184,12 @@ export function WorkerOutputView({
     });
   }, [onViewportChange, selection.clampedOffset, selection.maxOffset]);
 
-  const panelWidth = workerOutputPanelRailWidth(terminalWidth);
   const scrollLabel = workerOutputScrollDisplay(selection.clampedOffset, selection.maxOffset, terminalWidth);
   const displayTitle = workerOutputHeaderDisplay(
     title,
     selection.maxOffset > 0 ? scrollLabel : null,
     Math.max(1, panelWidth - 2)
   );
-  const nanoRender = isNanoWorkerOutputWidth(terminalWidth);
 
   return (
     <Box flexDirection="column">
@@ -4473,9 +4476,13 @@ export function workerOutputDiffColumns(text: string): WorkerOutputDiffColumns |
   };
 }
 
-function renderDisplayLines(lines: RenderLine[], width = Number(process.stdout.columns) || 120): DisplayLine[] {
-  const contentWidth = Math.max(1, width - 4);
-  if (isNanoWorkerOutputWidth(width)) {
+function renderDisplayLines(
+  lines: RenderLine[],
+  width = Number(process.stdout.columns) || 120,
+  options: { contentWidth?: number; nano?: boolean } = {}
+): DisplayLine[] {
+  const contentWidth = options.contentWidth ?? Math.max(1, width - 4);
+  if (options.nano ?? isNanoWorkerOutputWidth(width)) {
     return renderNanoDisplayLines(lines, contentWidth);
   }
   return lines.flatMap((line) => {
