@@ -78,7 +78,22 @@ jobs:
           CI: "0"
 
       - name: Build package
-        run: npm pack --json
+        id: pack
+        shell: bash
+        run: |
+          npm pack --json | tee npm-pack.json
+          TARBALL=$(node <<'NODE'
+          const fs = require("node:fs");
+          const packs = JSON.parse(fs.readFileSync("npm-pack.json", "utf8"));
+
+          if (packs.length !== 1 || !packs[0].filename) {
+            throw new Error("Expected exactly one npm pack output");
+          }
+
+          console.log(packs[0].filename);
+          NODE
+          )
+          echo "tarball=$TARBALL" >> "$GITHUB_OUTPUT"
 
       - name: Check npm version
         id: npm
@@ -99,6 +114,12 @@ jobs:
         if: steps.npm.outputs.published != 'true'
         shell: bash
         run: |
+          PACKAGE_TARBALL="${{ steps.pack.outputs.tarball }}"
+          if [ ! -f "$PACKAGE_TARBALL" ]; then
+            echo "Package tarball not found: $PACKAGE_TARBALL" >&2
+            exit 1
+          fi
+
           remove_auth_token_config() {
             if [ -n "${NPM_CONFIG_USERCONFIG:-}" ] && [ -f "$NPM_CONFIG_USERCONFIG" ]; then
               sed -i '/_authToken/d' "$NPM_CONFIG_USERCONFIG"
@@ -117,7 +138,7 @@ jobs:
             unset NODE_AUTH_TOKEN
 
             trusted_log="$(mktemp)"
-            if npm publish --access public --provenance 2>&1 | tee "$trusted_log"; then
+            if npm publish --access public --provenance "$PACKAGE_TARBALL" 2>&1 | tee "$trusted_log"; then
               exit 0
             fi
 
@@ -137,7 +158,7 @@ jobs:
           export NODE_AUTH_TOKEN="$NPM_TOKEN"
           restore_auth_token_config
           token_log="$(mktemp)"
-          if npm publish --access public --provenance 2>&1 | tee "$token_log"; then
+          if npm publish --access public --provenance "$PACKAGE_TARBALL" 2>&1 | tee "$token_log"; then
             exit 0
           fi
 

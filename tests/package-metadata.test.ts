@@ -206,12 +206,15 @@ describe("package metadata", () => {
     expect(workflow).toContain("npm run typecheck");
     expect(workflow).toContain('CI: "0"');
     expect(workflow).toContain("npm pack --json");
+    expect(workflow).toContain("id: pack");
+    expect(workflow).toContain("tarball=$TARBALL");
     expect(workflow).toContain('PACKAGE_VERSION=$(node -p "require(\'./package.json\').version")');
     expect(workflow).toContain('if [ "v$PACKAGE_VERSION" != "$RELEASE_VERSION" ]; then');
     expect(workflow).toContain("npm view \"parallel-codex-tui@$PACKAGE_VERSION\" version --json");
     expect(workflow).toContain('published=$PUBLISHED');
     expect(workflow).toContain("if: steps.npm.outputs.published != 'true'");
-    expect(workflow).toContain("npm publish --access public --provenance");
+    expect(workflow).toContain('PACKAGE_TARBALL="${{ steps.pack.outputs.tarball }}"');
+    expect(workflow).toContain('npm publish --access public --provenance "$PACKAGE_TARBALL"');
     expect(workflow).toContain("Trying npm trusted publishing via GitHub OIDC");
     expect(workflow).toContain("Trusted publishing was not accepted; falling back to NPM_TOKEN if available.");
     expect(workflow).toContain("restore_auth_token_config");
