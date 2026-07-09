@@ -80,7 +80,9 @@ describe("TUI theme", () => {
     expect(normalizeTuiThemeColorValue("#AABBCC")).toBe("#aabbcc");
     expect(normalizeTuiThemeColorValue("  ansi256(238)  ")).toBe("ansi256(238)");
     expect(normalizeTuiThemeColorValue("ansi256( 238 )")).toBe("ansi256(238)");
+    expect(normalizeTuiThemeColorValue("ansi256(001)")).toBe("ansi256(1)");
     expect(normalizeTuiThemeColorValue("rgb(232, 131, 136)")).toBe("rgb(232,131,136)");
+    expect(normalizeTuiThemeColorValue("rgb(001, 002, 003)")).toBe("rgb(1,2,3)");
     expect(normalizeTuiThemeColorValue("not-a-color")).toBeNull();
     expect(normalizeTuiThemeColorValue("   ")).toBeNull();
     expect(normalizeTuiThemeColorValue(null)).toBeNull();

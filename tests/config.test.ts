@@ -119,7 +119,8 @@ describe("config", () => {
         'chrome = "  ansi256( 238 )  "',
         'surface = " rgb(22, 27, 34) "',
         'accent = "  magenta  "',
-        'warning = " #AABBCC "'
+        'warning = " #AABBCC "',
+        'success = " ansi256(001) "'
       ].join("\n")
     );
 
@@ -129,7 +130,8 @@ describe("config", () => {
       chrome: "ansi256(238)",
       surface: "rgb(22,27,34)",
       accent: "magenta",
-      warning: "#aabbcc"
+      warning: "#aabbcc",
+      success: "ansi256(1)"
     });
   });
 

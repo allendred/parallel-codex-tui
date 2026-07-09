@@ -124,14 +124,14 @@ export function normalizeTuiThemeColorValue(value: string | null | undefined): s
 
   const ansiMatch = color.match(/^ansi256\(\s*(\d+)\s*\)$/);
   if (ansiMatch) {
-    const value = ansiMatch[1] ?? "";
-    return isByteColorValue(value) ? `ansi256(${value})` : null;
+    const value = normalizeByteColorValue(ansiMatch[1] ?? "");
+    return value !== null ? `ansi256(${value})` : null;
   }
 
   const rgbMatch = color.match(/^rgb\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*\)$/);
   if (rgbMatch) {
-    const parts = [rgbMatch[1] ?? "", rgbMatch[2] ?? "", rgbMatch[3] ?? ""];
-    return parts.every(isByteColorValue) ? `rgb(${parts.join(",")})` : null;
+    const parts = [rgbMatch[1] ?? "", rgbMatch[2] ?? "", rgbMatch[3] ?? ""].map(normalizeByteColorValue);
+    return parts.every((value) => value !== null) ? `rgb(${parts.join(",")})` : null;
   }
 
   return null;
@@ -146,12 +146,12 @@ export function normalizeTuiThemeName(value: string | null | undefined): TuiThem
   return isTuiThemeName(name) ? name : null;
 }
 
-function isByteColorValue(value: string): boolean {
+function normalizeByteColorValue(value: string): string | null {
   if (!/^\d+$/.test(value)) {
-    return false;
+    return null;
   }
   const number = Number(value);
-  return Number.isInteger(number) && number >= 0 && number <= 255;
+  return Number.isInteger(number) && number >= 0 && number <= 255 ? String(number) : null;
 }
 
 function normalizeTuiThemeOverrides(colors: TuiThemeOverrides | undefined): Partial<TuiTheme> {
