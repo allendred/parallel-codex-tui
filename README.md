@@ -127,6 +127,8 @@ To compare every built-in palette without loading config or starting the TUI:
 parallel-codex-tui --themes
 ```
 
+The theme catalog includes complete palette groups for every built-in theme plus the same `preview:` and `semantic:` ANSI swatch rows.
+
 The doctor output includes `preview:` and `semantic:` ANSI swatch rows so you can see the effective terminal colors before starting a worker session.
 
 ## Behavior

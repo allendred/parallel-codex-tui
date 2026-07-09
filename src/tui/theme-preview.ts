@@ -47,6 +47,8 @@ export function formatTuiThemeCatalog(themeNames: readonly string[] = TUI_THEME_
   for (const themeName of themeNames) {
     const theme = resolveTuiTheme({ theme: themeName });
     lines.push(`${themeName}: ${formatTuiThemePalette(theme)}`);
+    lines.push("  palette:");
+    lines.push(...formatTuiThemePaletteGroups(theme).map((line) => `    ${line}`));
     lines.push(...formatTuiThemePreview(theme).map((line) => `  ${line}`));
   }
 
@@ -60,6 +62,15 @@ export function formatTuiThemePalette(theme: TuiTheme): string {
     `rail=${theme.rail}`,
     `accent=${theme.accent}`
   ].join(", ");
+}
+
+export function formatTuiThemePaletteGroups(theme: TuiTheme): string[] {
+  return [
+    `chrome=${theme.chrome}, surface=${theme.surface}, rail=${theme.rail}`,
+    `text=${theme.text}, muted=${theme.muted}, accent=${theme.accent}`,
+    `successSurface=${theme.successSurface}, success=${theme.success}, warning=${theme.warning}`,
+    `dangerSurface=${theme.dangerSurface}, danger=${theme.danger}`
+  ];
 }
 
 function themeSwatch(label: string, backgroundColor: string, foregroundColor: string): string {

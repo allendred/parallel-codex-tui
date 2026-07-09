@@ -52,6 +52,9 @@ describe("CLI help and version", () => {
     expect(stdout).toContain("codex: chrome=ansi256(234), surface=ansi256(235), rail=ansi256(238), accent=ansi256(81)");
     expect(stdout).toContain("graphite: chrome=ansi256(236), surface=ansi256(233), rail=ansi256(238), accent=ansi256(75)");
     expect(stdout).toContain("paper: chrome=ansi256(254), surface=ansi256(231), rail=ansi256(255), accent=ansi256(25)");
+    expect(stdout).toContain("  palette:");
+    expect(stdout).toContain("    text=ansi256(255), muted=ansi256(250), accent=ansi256(81)");
+    expect(stdout).toContain("    successSurface=ansi256(194), success=ansi256(28), warning=ansi256(130)");
     expect(stdout).toContain("preview:");
     expect(stdout).toContain("semantic:");
     expect(stdout).toContain("\u001b[48;5;234m");
