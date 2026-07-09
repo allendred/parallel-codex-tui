@@ -34,6 +34,7 @@ const WORKER_OUTPUT_LINE_KINDS = [
   "group",
   "section",
   "content",
+  "placeholder",
   "blank",
   "heading",
   "list",
@@ -69,6 +70,42 @@ describe("WorkerOutputView", () => {
       color: TUI_THEME_PRESETS.paper.muted,
       dimColor: true
     });
+  });
+
+  it("renders loading and empty worker states as muted placeholders", async () => {
+    configureTuiTheme({ theme: "paper" });
+    const root = await mkdtemp(join(tmpdir(), "pct-worker-output-placeholder-"));
+    const workerDir = join(root, "actor-mock");
+
+    await mkdir(workerDir, { recursive: true });
+    await writeFile(join(workerDir, "output.log"), "");
+
+    expect(workerOutputLineTheme("placeholder")).toEqual({
+      backgroundColor: TUI_THEME_PRESETS.paper.surface,
+      color: TUI_THEME_PRESETS.paper.muted,
+      dimColor: true
+    });
+    expect(workerOutputLineFillTheme("placeholder")).toBe(TUI_THEME_PRESETS.paper.surface);
+
+    const { lastFrame, unmount } = render(
+      <WorkerOutputView
+        title="Actor (mock) output"
+        role="actor"
+        logPath={join(workerDir, "output.log")}
+        height={5}
+      />
+    );
+
+    try {
+      expect(lastFrame() ?? "").toContain("Loading log...");
+      await waitForFrame(lastFrame, "No worker output");
+
+      const frame = lastFrame() ?? "";
+      expect(frame).toContain("No worker output yet. Logs will appear here.");
+      expect(frame).not.toContain("Loading worker log");
+    } finally {
+      unmount();
+    }
   });
 
   it("renders an actionable empty state when no worker log is selected", async () => {
@@ -3221,6 +3258,7 @@ describe("WorkerOutputView", () => {
     expect(workerOutputLineTheme("code").backgroundColor).toBe(theme.rail);
     expect(workerOutputLineTheme("json")).toMatchObject({ backgroundColor: theme.rail, color: theme.accent });
     expect(workerOutputLineTheme("content")).toEqual({ backgroundColor: theme.surface, color: theme.text });
+    expect(workerOutputLineTheme("placeholder")).toEqual({ backgroundColor: theme.surface, color: theme.muted, dimColor: true });
     expect(workerOutputLineTheme("list")).toEqual({ backgroundColor: theme.surface, color: theme.text });
     expect(workerOutputLineTheme("list-detail")).toEqual({ backgroundColor: theme.surface, color: theme.text });
     expect(workerOutputLineTheme("ordered-list")).toEqual({ backgroundColor: theme.surface, color: theme.text });
@@ -3236,6 +3274,7 @@ describe("WorkerOutputView", () => {
     expect(workerOutputLineFillTheme("diff-summary")).toBe(theme.surface);
     expect(workerOutputLineFillTheme("diff-context")).toBe(theme.surface);
     expect(workerOutputLineFillTheme("content")).toBe(theme.surface);
+    expect(workerOutputLineFillTheme("placeholder")).toBe(theme.surface);
     expect(workerOutputLineFillTheme("rule")).toBe(theme.surface);
     for (const kind of WORKER_OUTPUT_LINE_KINDS) {
       expect(workerOutputLineFillTheme(kind), `${kind} should not fall through to the terminal background`).not.toBeNull();

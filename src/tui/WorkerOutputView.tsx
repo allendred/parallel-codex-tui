@@ -23,6 +23,7 @@ export type WorkerOutputLineKind =
   | "group"
   | "section"
   | "content"
+  | "placeholder"
   | "blank"
   | "heading"
   | "list"
@@ -116,7 +117,7 @@ export function WorkerOutputView({
       if (!logPath) {
         setContentState({
           key: loadKey,
-          lines: [{ kind: "content", text: "No worker selected. Run a complex task to create logs." }]
+          lines: [{ kind: "placeholder", text: "No worker selected. Run a complex task to create logs." }]
         });
         return;
       }
@@ -152,7 +153,7 @@ export function WorkerOutputView({
 
   const content = contentState.key === contentKey
     ? contentState.lines
-    : [{ kind: "content" as const, text: "Loading worker log..." }];
+    : [{ kind: "placeholder" as const, text: "Loading log..." }];
   const sourceLines = isNanoWorkerOutputWidth(terminalWidth) ? tinyWorkerOutputSourceLines(content, height) : content;
   const panelWidth = workerOutputPanelRailWidth(terminalWidth);
   const nanoRender = isNanoWorkerOutputWidth(terminalWidth);
@@ -596,13 +597,13 @@ async function loadWorkerOutputSections(role: WorkerRole | undefined, logPath: s
 async function loadNanoWorkerOutputLines(logPath: string, height: number): Promise<RenderLine[]> {
   const rawOutput = (await readTextIfExists(logPath)).trimEnd();
   if (!rawOutput) {
-    return [{ kind: "content", text: EMPTY_WORKER_OUTPUT_TEXT }];
+    return [{ kind: "placeholder", text: EMPTY_WORKER_OUTPUT_TEXT }];
   }
 
   const lines = renderNanoProcessContent(compactNanoProcessText(rawOutput, height));
   return lines.length > 0
     ? [{ kind: "group", text: "process" }, ...lines]
-    : [{ kind: "content", text: EMPTY_WORKER_OUTPUT_TEXT }];
+    : [{ kind: "placeholder", text: EMPTY_WORKER_OUTPUT_TEXT }];
 }
 
 function renderNanoProcessContent(text: string): RenderLine[] {
@@ -899,7 +900,7 @@ function renderLinesFromSections(
     }
   }
 
-  return lines.length > 0 ? lines : [{ kind: "content", text: EMPTY_WORKER_OUTPUT_TEXT }];
+  return lines.length > 0 ? lines : [{ kind: "placeholder", text: EMPTY_WORKER_OUTPUT_TEXT }];
 }
 
 function compactNanoProcessText(text: string, height: number): string {
@@ -3842,6 +3843,9 @@ export function workerOutputLineTheme(kind: WorkerOutputLineKind): WorkerOutputL
   if (kind === "content" || kind === "list" || kind === "list-detail" || kind === "ordered-list" || kind === "task") {
     return { backgroundColor: TUI_THEME.surface, color: TUI_THEME.text };
   }
+  if (kind === "placeholder") {
+    return workerOutputEmptyFallbackTheme();
+  }
   if (kind === "heading") {
     return { backgroundColor: TUI_THEME.surface, bold: true, color: TUI_THEME.text };
   }
@@ -3919,7 +3923,7 @@ export function workerOutputLineLayout(kind: WorkerOutputLineKind, text: string)
   if (kind === "section") {
     return { gutter: "", body: `${workerSectionLabel(text)} · ${formatWorkerSectionTitle(text)}` };
   }
-  if (kind === "content") {
+  if (kind === "content" || kind === "placeholder") {
     return { gutter: "", body: formatPlainDisplayText(text) };
   }
   if (kind === "heading") {
