@@ -113,12 +113,15 @@ describe("ChatView", () => {
     configureTuiTheme({ theme: "paper" });
 
     expect(chatLineTheme({ from: "user", text: "> 你好", continuation: false })).toEqual({
+      backgroundColor: TUI_THEME_PRESETS.paper.surface,
       color: TUI_THEME_PRESETS.paper.accent
     });
     expect(chatLineTheme({ from: "system", text: "继续优化中。", continuation: false })).toEqual({
+      backgroundColor: TUI_THEME_PRESETS.paper.surface,
       color: TUI_THEME_PRESETS.paper.text
     });
     expect(chatLineTheme({ from: "system", text: "", continuation: false })).toEqual({
+      backgroundColor: TUI_THEME_PRESETS.paper.surface,
       color: TUI_THEME_PRESETS.paper.muted,
       dimColor: true
     });

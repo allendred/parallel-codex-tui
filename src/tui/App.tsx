@@ -58,7 +58,7 @@ export interface ChatDisplayLine {
   continuation: boolean;
 }
 
-type ChatLineTheme = Pick<TextProps, "color" | "dimColor">;
+type ChatLineTheme = Pick<TextProps, "backgroundColor" | "color" | "dimColor">;
 type NativeAttachStartingTheme = Pick<TextProps, "backgroundColor" | "color" | "dimColor">;
 
 export function App({
@@ -670,12 +670,12 @@ export function ChatView({
 
 export function chatLineTheme(line: ChatDisplayLine): ChatLineTheme {
   if (line.from === "user") {
-    return { color: TUI_THEME.accent };
+    return { backgroundColor: TUI_THEME.surface, color: TUI_THEME.accent };
   }
   if (!line.text.trim()) {
-    return { color: TUI_THEME.muted, dimColor: true };
+    return { backgroundColor: TUI_THEME.surface, color: TUI_THEME.muted, dimColor: true };
   }
-  return { color: TUI_THEME.text };
+  return { backgroundColor: TUI_THEME.surface, color: TUI_THEME.text };
 }
 
 export function chatMessageDisplayLines(messages: Message[], terminalWidth: number, maxLines = 12): ChatDisplayLine[] {
