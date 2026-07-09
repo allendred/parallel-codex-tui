@@ -154,12 +154,17 @@ function appShellErrorRow(error: string, terminalWidth: number): { text: string;
     ? Math.max(1, Math.min(terminalWidth, process.stdout.columns))
     : terminalWidth;
   const contentWidth = Math.max(1, renderWidth - 2);
-  const text = compactEndByDisplayWidth(error, contentWidth);
+  const text = compactEndByDisplayWidth(appShellErrorDisplayText(error), contentWidth);
 
   return {
     text,
     trailingWidth: Math.max(0, contentWidth - displayWidth(text))
   };
+}
+
+function appShellErrorDisplayText(error: string): string {
+  const message = error.replace(/^(?:ERROR|Error|error):\s*/, "").trim();
+  return `error · ${message || error}`;
 }
 
 function headerSegmentsDisplayWidth(segments: Array<{ text: string }>, separator: string): number {

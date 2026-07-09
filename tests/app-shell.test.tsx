@@ -40,9 +40,34 @@ describe("AppShell", () => {
       .split("\n")
       .find((line) => line.includes("No native session recorded")) ?? "";
 
-    expect(errorLine).toContain("No native session recorded");
+    expect(errorLine).toContain("error · No native session recorded");
     expect(displayWidth(errorLine)).toBe(79);
     expect(Math.max(...frame.split("\n").map((line) => displayWidth(line)))).toBeLessThanOrEqual(79);
+  });
+
+  it("normalizes generic error prefixes in the app error rail", () => {
+    const { lastFrame } = render(
+      <AppShell
+        view="chat"
+        cwd="/tmp/project"
+        taskId={null}
+        statusText="idle"
+        terminalWidth={48}
+        input={<TextLine text="> | Type a message" />}
+        error="Error: Permission denied"
+      >
+        <TextLine text="ready" />
+      </AppShell>
+    );
+
+    const frame = lastFrame() ?? "";
+    const errorLine = frame
+      .split("\n")
+      .find((line) => line.includes("Permission denied")) ?? "";
+
+    expect(errorLine).toContain("error · Permission denied");
+    expect(errorLine).not.toContain("Error: Permission denied");
+    expect(displayWidth(errorLine)).toBeLessThanOrEqual(47);
   });
 
   it("renders a structured worker interface with header, full-width content, input, and status", () => {
