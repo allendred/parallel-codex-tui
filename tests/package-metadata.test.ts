@@ -157,6 +157,8 @@ describe("package metadata", () => {
     expect(readme).toContain("reports the loaded TUI theme and color override values");
     expect(readme).toContain("including any temporary `--theme` override");
     expect(readme).toContain('OPENAI_API_KEY = "{env:OPENAI_API_KEY}"');
+    expect(readme).toContain("In chat, press `Ctrl+W` to open worker logs");
+    expect(readme).toContain("In worker-log views, scroll with the mouse wheel or PageUp/PageDown");
     expect(readme).toContain("In chat or worker-log views, press `Ctrl+O`");
     expect(readme).toContain("parallel-codex-tui --help");
     expect(readme).toContain("parallel-codex-tui --version");
