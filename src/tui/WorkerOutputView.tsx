@@ -3836,6 +3836,9 @@ export function workerOutputLineTheme(kind: WorkerOutputLineKind): WorkerOutputL
   if (kind === "section") {
     return { backgroundColor: TUI_THEME.rail, color: TUI_THEME.warning };
   }
+  if (kind === "content" || kind === "list" || kind === "list-detail" || kind === "ordered-list" || kind === "task") {
+    return { backgroundColor: TUI_THEME.surface, color: TUI_THEME.text };
+  }
   if (kind === "heading") {
     return { backgroundColor: TUI_THEME.surface, bold: true, color: TUI_THEME.text };
   }
@@ -3846,7 +3849,7 @@ export function workerOutputLineTheme(kind: WorkerOutputLineKind): WorkerOutputL
     return { backgroundColor: TUI_THEME.rail, color: TUI_THEME.text };
   }
   if (kind === "rule") {
-    return { color: TUI_THEME.muted, dimColor: true };
+    return { backgroundColor: TUI_THEME.surface, color: TUI_THEME.muted, dimColor: true };
   }
   if (kind === "blank") {
     return { backgroundColor: TUI_THEME.surface };

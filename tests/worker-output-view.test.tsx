@@ -6,6 +6,7 @@ import { render } from "ink-testing-library";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   WorkerOutputView,
+  type WorkerOutputLineKind,
   workerOutputBodyDisplayLines,
   workerOutputCodeDisplayLines,
   workerOutputDiffColumns,
@@ -28,6 +29,36 @@ import { configureTuiTheme, resetTuiTheme, TUI_THEME_PRESETS } from "../src/tui/
 afterEach(() => {
   resetTuiTheme();
 });
+
+const WORKER_OUTPUT_LINE_KINDS = [
+  "group",
+  "section",
+  "content",
+  "blank",
+  "heading",
+  "list",
+  "list-detail",
+  "ordered-list",
+  "task",
+  "quote",
+  "table",
+  "rule",
+  "code",
+  "source-line",
+  "summary",
+  "json",
+  "json-message",
+  "command",
+  "success",
+  "error",
+  "diff-file",
+  "diff-summary",
+  "diff-hunk",
+  "diff-context",
+  "diff-meta",
+  "diff-add",
+  "diff-remove"
+] as const satisfies readonly WorkerOutputLineKind[];
 
 describe("WorkerOutputView", () => {
   it("themes fallback empty log text with the active surface", () => {
@@ -3189,6 +3220,12 @@ describe("WorkerOutputView", () => {
     expect(workerOutputLineTheme("diff-context")).toEqual({ backgroundColor: theme.surface, color: theme.muted });
     expect(workerOutputLineTheme("code").backgroundColor).toBe(theme.rail);
     expect(workerOutputLineTheme("json")).toMatchObject({ backgroundColor: theme.rail, color: theme.accent });
+    expect(workerOutputLineTheme("content")).toEqual({ backgroundColor: theme.surface, color: theme.text });
+    expect(workerOutputLineTheme("list")).toEqual({ backgroundColor: theme.surface, color: theme.text });
+    expect(workerOutputLineTheme("list-detail")).toEqual({ backgroundColor: theme.surface, color: theme.text });
+    expect(workerOutputLineTheme("ordered-list")).toEqual({ backgroundColor: theme.surface, color: theme.text });
+    expect(workerOutputLineTheme("task")).toEqual({ backgroundColor: theme.surface, color: theme.text });
+    expect(workerOutputLineTheme("rule")).toEqual({ backgroundColor: theme.surface, color: theme.muted, dimColor: true });
     expect(workerOutputLineTheme("source-line").backgroundColor).toBe(theme.surface);
     expect(workerOutputLineTheme("blank").backgroundColor).toBe(theme.surface);
     expect(workerOutputLineFillTheme("group")).toBe(theme.chrome);
@@ -3198,7 +3235,11 @@ describe("WorkerOutputView", () => {
     expect(workerOutputLineFillTheme("diff-file")).toBe(theme.surface);
     expect(workerOutputLineFillTheme("diff-summary")).toBe(theme.surface);
     expect(workerOutputLineFillTheme("diff-context")).toBe(theme.surface);
-    expect(workerOutputLineFillTheme("content")).toBeNull();
+    expect(workerOutputLineFillTheme("content")).toBe(theme.surface);
+    expect(workerOutputLineFillTheme("rule")).toBe(theme.surface);
+    for (const kind of WORKER_OUTPUT_LINE_KINDS) {
+      expect(workerOutputLineFillTheme(kind), `${kind} should not fall through to the terminal background`).not.toBeNull();
+    }
   });
 
   it("keeps styled log rows free of table gutters", () => {
