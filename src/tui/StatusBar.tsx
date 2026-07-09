@@ -417,8 +417,8 @@ function colorForTone(tone: StatusTone | undefined): TextProps["color"] {
 }
 
 function valueColorForTone(tone: StatusTone | undefined): TextProps["color"] {
-  if (tone === "fail") {
-    return TUI_THEME.danger;
+  if (tone === "run" || tone === "done" || tone === "fail" || tone === "wait") {
+    return colorForTone(tone);
   }
   return undefined;
 }

@@ -65,14 +65,14 @@ theme = "codex" # codex, graphite, paper
 [ui.colors]
 # Optional color overrides. Values can be Chalk color names,
 # #rgb/#rrggbb, rgb(r,g,b), or ansi256(0..255).
-# chrome = "ansi256(23)"
-# surface = "ansi256(234)"
-# rail = "ansi256(236)"
+# chrome = "ansi256(17)"
+# surface = "ansi256(235)"
+# rail = "ansi256(238)"
 # successSurface = "ansi256(22)"
 # dangerSurface = "ansi256(52)"
-# text = "ansi256(254)"
-# muted = "ansi256(246)"
-# accent = "ansi256(87)"
-# warning = "ansi256(221)"
-# success = "ansi256(120)"
+# text = "ansi256(255)"
+# muted = "ansi256(250)"
+# accent = "ansi256(45)"
+# warning = "ansi256(220)"
+# success = "ansi256(114)"
 # danger = "ansi256(203)"

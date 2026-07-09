@@ -64,7 +64,7 @@ describe("InputBar", () => {
 
   it("shows task shortcuts in the empty chat prompt once workers exist", () => {
     expect(chatPlaceholderDisplayValue(80, { hasWorkers: true })).toBe("Type a message · ^W logs · Tab worker · ^O attach");
-    expect(chatPlaceholderDisplayValue(42, { hasWorkers: true })).toBe("Message · ^W logs · ^O attach");
+    expect(chatPlaceholderDisplayValue(42, { hasWorkers: true })).toBe("Message · ^W logs · Tab · ^O attach");
     expect(chatPlaceholderDisplayValue(30, { hasWorkers: true })).toBe("Message · ^W · ^O");
     expect(chatPlaceholderDisplayValue(20, { hasWorkers: true })).toBe("msg · ^W · ^O");
     expect(chatPlaceholderDisplayValue(19, { hasWorkers: true })).toBe("msg · ^W · ^O");

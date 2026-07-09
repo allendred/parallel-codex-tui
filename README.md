@@ -103,10 +103,10 @@ showStatusBar = true
 autoOpenFailedWorker = true
 
 [ui.colors]
-accent = "ansi256(87)"
-chrome = "ansi256(23)"
-rail = "ansi256(236)"
-surface = "ansi256(234)"
+accent = "ansi256(45)"
+chrome = "ansi256(17)"
+rail = "ansi256(238)"
+surface = "ansi256(235)"
 ```
 
 Set `showStatusBar = false` to hide the bottom runtime status line and give that row back to the main content area.

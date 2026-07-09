@@ -129,6 +129,13 @@ describe("CLI worker layout smoke", () => {
       expect(snapshot).toContain("done 1");
       expect(snapshot).toContain("@ critic/mock");
       expect(statusLine?.chunks.some((chunk) => chunk.style.backgroundColor === TUI_THEME_PRESETS.codex.rail)).toBe(true);
+      const successStatusText = statusLine?.chunks
+        .filter((chunk) => chunk.style.color === TUI_THEME_PRESETS.codex.success)
+        .map((chunk) => chunk.text)
+        .join("") ?? "";
+      expect(successStatusText).toContain("done");
+      expect(successStatusText).toContain("1");
+      expect(successStatusText).toContain("critic/mock");
       expect(displayWidth(statusLineText)).toBe(139);
       expect(snapshot).not.toContain("Type a message");
 
@@ -307,7 +314,7 @@ describe("CLI worker layout smoke", () => {
       child.write("\x1b");
       await waitForScreenText(() => screenWrites, screen, "^W logs");
       const chatSnapshot = screen.snapshot();
-      expect(chatSnapshot).toContain("> | Message · ^W logs · ^O attach");
+      expect(chatSnapshot).toContain("> | Message · ^W logs · Tab · ^O attach");
       expect(chatSnapshot).not.toContain("@ critic/mock");
       expect(Math.max(...chatSnapshot.split("\n").map((line) => line.length))).toBeLessThanOrEqual(42);
     } finally {

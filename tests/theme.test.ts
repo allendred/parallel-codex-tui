@@ -27,28 +27,28 @@ describe("TUI theme", () => {
     expect(TUI_THEME_NAMES.every((name) => Object.isFrozen(TUI_THEME_PRESETS[name]))).toBe(true);
     expect(Object.keys(TUI_THEME_PRESETS)).toEqual(["codex", "graphite", "paper"]);
     expect(resolveTuiTheme({ theme: "codex" })).toMatchObject({
-      chrome: "ansi256(23)",
-      surface: "ansi256(234)",
-      rail: "ansi256(236)",
-      text: "ansi256(254)",
-      muted: "ansi256(246)",
-      accent: "ansi256(87)"
+      chrome: "ansi256(17)",
+      surface: "ansi256(235)",
+      rail: "ansi256(238)",
+      text: "ansi256(255)",
+      muted: "ansi256(250)",
+      accent: "ansi256(45)"
     });
     expect(resolveTuiTheme({ theme: "graphite" })).toMatchObject({
-      chrome: "ansi256(238)",
-      surface: "ansi256(232)",
-      rail: "ansi256(235)",
-      text: "ansi256(254)",
-      muted: "ansi256(247)",
-      accent: "ansi256(117)"
+      chrome: "ansi256(236)",
+      surface: "ansi256(233)",
+      rail: "ansi256(238)",
+      text: "ansi256(255)",
+      muted: "ansi256(248)",
+      accent: "ansi256(75)"
     });
     expect(resolveTuiTheme({ theme: "paper" })).toMatchObject({
-      chrome: "ansi256(255)",
+      chrome: "ansi256(254)",
       surface: "ansi256(231)",
-      rail: "ansi256(254)",
+      rail: "ansi256(255)",
       text: "ansi256(235)",
-      muted: "ansi256(243)",
-      accent: "ansi256(27)"
+      muted: "ansi256(244)",
+      accent: "ansi256(25)"
     });
   });
 
@@ -56,21 +56,21 @@ describe("TUI theme", () => {
     expect(resolveTuiTheme({ theme: "codex" })).toMatchObject({
       successSurface: "ansi256(22)",
       dangerSurface: "ansi256(52)",
-      warning: "ansi256(221)",
-      success: "ansi256(120)",
+      warning: "ansi256(220)",
+      success: "ansi256(114)",
       danger: "ansi256(203)"
     });
     expect(resolveTuiTheme({ theme: "graphite" })).toMatchObject({
       successSurface: "ansi256(22)",
       dangerSurface: "ansi256(52)",
-      warning: "ansi256(222)",
+      warning: "ansi256(221)",
       success: "ansi256(150)",
       danger: "ansi256(203)"
     });
     expect(resolveTuiTheme({ theme: "paper" })).toMatchObject({
       successSurface: "ansi256(194)",
       dangerSurface: "ansi256(224)",
-      warning: "ansi256(136)",
+      warning: "ansi256(130)",
       success: "ansi256(28)",
       danger: "ansi256(160)"
     });
@@ -82,6 +82,19 @@ describe("TUI theme", () => {
 
   it("normalizes theme names before selecting a palette", () => {
     expect(resolveTuiTheme({ theme: "  paper  " }).text).toBe("ansi256(235)");
+  });
+
+  it("keeps bundled palette surface layers visually separated", () => {
+    for (const name of TUI_THEME_NAMES) {
+      const theme = resolveTuiTheme({ theme: name });
+
+      expect(new Set([theme.chrome, theme.surface, theme.rail]).size).toBe(3);
+      expect(theme.successSurface).not.toBe(theme.surface);
+      expect(theme.dangerSurface).not.toBe(theme.surface);
+      expect(theme.accent).not.toBe(theme.muted);
+      expect(theme.warning).not.toBe(theme.success);
+      expect(theme.success).not.toBe(theme.danger);
+    }
   });
 
   it("provides one shared theme-name normalizer", () => {
