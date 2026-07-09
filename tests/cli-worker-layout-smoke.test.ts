@@ -301,6 +301,7 @@ describe("CLI worker layout smoke", () => {
 
     try {
       await waitForText(chunks, "actor failure details");
+      await waitForScreenText(() => screenWrites, screen, "workers 2");
       await screenWrites;
 
       const snapshot = screen.snapshot();

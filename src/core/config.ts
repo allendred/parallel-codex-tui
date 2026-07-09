@@ -30,7 +30,7 @@ const RolePromptConfigSchema = z.object({
 
 const TuiColorValueSchema = z.string().min(1).refine(isTuiThemeColorValue, {
   message: "Invalid TUI color value. Use a Chalk color name, #rgb/#rrggbb, rgb(r,g,b), or ansi256(0..255)."
-});
+}).transform((value) => value.trim());
 
 const UiColorOverridesSchema = z.object({
   chrome: TuiColorValueSchema.optional(),

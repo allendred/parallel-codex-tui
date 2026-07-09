@@ -99,6 +99,26 @@ describe("config", () => {
     });
   });
 
+  it("normalizes TUI color override values during config load", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pct-config-theme-colors-normalized-"));
+
+    await writeText(
+      join(root, ".parallel-codex", "config.toml"),
+      [
+        "[ui.colors]",
+        'chrome = "  ansi256(238)  "',
+        'accent = "  magenta  "'
+      ].join("\n")
+    );
+
+    const config = await loadConfig(root);
+
+    expect(config.ui.colors).toEqual({
+      chrome: "ansi256(238)",
+      accent: "magenta"
+    });
+  });
+
   it("applies a transient UI theme override without mutating loaded config", async () => {
     const root = await mkdtemp(join(tmpdir(), "pct-config-theme-override-"));
     const config = await loadConfig(root);
