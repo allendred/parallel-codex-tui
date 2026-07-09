@@ -82,7 +82,7 @@ export function AppShell({
         <Box>
           <Text {...errorTheme}> </Text>
           <Text {...errorTheme}>{errorRow.text}</Text>
-          <Text {...errorTheme}>{" ".repeat(errorRow.trailingWidth + 1)}</Text>
+          <Text {...errorTheme}>{" ".repeat(errorRow.trailingWidth)}</Text>
         </Box>
       ) : null}
     </Box>

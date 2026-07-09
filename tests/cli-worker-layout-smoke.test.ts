@@ -274,6 +274,56 @@ describe("CLI worker layout smoke", () => {
     }
   }, 10000);
 
+  it("keeps attach error rows aligned with the reserved terminal width", async () => {
+    const workspace = await mkdtemp(join(tmpdir(), "pct-cli-worker-attach-error-width-"));
+    const taskId = "task-20260705-000000-attach-error-width";
+    const taskDir = join(workspace, ".parallel-codex", "sessions", taskId);
+    const workerDir = join(taskDir, "critic-mock");
+    const chunks: string[] = [];
+    const screen = new NativeTerminalScreen({ cols: 80, rows: 16, scrollback: 1000 });
+    let screenWrites = Promise.resolve();
+
+    await mkdir(workerDir, { recursive: true });
+    await writeTaskFiles({ workspace, taskId, taskDir, workerDir });
+
+    const child = spawn(
+      process.execPath,
+      ["./node_modules/.bin/tsx", "src/cli.tsx", "--workspace", workspace, "--task", taskId],
+      {
+        cwd: process.cwd(),
+        cols: 80,
+        rows: 16,
+        name: "xterm-256color",
+        env: {
+          ...process.env,
+          TERM: "xterm-256color"
+        }
+      }
+    );
+
+    child.onData((chunk) => {
+      chunks.push(chunk);
+      screenWrites = screenWrites.then(() => screen.write(chunk));
+    });
+
+    try {
+      await waitForScreenText(() => screenWrites, screen, "ready");
+      child.write("\x0f");
+      await waitForScreenText(() => screenWrites, screen, "No native session recorded");
+
+      const lines = screen.styledSnapshotLines();
+      const headerLineText = lines[0]?.chunks.map((chunk) => chunk.text).join("") ?? "";
+      const errorLine = lines.find((line) => line.chunks.map((chunk) => chunk.text).join("").includes("No native session recorded"));
+      const errorLineText = errorLine?.chunks.map((chunk) => chunk.text).join("") ?? "";
+
+      expect(errorLineText).toContain("No native session recorded");
+      expect(displayWidth(errorLineText)).toBe(displayWidth(headerLineText));
+      expect(errorLine?.chunks.every((chunk) => chunk.style.backgroundColor === TUI_THEME_PRESETS.codex.dangerSurface)).toBe(true);
+    } finally {
+      child.kill("SIGTERM");
+    }
+  }, 10000);
+
   it("fills short worker code block rows with the themed rail", async () => {
     const workspace = await mkdtemp(join(tmpdir(), "pct-cli-worker-code-fill-"));
     const taskId = "task-20260705-000000-code-fill";

@@ -20,6 +20,31 @@ describe("AppShell", () => {
     });
   });
 
+  it("keeps error rows inside the same reserved terminal width as other chrome rows", () => {
+    const { lastFrame } = render(
+      <AppShell
+        view="chat"
+        cwd="/tmp/project"
+        taskId="task-20260710-000000-error"
+        statusText="workers 1"
+        terminalWidth={80}
+        input={<TextLine text="> | Type a message · ^W logs · Tab worker · ^O attach" />}
+        error="No native session recorded for Critic (mock). Run the worker once before attaching."
+      >
+        <TextLine text="ready" />
+      </AppShell>
+    );
+
+    const frame = lastFrame() ?? "";
+    const errorLine = frame
+      .split("\n")
+      .find((line) => line.includes("No native session recorded")) ?? "";
+
+    expect(errorLine).toContain("No native session recorded");
+    expect(displayWidth(errorLine)).toBe(79);
+    expect(Math.max(...frame.split("\n").map((line) => displayWidth(line)))).toBeLessThanOrEqual(79);
+  });
+
   it("renders a structured worker interface with header, full-width content, input, and status", () => {
     const { lastFrame } = render(
       <AppShell
