@@ -1,6 +1,7 @@
 import React from "react";
-import { Box, Text } from "ink";
+import { Box, Text, type TextProps } from "ink";
 import type { TerminalLine, TerminalTextStyle } from "./terminal-screen.js";
+import { TUI_THEME } from "./theme.js";
 
 export interface TerminalOutputProps {
   lines: TerminalLine[];
@@ -8,7 +9,7 @@ export interface TerminalOutputProps {
 
 export function TerminalOutput({ lines }: TerminalOutputProps) {
   if (lines.length === 0) {
-    return <Text>(no output yet)</Text>;
+    return <Text {...terminalOutputEmptyTheme()}>(no output yet)</Text>;
   }
 
   return (
@@ -16,9 +17,9 @@ export function TerminalOutput({ lines }: TerminalOutputProps) {
       {lines.map((line, index) => (
         <Text key={index}>
           {line.chunks.length === 0
-            ? " "
+            ? <Text {...terminalOutputBlankLineTheme()}> </Text>
             : line.chunks.map((chunk, chunkIndex) => (
-                <Text key={chunkIndex} {...textProps(chunk.style)}>
+                <Text key={chunkIndex} {...terminalOutputTextProps(chunk.style)}>
                   {chunk.text}
                 </Text>
               ))}
@@ -28,7 +29,23 @@ export function TerminalOutput({ lines }: TerminalOutputProps) {
   );
 }
 
-function textProps(style: TerminalTextStyle) {
+type TerminalOutputTheme = Pick<TextProps, "backgroundColor" | "bold" | "color" | "dimColor" | "inverse" | "italic" | "strikethrough" | "underline">;
+
+export function terminalOutputEmptyTheme(): TerminalOutputTheme {
+  return {
+    backgroundColor: TUI_THEME.surface,
+    color: TUI_THEME.muted,
+    dimColor: true
+  };
+}
+
+export function terminalOutputBlankLineTheme(): TerminalOutputTheme {
+  return {
+    backgroundColor: TUI_THEME.surface
+  };
+}
+
+export function terminalOutputTextProps(style: TerminalTextStyle): TerminalOutputTheme {
   return {
     backgroundColor: style.backgroundColor,
     bold: style.bold,
