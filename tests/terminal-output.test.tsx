@@ -22,6 +22,10 @@ describe("TerminalOutput theme helpers", () => {
     expect(terminalOutputBlankLineTheme()).toEqual({
       backgroundColor: TUI_THEME_PRESETS.paper.surface
     });
+    expect(terminalOutputTextProps({})).toMatchObject({
+      backgroundColor: TUI_THEME_PRESETS.paper.surface,
+      color: TUI_THEME_PRESETS.paper.text
+    });
     expect(terminalOutputTextProps({
       backgroundColor: "ansi256(4)",
       color: "ansi256(2)",

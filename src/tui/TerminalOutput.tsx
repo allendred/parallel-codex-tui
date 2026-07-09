@@ -47,9 +47,9 @@ export function terminalOutputBlankLineTheme(): TerminalOutputTheme {
 
 export function terminalOutputTextProps(style: TerminalTextStyle): TerminalOutputTheme {
   return {
-    backgroundColor: style.backgroundColor,
+    backgroundColor: style.backgroundColor ?? TUI_THEME.surface,
     bold: style.bold,
-    color: style.color,
+    color: style.color ?? TUI_THEME.text,
     dimColor: style.dimColor,
     inverse: style.inverse || style.cursor,
     italic: style.italic,
