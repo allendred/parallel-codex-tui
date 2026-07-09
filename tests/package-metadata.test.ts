@@ -149,8 +149,8 @@ describe("package metadata", () => {
     expect(readme).toContain("GitHub Actions runs CI on pushes and pull requests to `main`");
     expect(readme).toContain("Configure npm Trusted Publishing");
     expect(readme).toContain("add an `NPM_TOKEN` repository secret");
-    expect(readme).toContain("git tag v0.1.1");
-    expect(readme).toContain("git push origin v0.1.1");
+    expect(readme).toContain("git tag v0.1.2");
+    expect(readme).toContain("git push origin v0.1.2");
     expect(readme).toContain("The release tag must match `package.json`");
   });
 
@@ -184,6 +184,7 @@ describe("package metadata", () => {
     expect(workflow).toContain("workflow_dispatch:");
     expect(workflow).toContain("tags:");
     expect(workflow).toContain("- \"v*\"");
+    expect(workflow).toContain("ref: ${{ github.event_name == 'workflow_dispatch' && inputs.version || github.ref }}");
     expect(workflow).toContain("id-token: write");
     expect(workflow).toContain('node-version: "26.x"');
     expect(workflow).toContain("npm run typecheck");

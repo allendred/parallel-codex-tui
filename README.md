@@ -174,11 +174,11 @@ GitHub Actions runs CI on pushes and pull requests to `main`.
 Configure npm Trusted Publishing for `.github/workflows/release.yml`. Alternatively, add an `NPM_TOKEN` repository secret with npm publish permission. To publish a release, update `package.json` and `src/version.ts` to the same version, then push a matching tag:
 
 ```bash
-git tag v0.1.1
-git push origin v0.1.1
+git tag v0.1.2
+git push origin v0.1.2
 ```
 
-You can also run the Release workflow manually and enter the same tag value. The release tag must match `package.json`; for example, package version `0.1.1` requires tag `v0.1.1`.
+You can also run the Release workflow manually and enter the same tag value. The release tag must match `package.json`; for example, package version `0.1.2` requires tag `v0.1.2`.
 
 ## Publishing Hygiene
 
