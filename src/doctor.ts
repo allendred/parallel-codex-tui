@@ -2,6 +2,7 @@ import { constants } from "node:fs";
 import { access } from "node:fs/promises";
 import { delimiter, join } from "node:path";
 import { prepareAppRoot } from "./core/app-root.js";
+import { formatConfigErrorMessage } from "./core/config-errors.js";
 import { configPath, loadConfig } from "./core/config.js";
 import { pathExists } from "./core/file-store.js";
 import { prepareWorkspace } from "./core/workspace.js";
@@ -46,7 +47,7 @@ export async function runDoctor(appRoot: string, workspaceRoot: string, env: Nod
     lines.push(`theme: ok (${config.ui.theme}; ${themeOverrideSummary(config.ui.colors)})`);
   } catch (error) {
     ok = false;
-    lines.push(`config: invalid (${localConfigPath}; ${(error as Error).message})`);
+    lines.push(`config: invalid (${localConfigPath}; ${formatConfigErrorMessage(error)})`);
     return {
       ok,
       text: `${lines.join("\n")}\n`

@@ -238,6 +238,32 @@ describe("CLI doctor", () => {
     expect(result.stdout).not.toContain("claude: missing");
   });
 
+  it("prints config paths for invalid TUI color values", async () => {
+    const appRoot = await mkdtemp(join(tmpdir(), "pct-cli-doctor-invalid-theme-color-"));
+
+    await mkdir(join(appRoot, ".parallel-codex"), { recursive: true });
+    await writeFile(
+      join(appRoot, ".parallel-codex", "config.toml"),
+      [
+        "[ui.colors]",
+        'accent = "cyan-ish"',
+        'chrome = "ansi256(999)"'
+      ].join("\n"),
+      "utf8"
+    );
+
+    const result = await runCli(["--app-root", appRoot, "--doctor"]);
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr).toBe("");
+    expect(result.stdout).toContain("config: invalid");
+    expect(result.stdout).toContain("ui.colors.accent: Invalid TUI color value");
+    expect(result.stdout).toContain("ui.colors.chrome: Invalid TUI color value");
+    expect(result.stdout).not.toContain("ZodError");
+    expect(result.stdout).not.toContain("\"path\"");
+    expect(result.stdout).not.toContain("at ");
+  });
+
   it("reports missing worker model environment variables before workers start", async () => {
     const root = await mkdtemp(join(tmpdir(), "pct-cli-doctor-model-env-"));
     const binDir = join(root, "bin");

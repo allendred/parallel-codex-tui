@@ -6,6 +6,7 @@ import { parseCliArgs, validateCliArgs } from "./cli-args.js";
 import { selectWorkspaceForCli } from "./cli-workspace.js";
 import { createRuntime } from "./bootstrap.js";
 import { prepareAppRoot } from "./core/app-root.js";
+import { formatConfigErrorMessage } from "./core/config-errors.js";
 import { configPath, withUiThemeOverride, writeDefaultConfig } from "./core/config.js";
 import { pathExists } from "./core/file-store.js";
 import { runDoctor } from "./doctor.js";
@@ -86,26 +87,13 @@ function canRenderInteractiveTui(): boolean {
 }
 
 function formatStartupError(error: unknown): string {
-  const message = formatStartupErrorMessage(error);
+  const message = isConfigStartupError(error)
+    ? formatConfigErrorMessage(error)
+    : error instanceof Error ? error.message : String(error);
   if (isConfigStartupError(error)) {
     return `Config error: ${message}\nRun parallel-codex-tui --doctor for details.`;
   }
   return `Startup error: ${message}`;
-}
-
-function formatStartupErrorMessage(error: unknown): string {
-  if (error instanceof ZodError) {
-    return error.issues
-      .map((issue) => ({
-        message: issue.message,
-        path: issue.path.map(String).join(".") || "<config>"
-      }))
-      .sort((left, right) => left.path.localeCompare(right.path))
-      .map((issue) => `${issue.path}: ${issue.message}`)
-      .join("\n");
-  }
-
-  return error instanceof Error ? error.message : String(error);
 }
 
 function isConfigStartupError(error: unknown): boolean {
