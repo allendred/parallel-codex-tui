@@ -60,6 +60,7 @@ export interface ChatDisplayLine {
 
 type ChatLineTheme = Pick<TextProps, "backgroundColor" | "color" | "dimColor">;
 type ChatEmptyStateTheme = Pick<TextProps, "backgroundColor" | "bold" | "color">;
+type ChatViewportBlankLineTheme = Pick<TextProps, "backgroundColor">;
 type NativeAttachStartingTheme = Pick<TextProps, "backgroundColor" | "color" | "dimColor">;
 
 export function App({
@@ -647,16 +648,21 @@ export function ChatView({
 }) {
   const height = viewportHeight ? Math.max(1, viewportHeight) : undefined;
   if (messages.length === 0) {
+    const spacerLines = chatViewportSpacerLineCount(1, height);
+
     return (
-      <Box flexDirection="column" height={height} justifyContent={height ? "flex-end" : undefined}>
+      <Box flexDirection="column" height={height}>
+        <ChatViewportSpacerLines count={spacerLines} terminalWidth={terminalWidth} />
         <ChatEmptyState cwd={cwd} activeTaskId={activeTaskId} terminalWidth={terminalWidth} />
       </Box>
     );
   }
   const lines = chatMessageDisplayLines(messages, terminalWidth, height ?? 12);
+  const spacerLines = chatViewportSpacerLineCount(lines.length, height);
 
   return (
-    <Box flexDirection="column" height={height} justifyContent={height ? "flex-end" : undefined}>
+    <Box flexDirection="column" height={height}>
+      <ChatViewportSpacerLines count={spacerLines} terminalWidth={terminalWidth} />
       {lines.map((line, index) => (
         <Text
           key={`${line.from}-${index}`}
@@ -683,6 +689,32 @@ export function chatMessageDisplayLines(messages: Message[], terminalWidth: numb
   const contentWidth = Math.max(8, terminalWidth - 2);
   const rendered = messages.flatMap((message) => chatSingleMessageDisplayLines(message, contentWidth));
   return rendered.slice(-maxLines);
+}
+
+export function chatViewportBlankLineTheme(): ChatViewportBlankLineTheme {
+  return {
+    backgroundColor: TUI_THEME.surface
+  };
+}
+
+function ChatViewportSpacerLines({ count, terminalWidth }: { count: number; terminalWidth: number }) {
+  return (
+    <>
+      {Array.from({ length: count }, (_, index) => (
+        <Text key={`chat-spacer-${index}`} {...chatViewportBlankLineTheme()}>
+          {" ".repeat(chatViewportBlankLineWidth(terminalWidth))}
+        </Text>
+      ))}
+    </>
+  );
+}
+
+function chatViewportSpacerLineCount(contentLines: number, viewportHeight: number | undefined): number {
+  return viewportHeight ? Math.max(0, viewportHeight - contentLines) : 0;
+}
+
+function chatViewportBlankLineWidth(terminalWidth: number): number {
+  return Math.max(1, Math.max(8, terminalWidth - 2));
 }
 
 function chatSingleMessageDisplayLines(message: Message, contentWidth: number): ChatDisplayLine[] {

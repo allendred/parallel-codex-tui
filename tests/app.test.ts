@@ -1,7 +1,7 @@
 import React from "react";
 import { render } from "ink-testing-library";
 import { afterEach, describe, expect, it } from "vitest";
-import { appContentHeight, chatEmptyStateTheme, chatLineTheme, chatMessageDisplayLines, ChatView, nativeAttachExitLine, nativeAttachStartingTheme, nativeAttachTerminalColumns, nativeAttachTitleDisplay, nativeTerminalScrollDisplay } from "../src/tui/App.js";
+import { appContentHeight, chatEmptyStateTheme, chatLineTheme, chatMessageDisplayLines, chatViewportBlankLineTheme, ChatView, nativeAttachExitLine, nativeAttachStartingTheme, nativeAttachTerminalColumns, nativeAttachTitleDisplay, nativeTerminalScrollDisplay } from "../src/tui/App.js";
 import { displayWidth } from "../src/tui/display-width.js";
 import { configureTuiTheme, resetTuiTheme, TUI_THEME_PRESETS } from "../src/tui/theme.js";
 
@@ -119,6 +119,14 @@ describe("ChatView", () => {
     });
   });
 
+  it("themes chat viewport spacer rows with the active surface", () => {
+    configureTuiTheme({ theme: "paper" });
+
+    expect(chatViewportBlankLineTheme()).toEqual({
+      backgroundColor: TUI_THEME_PRESETS.paper.surface
+    });
+  });
+
   it("uses active theme colors for chat message roles", () => {
     configureTuiTheme({ theme: "paper" });
 
@@ -173,7 +181,7 @@ describe("ChatView", () => {
     const lines = (lastFrame() ?? "").split("\n");
 
     expect(lines).toHaveLength(6);
-    expect(lines.slice(0, 5)).toEqual(["", "", "", "", ""]);
+    expect(lines.slice(0, 5).every((line) => line.trim() === "")).toBe(true);
     expect(lines[5]).toBe("ready · tetris · 093326-1980");
   });
 
@@ -194,7 +202,7 @@ describe("ChatView", () => {
     const lines = (lastFrame() ?? "").split("\n");
 
     expect(lines).toHaveLength(5);
-    expect(lines.slice(0, 3)).toEqual(["", "", ""]);
+    expect(lines.slice(0, 3).every((line) => line.trim() === "")).toBe(true);
     expect(lines.slice(-2)).toEqual(["> 你好", "继续优化中。"]);
   });
 
