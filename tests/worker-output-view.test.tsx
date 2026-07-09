@@ -151,6 +151,53 @@ describe("WorkerOutputView", () => {
     }
   });
 
+  it("renders jsonl title, details, and recommendations without leaking raw objects", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pct-worker-output-jsonl-details-"));
+    const workerDir = join(root, "critic-mock");
+
+    await mkdir(workerDir, { recursive: true });
+    await writeFile(
+      join(workerDir, "critic-findings.jsonl"),
+      [
+        "{",
+        "\"id\":\"C-018\",",
+        "\"severity\":\"medium\",",
+        "\"file\":\"src/workers/native-attach.ts\",",
+        "\"line\":\"245\",",
+        "\"title\":\"Attach cleanup leaves stale sessions\",",
+        "\"details\":[\"Close after pty exit\",\"Fallback resumes wrong worker\"],",
+        "\"recommendation\":\"Clear native session id\"",
+        "}"
+      ].join("")
+    );
+    await writeFile(join(workerDir, "output.log"), "critic cli transcript\n");
+
+    const { lastFrame, unmount } = render(
+      <WorkerOutputView
+        title="Critic (mock) output"
+        role="critic"
+        logPath={join(workerDir, "output.log")}
+        height={16}
+      />
+    );
+
+    try {
+      await waitForFrame(lastFrame, "Clear native session id");
+
+      const frame = lastFrame() ?? "";
+      expect(frame).toContain("[medium] C-018 · src/workers/native-attach.ts:245");
+      expect(frame).toContain("Attach cleanup leaves stale sessions");
+      expect(frame).toContain("detail · Close after pty exit");
+      expect(frame).toContain("detail · Fallback resumes wrong worker");
+      expect(frame).toContain("fix · Clear native session id");
+      expect(frame).not.toContain("\"details\"");
+      expect(frame).not.toContain("\"recommendation\"");
+      expect(frame).not.toContain("{\"id\"");
+    } finally {
+      unmount();
+    }
+  });
+
   it("keeps judge worker briefs out of the primary log view", async () => {
     const root = await mkdtemp(join(tmpdir(), "pct-worker-output-judge-briefs-"));
     const workerDir = join(root, "judge-mock");

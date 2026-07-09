@@ -3714,14 +3714,14 @@ function renderJsonLine(line: string): RenderLine[] {
         kind: "json",
         text: summary.meta
       },
-      ...(summary.message ? [{ kind: "json-message" as const, text: summary.message }] : [])
+      ...summary.messages.map((message) => ({ kind: "json-message" as const, text: message }))
     ];
   } catch {
     return [{ kind: "content", text: line }];
   }
 }
 
-function summarizeJsonRecord(value: Record<string, unknown>): { meta: string; message: string } {
+function summarizeJsonRecord(value: Record<string, unknown>): { meta: string; messages: string[] } {
   const state = stringField(value, "status") || stringField(value, "severity");
   const id = stringField(value, "id") || stringField(value, "finding_id") || stringField(value, "findingId");
   const to = stringField(value, "to");
@@ -3731,7 +3731,7 @@ function summarizeJsonRecord(value: Record<string, unknown>): { meta: string; me
   const line = numberLikeField(value, "line");
   const column = numberLikeField(value, "column") || numberLikeField(value, "col");
   const location = formatJsonRecordLocation(file, line, column);
-  const message = stringField(value, "message") || stringField(value, "summary") || JSON.stringify(value);
+  const messages = jsonRecordMessages(value);
   const marker = state ? `[${state}]` : "";
   const lead = [marker, id].filter(Boolean).join(" ");
   const details = [direction, location].filter(Boolean);
@@ -3740,13 +3740,52 @@ function summarizeJsonRecord(value: Record<string, unknown>): { meta: string; me
     : [lead, ...details].filter(Boolean).join(" ");
   return {
     meta: meta || "json",
-    message
+    messages: messages.length > 0 ? messages : [JSON.stringify(value)]
   };
 }
 
 function stringField(value: Record<string, unknown>, key: string): string {
   const field = value[key];
   return typeof field === "string" ? field.trim() : "";
+}
+
+function jsonRecordMessages(value: Record<string, unknown>): string[] {
+  const primary = stringField(value, "message") || stringField(value, "summary");
+  if (primary) {
+    return [primary];
+  }
+  return [
+    ...textFragmentsField(value, "title"),
+    ...textFragmentsField(value, "detail").map((text) => `detail · ${text}`),
+    ...textFragmentsField(value, "details").map((text) => `detail · ${text}`),
+    ...textFragmentsField(value, "recommendation").map((text) => `fix · ${text}`)
+  ].filter(uniqueTextFragmentFilter());
+}
+
+function textFragmentsField(value: Record<string, unknown>, key: string): string[] {
+  return textFragmentsValue(value[key]);
+}
+
+function textFragmentsValue(value: unknown): string[] {
+  if (typeof value === "string") {
+    return value.trim() ? [value.trim()] : [];
+  }
+  if (Array.isArray(value)) {
+    return value.flatMap((item) => textFragmentsValue(item));
+  }
+  return [];
+}
+
+function uniqueTextFragmentFilter(): (value: string) => boolean {
+  const seen = new Set<string>();
+  return (value: string) => {
+    const normalized = value.toLowerCase();
+    if (!value || seen.has(normalized)) {
+      return false;
+    }
+    seen.add(normalized);
+    return true;
+  };
 }
 
 function numberLikeField(value: Record<string, unknown>, key: string): string {
