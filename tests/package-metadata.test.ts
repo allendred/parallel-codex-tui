@@ -175,6 +175,9 @@ describe("package metadata", () => {
     expect(workflow).toContain("npm pack --json");
     expect(workflow).toContain('PACKAGE_VERSION=$(node -p "require(\'./package.json\').version")');
     expect(workflow).toContain('if [ "v$PACKAGE_VERSION" != "$RELEASE_VERSION" ]; then');
+    expect(workflow).toContain("npm view \"parallel-codex-tui@$PACKAGE_VERSION\" version --json");
+    expect(workflow).toContain('published=$PUBLISHED');
+    expect(workflow).toContain("if: steps.npm.outputs.published != 'true'");
     expect(workflow).toContain("npm publish --access public");
     expect(workflow).toContain("softprops/action-gh-release@v2");
     expect(workflow).toContain("NPM_TOKEN");
