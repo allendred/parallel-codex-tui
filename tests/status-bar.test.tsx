@@ -1,10 +1,42 @@
 import React from "react";
 import { render } from "ink-testing-library";
 import { describe, expect, it } from "vitest";
-import { StatusBar } from "../src/tui/StatusBar.js";
+import { StatusBar, statusSegmentLabelTheme, statusSegmentValueTheme } from "../src/tui/StatusBar.js";
 import { displayWidth } from "../src/tui/display-width.js";
+import { TUI_THEME_PRESETS } from "../src/tui/theme.js";
 
 describe("StatusBar", () => {
+  it("keeps status labels quiet while values carry semantic emphasis", () => {
+    expect(statusSegmentLabelTheme("run")).toEqual({
+      backgroundColor: TUI_THEME_PRESETS.codex.rail,
+      color: TUI_THEME_PRESETS.codex.muted,
+      dimColor: true
+    });
+    expect(statusSegmentLabelTheme("fail")).toEqual({
+      backgroundColor: TUI_THEME_PRESETS.codex.rail,
+      color: TUI_THEME_PRESETS.codex.muted,
+      dimColor: true
+    });
+    expect(statusSegmentValueTheme("run")).toEqual({
+      backgroundColor: TUI_THEME_PRESETS.codex.rail,
+      color: TUI_THEME_PRESETS.codex.accent,
+      bold: true
+    });
+    expect(statusSegmentValueTheme("done")).toEqual({
+      backgroundColor: TUI_THEME_PRESETS.codex.rail,
+      color: TUI_THEME_PRESETS.codex.success
+    });
+    expect(statusSegmentValueTheme("fail")).toEqual({
+      backgroundColor: TUI_THEME_PRESETS.codex.rail,
+      color: TUI_THEME_PRESETS.codex.danger,
+      bold: true
+    });
+    expect(statusSegmentValueTheme("wait")).toEqual({
+      backgroundColor: TUI_THEME_PRESETS.codex.rail,
+      color: TUI_THEME_PRESETS.codex.warning
+    });
+  });
+
   it("renders readable status segments in roomy terminals", () => {
     const { lastFrame } = render(
       <StatusBar

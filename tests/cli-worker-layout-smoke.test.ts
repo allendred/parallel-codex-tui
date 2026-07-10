@@ -91,8 +91,7 @@ describe("CLI worker layout smoke", () => {
 
     try {
       await waitForScreenText(() => screenWrites, screen, "Type a message");
-      child.write("\x0f");
-      await waitForScreenText(() => screenWrites, screen, "No workers yet");
+      await openAttachError(child, () => screenWrites, screen, "No workers yet");
 
       const snapshot = screen.snapshot();
       expect(snapshot).toContain("No workers yet · start a complex task before attaching");
@@ -1156,6 +1155,21 @@ async function openWorkerLogs(
       return;
     }
     await waitForScreenText(screenWritesRef, screen, "^W logs");
+  }
+  await waitForScreenText(screenWritesRef, screen, expectedText);
+}
+
+async function openAttachError(
+  child: { write(data: string): void },
+  screenWritesRef: () => Promise<void>,
+  screen: NativeTerminalScreen,
+  expectedText: string
+): Promise<void> {
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    child.write("\x0f");
+    if (await tryWaitForScreenText(screenWritesRef, screen, expectedText, 20)) {
+      return;
+    }
   }
   await waitForScreenText(screenWritesRef, screen, expectedText);
 }
