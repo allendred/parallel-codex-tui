@@ -1402,9 +1402,65 @@ function isSingleFilePathListItem(trimmed: string): boolean {
 }
 
 function cleanProcessRenderLines(lines: RenderLine[]): RenderLine[] {
-  return dedupeCollapsedDiffSummaries(
-    removePatchDiffReadbackNoise(removeDiffAdjacentCodeSummaries(mergeSmokeStatusSuccessLines(lines)))
+  return dedupeSupersededChecklistSnapshots(
+    dedupeCollapsedDiffSummaries(
+      removePatchDiffReadbackNoise(removeDiffAdjacentCodeSummaries(mergeSmokeStatusSuccessLines(lines)))
+    )
   );
+}
+
+interface ChecklistSnapshot {
+  startIndex: number;
+  endIndex: number;
+  key: string;
+}
+
+function dedupeSupersededChecklistSnapshots(lines: RenderLine[]): RenderLine[] {
+  const snapshots: ChecklistSnapshot[] = [];
+
+  for (let index = 0; index < lines.length;) {
+    const firstItem = checklistSnapshotItem(lines[index]);
+    if (!firstItem) {
+      index += 1;
+      continue;
+    }
+
+    const items: string[] = [];
+    const startIndex = index;
+    while (index < lines.length) {
+      const item = checklistSnapshotItem(lines[index]);
+      if (!item) {
+        break;
+      }
+      items.push(item);
+      index += 1;
+    }
+    if (items.length >= 2) {
+      snapshots.push({ startIndex, endIndex: index, key: items.join("\n") });
+    }
+  }
+
+  const lastSnapshotByKey = new Map<string, ChecklistSnapshot>();
+  for (const snapshot of snapshots) {
+    lastSnapshotByKey.set(snapshot.key, snapshot);
+  }
+  const hidden = new Set<number>();
+  for (const snapshot of snapshots) {
+    if (lastSnapshotByKey.get(snapshot.key) === snapshot) {
+      continue;
+    }
+    for (let index = snapshot.startIndex; index < snapshot.endIndex; index += 1) {
+      hidden.add(index);
+    }
+  }
+  return hidden.size > 0 ? lines.filter((_line, index) => !hidden.has(index)) : lines;
+}
+
+function checklistSnapshotItem(line: RenderLine | undefined): string | null {
+  if (!line || (line.kind !== "content" && line.kind !== "success")) {
+    return null;
+  }
+  return line.text.trim().match(/^(?:✓|✔|→|•)\s+(.+)$/)?.[1]?.trim() ?? null;
 }
 
 function dedupeCollapsedDiffSummaries(lines: RenderLine[]): RenderLine[] {

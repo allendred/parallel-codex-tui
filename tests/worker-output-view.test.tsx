@@ -3293,6 +3293,70 @@ describe("WorkerOutputView", () => {
     }
   });
 
+  it("keeps only the latest state of an identical Codex checklist", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pct-worker-output-checklist-snapshots-"));
+    const workerDir = join(root, "judge-codex");
+    const items = [
+      "Inspect project structure",
+      "Draft requirements",
+      "Write task files",
+      "Verify task files"
+    ];
+
+    await mkdir(workerDir, { recursive: true });
+    await writeFile(
+      join(workerDir, "output.log"),
+      [
+        "codex",
+        "Starting the Judge handoff.",
+        `  ✓ ${items[0]}`,
+        `  → ${items[1]}`,
+        `  • ${items[2]}`,
+        `  • ${items[3]}`,
+        "exec",
+        "/bin/zsh -lc 'printf ready' in /tmp/project",
+        "succeeded in 1ms:",
+        "ready",
+        "codex",
+        "Independent verification remains visible.",
+        "  ✓ Run unit tests",
+        "  ✓ Run smoke tests",
+        "codex",
+        "Judge handoff is complete.",
+        ...items.map((item) => `  ✓ ${item}`)
+      ].join("\n")
+    );
+
+    const { lastFrame, unmount } = render(
+      <WorkerOutputView
+        title="Judge (codex) output"
+        role="judge"
+        logPath={join(workerDir, "output.log")}
+        height={20}
+      />
+    );
+
+    try {
+      await waitForFrame(lastFrame, "Judge handoff is complete.");
+
+      const frame = lastFrame() ?? "";
+      for (const item of items) {
+        expect(frame.match(new RegExp(item, "g"))).toHaveLength(1);
+        expect(frame).toContain(`✓ ${item}`);
+      }
+      expect(frame).toContain("Starting the Judge handoff.");
+      expect(frame).toContain("Independent verification remains visible.");
+      expect(frame).toContain("✓ Run unit tests");
+      expect(frame).toContain("✓ Run smoke tests");
+      expect(frame).toContain("Judge handoff is complete.");
+      expect(frame).toContain("$ printf ready");
+      expect(frame).not.toContain("→ Draft requirements");
+      expect(frame).not.toContain("• Write task files");
+    } finally {
+      unmount();
+    }
+  });
+
   it("hides Claude critic completion prose when a review artifact exists", async () => {
     const root = await mkdtemp(join(tmpdir(), "pct-worker-output-claude-narrative-"));
     const workerDir = join(root, "critic-claude");
