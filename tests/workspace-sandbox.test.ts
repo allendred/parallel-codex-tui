@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 import { pathExists, readTextIfExists, writeText } from "../src/core/file-store.js";
 import {
   ParallelWorkspaceManager,
+  WorkspaceLiveMutationError,
   WorkspaceMergeConflictError
 } from "../src/orchestrator/workspace-sandbox.js";
 
@@ -110,6 +111,30 @@ describe("ParallelWorkspaceManager", () => {
       "src/engine.ts",
       "src/ui.ts"
     ]);
+  });
+
+  it("refuses staging or commit after the live workspace changes outside orchestration", async () => {
+    const workspaceRoot = await mkdtemp(join(tmpdir(), "pct-workspace-live-mutation-"));
+    const taskDir = join(workspaceRoot, ".parallel-codex", "sessions", "task-live-mutation");
+    await writeText(join(workspaceRoot, "base.txt"), "base\n");
+    const manager = new ParallelWorkspaceManager({ workspaceRoot, taskDir, dataDir: ".parallel-codex" });
+    const firstWave = await manager.prepareWave({ turnId: "0001", wave: 1, featureIds: ["0001-safe"] });
+    await writeText(join(workspaceRoot, "escaped.txt"), "escaped\n");
+
+    await expect(manager.stageWave(firstWave)).rejects.toMatchObject({
+      name: "WorkspaceLiveMutationError",
+      paths: ["escaped.txt"]
+    } satisfies Partial<WorkspaceLiveMutationError>);
+
+    const secondWave = await manager.prepareWave({ turnId: "0002", wave: 1, featureIds: ["0002-safe"] });
+    await writeText(join(secondWave.featureDirs.get("0002-safe") ?? "", "feature.txt"), "feature\n");
+    await manager.stageWave(secondWave);
+    await writeText(join(workspaceRoot, "late-escape.txt"), "escaped after staging\n");
+
+    await expect(manager.commitWave(secondWave)).rejects.toMatchObject({
+      name: "WorkspaceLiveMutationError",
+      paths: ["late-escape.txt"]
+    } satisfies Partial<WorkspaceLiveMutationError>);
   });
 
   it("keeps the live workspace unchanged and writes conflict evidence when features overlap", async () => {

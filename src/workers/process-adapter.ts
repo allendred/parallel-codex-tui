@@ -50,7 +50,8 @@ export class ProcessWorkerAdapter implements WorkerAdapter {
       spec.nativeSession,
       spec.nativeSessionConfig,
       model,
-      spec.writableDirs
+      spec.writableDirs,
+      spec.enforceWorkspaceIsolation
     );
     const runSpec = {
       ...spec,
@@ -75,7 +76,13 @@ export class ProcessWorkerAdapter implements WorkerAdapter {
       `\nNative resume for ${retiredSessionId ?? "unknown session"} is unrecoverable; starting a fresh native session.\n`
     );
 
-    const freshLaunch = buildFreshLaunch(this.args, this.name, model, runSpec.writableDirs);
+    const freshLaunch = buildFreshLaunch(
+      this.args,
+      this.name,
+      model,
+      runSpec.writableDirs,
+      runSpec.enforceWorkspaceIsolation
+    );
     return (await this.runAttempt(
       {
         ...runSpec,
@@ -349,18 +356,24 @@ function buildLaunch(
   nativeSession: WorkerRunSpec["nativeSession"],
   nativeSessionConfig: WorkerRunSpec["nativeSessionConfig"],
   modelConfig?: WorkerModelRunConfig,
-  writableDirs?: string[]
+  writableDirs?: string[],
+  enforceWorkspaceIsolation = false
 ): ProcessLaunch {
   const modelArgs = buildModelArgs(modelConfig);
   if (!nativeSession || !nativeSessionConfig?.enabled || nativeSessionConfig.resumeArgs.length === 0) {
-    return buildFreshLaunch(defaultArgs, engine, modelConfig, writableDirs);
+    return buildFreshLaunch(defaultArgs, engine, modelConfig, writableDirs, enforceWorkspaceIsolation);
   }
 
   return {
-    args: withWritableDirectoryArgs([
-      ...nativeSessionConfig.resumeArgs.map((arg) => renderTemplate(arg, nativeSession.session_id, modelConfig)),
-      ...modelArgs
-    ], engine, true, writableDirs),
+    args: withWritableDirectoryArgs(
+      enforceWorkerIsolationArgs([
+        ...nativeSessionConfig.resumeArgs.map((arg) => renderTemplate(arg, nativeSession.session_id, modelConfig)),
+        ...modelArgs
+      ], engine, enforceWorkspaceIsolation),
+      engine,
+      true,
+      writableDirs
+    ),
     isResume: true,
     nativeSession
   };
@@ -370,13 +383,94 @@ function buildFreshLaunch(
   defaultArgs: string[],
   engine: EngineName,
   modelConfig?: WorkerModelRunConfig,
-  writableDirs?: string[]
+  writableDirs?: string[],
+  enforceWorkspaceIsolation = false
 ): ProcessLaunch {
   return {
-    args: withWritableDirectoryArgs([...defaultArgs, ...buildModelArgs(modelConfig)], engine, false, writableDirs),
+    args: withWritableDirectoryArgs(
+      enforceWorkerIsolationArgs(
+        [...defaultArgs, ...buildModelArgs(modelConfig)],
+        engine,
+        enforceWorkspaceIsolation
+      ),
+      engine,
+      false,
+      writableDirs
+    ),
     isResume: false,
     nativeSession: null
   };
+}
+
+function enforceWorkerIsolationArgs(args: string[], engine: EngineName, enforce: boolean): string[] {
+  if (!enforce) {
+    return args;
+  }
+  if (engine === "codex") {
+    return enforceCodexWorkspaceSandbox(args);
+  }
+  if (engine === "claude") {
+    return enforceClaudeEditPermissions(args);
+  }
+  return args;
+}
+
+function enforceCodexWorkspaceSandbox(args: string[]): string[] {
+  const result: string[] = [];
+  let hasSandbox = false;
+  for (let index = 0; index < args.length; index += 1) {
+    const arg = args[index] ?? "";
+    if (arg === "--dangerously-bypass-approvals-and-sandbox") {
+      continue;
+    }
+    if (arg === "--sandbox" || arg === "-s") {
+      result.push(arg, "workspace-write");
+      hasSandbox = true;
+      index += 1;
+      continue;
+    }
+    if (arg.startsWith("--sandbox=") || arg.startsWith("-s=")) {
+      result.push(arg.startsWith("-s=") ? "-s=workspace-write" : "--sandbox=workspace-write");
+      hasSandbox = true;
+      continue;
+    }
+    result.push(arg);
+  }
+
+  if (!hasSandbox) {
+    const execIndex = result.indexOf("exec");
+    const promptIndex = result.lastIndexOf("-");
+    const insertAt = execIndex >= 0 ? execIndex + 1 : promptIndex >= 0 ? promptIndex : result.length;
+    result.splice(insertAt, 0, "--sandbox", "workspace-write");
+  }
+  return result;
+}
+
+function enforceClaudeEditPermissions(args: string[]): string[] {
+  const result: string[] = [];
+  let hasPermissionMode = false;
+  for (let index = 0; index < args.length; index += 1) {
+    const arg = args[index] ?? "";
+    if (arg === "--dangerously-skip-permissions") {
+      continue;
+    }
+    if (arg === "--permission-mode") {
+      result.push(arg, "acceptEdits");
+      hasPermissionMode = true;
+      index += 1;
+      continue;
+    }
+    if (arg.startsWith("--permission-mode=")) {
+      result.push("--permission-mode=acceptEdits");
+      hasPermissionMode = true;
+      continue;
+    }
+    result.push(arg);
+  }
+  if (!hasPermissionMode) {
+    result.push("--permission-mode", "acceptEdits");
+  }
+  return result;
 }
 
 function withWritableDirectoryArgs(

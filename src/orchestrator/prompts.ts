@@ -8,6 +8,7 @@ export interface JudgePromptInput {
   request: string;
   taskDir: string;
   workerDir?: string;
+  workspaceDir?: string;
   turn?: PromptTurnContext;
   role?: RolePromptConfig;
 }
@@ -92,6 +93,12 @@ export function buildJudgePrompt(input: JudgePromptInput): string {
     "",
     `Task directory: ${input.taskDir}`,
     ...(input.workerDir ? [`Worker directory: ${input.workerDir}`] : []),
+    ...(input.workspaceDir ? [
+      `Project workspace (read-only): ${input.workspaceDir}`,
+      "Inspect the project workspace when needed, but never modify it. Write only the Judge artifacts listed below.",
+      "Actors execute in isolated feature workspaces. In every artifact, use logical project root to mean the Actor's assigned feature workspace/current working directory.",
+      "Never put the absolute live workspace path into implementation instructions or acceptance paths."
+    ] : []),
     ...turnLines(input.turn),
     "",
     "Write these files in the worker directory above:",
@@ -126,6 +133,9 @@ export function buildActorPrompt(input: RolePromptInput): string {
     `Judge directory: ${input.judgeDir}`,
     ...(input.workspaceDir ? [
       `Feature workspace: ${input.workspaceDir}`,
+      "The feature workspace above is the logical project root for this run.",
+      "Resolve every project-root, repository-root, or current-project path to this exact feature workspace.",
+      "Never write implementation files to the shared live workspace or any parent of the task directory.",
       "Keep all implementation changes inside this feature workspace. Use task and feature directories only for coordination files."
     ] : []),
     ...turnLines(input.turn),
@@ -167,6 +177,7 @@ export function buildCriticPrompt(input: RolePromptInput): string {
     `Actor directory: ${input.actorDir ?? ""}`,
     ...(input.workspaceDir ? [
       `Feature workspace: ${input.workspaceDir}`,
+      "Treat this feature workspace as the logical project root for review.",
       "Review the implementation in this feature workspace. Do not modify the live workspace."
     ] : []),
     ...turnLines(input.turn),
@@ -203,6 +214,7 @@ export function buildWaveCriticPrompt(input: WaveRolePromptInput): string {
     ...turnLines(input.turn),
     "",
     "Live workspace has not been updated. Review only the combined verification workspace.",
+    "Treat the combined verification workspace as the logical project root for this review.",
     "Read Judge requirements.md, plan.md, acceptance.md, critic-brief.md, and every feature decisions.md.",
     "Run relevant tests, builds, and cross-feature checks in the combined verification workspace.",
     "Do not modify implementation files.",
@@ -236,6 +248,7 @@ export function buildWaveActorPrompt(input: WaveRolePromptInput): string {
     ...turnLines(input.turn),
     "",
     "Modify only the combined integration workspace. Do not modify the live workspace or isolated feature workspaces.",
+    "Treat the combined integration workspace as the logical project root for this revision.",
     "Read Judge requirements and acceptance, feature decisions, and the Wave Critic review below.",
     "Run relevant verification after fixing the combined result.",
     "Write worklog.md and patch.diff in the worker directory.",

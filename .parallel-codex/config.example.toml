@@ -23,6 +23,7 @@ maxParallelFeatures = 3
 
 [workers.codex]
 command = "codex"
+# Automated Judge/Actor/Critic runs enforce workspace-write even if private args request a broader sandbox.
 args = ["exec", "--skip-git-repo-check", "--sandbox", "workspace-write", "--color", "never", "-"]
 firstOutputTimeoutMs = 120000
 
@@ -42,6 +43,7 @@ fallback = "new"
 
 [workers.claude]
 command = "claude"
+# Automated isolated roles enforce acceptEdits and remove permission-bypass flags.
 args = ["--print", "--permission-mode", "acceptEdits", "--output-format", "text"]
 firstOutputTimeoutMs = 120000
 

@@ -427,6 +427,20 @@ export class SessionManager {
   }
 
   private async clearWorkerArtifacts(dir: string, role: WorkerRole): Promise<void> {
+    if (role === "judge") {
+      for (const file of [
+        "requirements.md",
+        "plan.md",
+        "acceptance.md",
+        "actor-brief.md",
+        "critic-brief.md",
+        "features.json"
+      ]) {
+        await removeIfExists(join(dir, file));
+      }
+      return;
+    }
+
     const files =
       role === "actor"
         ? ["worklog.md", "patch.diff"]

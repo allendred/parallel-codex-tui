@@ -102,6 +102,20 @@ export class WorkspaceMergeConflictError extends Error {
   }
 }
 
+export class WorkspaceLiveMutationError extends Error {
+  readonly paths: string[];
+
+  constructor(paths: string[]) {
+    const count = paths.length;
+    super(
+      `Live workspace changed outside orchestration in ${count} ${count === 1 ? "path" : "paths"}: ${paths.join(", ")}. `
+      + "The isolated wave was not integrated."
+    );
+    this.name = "WorkspaceLiveMutationError";
+    this.paths = paths;
+  }
+}
+
 export class ParallelWorkspaceManager {
   private readonly workspaceRoot: string;
   private readonly taskDir: string;
@@ -181,6 +195,7 @@ export class ParallelWorkspaceManager {
   }
 
   async stageWave(wave: FeatureWorkspaceWave): Promise<WorkspaceIntegrationResult> {
+    await this.assertLiveWorkspaceUnchanged(wave);
     await rm(wave.conflictDir, { recursive: true, force: true });
     await rm(wave.stagingDir, { recursive: true, force: true });
     await rm(wave.integrationDir, { recursive: true, force: true });
@@ -227,6 +242,7 @@ export class ParallelWorkspaceManager {
   }
 
   async commitWave(wave: FeatureWorkspaceWave): Promise<WorkspaceIntegrationResult> {
+    await this.assertLiveWorkspaceUnchanged(wave);
     const liveConflictDir = join(wave.conflictDir, "live-workspace");
     const livePlan = await planWorkspaceMerge(
       wave.baselineDir,
@@ -251,6 +267,17 @@ export class ParallelWorkspaceManager {
   async integrateWave(wave: FeatureWorkspaceWave): Promise<WorkspaceIntegrationResult> {
     await this.stageWave(wave);
     return this.commitWave(wave);
+  }
+
+  async assertLiveWorkspaceUnchanged(wave: FeatureWorkspaceWave): Promise<void> {
+    const paths = await workspaceChangedPaths(
+      wave.baselineDir,
+      this.workspaceRoot,
+      (path) => this.excludeRelativePath(path)
+    );
+    if (paths.length > 0) {
+      throw new WorkspaceLiveMutationError(paths);
+    }
   }
 
   private excludeFromSource(path: string): boolean {

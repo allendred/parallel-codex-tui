@@ -120,6 +120,8 @@ function lifecycleAgentSource(): string {
     "    fs.writeFileSync(path.join(dir, 'requirements.md'), '# Requirements\\n\\n- Build the game.\\n');",
     "    fs.writeFileSync(path.join(dir, 'plan.md'), '# Plan\\n\\n1. Implement.\\n');",
     "    fs.writeFileSync(path.join(dir, 'acceptance.md'), '# Acceptance\\n\\n- Tests pass.\\n');",
+    "    fs.writeFileSync(path.join(dir, 'actor-brief.md'), '# Actor Brief\\n\\nImplement the game.\\n');",
+    "    fs.writeFileSync(path.join(dir, 'critic-brief.md'), '# Critic Brief\\n\\nReview the game.\\n');",
     "    console.log('judge done');",
     "    return;",
     "  }",

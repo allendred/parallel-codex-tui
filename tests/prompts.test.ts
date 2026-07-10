@@ -12,6 +12,7 @@ describe("role prompts", () => {
       request: "实现功能",
       taskDir: "/tmp/task",
       judgeDir: "/tmp/task/judge",
+      workspaceDir: "/tmp/task/workspaces/feature",
       role: {
         title: "Builder",
         instructions: ["Prefer small patches.", "Always update worklog.md."]
@@ -21,19 +22,25 @@ describe("role prompts", () => {
     expect(prompt).toContain("# Role: Builder");
     expect(prompt).toContain("- Prefer small patches.");
     expect(prompt).toContain("- Always update worklog.md.");
+    expect(prompt).toContain("logical project root for this run");
+    expect(prompt).toContain("Never write implementation files to the shared live workspace");
   });
 
   it("asks Judge for a bounded dependency-aware feature manifest", () => {
     const prompt = buildJudgePrompt({
       request: "实现包含界面、引擎和集成的游戏",
       taskDir: "/tmp/task",
-      workerDir: "/tmp/task/judge"
+      workerDir: "/tmp/task/judge",
+      workspaceDir: "/tmp/project"
     });
 
     expect(prompt).toContain("- features.json");
     expect(prompt).toContain('"depends_on"');
     expect(prompt).toContain("independent features can run in parallel");
     expect(prompt).toContain("at most 8 features");
+    expect(prompt).toContain("Project workspace (read-only): /tmp/project");
+    expect(prompt).toContain("Never put the absolute live workspace path into implementation instructions");
+    expect(prompt).toContain("logical project root");
   });
 
   it("asks the Wave Critic to verify the combined workspace before live commit", () => {

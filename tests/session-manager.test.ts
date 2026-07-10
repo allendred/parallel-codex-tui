@@ -340,6 +340,58 @@ describe("SessionManager", () => {
     expect(await readTextIfExists(worker.promptPath)).toContain("Write requirements.");
   });
 
+  it("clears stale Judge artifacts while preserving its native session", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pct-judge-artifacts-"));
+    const manager = new SessionManager({
+      projectRoot: root,
+      dataDir: ".parallel-codex",
+      now: () => new Date("2026-06-30T03:30:00.000Z"),
+      randomId: () => "a1b2"
+    });
+    const task = await manager.createTask({
+      request: "Build the MVP.",
+      cwd: root,
+      route: {
+        mode: "complex",
+        reason: "Requires workers.",
+        suggested_roles: ["judge", "actor", "critic"],
+        judge_engine: "mock",
+        actor_engine: "mock",
+        critic_engine: "mock"
+      }
+    });
+    const worker = await manager.initializeWorker(task, {
+      workerId: "judge-mock",
+      role: "judge",
+      engine: "mock",
+      prompt: "Write first-turn requirements."
+    });
+    await writeText(join(worker.dir, "requirements.md"), "stale requirements\n");
+    await writeJson(join(worker.dir, "features.json"), { version: 1, features: [{ id: "stale" }] });
+    await manager.writeNativeSession(worker, {
+      engine: "mock",
+      role: "judge",
+      worker_id: "judge-mock",
+      session_id: "judge-session",
+      scope: "task",
+      cwd: root,
+      created_at: "2026-06-30T03:30:00.000Z",
+      last_used_at: "2026-06-30T03:30:00.000Z",
+      source: "manual"
+    });
+
+    await manager.initializeWorker(task, {
+      workerId: "judge-mock",
+      role: "judge",
+      engine: "mock",
+      prompt: "Write second-turn requirements."
+    });
+
+    expect(await pathExists(join(worker.dir, "requirements.md"))).toBe(false);
+    expect(await pathExists(join(worker.dir, "features.json"))).toBe(false);
+    expect((await manager.readNativeSession(worker))?.session_id).toBe("judge-session");
+  });
+
   it("stores worker native session metadata", async () => {
     const root = await mkdtemp(join(tmpdir(), "pct-native-session-"));
     const manager = new SessionManager({

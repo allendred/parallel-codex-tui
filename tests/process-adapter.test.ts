@@ -35,6 +35,81 @@ describe("ProcessWorkerAdapter", () => {
     expect(await readTextIfExists(outputLogPath)).toContain(`exec|--add-dir|${coordinationDir}|-`);
   });
 
+  it("forces isolated Codex workers back to workspace-write", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pct-process-codex-sandbox-"));
+    const filesDir = join(root, "actor-codex");
+    const promptPath = join(filesDir, "prompt.md");
+    const outputLogPath = join(filesDir, "output.log");
+    const statusPath = join(filesDir, "status.json");
+    const script = "console.log(process.argv.slice(1).join('|'))";
+    await writeText(promptPath, "isolated prompt");
+
+    const adapter = new ProcessWorkerAdapter(process.execPath, [
+      "-e",
+      script,
+      "exec",
+      "--sandbox",
+      "danger-full-access",
+      "--dangerously-bypass-approvals-and-sandbox",
+      "-"
+    ], "codex");
+    const result = await adapter.run({
+      workerId: "actor-codex",
+      role: "actor",
+      engine: "codex",
+      cwd: root,
+      enforceWorkspaceIsolation: true,
+      filesDir,
+      promptPath,
+      outputLogPath,
+      statusPath,
+      prompt: "isolated prompt"
+    });
+
+    const output = await readTextIfExists(outputLogPath);
+    expect(result.exitCode).toBe(0);
+    expect(output).toContain("exec|--sandbox|workspace-write|-");
+    expect(output).not.toContain("danger-full-access");
+    expect(output).not.toContain("dangerously-bypass-approvals-and-sandbox");
+  });
+
+  it("forces isolated Claude workers back to acceptEdits", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pct-process-claude-permissions-"));
+    const filesDir = join(root, "actor-claude");
+    const promptPath = join(filesDir, "prompt.md");
+    const outputLogPath = join(filesDir, "output.log");
+    const statusPath = join(filesDir, "status.json");
+    const script = "console.log(process.argv.slice(1).join('|'))";
+    await writeText(promptPath, "isolated prompt");
+
+    const adapter = new ProcessWorkerAdapter(process.execPath, [
+      "-e",
+      script,
+      "--",
+      "--permission-mode",
+      "bypassPermissions",
+      "--dangerously-skip-permissions"
+    ], "claude");
+    const result = await adapter.run({
+      workerId: "actor-claude",
+      role: "actor",
+      engine: "claude",
+      cwd: root,
+      enforceWorkspaceIsolation: true,
+      filesDir,
+      promptPath,
+      outputLogPath,
+      statusPath,
+      prompt: "isolated prompt"
+    });
+
+    const output = await readTextIfExists(outputLogPath);
+    expect(result.exitCode).toBe(0);
+    expect(output).toContain("--permission-mode|acceptEdits");
+    expect(output).not.toContain("bypassPermissions");
+    expect(output).not.toContain("dangerously-skip-permissions");
+  });
+
   it("passes isolated worker coordination directories to resumed Claude workers", async () => {
     const root = await mkdtemp(join(tmpdir(), "pct-process-claude-add-dir-"));
     const filesDir = join(root, "critic-claude");
@@ -102,6 +177,7 @@ describe("ProcessWorkerAdapter", () => {
       outputLogPath,
       statusPath,
       prompt: "resume implementation",
+      enforceWorkspaceIsolation: true,
       nativeSession: {
         engine: "codex",
         role: "actor",
@@ -115,7 +191,17 @@ describe("ProcessWorkerAdapter", () => {
       },
       nativeSessionConfig: {
         enabled: true,
-        resumeArgs: ["-e", script, "exec", "resume", "{sessionId}", "-"],
+        resumeArgs: [
+          "-e",
+          script,
+          "exec",
+          "--sandbox",
+          "danger-full-access",
+          "--dangerously-bypass-approvals-and-sandbox",
+          "resume",
+          "{sessionId}",
+          "-"
+        ],
         detectSessionId: true,
         fallback: "fail"
       }
@@ -123,8 +209,9 @@ describe("ProcessWorkerAdapter", () => {
 
     expect(result.exitCode).toBe(0);
     expect(await readTextIfExists(outputLogPath)).toContain(
-      `exec|--add-dir|${coordinationDir}|resume|session-456|-`
+      `exec|--sandbox|workspace-write|--add-dir|${coordinationDir}|resume|session-456|-`
     );
+    expect(await readTextIfExists(outputLogPath)).not.toContain("danger-full-access");
   });
 
   it("streams process output into output.log", async () => {

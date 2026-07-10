@@ -1,7 +1,7 @@
 import { readdir } from "node:fs/promises";
 import { join } from "node:path";
 import type { AppConfig } from "../core/config.js";
-import { appendJsonLine, ensureDir, pathExists, readJson, readTextIfExists, writeJson, writeText } from "../core/file-store.js";
+import { appendJsonLine, ensureDir, pathExists, readJson, readTextIfExists, removeIfExists, writeJson, writeText } from "../core/file-store.js";
 import { routerRuntimeDir } from "../core/paths.js";
 import { routeRequestWithCodex, type CodexRouteRunner } from "../core/router.js";
 import type { SessionManager, TaskSession, TaskTurn, WorkerFiles } from "../core/session-manager.js";
@@ -30,6 +30,17 @@ import { ParallelWorkspaceManager } from "./workspace-sandbox.js";
 
 const PREVIOUS_TURN_SUMMARY_LIMIT = 5;
 const PREVIOUS_TURN_SUMMARY_LENGTH = 600;
+const JUDGE_REQUIRED_ARTIFACTS = [
+  "requirements.md",
+  "plan.md",
+  "acceptance.md",
+  "actor-brief.md",
+  "critic-brief.md"
+] as const;
+const JUDGE_ARTIFACTS = [
+  ...JUDGE_REQUIRED_ARTIFACTS,
+  "features.json"
+] as const;
 
 export interface HandleRequestInput {
   request: string;
@@ -323,10 +334,12 @@ export class Orchestrator {
   ): Promise<HandleRequestResult> {
     let features: FeatureChannel[] = [];
     try {
+      await this.clearTurnJudgeArtifacts(turn, input.retry);
       await this.sessions.updateTaskStatus(task, "judging");
       input.onStatus?.({ taskId: task.id, judge: "running", actor: "waiting", critic: "waiting" });
-      const judge = await this.runJudge(input, task, route.judge_engine, workers, turn);
+      const judgeWorker = await this.runJudge(input, task, route.judge_engine, workers, turn);
       throwIfCancelled(input.signal);
+      const judge = await this.snapshotJudgeArtifacts(judgeWorker, turn);
       const featurePlan = await this.loadFeaturePlan(judge, turn);
       if (featurePlan && featurePlan.features.length > 1) {
         features = await Promise.all(featurePlan.features.map((feature) => createFeatureChannel({
@@ -359,9 +372,31 @@ export class Orchestrator {
     turn: TaskTurn,
     workers: WorkerLogRef[]
   ): Promise<HandleRequestResult> {
-    const judge = this.workerFiles(task, `judge-${route.judge_engine}`);
     let features: FeatureChannel[] = [];
     try {
+      const reuseJudgeSnapshot = input.retry && await this.hasCompleteJudgeSnapshot(turn);
+      if (!reuseJudgeSnapshot) {
+        await this.clearTurnJudgeArtifacts(turn);
+      }
+      const judgeWorker = reuseJudgeSnapshot
+        ? this.workerFiles(task, `judge-${route.judge_engine}`)
+        : await this.runFollowUpJudge(input, task, route, turn, workers);
+      throwIfCancelled(input.signal);
+      const judge = reuseJudgeSnapshot
+        ? { ...judgeWorker, dir: turn.dir }
+        : await this.snapshotJudgeArtifacts(judgeWorker, turn);
+      const featurePlan = await this.loadFeaturePlan(judge, turn);
+      if (featurePlan && featurePlan.features.length > 1) {
+        features = await Promise.all(featurePlan.features.map((feature) => createFeatureChannel({
+          task,
+          turn,
+          request: input.request,
+          judgeDir: judge.dir,
+          feature
+        })));
+        return await this.runFeaturePlan(input, task, route, turn, workers, judge, featurePlan, features);
+      }
+
       const feature = await createFeatureChannel({
         task,
         turn,
@@ -372,6 +407,53 @@ export class Orchestrator {
       return await this.runActorCriticPair(input, task, route, turn, workers, judge, feature);
     } catch (error) {
       return this.failTask(task, features, input, error);
+    }
+  }
+
+  private async runFollowUpJudge(
+    input: HandleRequestInput,
+    task: TaskSession,
+    route: RouteDecision,
+    turn: TaskTurn,
+    workers: WorkerLogRef[]
+  ): Promise<WorkerFiles> {
+    await this.sessions.updateTaskStatus(task, "judging");
+    input.onStatus?.({ taskId: task.id, judge: "running", actor: "waiting", critic: "waiting" });
+    return this.runJudge(input, task, route.judge_engine, workers, turn);
+  }
+
+  private async snapshotJudgeArtifacts(judge: WorkerFiles, turn: TaskTurn): Promise<WorkerFiles> {
+    for (const file of JUDGE_ARTIFACTS) {
+      const sourcePath = join(judge.dir, file);
+      if (await pathExists(sourcePath)) {
+        await writeText(join(turn.dir, file), await readTextIfExists(sourcePath));
+      }
+    }
+    if (!(await this.hasCompleteJudgeSnapshot(turn))) {
+      const missing: string[] = [];
+      for (const file of JUDGE_REQUIRED_ARTIFACTS) {
+        if (!(await readTextIfExists(join(turn.dir, file))).trim()) {
+          missing.push(file);
+        }
+      }
+      throw new Error(`Judge did not write required turn artifacts: ${missing.join(", ")}.`);
+    }
+    return { ...judge, dir: turn.dir };
+  }
+
+  private async hasCompleteJudgeSnapshot(turn: TaskTurn): Promise<boolean> {
+    for (const file of JUDGE_REQUIRED_ARTIFACTS) {
+      if (!(await readTextIfExists(join(turn.dir, file))).trim()) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  private async clearTurnJudgeArtifacts(turn: TaskTurn, preserveFeaturePlan = false): Promise<void> {
+    const files = preserveFeaturePlan ? JUDGE_ARTIFACTS : [...JUDGE_ARTIFACTS, "feature-plan.json"];
+    for (const file of files) {
+      await removeIfExists(join(turn.dir, file));
     }
   }
 
@@ -742,17 +824,52 @@ export class Orchestrator {
     judge: WorkerFiles,
     feature: FeatureChannel
   ): Promise<HandleRequestResult> {
+    const workspaceManager = new ParallelWorkspaceManager({
+      workspaceRoot: input.cwd,
+      taskDir: task.dir,
+      dataDir: this.config.dataDir
+    });
+    const workspaceWave = await workspaceManager.prepareWave({
+      turnId: turn.turnId,
+      wave: 1,
+      featureIds: [feature.id]
+    });
+    const workspaceDir = requiredFeatureWorkspace(workspaceWave.featureDirs, feature);
     throwIfCancelled(input.signal);
     await this.sessions.updateTaskStatus(task, "actor_running");
     await updateFeatureStatus(feature, "actor_running");
     input.onStatus?.({ taskId: task.id, judge: "done", actor: "running", critic: "waiting" });
-    let actor = await this.runActor(input, task, route.actor_engine, judge.dir, workers, turn, feature);
+    let actor = await this.runActor(
+      input,
+      task,
+      route.actor_engine,
+      judge.dir,
+      workers,
+      turn,
+      feature,
+      undefined,
+      false,
+      workspaceDir,
+      true
+    );
     throwIfCancelled(input.signal);
 
     await this.sessions.updateTaskStatus(task, "critic_running");
     await updateFeatureStatus(feature, "critic_running");
     input.onStatus?.({ taskId: task.id, judge: "done", actor: "done", critic: "running" });
-    let critic = await this.runCritic(input, task, route.critic_engine, judge.dir, actor.dir, workers, turn, feature);
+    let critic = await this.runCritic(
+      input,
+      task,
+      route.critic_engine,
+      judge.dir,
+      actor.dir,
+      workers,
+      turn,
+      feature,
+      false,
+      workspaceDir,
+      true
+    );
     throwIfCancelled(input.signal);
     let review = await readTextIfExists(`${critic.dir}/review.md`);
     let decision = criticReviewDecision(review);
@@ -776,13 +893,28 @@ export class Orchestrator {
         workers,
         turn,
         feature,
-        buildRevisionRequest(review, feature)
+        buildRevisionRequest(review, feature),
+        false,
+        workspaceDir,
+        true
       );
       throwIfCancelled(input.signal);
       await this.sessions.updateTaskStatus(task, "critic_running");
       await updateFeatureStatus(feature, "critic_running");
       input.onStatus?.({ taskId: task.id, judge: "done", actor: "done", critic: "rerunning" });
-      critic = await this.runCritic(input, task, route.critic_engine, judge.dir, actor.dir, workers, turn, feature);
+      critic = await this.runCritic(
+        input,
+        task,
+        route.critic_engine,
+        judge.dir,
+        actor.dir,
+        workers,
+        turn,
+        feature,
+        false,
+        workspaceDir,
+        true
+      );
       throwIfCancelled(input.signal);
       review = await readTextIfExists(`${critic.dir}/review.md`);
       decision = criticReviewDecision(review);
@@ -790,6 +922,24 @@ export class Orchestrator {
         throw new Error(`Critic did not approve ${feature.id} after Actor revision.`);
       }
     }
+
+    await this.sessions.updateTaskStatus(task, "integrating");
+    await updateFeatureStatus(feature, "integrating");
+    input.onStatus?.({
+      taskId: task.id,
+      judge: "done",
+      actor: "done",
+      critic: "done",
+      featureProgress: { wave: 1, waves: 1, phase: "integration", completed: 0, total: 1 }
+    });
+    await workspaceManager.integrateWave(workspaceWave);
+    input.onStatus?.({
+      taskId: task.id,
+      judge: "done",
+      actor: "done",
+      critic: "done",
+      featureProgress: { wave: 1, waves: 1, phase: "integration", completed: 1, total: 1 }
+    });
 
     return this.completeTask(task, turn, judge, actor, critic, feature, input, workers);
   }
@@ -946,6 +1096,7 @@ export class Orchestrator {
         request: input.request,
         taskDir: task.dir,
         workerDir: judgeFiles.dir,
+        workspaceDir: input.cwd,
         turn: await this.promptTurnContext(task, turn),
         role: this.config.roles.judge
       })
@@ -964,7 +1115,8 @@ export class Orchestrator {
       workerId: judge.workerId,
       role: "judge",
       engine,
-      cwd: input.cwd,
+      cwd: judge.dir,
+      enforceWorkspaceIsolation: true,
       filesDir: judge.dir,
       promptPath: judge.promptPath,
       outputLogPath: judge.outputLogPath,
@@ -987,7 +1139,8 @@ export class Orchestrator {
     feature: FeatureChannel,
     revision?: string,
     featureScoped = false,
-    workspaceDir = input.cwd
+    workspaceDir = input.cwd,
+    isolatedWorkspace = featureScoped
   ): Promise<WorkerFiles> {
     const workerId = featureScoped ? `actor-${engine}-${feature.id}` : `actor-${engine}`;
     const actor = await this.sessions.initializeWorker(task, {
@@ -1003,7 +1156,7 @@ export class Orchestrator {
         judgeDir,
         turn: await this.promptTurnContext(task, turn),
         feature: featurePromptContext(feature),
-        ...(featureScoped ? { workspaceDir } : {}),
+        ...(isolatedWorkspace ? { workspaceDir } : {}),
         revision,
         role: this.config.roles.actor
       })
@@ -1026,7 +1179,8 @@ export class Orchestrator {
       role: "actor",
       engine,
       cwd: workspaceDir,
-      ...(featureScoped ? { writableDirs: uniquePaths([actor.dir, judgeDir, feature.dir, turn.dir]) } : {}),
+      enforceWorkspaceIsolation: isolatedWorkspace,
+      ...(isolatedWorkspace ? { writableDirs: uniquePaths([actor.dir, judgeDir, feature.dir, turn.dir]) } : {}),
       filesDir: actor.dir,
       promptPath: actor.promptPath,
       outputLogPath: actor.outputLogPath,
@@ -1055,7 +1209,8 @@ export class Orchestrator {
     turn: TaskTurn,
     feature: FeatureChannel,
     featureScoped = false,
-    workspaceDir = input.cwd
+    workspaceDir = input.cwd,
+    isolatedWorkspace = featureScoped
   ): Promise<WorkerFiles> {
     const workerId = featureScoped ? `critic-${engine}-${feature.id}` : `critic-${engine}`;
     const critic = await this.sessions.initializeWorker(task, {
@@ -1072,7 +1227,7 @@ export class Orchestrator {
         actorDir,
         turn: await this.promptTurnContext(task, turn),
         feature: featurePromptContext(feature),
-        ...(featureScoped ? { workspaceDir } : {}),
+        ...(isolatedWorkspace ? { workspaceDir } : {}),
         role: this.config.roles.critic
       })
     });
@@ -1094,7 +1249,8 @@ export class Orchestrator {
       role: "critic",
       engine,
       cwd: workspaceDir,
-      ...(featureScoped ? { writableDirs: uniquePaths([critic.dir, judgeDir, actorDir, feature.dir, turn.dir]) } : {}),
+      enforceWorkspaceIsolation: isolatedWorkspace,
+      ...(isolatedWorkspace ? { writableDirs: uniquePaths([critic.dir, judgeDir, actorDir, feature.dir, turn.dir]) } : {}),
       filesDir: critic.dir,
       promptPath: critic.promptPath,
       outputLogPath: critic.outputLogPath,
@@ -1162,6 +1318,7 @@ export class Orchestrator {
       role: "critic",
       engine,
       cwd: workspaceDir,
+      enforceWorkspaceIsolation: true,
       writableDirs: uniquePaths([critic.dir, judgeDir, join(task.dir, "features"), turn.dir]),
       filesDir: critic.dir,
       promptPath: critic.promptPath,
@@ -1226,6 +1383,7 @@ export class Orchestrator {
       role: "actor",
       engine,
       cwd: workspaceDir,
+      enforceWorkspaceIsolation: true,
       writableDirs: uniquePaths([actor.dir, judgeDir, join(task.dir, "features"), turn.dir]),
       filesDir: actor.dir,
       promptPath: actor.promptPath,
@@ -1487,10 +1645,10 @@ function buildRevisionRequest(review: string, feature: FeatureChannel): string {
 
 function criticReviewDecision(review: string): "approved" | "revision" | "missing" {
   const lines = review.split(/\r?\n/).map((line) => line.trim());
-  if (lines.some((line) => /^REVISION_REQUIRED(?:\b|$)/i.test(line))) {
+  if (lines.some((line) => /^(?:(?:#{1,6}|[-*+]|>)\s+)*(?:\*\*|__|`)?REVISION_REQUIRED(?:\b|$)/i.test(line))) {
     return "revision";
   }
-  if (lines.some((line) => /^APPROVED(?:\b|$)/i.test(line))) {
+  if (lines.some((line) => /^(?:(?:#{1,6}|[-*+]|>)\s+)*(?:\*\*|__|`)?APPROVED(?:\b|$)/i.test(line))) {
     return "approved";
   }
   return "missing";

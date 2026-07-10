@@ -153,6 +153,7 @@ The doctor output includes `preview:` and `semantic:` ANSI swatch rows so you ca
 - Consecutive simple requests reuse the main worker's native session across app restarts when the CLI exposes a session id.
 - Complex requests create a session under `.parallel-codex/sessions/`.
 - Complex requests run Judge -> Actor -> Critic. Judge also writes a bounded `features.json` dependency plan.
+- Judge runs from its task-owned worker directory, reads the selected project without treating it as a write target, and snapshots `requirements.md`, `plan.md`, `acceptance.md`, role briefs, and `features.json` into each numbered turn.
 - Independent features run as parallel Actor batches followed by parallel Critic batches. Dependent features start only after their prerequisite wave is approved and integrated.
 - Parallel Actor, Critic, and revision batches honor `[orchestration].maxParallelFeatures` (default `3`).
 - Each planned feature gets an isolated implementation workspace, Actor/Critic worker directories, logs, status, native session ids, and a mailbox under `features/<turn>-<feature>`; the shared dialogue remains in `dialogue/actor-critic.jsonl`.
@@ -162,8 +163,11 @@ The doctor output includes `preview:` and `semantic:` ANSI swatch rows so you ca
 - When combined verification requests changes, a session-backed Wave Actor fixes the integration workspace and the same Wave Critic native session reviews it again. Only an explicit final `APPROVED` allows the wave to reach the live workspace.
 - Wave Actor/Critic prompts, logs, immutable `verification-review-01.md`/`02.md` rounds, native session ids, minimized additional-directory permissions, and `verification.json` audit evidence are stored with the task and remain available through worker logs and native attach.
 - Overlapping edits fail the task without partially changing the live workspace. The chat error names the conflicting paths and points to marker files under the wave's `conflicts/` directory; `Ctrl+R` retries in the same task and native worker sessions.
+- If the live workspace changes after a wave baseline is captured, staging or commit stops with the changed paths instead of silently absorbing an escaped worker edit or overwriting concurrent user work.
 - Feature workspaces persist with the task so native attach can reopen the exact worker cwd. Delete an old task session when its audit trail and attachable workspaces are no longer needed.
-- Complex follow-ups stay in the active task, append a numbered turn, reuse the same Actor/Critic native sessions when available, and inject up to five prior turn summaries as file-backed memory.
+- Complex follow-ups stay in the active task, append a numbered turn, restore the same Judge session to re-clarify the new direction, and save a turn-local Judge snapshot. A new multi-feature plan can start parallel workers immediately.
+- Single-feature follow-ups reuse the same Actor/Critic native sessions when available while moving them to the new turn's isolated workspace; prompts include up to five prior turn summaries as file-backed memory. A failed follow-up retry reuses a complete saved Judge plan, or restores Judge first when the earlier Judge run never produced one.
+- Automated Judge, Actor, Critic, Wave Actor, and Wave Critic runs enforce process-level isolation: Codex is clamped to `workspace-write`, and Claude is clamped to `acceptEdits`, even when private command arguments contain a broader bypass mode. Native attach remains an explicit interactive path.
 - Pressing `Esc` while a request is running stops the router or active worker and records an interrupted complex task as `cancelled`; exiting the outer TUI also terminates the active run.
 - Failed and cancelled tasks expose `Ctrl+R` retry. Retry keeps the same task and turn, reuses recorded native worker sessions, preserves prior output behind a retry separator, does not route the request again, and reuses the persisted feature dependency plan.
 - Simple follow-up questions run through the persistent Main native session with the active task directory, original request, up to five recent turn summaries, valid worker statuses, and log tails as file-backed context. They do not start another Judge, Actor, or Critic turn.
@@ -263,7 +267,7 @@ title = "Builder"
 instructions = ["Implement small verified changes.", "Record decisions in worklog.md."]
 ```
 
-Keep `[router.codex]` on `workspace-write`; routing only classifies requests and does not need host-level access. If a trusted local project needs Docker, OrbStack, or other host services, opt into broader worker permissions in your private `.parallel-codex/config.toml` rather than committing them.
+Keep `[router.codex]` on `read-only`; routing only classifies requests and does not need project writes. Automated Judge/Actor/Critic runs also clamp unsafe Codex or Claude permission flags to their isolated workspace policy, so a private `danger-full-access` or bypass flag cannot silently defeat live-workspace isolation. Use native attach for deliberate interactive host-level work such as Docker or OrbStack access.
 
 The process adapter sends each role prompt to stdin and records stdout/stderr in `output.log`.
 

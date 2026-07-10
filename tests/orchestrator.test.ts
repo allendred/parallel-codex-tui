@@ -222,6 +222,7 @@ describe("Orchestrator", () => {
       cwd: root
     })).rejects.toThrow("must include APPROVED or REVISION_REQUIRED");
 
+    expect(await pathExists(join(root, "rejected.txt"))).toBe(false);
     expect((await readJson(join(
       root,
       ".parallel-codex",
@@ -229,6 +230,60 @@ describe("Orchestrator", () => {
       "task-20260630-033001-feature-decision",
       "meta.json"
     ), TaskMetaSchema)).status).toBe("failed");
+  });
+
+  it("accepts Critic decisions formatted as Markdown headings", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pct-orch-markdown-decision-"));
+    const config = mockConfig(root);
+    const manager = new SessionManager({
+      projectRoot: root,
+      dataDir: config.dataDir,
+      now: () => new Date("2026-06-30T03:30:01.500Z"),
+      randomId: () => "markdown-decision"
+    });
+    const orchestrator = new Orchestrator(
+      config,
+      manager,
+      new Map([["mock", new MarkdownApprovalAdapter()]])
+    );
+
+    await expect(orchestrator.handleRequest({
+      request: "实现并审查 Markdown 决策",
+      cwd: root
+    })).resolves.toMatchObject({ mode: "complex" });
+  });
+
+  it("commits a single Feature workspace only after Critic approval", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pct-orch-single-isolation-"));
+    const config = mockConfig(root);
+    const manager = new SessionManager({
+      projectRoot: root,
+      dataDir: config.dataDir,
+      now: () => new Date("2026-06-30T03:30:02.000Z"),
+      randomId: () => "single-safe"
+    });
+    const adapter = new SingleIsolationAdapter(root);
+    const orchestrator = new Orchestrator(config, manager, new Map([["mock", adapter]]));
+    const progress: FeatureRunProgress[] = [];
+
+    const result = await orchestrator.handleRequest({
+      request: "实现单个安全功能",
+      cwd: root,
+      onStatus: (status) => {
+        if (status.featureProgress) progress.push(status.featureProgress);
+      }
+    });
+
+    expect(adapter.actorCwd).not.toBe(root);
+    expect(adapter.criticCwd).toBe(adapter.actorCwd);
+    expect(adapter.actorIsolation).toBe(true);
+    expect(adapter.criticIsolation).toBe(true);
+    expect(adapter.liveWasUntouchedDuringCritic).toBe(true);
+    expect(await readTextIfExists(join(root, "approved.txt"))).toBe("approved\n");
+    expect(progress).toContainEqual({ wave: 1, waves: 1, phase: "integration", completed: 0, total: 1 });
+    expect(progress).toContainEqual({ wave: 1, waves: 1, phase: "integration", completed: 1, total: 1 });
+    const taskDir = join(root, ".parallel-codex", "sessions", result.taskId ?? "");
+    expect(JSON.parse(await readTextIfExists(join(taskDir, "actor-mock", "native-session.json"))).cwd).toBe(adapter.actorCwd);
   });
 
   it("runs independent feature pairs concurrently and waits for dependency waves", async () => {
@@ -656,7 +711,16 @@ describe("Orchestrator", () => {
 
     expect(result.mode).toBe("complex");
     expect(routerCwd).toBe(routerCwdRoot);
-    expect(workerCwds).toEqual([workspaceRoot, workspaceRoot, workspaceRoot]);
+    expect(workerCwds[0]).toBe(join(
+      workspaceRoot,
+      ".parallel-codex",
+      "sessions",
+      "task-20260630-033000-a1b2",
+      "judge-mock"
+    ));
+    expect(workerCwds[1]).not.toBe(workspaceRoot);
+    expect(workerCwds[2]).toBe(workerCwds[1]);
+    expect(workerCwds[1]).toContain(join("workspaces", "turn-0001", "wave-0001", "features", "0001"));
   });
 
   it("records simple decisions in one shared router audit across workspaces", async () => {
@@ -782,7 +846,7 @@ describe("Orchestrator", () => {
     expect(updated.source).toBe("manual");
   });
 
-  it("handles follow-up turns through Actor and Critic without rerunning Judge", async () => {
+  it("reruns Judge in the same native session before a complex follow-up pair", async () => {
     const root = await mkdtemp(join(tmpdir(), "pct-orch-follow-up-"));
     const config = mockConfig(root);
     const manager = new SessionManager({
@@ -811,12 +875,22 @@ describe("Orchestrator", () => {
     });
 
     expect(followUp.mode).toBe("complex");
-    expect(capturing.runs.map((run) => run.role)).toEqual(["actor", "critic"]);
+    expect(capturing.runs.map((run) => run.role)).toEqual(["judge", "actor", "critic"]);
+    const judgeRun = capturing.runs.find((run) => run.role === "judge");
     const actorRun = capturing.runs.find((run) => run.role === "actor");
     const criticRun = capturing.runs.find((run) => run.role === "critic");
+    expect(judgeRun?.nativeSession?.session_id).toBe("mock-judge-mock");
+    expect(judgeRun?.prompt).toContain("继续改状态栏");
+    expect(judgeRun?.cwd).toBe(join(taskDir, "judge-mock"));
+    expect(judgeRun?.enforceWorkspaceIsolation).toBe(true);
+    expect(actorRun?.cwd).not.toBe(root);
+    expect(criticRun?.cwd).toBe(actorRun?.cwd);
     expect(actorRun?.prompt).toContain("- 0001: FIRST_TURN_MEMORY status rail completed");
     expect(criticRun?.prompt).toContain("- 0001: FIRST_TURN_MEMORY status rail completed");
     expect(actorRun?.prompt).not.toContain("Previous turn summaries:\n- (none)");
+    expect(actorRun?.prompt).toContain(`Judge directory: ${join(taskDir, "turns", "0002")}`);
+    expect(await readTextIfExists(join(taskDir, "turns", "0001", "requirements.md"))).toContain("Mock requirements");
+    expect(await readTextIfExists(join(taskDir, "turns", "0002", "requirements.md"))).toContain("Mock requirements");
     expect(await readTextIfExists(join(taskDir, "turns", "0002", "user.md"))).toContain("继续改状态栏");
     expect(await readTextIfExists(join(taskDir, "actor-mock", "prompt.md"))).toContain("Current turn: 0002");
     expect(await readTextIfExists(join(taskDir, "actor-mock", "prompt.md"))).toContain(
@@ -827,6 +901,52 @@ describe("Orchestrator", () => {
     expect(await readTextIfExists(join(taskDir, "turns", "0002", "supervisor-summary.md"))).toContain(
       "Complex task completed."
     );
+    expect(JSON.parse(await readTextIfExists(join(taskDir, "judge-mock", "native-session.json"))).cwd).toBe(
+      join(taskDir, "judge-mock")
+    );
+    expect(JSON.parse(await readTextIfExists(join(taskDir, "actor-mock", "native-session.json"))).cwd).toBe(actorRun?.cwd);
+  });
+
+  it("runs a multi-Feature plan produced by the Judge for a complex follow-up", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pct-orch-follow-up-features-"));
+    const config = mockConfig(root);
+    const manager = new SessionManager({
+      projectRoot: root,
+      dataDir: config.dataDir,
+      now: () => new Date("2026-06-30T03:30:00.000Z"),
+      randomId: () => "follow-features"
+    });
+    const adapter = new FollowUpFeaturePlanAdapter();
+    const orchestrator = new Orchestrator(config, manager, new Map([["mock", adapter]]));
+    const initial = await orchestrator.handleRequest({ request: "实现基础功能", cwd: root });
+    const statuses: Array<{ judge?: string; featureProgress?: FeatureRunProgress }> = [];
+
+    adapter.runs.length = 0;
+    const followUp = await orchestrator.handleTaskTurn({
+      taskId: initial.taskId ?? "",
+      request: "改方向：并行增加 alpha 与 beta",
+      cwd: root,
+      onStatus: (status) => statuses.push(status)
+    });
+
+    expect(followUp.mode).toBe("complex");
+    expect(adapter.runs.filter((run) => run.role === "judge")).toHaveLength(1);
+    expect(adapter.judgeNativeSessions).toEqual([null, "mock-judge-mock"]);
+    expect(adapter.runs.filter((run) => run.role === "actor").map((run) => run.workerId).sort()).toEqual([
+      "actor-mock-0002-alpha",
+      "actor-mock-0002-beta"
+    ]);
+    expect(await readTextIfExists(join(root, "alpha.txt"))).toBe("alpha\n");
+    expect(await readTextIfExists(join(root, "beta.txt"))).toBe("beta\n");
+    expect(statuses[0]?.judge).toBe("running");
+    expect(statuses.some(({ featureProgress }) => featureProgress?.phase === "actor")).toBe(true);
+    expect(statuses.some(({ featureProgress }) => featureProgress?.phase === "critic")).toBe(true);
+    expect(statuses.some(({ featureProgress }) => featureProgress?.phase === "verification")).toBe(true);
+    expect(statuses.some(({ featureProgress }) => featureProgress?.phase === "integration")).toBe(true);
+    const taskDir = join(root, ".parallel-codex", "sessions", initial.taskId ?? "");
+    expect(JSON.parse(await readTextIfExists(join(taskDir, "turns", "0002", "feature-plan.json")))).toMatchObject({
+      features: [{ id: "alpha" }, { id: "beta" }]
+    });
   });
 
   it("passes critic findings through the feature mailbox for actor revision", async () => {
@@ -1548,12 +1668,39 @@ describe("Orchestrator", () => {
     await orchestrator.retryTask({ taskId, cwd: root });
     const taskDir = join(root, ".parallel-codex", "sessions", taskId);
 
-    expect(adapter.runs.filter((run) => run.role === "judge")).toHaveLength(1);
+    expect(adapter.runs.filter((run) => run.role === "judge")).toHaveLength(2);
     expect(adapter.runs.filter((run) => run.role === "actor")).toHaveLength(3);
     expect(adapter.runs.filter((run) => run.role === "actor").at(-1)?.nativeSession?.session_id).toBe("mock-actor-mock");
     expect(await pathExists(join(taskDir, "turns", "0002"))).toBe(true);
     expect(await pathExists(join(taskDir, "turns", "0003"))).toBe(false);
     expect(await readTextIfExists(join(taskDir, "actor-mock", "output.log"))).toContain("FOLLOWUP_ACTOR_FAILURE");
+  });
+
+  it("reruns a failed follow-up Judge when no turn snapshot was produced", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pct-orch-retry-follow-up-judge-"));
+    const config = mockConfig(root);
+    const manager = new SessionManager({
+      projectRoot: root,
+      dataDir: config.dataDir,
+      now: () => new Date("2026-06-30T03:31:31.000Z"),
+      randomId: () => "follow-judge"
+    });
+    const adapter = new RetryFollowUpJudgeAdapter();
+    const orchestrator = new Orchestrator(config, manager, new Map([["mock", adapter]]));
+    const initial = await orchestrator.handleRequest({ request: "实现基础游戏", cwd: root });
+    const taskId = initial.taskId ?? "";
+
+    await expect(
+      orchestrator.handleTaskTurn({ taskId, request: "改成另一个方向", cwd: root })
+    ).rejects.toThrow("judge-mock failed with exit code 2");
+
+    const result = await orchestrator.retryTask({ taskId, cwd: root });
+    const taskDir = join(root, ".parallel-codex", "sessions", taskId);
+
+    expect(result.mode).toBe("complex");
+    expect(adapter.judgeNativeSessions).toEqual([null, "mock-judge-mock", "mock-judge-mock"]);
+    expect(await readTextIfExists(join(taskDir, "turns", "0002", "requirements.md"))).toContain("Mock requirements");
+    expect(await pathExists(join(taskDir, "turns", "0003"))).toBe(false);
   });
 
   it("marks an interrupted task cancelled and does not start the next worker", async () => {
@@ -1569,6 +1716,13 @@ describe("Orchestrator", () => {
     const script = [
       "const role = process.env.PARALLEL_CODEX_ROLE;",
       "console.log(role + ' ready');",
+      "if (role === 'judge') {",
+      "  const fs = require('node:fs');",
+      "  const path = require('node:path');",
+      "  for (const file of ['requirements.md','plan.md','acceptance.md','actor-brief.md','critic-brief.md']) {",
+      "    fs.writeFileSync(path.join(process.env.PARALLEL_CODEX_FILES_DIR, file), file + '\\n');",
+      "  }",
+      "}",
       "if (role === 'actor') setInterval(() => {}, 1000);"
     ].join("");
     const adapter = new ProcessWorkerAdapter(process.execPath, ["-e", script]);
@@ -1615,11 +1769,50 @@ class FailingJudgeAdapter implements WorkerAdapter {
 
 class MissingFeatureDecisionAdapter extends MockWorkerAdapter {
   async run(spec: WorkerRunSpec): Promise<WorkerResult> {
+    if (spec.role === "actor") {
+      await writeText(join(spec.cwd, "rejected.txt"), "must not reach live\n");
+    }
     const result = await super.run(spec);
     if (spec.role === "critic") {
       await writeText(join(spec.filesDir, "review.md"), "Review completed without a decision marker.\n");
     }
     return result;
+  }
+}
+
+class MarkdownApprovalAdapter extends MockWorkerAdapter {
+  async run(spec: WorkerRunSpec): Promise<WorkerResult> {
+    const result = await super.run(spec);
+    if (spec.role === "critic") {
+      await writeText(join(spec.filesDir, "review.md"), "## **APPROVED**\n\nNo blocking findings.\n");
+    }
+    return result;
+  }
+}
+
+class SingleIsolationAdapter extends MockWorkerAdapter {
+  actorCwd = "";
+  criticCwd = "";
+  actorIsolation = false;
+  criticIsolation = false;
+  liveWasUntouchedDuringCritic = false;
+
+  constructor(private readonly liveRoot: string) {
+    super();
+  }
+
+  async run(spec: WorkerRunSpec): Promise<WorkerResult> {
+    if (spec.role === "actor") {
+      this.actorCwd = spec.cwd;
+      this.actorIsolation = spec.enforceWorkspaceIsolation === true;
+      await writeText(join(spec.cwd, "approved.txt"), "approved\n");
+    }
+    if (spec.role === "critic") {
+      this.criticCwd = spec.cwd;
+      this.criticIsolation = spec.enforceWorkspaceIsolation === true;
+      this.liveWasUntouchedDuringCritic = !(await pathExists(join(this.liveRoot, "approved.txt")));
+    }
+    return super.run(spec);
   }
 }
 
@@ -1981,6 +2174,57 @@ class RetryFollowUpActorAdapter extends MockWorkerAdapter {
   }
 }
 
+class RetryFollowUpJudgeAdapter extends MockWorkerAdapter {
+  readonly judgeNativeSessions: Array<string | null> = [];
+  private judgeRuns = 0;
+
+  async run(spec: WorkerRunSpec): Promise<WorkerResult> {
+    if (spec.role !== "judge") {
+      return super.run(spec);
+    }
+
+    this.judgeRuns += 1;
+    this.judgeNativeSessions.push(spec.nativeSession?.session_id ?? null);
+    if (this.judgeRuns === 2) {
+      return { workerId: spec.workerId, exitCode: 2, signal: null };
+    }
+    return super.run(spec);
+  }
+}
+
+class FollowUpFeaturePlanAdapter extends MockWorkerAdapter {
+  readonly runs: WorkerRunSpec[] = [];
+  readonly judgeNativeSessions: Array<string | null> = [];
+  private judgeRuns = 0;
+
+  async run(spec: WorkerRunSpec): Promise<WorkerResult> {
+    this.runs.push(spec);
+    if (spec.role === "judge") {
+      this.judgeRuns += 1;
+      this.judgeNativeSessions.push(spec.nativeSession?.session_id ?? null);
+      const result = await super.run(spec);
+      if (this.judgeRuns === 2) {
+        await writeJson(join(spec.filesDir, "features.json"), {
+          version: 1,
+          features: [
+            { id: "alpha", title: "Alpha", description: "Create alpha.txt", depends_on: [] },
+            { id: "beta", title: "Beta", description: "Create beta.txt", depends_on: [] }
+          ]
+        });
+      }
+      return result;
+    }
+
+    if (spec.role === "actor" && spec.featureId?.endsWith("-alpha")) {
+      await writeText(join(spec.cwd, "alpha.txt"), "alpha\n");
+    }
+    if (spec.role === "actor" && spec.featureId?.endsWith("-beta")) {
+      await writeText(join(spec.cwd, "beta.txt"), "beta\n");
+    }
+    return super.run(spec);
+  }
+}
+
 class CapturingAdapter extends MockWorkerAdapter {
   readonly runs: WorkerRunSpec[] = [];
 
@@ -2007,7 +2251,7 @@ class RevisionFindingAdapter extends MockWorkerAdapter {
           severity: "blocker",
           summary: "Keyboard handling is incomplete"
         });
-        await writeText(join(spec.filesDir, "review.md"), "# Review\n\nREVISION_REQUIRED\n\nSee critic-findings.jsonl.\n");
+        await writeText(join(spec.filesDir, "review.md"), "# **REVISION_REQUIRED**\n\nSee critic-findings.jsonl.\n");
       }
     }
     if (spec.role === "actor" && spec.prompt.includes("Revision request:")) {

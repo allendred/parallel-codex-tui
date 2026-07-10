@@ -21,6 +21,7 @@ export interface WorkerRunSpec {
   role: WorkerRole;
   engine: EngineName;
   cwd: string;
+  enforceWorkspaceIsolation?: boolean;
   writableDirs?: string[];
   filesDir: string;
   promptPath: string;
