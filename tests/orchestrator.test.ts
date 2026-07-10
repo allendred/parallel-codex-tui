@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { defaultConfig } from "../src/core/config.js";
 import { appendJsonLine, pathExists, readJson, readTextIfExists, writeJson, writeText } from "../src/core/file-store.js";
+import { SessionIndex } from "../src/core/session-index.js";
 import { SessionManager } from "../src/core/session-manager.js";
 import { NativeSessionSchema, TaskMetaSchema, WorkerStatusSchema } from "../src/domain/schemas.js";
 import { Orchestrator } from "../src/orchestrator/orchestrator.js";
@@ -70,6 +71,57 @@ describe("Orchestrator", () => {
     expect(result.summary).not.toContain("main worker");
     expect(result.summary).not.toContain("Simple route selected");
     expect(result.summary).not.toContain("Forced simple mode");
+  });
+
+  it("reuses the main native session across simple chat turns and restarts", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pct-orch-main-session-"));
+    const config = mockConfig(root);
+    config.router.defaultMode = "simple";
+    const firstIndex = await SessionIndex.open(root, config.dataDir);
+    const firstAdapter = new CapturingAdapter();
+
+    try {
+      const firstManager = new SessionManager({
+        projectRoot: root,
+        dataDir: config.dataDir,
+        index: firstIndex
+      });
+      const firstOrchestrator = new Orchestrator(config, firstManager, new Map([["mock", firstAdapter]]));
+      await firstOrchestrator.handleRequest({ request: "记住暗号蓝色", cwd: root });
+    } finally {
+      firstIndex.close();
+    }
+
+    const secondIndex = await SessionIndex.open(root, config.dataDir);
+
+    try {
+      await secondIndex.rebuildFromFiles();
+      await expect(secondIndex.countRows("native_sessions")).resolves.toBe(1);
+      const secondAdapter = new CapturingAdapter();
+      const secondManager = new SessionManager({
+        projectRoot: root,
+        dataDir: config.dataDir,
+        index: secondIndex
+      });
+      const secondOrchestrator = new Orchestrator(config, secondManager, new Map([["mock", secondAdapter]]));
+      await secondOrchestrator.handleRequest({ request: "暗号是什么", cwd: root });
+
+      expect(firstAdapter.runs[0]?.nativeSession?.session_id).toBeUndefined();
+      expect(secondAdapter.runs[0]?.nativeSession?.session_id).toBe("mock-main-mock");
+      const mainSessionPath = join(
+        root,
+        config.dataDir,
+        "sessions",
+        "main",
+        "main-mock",
+        "native-session.json"
+      );
+      const mainSession = await readJson(mainSessionPath, NativeSessionSchema);
+      expect(mainSession.scope).toBe("main");
+      await expect(secondIndex.countRows("native_sessions")).resolves.toBe(1);
+    } finally {
+      secondIndex.close();
+    }
   });
 
   it("runs Judge Actor Critic for complex requests", async () => {

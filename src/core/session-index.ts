@@ -197,7 +197,14 @@ export class SessionIndex {
 
     const taskEntries = await readdir(sessions, { withFileTypes: true });
     for (const taskEntry of taskEntries) {
-      if (!taskEntry.isDirectory() || !taskEntry.name.startsWith("task-")) {
+      if (!taskEntry.isDirectory()) {
+        continue;
+      }
+      if (taskEntry.name === "main") {
+        await this.rebuildWorkers(join(sessions, taskEntry.name), "main");
+        continue;
+      }
+      if (!taskEntry.name.startsWith("task-")) {
         continue;
       }
       await this.rebuildTask(join(sessions, taskEntry.name), taskEntry.name);
@@ -231,19 +238,23 @@ export class SessionIndex {
       }
     }
 
-    const entries = await readdir(taskDir, { withFileTypes: true });
+    await this.rebuildWorkers(taskDir, taskId);
+  }
+
+  private async rebuildWorkers(sessionDir: string, sessionId: string): Promise<void> {
+    const entries = await readdir(sessionDir, { withFileTypes: true });
     for (const entry of entries) {
       if (!entry.isDirectory() || entry.name === "turns") {
         continue;
       }
 
-      const workerDir = join(taskDir, entry.name);
+      const workerDir = join(sessionDir, entry.name);
       const statusPath = join(workerDir, "status.json");
       const nativePath = join(workerDir, "native-session.json");
       if (await pathExists(statusPath)) {
         const status = await this.readRebuildWorkerStatus(statusPath, nativePath);
         if (status) {
-          await this.upsertWorker(taskId, status, {
+          await this.upsertWorker(sessionId, status, {
             dir: workerDir,
             statusPath,
             outputLogPath: join(workerDir, "output.log")
@@ -254,7 +265,7 @@ export class SessionIndex {
       if (await pathExists(nativePath)) {
         const nativeSession = await readJsonIfValid(nativePath, NativeSessionSchema);
         if (nativeSession) {
-          await this.upsertNativeSession(taskId, nativeSession);
+          await this.upsertNativeSession(sessionId, nativeSession);
         }
       }
     }

@@ -71,7 +71,7 @@ export const NativeSessionSchema = z.object({
   role: WorkerRoleSchema,
   worker_id: z.string().min(1),
   session_id: z.string().min(1),
-  scope: z.literal("task"),
+  scope: z.enum(["main", "task"]),
   cwd: z.string().min(1),
   created_at: z.string().datetime(),
   last_used_at: z.string().datetime(),

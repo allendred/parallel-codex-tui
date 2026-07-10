@@ -364,7 +364,7 @@ export class Orchestrator {
       statusPath
     });
 
-    await getAdapter(this.workers, engine).run({
+    await this.runWorkerWithNativeSession(engine, {
       workerId,
       role: "main",
       engine,
@@ -374,7 +374,7 @@ export class Orchestrator {
       outputLogPath,
       statusPath,
       prompt: input.request
-    });
+    }, "main");
 
     return readTextIfExists(outputLogPath);
   }
@@ -546,7 +546,11 @@ export class Orchestrator {
     input.onWorker?.(worker);
   }
 
-  private async runWorkerWithNativeSession(engine: EngineName, spec: WorkerRunSpec): Promise<WorkerResult> {
+  private async runWorkerWithNativeSession(
+    engine: EngineName,
+    spec: WorkerRunSpec,
+    scope: NativeSession["scope"] = "task"
+  ): Promise<WorkerResult> {
     const adapter = getAdapter(this.workers, engine);
     const workerFiles: WorkerFiles = {
       workerId: spec.workerId,
@@ -575,7 +579,7 @@ export class Orchestrator {
           role: spec.role,
           worker_id: spec.workerId,
           session_id: sessionId,
-          scope: "task",
+          scope,
           cwd: spec.cwd,
           created_at: previous?.created_at ?? now,
           last_used_at: now,

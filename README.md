@@ -139,6 +139,7 @@ The doctor output includes `preview:` and `semantic:` ANSI swatch rows so you ca
 - Requests are routed by Codex by default, with a configured simple/complex fallback if the router process fails.
 - Router classification only receives the user request; workspace selection and session files are kept out of the router prompt.
 - Simple requests stay in the main TUI flow and do not create Judge, Actor, or Critic workers.
+- Consecutive simple requests reuse the main worker's native session across app restarts when the CLI exposes a session id.
 - Complex requests create a session under `.parallel-codex/sessions/`.
 - Complex requests run Judge -> Actor -> Critic.
 - Complex follow-ups stay in the active task, append a numbered turn, reuse the same Actor/Critic native sessions when available, and inject up to five prior turn summaries as file-backed memory.
