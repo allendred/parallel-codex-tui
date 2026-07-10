@@ -1044,7 +1044,7 @@ export function nativeAttachStartingTheme(): NativeAttachStartingTheme {
 }
 
 export function nativeAttachStartingText(): string {
-  return "Opening native session...";
+  return "opening native session";
 }
 
 function NativeAttachTitleRail({ title, width }: { title: string; width: number }) {

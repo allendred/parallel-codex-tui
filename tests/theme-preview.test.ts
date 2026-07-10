@@ -28,16 +28,16 @@ describe("formatTuiThemePreview", () => {
     const catalog = formatTuiThemeCatalog().join("\n");
 
     expect(catalog).toContain("parallel-codex-tui themes");
-    expect(catalog).toContain("codex: chrome=ansi256(17), surface=ansi256(235), rail=ansi256(236), accent=ansi256(117)");
+    expect(catalog).toContain("codex: chrome=ansi256(234), surface=ansi256(235), rail=ansi256(237), accent=ansi256(81)");
     expect(catalog).toContain("graphite: chrome=ansi256(236), surface=ansi256(233), rail=ansi256(238), accent=ansi256(110)");
     expect(catalog).toContain("paper: chrome=ansi256(254), surface=ansi256(231), rail=ansi256(255), accent=ansi256(31)");
     expect(catalog).toContain("aurora: chrome=ansi256(24), surface=ansi256(233), rail=ansi256(30), accent=ansi256(159)");
     expect(catalog).toContain("studio: chrome=ansi256(236), surface=ansi256(235), rail=ansi256(238), accent=ansi256(147)");
     expect(catalog).toContain("  palette:");
-    expect(catalog).toContain("    chrome=ansi256(17), surface=ansi256(235), rail=ansi256(236)");
-    expect(catalog).toContain("    text=ansi256(255), muted=ansi256(247), accent=ansi256(117)");
-    expect(catalog).toContain("    successSurface=ansi256(22), success=ansi256(114), warning=ansi256(215)");
-    expect(catalog).toContain("    dangerSurface=ansi256(52), danger=ansi256(203)");
+    expect(catalog).toContain("    chrome=ansi256(234), surface=ansi256(235), rail=ansi256(237)");
+    expect(catalog).toContain("    text=ansi256(255), muted=ansi256(250), accent=ansi256(81)");
+    expect(catalog).toContain("    successSurface=ansi256(22), success=ansi256(120), warning=ansi256(222)");
+    expect(catalog).toContain("    dangerSurface=ansi256(52), danger=ansi256(210)");
     expect(catalog).toContain("    chrome=ansi256(254), surface=ansi256(231), rail=ansi256(255)");
     expect(catalog).toContain("    text=ansi256(235), muted=ansi256(242), accent=ansi256(31)");
     expect(catalog).toContain("    successSurface=ansi256(194), success=ansi256(28), warning=ansi256(136)");
@@ -52,7 +52,7 @@ describe("formatTuiThemePreview", () => {
     expect(catalog).toContain("    dangerSurface=ansi256(52), danger=ansi256(210)");
     expect(catalog).toContain("preview:");
     expect(catalog).toContain("semantic:");
-    expect(catalog).toContain("\u001b[48;5;17m");
+    expect(catalog).toContain("\u001b[48;5;234m");
     expect(catalog).toContain("\u001b[48;5;231m");
   });
 });

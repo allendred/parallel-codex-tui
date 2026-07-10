@@ -29,7 +29,7 @@ describe("nativeAttachTitleDisplay", () => {
   it("themes the native attach starting placeholder with the active palette", () => {
     configureTuiTheme({ theme: "paper" });
 
-    expect(nativeAttachStartingText()).toBe("Opening native session...");
+    expect(nativeAttachStartingText()).toBe("opening native session");
     expect(nativeAttachStartingTheme()).toEqual({
       backgroundColor: TUI_THEME_PRESETS.paper.surface,
       color: TUI_THEME_PRESETS.paper.muted,

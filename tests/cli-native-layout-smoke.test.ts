@@ -263,15 +263,15 @@ describe("CLI native layout smoke", () => {
       await waitForText(chunks, "ready");
       await waitForText(chunks, "attach");
       child.write("\x0f");
-      await waitForScreenText(() => screenWrites, screen, "Waiting for native output...");
+      await waitForScreenText(() => screenWrites, screen, "waiting for native output");
 
       const lines = screen.styledSnapshotLines();
       const nativeTitleLine = lines.find((line) => line.chunks.map((chunk) => chunk.text).join("").includes("native actor/mock"));
       const nativeTitleLineText = nativeTitleLine?.chunks.map((chunk) => chunk.text).join("") ?? "";
-      const emptyLine = lines.find((line) => line.chunks.map((chunk) => chunk.text).join("").includes("Waiting for native output..."));
+      const emptyLine = lines.find((line) => line.chunks.map((chunk) => chunk.text).join("").includes("waiting for native output"));
       const emptyLineText = emptyLine?.chunks.map((chunk) => chunk.text).join("") ?? "";
 
-      expect(emptyLineText).toContain("Waiting for native output...");
+      expect(emptyLineText).toContain("waiting for native output");
       expect(displayWidth(emptyLineText)).toBe(displayWidth(nativeTitleLineText));
       expect(emptyLine?.chunks.every((chunk) => chunk.style.backgroundColor === TUI_THEME_PRESETS.codex.surface)).toBe(true);
     } finally {

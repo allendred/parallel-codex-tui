@@ -16,7 +16,7 @@ describe("TerminalOutput theme helpers", () => {
   it("themes outer empty native output states without changing native ANSI chunk colors", () => {
     configureTuiTheme({ theme: "paper" });
 
-    expect(terminalOutputEmptyText()).toBe("Waiting for native output...");
+    expect(terminalOutputEmptyText()).toBe("waiting for native output");
     expect(terminalOutputEmptyTheme()).toEqual({
       backgroundColor: TUI_THEME_PRESETS.paper.surface,
       color: TUI_THEME_PRESETS.paper.muted,
