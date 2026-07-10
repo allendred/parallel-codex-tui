@@ -1709,6 +1709,13 @@ function sanitizeProcessOutput(text: string, options: ProcessOutputSanitizeOptio
       continue;
     }
 
+    const hiddenCommandBatch = collectParallelHiddenCommandBatch(rawLines, index, renderedArtifactFiles);
+    if (hiddenCommandBatch) {
+      kept.push(...hiddenCommandBatch.lines);
+      index = hiddenCommandBatch.nextIndex;
+      continue;
+    }
+
     const parallelRead = collectParallelReadCommandBatch(rawLines, index, renderedArtifactFiles);
     if (parallelRead) {
       kept.push(parallelRead.summary);
@@ -1976,6 +1983,50 @@ function collectParallelReadCommandBatch(
   };
 }
 
+function collectParallelHiddenCommandBatch(
+  rawLines: string[],
+  startIndex: number,
+  renderedArtifactFiles: Set<string>
+): { lines: string[]; nextIndex: number } | null {
+  const commands: ProcessExecCommand[] = [];
+  let index = startIndex;
+
+  while (index < rawLines.length) {
+    const command = collectProcessExecCommand(rawLines, index);
+    if (!command) {
+      break;
+    }
+    commands.push(command);
+    index = command.nextIndex;
+  }
+  if (commands.length < 2 || commands.some((command) => !shouldHideProcessCommand(command, renderedArtifactFiles))) {
+    return null;
+  }
+
+  const output: string[] = [];
+  let allSucceeded = true;
+  for (let commandIndex = 0; commandIndex < commands.length; commandIndex += 1) {
+    const status = normalizedProcessLine(rawLines[index] ?? "").trim();
+    if (!isProcessStatusLine(status)) {
+      return null;
+    }
+    allSucceeded &&= /^succeeded\s+in\s+/i.test(status);
+
+    const outputStart = index + 1;
+    const outputEnd = parallelReadOutputEnd(rawLines, outputStart, commandIndex < commands.length - 1);
+    if (outputEnd === null) {
+      return null;
+    }
+    output.push(status, ...rawLines.slice(outputStart, outputEnd));
+    index = outputEnd;
+  }
+
+  return {
+    lines: allSucceeded ? [] : [...commands.map((command) => command.commandLine), ...output],
+    nextIndex: index
+  };
+}
+
 function parallelReadOutputEnd(rawLines: string[], startIndex: number, expectsStatus: boolean): number | null {
   for (let index = startIndex; index < rawLines.length; index += 1) {
     const trimmed = normalizedProcessLine(rawLines[index] ?? "").trim();
@@ -2119,6 +2170,13 @@ function processCommandReadsRenderedArtifact(command: string, artifactFiles: Set
 
 function processCommandReadsParallelCodexTaskFile(command: string): boolean {
   const trimmed = command.trim();
+  const conditionalTarget = readOnlySessionFileProbeTarget(trimmed);
+  if (conditionalTarget) {
+    return (
+      conditionalTarget.includes(".parallel-codex/sessions/") &&
+      /\.(?:md|json|jsonl|diff|log|toml|txt)$/.test(conditionalTarget)
+    );
+  }
   if (!/^(?:cat|sed|nl|head|tail|bat|less|more)\b/.test(trimmed)) {
     return false;
   }
@@ -2126,6 +2184,23 @@ function processCommandReadsParallelCodexTaskFile(command: string): boolean {
     return false;
   }
   return /\.(?:md|json|jsonl|diff|log|toml|txt)\b/.test(trimmed);
+}
+
+function readOnlySessionFileProbeTarget(command: string): string | null {
+  const parts = command.split(/\s*;\s*/);
+  if (parts.length !== 5 || parts[3] !== "else echo MISSING" || parts[4] !== "fi") {
+    return null;
+  }
+
+  const existsMatch = parts[0]?.match(/^if\s+\[\s+-f\s+(.+)\s+\]$/);
+  const countMatch = parts[1]?.match(/^then\s+wc\s+-c\s+(.+)$/);
+  const existsTarget = existsMatch ? singleShellTokenValue(existsMatch[1] ?? "") : null;
+  const countTarget = countMatch ? singleShellTokenValue(countMatch[1] ?? "") : null;
+  const readTargets = sedReadTargets(parts[2] ?? "");
+  if (!existsTarget || countTarget !== existsTarget || readTargets?.length !== 1 || readTargets[0] !== existsTarget) {
+    return null;
+  }
+  return existsTarget;
 }
 
 function processCommandInspectsSessionMetadata(command: string): boolean {
@@ -2177,6 +2252,7 @@ function skipProcessCommandOutputBlock(rawLines: string[], startIndex: number): 
       trimmed.startsWith("$ ") ||
       parseShellExecCommand(trimmed) !== null ||
       isAssistantNarrativeMarker(trimmed) ||
+      /^tokens used$/i.test(trimmed) ||
       isDiffStartLine(trimmed)
     ) {
       return index;

@@ -2755,6 +2755,105 @@ describe("WorkerOutputView", () => {
     }
   });
 
+  it("hides successful parallel conditional probes of session artifacts", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pct-worker-output-conditional-readbacks-"));
+    const workerDir = join(root, "actor-codex");
+    const worklogPath = ".parallel-codex/sessions/task-1/actor-codex/worklog.md";
+    const repliesPath = ".parallel-codex/sessions/task-1/features/0002/actor-replies.jsonl";
+
+    await mkdir(workerDir, { recursive: true });
+    await writeFile(join(workerDir, "worklog.md"), "# Worklog\n\nNo source changes required.\n");
+    await writeFile(
+      join(workerDir, "output.log"),
+      [
+        "exec",
+        `/bin/zsh -lc \"if [ -f '${worklogPath}' ]; then wc -c '${worklogPath}'; sed -n '1,240p' '${worklogPath}'; else echo MISSING; fi\" in /tmp/project`,
+        "exec",
+        `/bin/zsh -lc \"if [ -f '${repliesPath}' ]; then wc -c '${repliesPath}'; sed -n '1,240p' '${repliesPath}'; else echo MISSING; fi\" in /tmp/project`,
+        "succeeded in 0ms:",
+        `0 ${worklogPath}`,
+        "succeeded in 1ms:",
+        `0 ${repliesPath}`,
+        "tokens used",
+        "1,234",
+        "Artifact inspection is complete."
+      ].join("\n")
+    );
+
+    const { lastFrame, unmount } = render(
+      <WorkerOutputView
+        title="Actor (codex) output"
+        role="actor"
+        logPath={join(workerDir, "output.log")}
+        height={18}
+      />
+    );
+
+    try {
+      await waitForFrame(lastFrame, "Artifact inspection is complete.");
+
+      const frame = lastFrame() ?? "";
+      expect(frame).toContain("No source changes required.");
+      expect(frame).toContain("Artifact inspection is complete.");
+      expect(frame).not.toContain("$ if [ -f");
+      expect(frame).not.toContain(`0 ${worklogPath}`);
+      expect(frame).not.toContain(`0 ${repliesPath}`);
+      expect(frame).not.toContain("· ok 0ms");
+      expect(frame).not.toContain("· ok 1ms");
+    } finally {
+      unmount();
+    }
+  });
+
+  it("keeps a parallel conditional probe batch visible when one probe fails", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pct-worker-output-failed-conditional-readbacks-"));
+    const workerDir = join(root, "actor-codex");
+    const worklogPath = ".parallel-codex/sessions/task-1/actor-codex/worklog.md";
+    const patchPath = ".parallel-codex/sessions/task-1/actor-codex/patch.diff";
+    const probe = (path: string) =>
+      `/bin/zsh -lc \"if [ -f '${path}' ]; then wc -c '${path}'; sed -n '1,240p' '${path}'; else echo MISSING; fi\" in /tmp/project`;
+
+    await mkdir(workerDir, { recursive: true });
+    await writeFile(join(workerDir, "worklog.md"), "# Worklog\n\nNo source changes required.\n");
+    await writeFile(
+      join(workerDir, "output.log"),
+      [
+        "exec",
+        probe(worklogPath),
+        "exec",
+        probe(patchPath),
+        "succeeded in 0ms:",
+        `38 ${worklogPath}`,
+        "failed in 2ms:",
+        `sed: ${patchPath}: Permission denied`,
+        "tokens used",
+        "1,234",
+        "Artifact inspection failed."
+      ].join("\n")
+    );
+
+    const { lastFrame, unmount } = render(
+      <WorkerOutputView
+        title="Actor (codex) output"
+        role="actor"
+        logPath={join(workerDir, "output.log")}
+        height={24}
+      />
+    );
+
+    try {
+      await waitForFrame(lastFrame, "Artifact inspection failed.");
+
+      const frame = lastFrame() ?? "";
+      expect(frame.match(/\$ if \[ -f/g)).toHaveLength(2);
+      expect(frame).toContain("· fail 2ms");
+      expect(frame).toContain("Permission denied");
+      expect(frame).toContain("Artifact inspection failed.");
+    } finally {
+      unmount();
+    }
+  });
+
   it("hides session metadata probes and standalone spinner noise from process logs", async () => {
     const root = await mkdtemp(join(tmpdir(), "pct-worker-output-session-probes-"));
     const workerDir = join(root, "critic-codex");
