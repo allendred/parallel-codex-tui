@@ -97,6 +97,18 @@ describe("CLI worker layout smoke", () => {
       expect(snapshot).toContain("No workers yet · start a complex task before attaching");
       expect(snapshot).not.toContain("Start a complex task to create workers before attaching.");
       expect(snapshot).not.toContain("Run a complex task");
+
+      child.write("\x1b");
+      await waitForScreenTextGone(() => screenWrites, screen, "No workers yet");
+      child.write("\x17");
+      await waitForScreenText(() => screenWrites, screen, "No workers yet · start a complex task before opening logs");
+
+      const logsSnapshot = screen.snapshot();
+      expect(logsSnapshot.split("\n")[0]).toContain("chat");
+      expect(logsSnapshot.split("\n")[0]).not.toContain("logs");
+      expect(logsSnapshot).not.toContain("before attaching");
+      child.write("\x1b");
+      await waitForScreenTextGone(() => screenWrites, screen, "No workers yet");
     } finally {
       child.kill("SIGTERM");
     }
@@ -1164,6 +1176,21 @@ async function waitForScreenText(
     return;
   }
   throw new Error(`Timed out waiting for screen text ${text}\nSnapshot:\n${screen.snapshot()}`);
+}
+
+async function waitForScreenTextGone(
+  screenWritesRef: () => Promise<void>,
+  screen: NativeTerminalScreen,
+  text: string
+): Promise<void> {
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    await screenWritesRef();
+    if (!screen.snapshot().includes(text)) {
+      return;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+  throw new Error(`Timed out waiting to remove screen text ${text}\nSnapshot:\n${screen.snapshot()}`);
 }
 
 async function openWorkerLogs(

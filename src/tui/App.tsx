@@ -88,6 +88,7 @@ type ChatEmptyStateTheme = Pick<TextProps, "backgroundColor" | "bold" | "color">
 type ChatViewportBlankLineTheme = Pick<TextProps, "backgroundColor">;
 type NativeAttachStartingTheme = Pick<TextProps, "backgroundColor" | "color">;
 const NO_WORKERS_ATTACH_MESSAGE = "No workers yet · start a complex task before attaching";
+const NO_WORKERS_LOGS_MESSAGE = "No workers yet · start a complex task before opening logs";
 
 export function App({
   config,
@@ -437,6 +438,7 @@ export function App({
         }
         if (chunk === "\x1b") {
           userSelectedWorkerRef.current = true;
+          setAttachError(null);
           setView("chat");
           return;
         }
@@ -475,6 +477,7 @@ export function App({
             return;
           }
           userSelectedWorkerRef.current = true;
+          setAttachError(null);
           setView("chat");
           return;
         }
@@ -490,11 +493,17 @@ export function App({
           return;
         }
         if (wheelDelta !== 0 && workersRef.current.length > 0) {
+          setAttachError(null);
           setView("worker");
           setWorkerScrollOffset((current) => nextScrollOffset(current, wheelDelta, workerMaxScrollOffsetRef.current));
           return;
         }
         if (chunk === "\u0017") {
+          if (workersRef.current.length === 0) {
+            setAttachError(NO_WORKERS_LOGS_MESSAGE);
+            return;
+          }
+          setAttachError(null);
           setView("worker");
           setWorkerScrollOffset(0);
           return;
@@ -512,6 +521,7 @@ export function App({
           const nextIndex = (selectedWorkerIndexRef.current + 1) % workersRef.current.length;
           userSelectedWorkerRef.current = true;
           selectedWorkerIndexRef.current = nextIndex;
+          setAttachError(null);
           setSelectedWorkerIndex(nextIndex);
           setView("worker");
           setWorkerScrollOffset(0);
@@ -626,6 +636,7 @@ export function App({
 
     if (key.escape) {
       userSelectedWorkerRef.current = true;
+      setAttachError(null);
       setView("chat");
       return;
     }

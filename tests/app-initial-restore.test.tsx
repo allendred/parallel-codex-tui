@@ -90,6 +90,57 @@ describe("App initial task restore", () => {
   });
 });
 
+describe("App empty worker shortcuts", () => {
+  it("keeps Ctrl+W in chat with a dismissible no-worker explanation", async () => {
+    const testInput = installTestInputStream();
+    const view = render(
+      <App
+        config={defaultConfig("/tmp/pct-app-empty-logs")}
+        orchestrator={{} as Orchestrator}
+        cwd="/tmp/pct-workspace"
+      />
+    );
+
+    try {
+      await waitForFrame(view.lastFrame, "ready");
+      await settleEffects();
+      testInput.send(view.stdin, "\x17");
+      await waitForFrame(view.lastFrame, "No workers yet · start a complex task before opening logs");
+
+      expect((view.lastFrame() ?? "").split("\n")[0]).toContain("· chat ·");
+      testInput.send(view.stdin, "\x1b");
+      await waitForFrameWithout(view.lastFrame, "No workers yet");
+    } finally {
+      view.unmount();
+      testInput.restore();
+    }
+  });
+
+  it("dismisses a no-worker attach explanation with Escape", async () => {
+    const testInput = installTestInputStream();
+    const view = render(
+      <App
+        config={defaultConfig("/tmp/pct-app-empty-attach")}
+        orchestrator={{} as Orchestrator}
+        cwd="/tmp/pct-workspace"
+      />
+    );
+
+    try {
+      await waitForFrame(view.lastFrame, "ready");
+      await settleEffects();
+      testInput.send(view.stdin, "\x0f");
+      await waitForFrame(view.lastFrame, "No workers yet · start a complex task before attaching");
+
+      testInput.send(view.stdin, "\x1b");
+      await waitForFrameWithout(view.lastFrame, "No workers yet");
+    } finally {
+      view.unmount();
+      testInput.restore();
+    }
+  });
+});
+
 function deferred<T>(): { promise: Promise<T>; resolve: (value: T) => void } {
   let resolve!: (value: T) => void;
   const promise = new Promise<T>((done) => {
@@ -106,6 +157,16 @@ async function waitForFrame(lastFrame: () => string | undefined, text: string): 
     await new Promise((resolve) => setTimeout(resolve, 10));
   }
   throw new Error(`Timed out waiting for ${text}\nFrame:\n${lastFrame() ?? ""}`);
+}
+
+async function waitForFrameWithout(lastFrame: () => string | undefined, text: string): Promise<void> {
+  for (let attempt = 0; attempt < 80; attempt += 1) {
+    if (!(lastFrame() ?? "").includes(text)) {
+      return;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  throw new Error(`Timed out waiting to remove ${text}\nFrame:\n${lastFrame() ?? ""}`);
 }
 
 async function settleEffects(): Promise<void> {
