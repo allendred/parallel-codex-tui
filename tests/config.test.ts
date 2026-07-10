@@ -29,6 +29,7 @@ describe("config", () => {
     ]);
     expect(config.router.codex.timeoutMs).toBe(30000);
     expect(config.router.codex.fallback).toBe("simple");
+    expect(config.router.codex.env).toEqual({});
     expect(config.router.codex.followUpTimeoutMs).toBe(20000);
     expect(config.workers.codex.args).toEqual([
       "exec",
@@ -298,7 +299,10 @@ describe("config", () => {
         'args = ["exec", "--skip-git-repo-check", "--sandbox", "workspace-write", "--color", "never", "-"]',
         "timeoutMs = 120000",
         "followUpTimeoutMs = 9000",
-        'fallback = "complex"'
+        'fallback = "complex"',
+        "",
+        "[router.codex.env]",
+        'HTTPS_PROXY = "http://127.0.0.1:7890"'
       ].join("\n")
     );
 
@@ -309,6 +313,9 @@ describe("config", () => {
     expect(config.router.codex.timeoutMs).toBe(120000);
     expect(config.router.codex.followUpTimeoutMs).toBe(9000);
     expect(config.router.codex.fallback).toBe("complex");
+    expect(config.router.codex.env).toEqual({
+      HTTPS_PROXY: "http://127.0.0.1:7890"
+    });
   });
 
   it("rejects the removed heuristic router fallback", async () => {

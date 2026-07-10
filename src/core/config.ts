@@ -68,7 +68,8 @@ const CodexRouterConfigSchema = z.object({
   ]),
   timeoutMs: z.number().int().positive().default(30000),
   followUpTimeoutMs: z.number().int().positive().max(120000).default(20000),
-  fallback: z.enum(["simple", "complex"]).default("simple")
+  fallback: z.enum(["simple", "complex"]).default("simple"),
+  env: z.record(z.string()).default({})
 });
 
 const OrchestrationConfigSchema = z.object({
@@ -146,7 +147,8 @@ export function defaultConfig(projectRoot: string): AppConfig {
         ],
         timeoutMs: 30000,
         followUpTimeoutMs: 20000,
-        fallback: "simple"
+        fallback: "simple",
+        env: {}
       }
     },
     orchestration: {
@@ -276,7 +278,11 @@ export async function loadConfig(projectRoot: string): Promise<AppConfig> {
       ...(parsed.router ?? {}),
       codex: {
         ...base.router.codex,
-        ...(parsed.router?.codex ?? {})
+        ...(parsed.router?.codex ?? {}),
+        env: {
+          ...base.router.codex.env,
+          ...(parsed.router?.codex?.env ?? {})
+        }
       }
     },
     orchestration: {
@@ -398,6 +404,7 @@ function assertObjectSections(parsed: Partial<AppConfig>): void {
   const sections: Array<[string, unknown]> = [
     ["router", parsed.router],
     ["router.codex", parsed.router?.codex],
+    ["router.codex.env", parsed.router?.codex?.env],
     ["orchestration", parsed.orchestration],
     ["workers", parsed.workers],
     ["workers.codex", parsed.workers?.codex],

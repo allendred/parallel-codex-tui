@@ -67,7 +67,10 @@ export async function runCodexRouterProcess(
   return new Promise<string>((resolve, reject) => {
     const child = spawn(command, args, {
       cwd,
-      env: process.env,
+      env: {
+        ...process.env,
+        ...routerEnvironment(config.router.codex.env)
+      },
       stdio: ["pipe", "pipe", "pipe"]
     });
     let stdout = "";
@@ -143,6 +146,15 @@ export async function runCodexRouterProcess(
     child.stdin.write(prompt);
     child.stdin.end();
   });
+}
+
+function routerEnvironment(configured: Record<string, string>): Record<string, string> {
+  return Object.fromEntries(
+    Object.entries(configured).map(([name, value]) => [
+      name,
+      value.replace(/\{env:([A-Za-z_][A-Za-z0-9_]*)\}/g, (_match, variable: string) => process.env[variable] ?? "")
+    ])
+  );
 }
 
 function cancellationError(): Error {

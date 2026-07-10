@@ -207,6 +207,28 @@ describe("routeRequestWithCodex", () => {
     expect(route.duration_ms).toBeLessThan(1000);
   });
 
+  it("passes configured environment variables to the router process", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pct-router-env-"));
+    const config = defaultConfig(root);
+    config.router.codex.command = process.execPath;
+    config.router.codex.args = [
+      "-e",
+      "process.stdout.write(JSON.stringify({mode: process.env.ROUTER_MODE, reason: process.env.ROUTER_REASON}))"
+    ];
+    config.router.codex.env = {
+      ROUTER_MODE: "simple",
+      ROUTER_REASON: "proxy environment reached router"
+    };
+
+    const route = await routeRequestWithCodex("你好", config, undefined, root);
+
+    expect(route).toMatchObject({
+      mode: "simple",
+      source: "codex",
+      reason: "proxy environment reached router"
+    });
+  });
+
   it("summarizes noisy Codex router process errors before adding fallback reason", async () => {
     const config = defaultConfig("/tmp/project");
     config.router.codex.fallback = "complex";

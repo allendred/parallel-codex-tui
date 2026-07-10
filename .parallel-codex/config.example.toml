@@ -9,6 +9,13 @@ timeoutMs = 30000
 followUpTimeoutMs = 20000
 fallback = "simple"
 
+# Optional environment passed only to the Codex router process.
+# [router.codex.env]
+# HTTP_PROXY = "http://127.0.0.1:7890"
+# HTTPS_PROXY = "http://127.0.0.1:7890"
+# ALL_PROXY = "socks5h://127.0.0.1:7890"
+# NO_PROXY = "localhost,127.0.0.1"
+
 [orchestration]
 # Maximum Actor or Critic feature workers running at the same time (1..8).
 maxParallelFeatures = 3
@@ -17,6 +24,13 @@ maxParallelFeatures = 3
 command = "codex"
 args = ["exec", "--skip-git-repo-check", "--sandbox", "workspace-write", "--color", "never", "-"]
 firstOutputTimeoutMs = 120000
+
+# Worker and native-attach environment use the same model env table.
+# [workers.codex.model.env]
+# HTTP_PROXY = "http://127.0.0.1:7890"
+# HTTPS_PROXY = "http://127.0.0.1:7890"
+# ALL_PROXY = "socks5h://127.0.0.1:7890"
+# NO_PROXY = "localhost,127.0.0.1"
 
 [workers.codex.interactive]
 command = "codex"

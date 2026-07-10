@@ -21,6 +21,7 @@ export interface NativeAttachLaunchInput {
 export interface NativeAttachLaunch {
   command: string;
   args: string[];
+  env?: Record<string, string>;
   cwd: string;
   sessionId: string;
   label: string;
@@ -43,6 +44,7 @@ export async function buildNativeAttachLaunch(input: NativeAttachLaunchInput): P
   const nativeSession = await readWorkerNativeSession(input.worker);
   const workerConfig = input.config.workers[input.worker.engine];
   const modelConfig = workerConfig.model;
+  const env = modelEnvironment(modelConfig);
   if (!(await pathExists(nativeSession.cwd))) {
     throw new Error(`Native session workspace not found for ${input.worker.label}: ${nativeSession.cwd}`);
   }
@@ -53,6 +55,7 @@ export async function buildNativeAttachLaunch(input: NativeAttachLaunchInput): P
   return {
     command: workerConfig.interactive.command,
     args: workerConfig.interactive.args.map((arg) => renderTemplate(arg, nativeSession.session_id, modelConfig)),
+    ...(Object.keys(env).length > 0 ? { env } : {}),
     cwd: nativeSession.cwd,
     sessionId: nativeSession.session_id,
     label: input.worker.label
@@ -71,6 +74,7 @@ export function startNativeAttachProcess(
     cwd: launch.cwd,
     env: {
       ...process.env,
+      ...(launch.env ?? {}),
       TERM: process.env.TERM || "xterm-256color"
     }
   });
@@ -90,6 +94,12 @@ export function startNativeAttachProcess(
       child.kill("SIGTERM");
     }
   };
+}
+
+function modelEnvironment(modelConfig: WorkerModelRunConfig): Record<string, string> {
+  return Object.fromEntries(
+    Object.entries(modelConfig.env ?? {}).map(([name, value]) => [name, renderTemplate(value, "", modelConfig)])
+  );
 }
 
 function ensureNodePtySpawnHelperExecutable(): void {

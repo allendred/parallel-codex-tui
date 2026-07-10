@@ -181,6 +181,26 @@ fallback = "simple"
 
 Set `defaultMode = "simple"` / `defaultMode = "complex"` to force one path. In `auto` mode, routing is semantic through an ephemeral, low-reasoning Codex run. If initial routing fails or returns invalid JSON, `fallback = "simple"` or `fallback = "complex"` decides the path; the safe default is `simple` and there is no keyword-only router. Active-task follow-ups use `followUpTimeoutMs` and always fail safely to the persistent Main session instead of accidentally starting Actor/Critic workers.
 
+### Proxy Environment
+
+Some CLI runtimes do not inherit the macOS System Settings proxy. Configure the router explicitly when direct OpenAI connections are blocked:
+
+```toml
+[router.codex.env]
+HTTP_PROXY = "http://127.0.0.1:7890"
+HTTPS_PROXY = "http://127.0.0.1:7890"
+ALL_PROXY = "socks5h://127.0.0.1:7890"
+NO_PROXY = "localhost,127.0.0.1"
+
+[workers.codex.model.env]
+HTTP_PROXY = "http://127.0.0.1:7890"
+HTTPS_PROXY = "http://127.0.0.1:7890"
+ALL_PROXY = "socks5h://127.0.0.1:7890"
+NO_PROXY = "localhost,127.0.0.1"
+```
+
+`router.codex.env` applies only to semantic classification. `workers.codex.model.env` applies to fresh/resumed Codex workers and embedded native attach sessions. Keep these values in local `config.toml`, which is ignored by Git.
+
 ## Mock Mode
 
 For deterministic local testing, use this pairing in `.parallel-codex/config.toml`:

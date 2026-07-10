@@ -63,6 +63,44 @@ describe("buildNativeAttachLaunch", () => {
     });
   });
 
+  it("passes worker model environment into the embedded native session", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pct-native-attach-env-"));
+    const workerDir = join(root, "task-a", "actor-codex");
+    await writeJson(join(workerDir, "native-session.json"), {
+      engine: "codex",
+      role: "actor",
+      worker_id: "actor-codex",
+      session_id: "native-env",
+      scope: "task",
+      cwd: root,
+      created_at: "2026-06-30T03:30:00.000Z",
+      last_used_at: "2026-06-30T03:30:00.000Z",
+      source: "manual"
+    });
+    const config = defaultConfig(root);
+    config.workers.codex.model.env = {
+      HTTPS_PROXY: "http://127.0.0.1:7890",
+      ALL_PROXY: "socks5h://127.0.0.1:7890"
+    };
+
+    const launch = await buildNativeAttachLaunch({
+      config,
+      worker: {
+        id: "actor-codex",
+        role: "actor",
+        engine: "codex",
+        label: "Actor (codex)",
+        logPath: join(workerDir, "output.log"),
+        statusPath: join(workerDir, "status.json")
+      }
+    });
+
+    expect(launch.env).toEqual({
+      HTTPS_PROXY: "http://127.0.0.1:7890",
+      ALL_PROXY: "socks5h://127.0.0.1:7890"
+    });
+  });
+
   it("fails when the selected worker has no native session file", async () => {
     const root = await mkdtemp(join(tmpdir(), "pct-native-attach-missing-"));
     const workerDir = join(root, "task-a", "critic-claude");
@@ -372,6 +410,31 @@ describe("buildNativeAttachLaunch", () => {
     await waitForClose(closed);
 
     expect(output.join("")).toContain("input:hello");
+    expect(closed).toEqual([0]);
+  });
+
+  it("applies launch environment variables to the embedded PTY", async () => {
+    const output: string[] = [];
+    const closed: number[] = [];
+    const script = "console.log('proxy:' + process.env.HTTPS_PROXY); process.exit(0);";
+
+    startNativeAttachProcess(
+      {
+        command: process.execPath,
+        args: ["-e", script],
+        env: { HTTPS_PROXY: "http://127.0.0.1:7890" },
+        cwd: process.cwd(),
+        sessionId: "native-env",
+        label: "Actor (node)"
+      },
+      {
+        onOutput: (chunk) => output.push(chunk),
+        onClose: (code) => closed.push(code)
+      }
+    );
+
+    await waitForClose(closed);
+    expect(output.join("")).toContain("proxy:http://127.0.0.1:7890");
     expect(closed).toEqual([0]);
   });
 
