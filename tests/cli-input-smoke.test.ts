@@ -24,6 +24,7 @@ describe("CLI input smoke", () => {
     child.onData((chunk) => chunks.push(chunk));
     try {
       await waitForText(chunks, "ready");
+      await waitForText(chunks, "message");
       child.write("做");
       child.write("个");
       child.write("俄罗斯");
@@ -59,6 +60,7 @@ describe("CLI input smoke", () => {
     });
     try {
       await waitForText(chunks, "ready");
+      await waitForText(chunks, "message");
       child.write("请帮我继续优化这个并行编码终端界面让它在窄屏下也保持专业稳定不要换行乱掉");
 
       await waitForText(chunks, "不要换行乱掉");

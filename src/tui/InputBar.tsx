@@ -150,7 +150,7 @@ export function chatPlaceholderDisplayValue(
   if (terminalWidth < 22) {
     return "message";
   }
-  return chatInputDisplayValue("Type a message", terminalWidth);
+  return chatInputDisplayValue("message", terminalWidth);
 }
 
 function chatTaskPlaceholderDisplayValue(terminalWidth: number): string {
@@ -164,9 +164,9 @@ function chatTaskPlaceholderDisplayValue(terminalWidth: number): string {
     return "msg · ^W · ^O";
   }
   if (terminalWidth < 38) {
-    return chatInputDisplayValue("Message · ^W · ^O", terminalWidth);
+    return chatInputDisplayValue("message · ^W · ^O", terminalWidth);
   }
-  return chatInputDisplayValue("Message · ^W logs · Tab · ^O attach", terminalWidth);
+  return chatInputDisplayValue("message · ^W logs · Tab · ^O attach", terminalWidth);
 }
 
 export function chatBusyDisplayValue(terminalWidth: number): string {

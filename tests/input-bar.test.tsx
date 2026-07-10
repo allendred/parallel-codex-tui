@@ -39,7 +39,7 @@ describe("InputBar", () => {
   it("uses intentional chat placeholders in ultra narrow terminals", () => {
     expect(chatPlaceholderDisplayValue(10)).toBe("msg");
     expect(chatPlaceholderDisplayValue(16)).toBe("message");
-    expect(chatPlaceholderDisplayValue(24)).toBe("Type a message");
+    expect(chatPlaceholderDisplayValue(24)).toBe("message");
 
     const { lastFrame } = render(
       <InputBar mode="chat" value="" terminalWidth={12} onChange={() => {}} />
@@ -63,9 +63,9 @@ describe("InputBar", () => {
   });
 
   it("shows task shortcuts in the empty chat prompt once workers exist", () => {
-    expect(chatPlaceholderDisplayValue(80, { hasWorkers: true })).toBe("Message · ^W logs · Tab · ^O attach");
-    expect(chatPlaceholderDisplayValue(42, { hasWorkers: true })).toBe("Message · ^W logs · Tab · ^O attach");
-    expect(chatPlaceholderDisplayValue(30, { hasWorkers: true })).toBe("Message · ^W · ^O");
+    expect(chatPlaceholderDisplayValue(80, { hasWorkers: true })).toBe("message · ^W logs · Tab · ^O attach");
+    expect(chatPlaceholderDisplayValue(42, { hasWorkers: true })).toBe("message · ^W logs · Tab · ^O attach");
+    expect(chatPlaceholderDisplayValue(30, { hasWorkers: true })).toBe("message · ^W · ^O");
     expect(chatPlaceholderDisplayValue(20, { hasWorkers: true })).toBe("msg · ^W · ^O");
     expect(chatPlaceholderDisplayValue(19, { hasWorkers: true })).toBe("msg · ^W · ^O");
     expect(chatPlaceholderDisplayValue(18, { hasWorkers: true })).toBe("msg · ^W");
@@ -77,6 +77,7 @@ describe("InputBar", () => {
 
     const frame = lastFrame() ?? "";
     expect(frame).not.toContain("Type a message");
+    expect(frame).toContain("message");
     expect(frame).toContain("^W logs");
     expect(frame).toContain("Tab");
     expect(frame).toContain("^O attach");
@@ -115,7 +116,7 @@ describe("InputBar", () => {
     );
 
     const frame = lastFrame() ?? "";
-    expect(frame).toContain("> | Message · ^W · ^O");
+    expect(frame).toContain("> | message · ^W · ^O");
     expect(frame).not.toContain("logs");
     expect(frame).not.toContain("attach");
     expect(frame.split("\n")).toHaveLength(1);

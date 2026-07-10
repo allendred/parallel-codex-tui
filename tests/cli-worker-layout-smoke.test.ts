@@ -37,13 +37,13 @@ describe("CLI worker layout smoke", () => {
     });
 
     try {
-      await waitForScreenText(() => screenWrites, screen, "Type a message");
+      await waitForScreenText(() => screenWrites, screen, "> | message");
       await screenWrites;
 
       const lines = screen.styledSnapshotLines();
       const snapshot = screen.snapshot();
       const headerLineText = lines[0]?.chunks.map((chunk) => chunk.text).join("") ?? "";
-      const inputIndex = lines.findIndex((line) => line.chunks.map((chunk) => chunk.text).join("").includes("Type a message"));
+      const inputIndex = lines.findIndex((line) => line.chunks.map((chunk) => chunk.text).join("").includes("> | message"));
       const statusLine = lines[inputIndex + 1];
       const statusLineText = statusLine?.chunks.map((chunk) => chunk.text).join("") ?? "";
       const contentLines = lines.slice(1, inputIndex);
@@ -90,7 +90,7 @@ describe("CLI worker layout smoke", () => {
     });
 
     try {
-      await waitForScreenText(() => screenWrites, screen, "Type a message");
+      await waitForScreenText(() => screenWrites, screen, "> | message");
       await openAttachError(child, () => screenWrites, screen, "No workers yet");
 
       const snapshot = screen.snapshot();
@@ -194,7 +194,7 @@ describe("CLI worker layout smoke", () => {
       child.write("\x1b");
       await waitForScreenText(() => screenWrites, screen, "^W logs");
       const chatSnapshot = screen.snapshot();
-      expect(chatSnapshot).toContain("> | Message · ^W logs · Tab · ^O attach");
+      expect(chatSnapshot).toContain("> | message · ^W logs · Tab · ^O attach");
       expect(chatSnapshot).toContain("1 worker");
       expect(chatSnapshot).toContain("1 done");
       expect(chatSnapshot).not.toContain("@ critic/mock");
@@ -302,6 +302,7 @@ describe("CLI worker layout smoke", () => {
       await waitForScreenText(() => screenWrites, screen, "^W logs");
       child.write("\x17");
       await waitForScreenText(() => screenWrites, screen, "line 80");
+      await waitForScreenText(() => screenWrites, screen, "1 worker");
 
       const lines = screen.styledSnapshotLines();
       const headerLine = lines.find((line) => line.chunks.map((chunk) => chunk.text).join("").includes("parallel-codex-tui"));
@@ -641,7 +642,7 @@ describe("CLI worker layout smoke", () => {
       child.write("\x1b");
       await waitForScreenText(() => screenWrites, screen, "^W logs");
       const chatSnapshot = screen.snapshot();
-      expect(chatSnapshot).toContain("> | Message · ^W logs · Tab · ^O attach");
+      expect(chatSnapshot).toContain("> | message · ^W logs · Tab · ^O attach");
       expect(chatSnapshot).not.toContain("@ critic/mock");
       expect(Math.max(...chatSnapshot.split("\n").map((line) => line.length))).toBeLessThanOrEqual(42);
     } finally {
