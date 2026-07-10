@@ -643,6 +643,49 @@ describe("WorkerOutputView", () => {
     }
   });
 
+  it("collapses compact project file listings before they become a vertical menu", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pct-worker-output-short-file-list-"));
+    const workerDir = join(root, "critic-codex");
+
+    await mkdir(workerDir, { recursive: true });
+    await writeFile(
+      join(workerDir, "output.log"),
+      [
+        "$ rg --files",
+        "succeeded in 0ms:",
+        "status.json",
+        "native-session.json",
+        "worklog.md",
+        "prompt.md",
+        "output.log",
+        "patch.diff",
+        "review.md",
+        "after file list"
+      ].join("\n")
+    );
+
+    const { lastFrame, unmount } = render(
+      <WorkerOutputView
+        title="Critic (codex) output"
+        role="critic"
+        logPath={join(workerDir, "output.log")}
+        height={16}
+      />
+    );
+
+    try {
+      await waitForFrame(lastFrame, "after file list");
+
+      const frame = lastFrame() ?? "";
+      expect(frame).toContain("files 7 paths");
+      expect(frame).toContain("after file list");
+      expect(frame).not.toContain("native-session.json");
+      expect(frame).not.toContain("patch.diff");
+    } finally {
+      unmount();
+    }
+  });
+
   it("uses a short command label for collapsed rg file listings", async () => {
     const root = await mkdtemp(join(tmpdir(), "pct-worker-output-file-list-short-command-"));
     const workerDir = join(root, "judge-codex");
@@ -1846,6 +1889,45 @@ describe("WorkerOutputView", () => {
     }
   });
 
+  it("renders consecutive identical process diffs only once", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pct-worker-output-repeated-diff-"));
+    const workerDir = join(root, "critic-mock");
+    const diff = [
+      "diff --git a/src/a.ts b/src/a.ts",
+      "index 1111111..2222222 100644",
+      "--- a/src/a.ts",
+      "+++ b/src/a.ts",
+      "@@ -0,0 +1 @@",
+      "+export const value = 1;"
+    ];
+
+    await mkdir(workerDir, { recursive: true });
+    await writeFile(
+      join(workerDir, "output.log"),
+      ["before repeated diff", ...diff, "", ...diff, "after repeated diff"].join("\n")
+    );
+
+    const { lastFrame, unmount } = render(
+      <WorkerOutputView
+        title="Critic (mock) output"
+        role="critic"
+        logPath={join(workerDir, "output.log")}
+        height={30}
+      />
+    );
+
+    try {
+      await waitForFrame(lastFrame, "after repeated diff");
+
+      const frame = lastFrame() ?? "";
+      expect(frame.match(/· diff 1 file · \+1 · src\/a\.ts/g)).toHaveLength(1);
+      expect(frame).toContain("before repeated diff");
+      expect(frame).toContain("after repeated diff");
+    } finally {
+      unmount();
+    }
+  });
+
   it("renders diff -u process blocks with the same structured diff layout", async () => {
     const root = await mkdtemp(join(tmpdir(), "pct-worker-output-process-unified-diff-"));
     const workerDir = join(root, "critic-mock");
@@ -2433,6 +2515,10 @@ describe("WorkerOutputView", () => {
         "Critic Review - Feature 0010",
         "PROCESS DUPLICATE SHOULD BE HIDDEN",
         "exec",
+        "/bin/zsh -lc \"tail -n 100 .parallel-codex/sessions/task-1/actor-codex/output.log\" in /tmp/project",
+        "succeeded in 0ms:",
+        "INTERNAL WORKER LOG SHOULD BE HIDDEN",
+        "exec",
         "/bin/zsh -lc 'npm test' in /tmp/project",
         "succeeded in 12ms:",
         "17 tests passed"
@@ -2459,6 +2545,8 @@ describe("WorkerOutputView", () => {
       expect(frame).not.toContain("$ sed -n");
       expect(frame).not.toContain("Critic Review - Feature 0010");
       expect(frame).not.toContain("PROCESS DUPLICATE SHOULD BE HIDDEN");
+      expect(frame).not.toContain("$ tail -n 100");
+      expect(frame).not.toContain("INTERNAL WORKER LOG SHOULD BE HIDDEN");
     } finally {
       unmount();
     }
@@ -2483,6 +2571,17 @@ describe("WorkerOutputView", () => {
         "succeeded in 0ms:",
         ".parallel-codex/sessions/task-1/critic-codex/native-session.json",
         "-rw-r--r-- 1 user staff 328 native-session.json",
+        "exec",
+        "/bin/zsh -lc 'rg --files .' in /tmp/project/.parallel-codex/sessions/task-1/critic-codex",
+        "succeeded in 0ms:",
+        "status.json",
+        "output.log",
+        "review.md",
+        "exec",
+        "/bin/zsh -lc 'ls -la' in /tmp/project/.parallel-codex/sessions/task-1/critic-codex",
+        "succeeded in 0ms:",
+        "total 24",
+        "drwxr-xr-x 4 user staff 128 .",
         "exec",
         "/bin/zsh -lc 'npm test' in /tmp/project",
         "succeeded in 12ms:",
@@ -2509,8 +2608,57 @@ describe("WorkerOutputView", () => {
       expect(frame).not.toContain("⠙");
       expect(frame).not.toContain("$ wc -c");
       expect(frame).not.toContain("$ find .parallel-codex");
+      expect(frame).not.toContain("$ rg --files");
+      expect(frame).not.toContain("$ ls -la");
       expect(frame).not.toContain("critic-findings.jsonl");
       expect(frame).not.toContain("native-session.json");
+      expect(frame).not.toContain("status.json");
+      expect(frame).not.toContain("total 24");
+    } finally {
+      unmount();
+    }
+  });
+
+  it("hides Codex plugin and telemetry diagnostics without hiding network recovery", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pct-worker-output-codex-diagnostics-"));
+    const workerDir = join(root, "critic-codex");
+
+    await mkdir(workerDir, { recursive: true });
+    await writeFile(
+      join(workerDir, "output.log"),
+      [
+        "before diagnostics",
+        "2026-07-07T03:37:20.758033Z WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: maximum of 3 prompts is",
+        "supported path=/Users/test/.codex/plugins/cache/openai-primary-runtime/template-creator/1.0/.codex-plugin/plugin.json",
+        "2026-07-07T03:38:35.243972Z WARN codex_otel::events::session_telemetry: metrics counter [codex.skill.injected]",
+        "failed: tag value contains invalid characters: superpowers:using-superpowers",
+        "Reconnecting... 1/5",
+        "warning: Falling back from WebSockets to HTTPS transport: request timed out",
+        "after network recovery"
+      ].join("\n")
+    );
+
+    const { lastFrame, unmount } = render(
+      <WorkerOutputView
+        title="Critic (codex) output"
+        role="critic"
+        logPath={join(workerDir, "output.log")}
+        height={20}
+      />
+    );
+
+    try {
+      await waitForFrame(lastFrame, "after network recovery");
+
+      const frame = lastFrame() ?? "";
+      expect(frame).toContain("before diagnostics");
+      expect(frame).toContain("Reconnecting... 1/5");
+      expect(frame).toContain("Falling back from WebSockets to HTTPS transport");
+      expect(frame).toContain("after network recovery");
+      expect(frame).not.toContain("codexcoreplugins::manifest");
+      expect(frame).not.toContain("supported path=");
+      expect(frame).not.toContain("codex_otel::events::session_telemetry");
+      expect(frame).not.toContain("tag value contains invalid characters");
     } finally {
       unmount();
     }

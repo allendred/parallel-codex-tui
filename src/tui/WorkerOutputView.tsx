@@ -1402,7 +1402,32 @@ function isSingleFilePathListItem(trimmed: string): boolean {
 }
 
 function cleanProcessRenderLines(lines: RenderLine[]): RenderLine[] {
-  return removePatchDiffReadbackNoise(removeDiffAdjacentCodeSummaries(mergeSmokeStatusSuccessLines(lines)));
+  return dedupeConsecutiveCollapsedDiffSummaries(
+    removePatchDiffReadbackNoise(removeDiffAdjacentCodeSummaries(mergeSmokeStatusSuccessLines(lines)))
+  );
+}
+
+function dedupeConsecutiveCollapsedDiffSummaries(lines: RenderLine[]): RenderLine[] {
+  const deduped: RenderLine[] = [];
+
+  for (const line of lines) {
+    if (isCollapsedDiffSummaryLine(line)) {
+      const previousIndex = lastIndexWhere(
+        deduped,
+        (candidate) => candidate.kind !== "blank" && Boolean(candidate.text.trim())
+      );
+      const previous = previousIndex >= 0 ? deduped[previousIndex] : undefined;
+      if (previous && isCollapsedDiffSummaryLine(previous) && previous.text.trim() === line.text.trim()) {
+        while (deduped[deduped.length - 1]?.kind === "blank") {
+          deduped.pop();
+        }
+        continue;
+      }
+    }
+    deduped.push(line);
+  }
+
+  return deduped;
 }
 
 function mergeSmokeStatusSuccessLines(lines: RenderLine[]): RenderLine[] {
@@ -1577,7 +1602,7 @@ function diffTitlePath(title: string): string {
 
 const SOURCE_OUTPUT_COLLAPSE_MIN_LINES = 8;
 const CODE_OUTPUT_COLLAPSE_MIN_LINES = 4;
-const FILE_LIST_OUTPUT_COLLAPSE_MIN_LINES = 12;
+const FILE_LIST_OUTPUT_COLLAPSE_MIN_LINES = 4;
 const READ_SUMMARY_RUN_COLLAPSE_MIN_ITEMS = 3;
 const NODE_TEST_OUTPUT_COLLAPSE_MIN_PASSES = 3;
 const PROCESS_DIFF_COLLAPSE_MIN_BODY_LINES = 1;
@@ -1636,6 +1661,7 @@ function sanitizeProcessOutput(text: string, options: ProcessOutputSanitizeOptio
         processCommandReadsRenderedArtifact(execCommand.command, renderedArtifactFiles) ||
         processCommandReadsParallelCodexTaskFile(execCommand.command) ||
         processCommandInspectsSessionMetadata(execCommand.command) ||
+        processCommandInspectsSessionCwd(execCommand.command, execCommand.cwd) ||
         processCommandReadsSessionSystemFile(execCommand.command) ||
         processCommandReadsSkillDocument(execCommand.command)
       ) {
@@ -1671,7 +1697,7 @@ function sanitizeProcessOutput(text: string, options: ProcessOutputSanitizeOptio
 function collectProcessExecCommand(
   rawLines: string[],
   startIndex: number
-): { command: string; commandLine: string; nextIndex: number } | null {
+): { command: string; commandLine: string; cwd: string | null; nextIndex: number } | null {
   const line = normalizedProcessLine(rawLines[startIndex] ?? "");
   const trimmed = line.trim();
 
@@ -1682,6 +1708,7 @@ function collectProcessExecCommand(
       return {
         command,
         commandLine: `$ ${command}`,
+        cwd: parseShellExecCwd(nextLine),
         nextIndex: startIndex + 2
       };
     }
@@ -1696,8 +1723,13 @@ function collectProcessExecCommand(
   return {
     command,
     commandLine: `$ ${command}`,
+    cwd: parseShellExecCwd(trimmed),
     nextIndex: startIndex + 1
   };
+}
+
+function parseShellExecCwd(line: string): string | null {
+  return line.match(/\s+in\s+(\/.+)$/)?.[1]?.trim() ?? null;
 }
 
 function processCommandReadsRenderedArtifact(command: string, artifactFiles: Set<string>): boolean {
@@ -1726,7 +1758,7 @@ function processCommandReadsParallelCodexTaskFile(command: string): boolean {
   if (!trimmed.includes(".parallel-codex/sessions/")) {
     return false;
   }
-  return /\.(?:md|json|jsonl|diff|toml|txt)\b/.test(trimmed);
+  return /\.(?:md|json|jsonl|diff|log|toml|txt)\b/.test(trimmed);
 }
 
 function processCommandInspectsSessionMetadata(command: string): boolean {
@@ -1734,6 +1766,17 @@ function processCommandInspectsSessionMetadata(command: string): boolean {
   return (
     /^(?:find|ls|wc|stat|du)\b/.test(trimmed) &&
     trimmed.includes(".parallel-codex/sessions/")
+  );
+}
+
+function processCommandInspectsSessionCwd(command: string, cwd: string | null): boolean {
+  if (!cwd || !/[\\/]\.parallel-codex[\\/]sessions[\\/]/.test(cwd)) {
+    return false;
+  }
+  const trimmed = command.trim();
+  return (
+    /^(?:rg\s+--files|ls|find|fd|tree|stat|du|wc)\b/.test(trimmed) ||
+    /^pwd\s*&&\s*(?:rg\s+--files|ls|find|fd|tree)\b/.test(trimmed)
   );
 }
 
@@ -2529,7 +2572,7 @@ function isFileListOutputLine(line: string): boolean {
     return true;
   }
 
-  return /^[A-Za-z0-9._@+-]+\.(?:cjs|css|diff|html|js|json|jsonl|lock|md|mjs|toml|ts|tsx|txt|yml|yaml)$/.test(line);
+  return /^[A-Za-z0-9._@+-]+\.(?:cjs|css|diff|html|js|json|jsonl|lock|log|md|mjs|toml|ts|tsx|txt|yml|yaml)$/.test(line);
 }
 
 function collectSourceOutputRun(
@@ -2666,6 +2709,18 @@ function skipNoisyProcessLine(rawLines: string[], startIndex: number): number {
     }
     return index;
   }
+  if (isCodexPluginManifestNoise(trimmed)) {
+    const next = normalizedProcessLine(rawLines[startIndex + 1] ?? "").trim();
+    return /^supported path=.*(?:\.codex-plugin\/plugin\.json|\/plugin\.json)$/i.test(next)
+      ? startIndex + 2
+      : startIndex + 1;
+  }
+  if (isCodexTelemetryNoise(trimmed)) {
+    const next = normalizedProcessLine(rawLines[startIndex + 1] ?? "").trim();
+    return /^failed:\s+tag value contains invalid characters:/i.test(next)
+      ? startIndex + 2
+      : startIndex + 1;
+  }
   return startIndex + 1;
 }
 
@@ -2675,6 +2730,8 @@ function shouldDropNoisyProcessLine(trimmed: string, line: string): boolean {
   }
   return (
     /^tokens used$/i.test(trimmed) ||
+    isCodexPluginManifestNoise(trimmed) ||
+    isCodexTelemetryNoise(trimmed) ||
     trimmed.includes("codex_models_manager::manager: failed to refresh available models") ||
     (trimmed.includes("failed to decode models response") && trimmed.includes("body: {\"data\"")) ||
     trimmed.startsWith("body: {\"data\"") ||
@@ -2684,6 +2741,14 @@ function shouldDropNoisyProcessLine(trimmed: string, line: string): boolean {
     /^[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏]$/.test(trimmed) ||
     line === "--------"
   );
+}
+
+function isCodexPluginManifestNoise(trimmed: string): boolean {
+  return /codex_?core_?plugins::manifest: ignoring interface\.defaultPrompt/.test(trimmed);
+}
+
+function isCodexTelemetryNoise(trimmed: string): boolean {
+  return trimmed.includes("codex_otel::events::session_telemetry: metrics counter");
 }
 
 function isNpmLifecycleEchoStart(trimmed: string): boolean {
