@@ -78,6 +78,7 @@ export const NativeSessionSchema = z.object({
   session_id: z.string().min(1),
   scope: z.enum(["main", "task"]),
   cwd: z.string().min(1),
+  writable_dirs: z.array(z.string().min(1)).optional(),
   created_at: z.string().datetime(),
   last_used_at: z.string().datetime(),
   source: NativeSessionSourceSchema

@@ -78,13 +78,33 @@ describe("ParallelWorkspaceManager", () => {
     );
     await writeText(join(engineRoot, "src", "engine.ts"), "export const engine = true;\n");
 
-    const result = await manager.integrateWave(wave);
+    const staged = await manager.stageWave(wave);
+
+    expect(staged.changedPaths).toEqual([
+      "src/app.ts",
+      "src/engine.ts",
+      "src/ui.ts"
+    ]);
+    expect(await readTextIfExists(join(workspaceRoot, "src", "app.ts"))).toContain("title = 'base'");
+    expect(await pathExists(join(workspaceRoot, "src", "ui.ts"))).toBe(false);
+    expect(await pathExists(join(workspaceRoot, "src", "engine.ts"))).toBe(false);
+    const combined = await readTextIfExists(join(wave.integrationDir, "src", "app.ts"));
+    expect(combined).toContain("title = 'Tetris'");
+    expect(combined).toContain("speed = 2");
+
+    const verificationDir = await manager.prepareVerificationWorkspace(wave);
+    expect(verificationDir).toBe(wave.verificationDir);
+    expect(await pathExists(join(verificationDir, "src", "ui.ts"))).toBe(true);
+    await writeText(join(verificationDir, "critic-note.txt"), "must not be committed\n");
+
+    const result = await manager.commitWave(wave);
 
     const app = await readTextIfExists(join(workspaceRoot, "src", "app.ts"));
     expect(app).toContain("title = 'Tetris'");
     expect(app).toContain("speed = 2");
     expect(await pathExists(join(workspaceRoot, "src", "ui.ts"))).toBe(true);
     expect(await pathExists(join(workspaceRoot, "src", "engine.ts"))).toBe(true);
+    expect(await pathExists(join(workspaceRoot, "critic-note.txt"))).toBe(false);
     expect(result.changedPaths).toEqual([
       "src/app.ts",
       "src/engine.ts",

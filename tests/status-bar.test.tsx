@@ -97,6 +97,17 @@ describe("StatusBar", () => {
     const integrationFrame = integration.lastFrame() ?? "";
     expect(integrationFrame).toContain("wave 2/3 i0/1");
     expect(displayWidth(integrationFrame)).toBeLessThanOrEqual(38);
+    integration.unmount();
+
+    const verification = render(
+      <StatusBar
+        text="a1b2 | wave 2/3 · verification 0/1 | workers 1 | run 1"
+        terminalWidth={38}
+      />
+    );
+    const verificationFrame = verification.lastFrame() ?? "";
+    expect(verificationFrame).toContain("wave 2/3 v0/1");
+    expect(displayWidth(verificationFrame)).toBeLessThanOrEqual(38);
   });
 
   it("fills an explicitly sized status rail without stdout columns", () => {

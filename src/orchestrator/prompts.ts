@@ -29,6 +29,20 @@ export interface RolePromptConfig {
   instructions: string[];
 }
 
+export interface WaveRolePromptInput {
+  request: string;
+  taskDir: string;
+  judgeDir: string;
+  workerDir: string;
+  workspaceDir: string;
+  wave: number;
+  waves: number;
+  featureIds: string[];
+  review?: string;
+  turn?: PromptTurnContext;
+  role?: RolePromptConfig;
+}
+
 export interface PromptTurnContext {
   turnId: string;
   turnDir: string;
@@ -171,9 +185,80 @@ export function buildCriticPrompt(input: RolePromptInput): string {
   ].join("\n");
 }
 
+export function buildWaveCriticPrompt(input: WaveRolePromptInput): string {
+  const role = waveRoleConfig(input.role, "Wave Critic", [
+    "Verify the combined feature result against all Judge requirements before it reaches the live workspace."
+  ]);
+  return [
+    `# Role: ${role.title}`,
+    "",
+    ...instructionLines(role.instructions),
+    "",
+    `Task directory: ${input.taskDir}`,
+    `Judge directory: ${input.judgeDir}`,
+    `Worker directory: ${input.workerDir}`,
+    `Combined verification workspace: ${input.workspaceDir}`,
+    `Wave: ${input.wave}/${input.waves}`,
+    `Features in this wave: ${input.featureIds.join(", ")}`,
+    ...turnLines(input.turn),
+    "",
+    "Live workspace has not been updated. Review only the combined verification workspace.",
+    "Read Judge requirements.md, plan.md, acceptance.md, critic-brief.md, and every feature decisions.md.",
+    "Run relevant tests, builds, and cross-feature checks in the combined verification workspace.",
+    "Do not modify implementation files.",
+    "",
+    "Write review.md in the worker directory.",
+    "Include APPROVED only when the combined result satisfies the full request and Judge acceptance.md.",
+    "Otherwise include REVISION_REQUIRED with a concise, actionable fix list.",
+    "Do not omit the decision marker.",
+    "",
+    "User request:",
+    input.request,
+    ""
+  ].join("\n");
+}
+
+export function buildWaveActorPrompt(input: WaveRolePromptInput): string {
+  const role = waveRoleConfig(input.role, "Wave Actor", [
+    "Resolve combined integration findings without reopening approved feature scope unnecessarily."
+  ]);
+  return [
+    `# Role: ${role.title}`,
+    "",
+    ...instructionLines(role.instructions),
+    "",
+    `Task directory: ${input.taskDir}`,
+    `Judge directory: ${input.judgeDir}`,
+    `Worker directory: ${input.workerDir}`,
+    `Combined integration workspace: ${input.workspaceDir}`,
+    `Wave: ${input.wave}/${input.waves}`,
+    `Features in this wave: ${input.featureIds.join(", ")}`,
+    ...turnLines(input.turn),
+    "",
+    "Modify only the combined integration workspace. Do not modify the live workspace or isolated feature workspaces.",
+    "Read Judge requirements and acceptance, feature decisions, and the Wave Critic review below.",
+    "Run relevant verification after fixing the combined result.",
+    "Write worklog.md and patch.diff in the worker directory.",
+    "",
+    "Wave Critic review:",
+    input.review?.trim() || "REVISION_REQUIRED\nNo review details were provided.",
+    "",
+    "User request:",
+    input.request,
+    ""
+  ].join("\n");
+}
+
 function roleConfig(role: RolePromptConfig | undefined, title: string, instructions: string[]): RolePromptConfig {
   return {
     title: role?.title ?? title,
+    instructions: role?.instructions?.length ? role.instructions : instructions
+  };
+}
+
+function waveRoleConfig(role: RolePromptConfig | undefined, title: string, instructions: string[]): RolePromptConfig {
+  return {
+    title: role ? `${role.title} · Wave` : title,
     instructions: role?.instructions?.length ? role.instructions : instructions
   };
 }

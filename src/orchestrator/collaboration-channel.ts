@@ -10,6 +10,7 @@ export type FeatureState =
   | "critic_running"
   | "revision_needed"
   | "integrating"
+  | "verifying"
   | "approved"
   | "failed"
   | "cancelled";

@@ -14,7 +14,7 @@ import {
   symlink,
   writeFile
 } from "node:fs/promises";
-import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import { basename, dirname, join, relative, resolve, sep } from "node:path";
 import { ensureDir, writeJson } from "../core/file-store.js";
 
 const MAX_TEXT_MERGE_BYTES = 10 * 1024 * 1024;
@@ -38,6 +38,8 @@ export interface FeatureWorkspaceWave {
   rootDir: string;
   baselineDir: string;
   stagingDir: string;
+  integrationDir: string;
+  verificationDir: string;
   conflictDir: string;
   featureIds: string[];
   featureDirs: ReadonlyMap<string, string>;
@@ -137,6 +139,8 @@ export class ParallelWorkspaceManager {
     );
     const baselineDir = join(rootDir, "baseline");
     const stagingDir = join(rootDir, "staging");
+    const integrationDir = join(rootDir, "integration");
+    const verificationDir = join(rootDir, "verification");
     const conflictDir = join(rootDir, "conflicts");
     const featureDirs = new Map<string, string>();
 
@@ -156,6 +160,8 @@ export class ParallelWorkspaceManager {
       rootDir,
       baselineDir,
       stagingDir,
+      integrationDir,
+      verificationDir,
       conflictDir,
       featureIds: [...input.featureIds],
       featureDirs
@@ -167,14 +173,18 @@ export class ParallelWorkspaceManager {
       wave: input.wave,
       baseline: baselineDir,
       staging: stagingDir,
+      integration: integrationDir,
+      verification: verificationDir,
       features: Object.fromEntries(featureDirs)
     });
     return wave;
   }
 
-  async integrateWave(wave: FeatureWorkspaceWave): Promise<WorkspaceIntegrationResult> {
+  async stageWave(wave: FeatureWorkspaceWave): Promise<WorkspaceIntegrationResult> {
     await rm(wave.conflictDir, { recursive: true, force: true });
     await rm(wave.stagingDir, { recursive: true, force: true });
+    await rm(wave.integrationDir, { recursive: true, force: true });
+    await rm(wave.verificationDir, { recursive: true, force: true });
     await cloneTree(wave.baselineDir, wave.stagingDir);
 
     for (const featureId of wave.featureIds) {
@@ -196,10 +206,31 @@ export class ParallelWorkspaceManager {
       await applyMergePlan(wave.stagingDir, plan);
     }
 
+    await cloneTree(wave.stagingDir, wave.integrationDir);
+    const changedPaths = await workspaceChangedPaths(
+      wave.baselineDir,
+      wave.integrationDir,
+      (path) => this.excludeRelativePath(path)
+    );
+    await writeJson(join(wave.rootDir, "integration.json"), {
+      version: 1,
+      state: "staged",
+      changed_paths: changedPaths
+    });
+    return { changedPaths };
+  }
+
+  async prepareVerificationWorkspace(wave: FeatureWorkspaceWave): Promise<string> {
+    await rm(wave.verificationDir, { recursive: true, force: true });
+    await cloneTree(wave.integrationDir, wave.verificationDir);
+    return wave.verificationDir;
+  }
+
+  async commitWave(wave: FeatureWorkspaceWave): Promise<WorkspaceIntegrationResult> {
     const liveConflictDir = join(wave.conflictDir, "live-workspace");
     const livePlan = await planWorkspaceMerge(
       wave.baselineDir,
-      wave.stagingDir,
+      wave.integrationDir,
       this.workspaceRoot,
       liveConflictDir,
       (path) => this.excludeRelativePath(path)
@@ -217,6 +248,11 @@ export class ParallelWorkspaceManager {
     return { changedPaths: livePlan.changedPaths };
   }
 
+  async integrateWave(wave: FeatureWorkspaceWave): Promise<WorkspaceIntegrationResult> {
+    await this.stageWave(wave);
+    return this.commitWave(wave);
+  }
+
   private excludeFromSource(path: string): boolean {
     const absolutePath = resolve(path);
     return this.excludeRelativePath(relative(this.workspaceRoot, absolutePath));
@@ -232,6 +268,21 @@ export class ParallelWorkspaceManager {
       && (path === this.dataRelativePath || path.startsWith(`${this.dataRelativePath}${sep}`))
     );
   }
+}
+
+async function workspaceChangedPaths(
+  baselineRoot: string,
+  incomingRoot: string,
+  exclude: (relativePath: string) => boolean
+): Promise<string[]> {
+  const [baseline, incoming] = await Promise.all([
+    workspaceManifest(baselineRoot, exclude),
+    workspaceManifest(incomingRoot, exclude)
+  ]);
+  return [...new Set([...baseline.keys(), ...incoming.keys()])]
+    .filter((path) => !exclude(path))
+    .filter((path) => !sameEntry(baseline.get(path) ?? missingEntry(), incoming.get(path) ?? missingEntry()))
+    .sort();
 }
 
 async function cloneTree(sourceRoot: string, targetRoot: string, exclude: (path: string) => boolean = () => false): Promise<void> {

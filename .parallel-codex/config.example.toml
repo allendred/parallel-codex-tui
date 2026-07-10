@@ -18,7 +18,7 @@ fallback = "simple"
 
 [orchestration]
 # Maximum isolated Actor or Critic feature workers running at the same time (1..8).
-# Each feature receives its own workspace snapshot; approved waves are merged atomically.
+# Each feature receives its own snapshot; a combined Wave Critic approves staged changes before atomic live commit.
 maxParallelFeatures = 3
 
 [workers.codex]

@@ -16,7 +16,14 @@ import {
   updateFeatureStatus,
   writeFeatureDecision
 } from "./collaboration-channel.js";
-import { buildActorPrompt, buildCriticPrompt, buildJudgePrompt, buildMainPrompt } from "./prompts.js";
+import {
+  buildActorPrompt,
+  buildCriticPrompt,
+  buildJudgePrompt,
+  buildMainPrompt,
+  buildWaveActorPrompt,
+  buildWaveCriticPrompt
+} from "./prompts.js";
 import { featureExecutionWaves, parseFeaturePlan, type FeatureDefinition, type FeaturePlan } from "./feature-plan.js";
 import { buildSupervisorSummary } from "./supervisor-summary.js";
 import { ParallelWorkspaceManager } from "./workspace-sandbox.js";
@@ -73,7 +80,7 @@ export interface WorkerRunStatus {
 export interface FeatureRunProgress {
   wave: number;
   waves: number;
-  phase: "actor" | "critic" | "revision" | "integration";
+  phase: "actor" | "critic" | "revision" | "integration" | "verification";
   completed: number;
   total: number;
 }
@@ -102,6 +109,11 @@ interface FeatureSummary {
   id: string;
   title: string;
   summary: string;
+}
+
+interface WaveSummary {
+  wave: number;
+  review: string;
 }
 
 export class Orchestrator {
@@ -401,6 +413,7 @@ export class Orchestrator {
   ): Promise<HandleRequestResult> {
     const channels = new Map(plan.features.map((definition, index) => [definition.id, features[index]]));
     const summaries: FeatureSummary[] = [];
+    const waveReviews: WaveSummary[] = [];
     const featureWaves = featureExecutionWaves(plan);
     const concurrency = this.config.orchestration.maxParallelFeatures;
     const workspaceManager = new ParallelWorkspaceManager({
@@ -492,8 +505,11 @@ export class Orchestrator {
       const revisionRuns: Array<FeaturePairRun & { review: string }> = [];
       for (const pair of pairRuns) {
         const review = await readTextIfExists(join(pair.critic.dir, "review.md"));
-        if (review.includes("REVISION_REQUIRED")) {
+        const decision = criticReviewDecision(review);
+        if (decision === "revision") {
           revisionRuns.push({ ...pair, review });
+        } else if (decision !== "approved") {
+          throw new Error(`Critic review for feature ${pair.channel.id} must include APPROVED or REVISION_REQUIRED.`);
         }
       }
 
@@ -557,6 +573,12 @@ export class Orchestrator {
         });
         const replacements = new Map(revisedPairs.map((pair) => [pair.definition.id, pair]));
         finalPairs = pairRuns.map((pair) => replacements.get(pair.definition.id) ?? pair);
+        for (const pair of revisedPairs) {
+          const review = await readTextIfExists(join(pair.critic.dir, "review.md"));
+          if (criticReviewDecision(review) !== "approved") {
+            throw new Error(`Critic did not approve feature ${pair.channel.id} after Actor revision.`);
+          }
+        }
         throwIfCancelled(input.signal);
       }
 
@@ -575,10 +597,121 @@ export class Orchestrator {
       await this.sessions.updateTaskStatus(task, "integrating");
       await Promise.all(finalPairs.map(({ channel }) => updateFeatureStatus(channel, "integrating")));
       reportProgress("integration", 0, 1, "done", "done");
-      const integration = await workspaceManager.integrateWave(workspaceWave);
+      await workspaceManager.stageWave(workspaceWave);
       reportProgress("integration", 1, 1, "done", "done");
+
+      await this.sessions.updateTaskStatus(task, "verifying");
+      await Promise.all(finalPairs.map(({ channel }) => updateFeatureStatus(channel, "verifying")));
+      reportProgress("verification", 0, 1, "done", "running");
+      let verificationWorkspace = await workspaceManager.prepareVerificationWorkspace(workspaceWave);
+      let waveCritic = await this.runWaveCritic(
+        input,
+        task,
+        route.critic_engine,
+        judge.dir,
+        workers,
+        turn,
+        verificationWorkspace,
+        waveIndex + 1,
+        featureWaves.length,
+        finalPairs.map(({ channel }) => channel.id)
+      );
+      let waveReview = await readTextIfExists(join(waveCritic.dir, "review.md"));
+      let waveDecision = criticReviewDecision(waveReview);
+      const firstReviewPath = join(workspaceWave.rootDir, "verification-review-01.md");
+      const waveReviewPaths = [firstReviewPath];
+      await writeText(firstReviewPath, waveReview);
+      await this.sessions.appendEvent(
+        task,
+        "feature.wave_reviewed",
+        `Wave ${waveIndex + 1}/${featureWaves.length} Critic decision: ${waveDecision}`
+      );
+      let waveRevised = false;
+
+      if (waveDecision === "revision") {
+        waveRevised = true;
+        await this.sessions.appendEvent(
+          task,
+          "feature.wave_revision_requested",
+          `Wave ${waveIndex + 1}/${featureWaves.length} Critic requested combined revision`
+        );
+        await this.sessions.updateTaskStatus(task, "revision_needed");
+        await Promise.all(finalPairs.map(({ channel }) => updateFeatureStatus(channel, "revision_needed")));
+        reportProgress("revision", 0, 1, "revision", "done");
+        await this.runWaveActor(
+          input,
+          task,
+          route.actor_engine,
+          judge.dir,
+          workers,
+          turn,
+          workspaceWave.integrationDir,
+          waveReview,
+          waveIndex + 1,
+          featureWaves.length,
+          finalPairs.map(({ channel }) => channel.id)
+        );
+        reportProgress("revision", 1, 1, "done", "done");
+        throwIfCancelled(input.signal);
+
+        await this.sessions.updateTaskStatus(task, "verifying");
+        await Promise.all(finalPairs.map(({ channel }) => updateFeatureStatus(channel, "verifying")));
+        reportProgress("verification", 0, 1, "done", "rerunning");
+        verificationWorkspace = await workspaceManager.prepareVerificationWorkspace(workspaceWave);
+        waveCritic = await this.runWaveCritic(
+          input,
+          task,
+          route.critic_engine,
+          judge.dir,
+          workers,
+          turn,
+          verificationWorkspace,
+          waveIndex + 1,
+          featureWaves.length,
+          finalPairs.map(({ channel }) => channel.id),
+          true
+        );
+        waveReview = await readTextIfExists(join(waveCritic.dir, "review.md"));
+        waveDecision = criticReviewDecision(waveReview);
+        const secondReviewPath = join(workspaceWave.rootDir, "verification-review-02.md");
+        waveReviewPaths.push(secondReviewPath);
+        await writeText(secondReviewPath, waveReview);
+        await this.sessions.appendEvent(
+          task,
+          "feature.wave_reviewed",
+          `Wave ${waveIndex + 1}/${featureWaves.length} Critic recheck decision: ${waveDecision}`
+        );
+      }
+
+      if (waveDecision !== "approved") {
+        const detail = waveDecision === "revision"
+          ? "still requires revision after the Wave Actor pass"
+          : "did not include APPROVED or REVISION_REQUIRED";
+        throw new Error(`Wave ${waveIndex + 1}/${featureWaves.length} Critic ${detail}. Live workspace was not changed.`);
+      }
+      reportProgress("verification", 1, 1, "done", "done");
+      await writeText(join(workspaceWave.rootDir, "verification-review.md"), waveReview);
+      await this.sessions.appendEvent(
+        task,
+        "feature.wave_verified",
+        `Wave ${waveIndex + 1}/${featureWaves.length} combined workspace approved`
+      );
+
+      await this.sessions.updateTaskStatus(task, "integrating");
+      const integration = await workspaceManager.commitWave(workspaceWave);
+      await writeJson(join(workspaceWave.rootDir, "verification.json"), {
+        version: 1,
+        state: "approved",
+        worker_id: waveCritic.workerId,
+        review_path: join(workspaceWave.rootDir, "verification-review.md"),
+        review_paths: waveReviewPaths,
+        verification_workspace: verificationWorkspace,
+        revised: waveRevised,
+        changed_paths: integration.changedPaths
+      });
       await Promise.all(finalPairs.map(({ channel }) => updateFeatureStatus(channel, "approved")));
       summaries.push(...waveSummaries);
+      waveReviews.push({ wave: waveIndex + 1, review: waveReview });
       await this.sessions.appendEvent(
         task,
         "feature.wave_integrated",
@@ -588,7 +721,7 @@ export class Orchestrator {
     }
 
     throwIfCancelled(input.signal);
-    const summary = multiFeatureSummary(summaries);
+    const summary = multiFeatureSummary(summaries, waveReviews);
     await writeText(join(turn.dir, "supervisor-summary.md"), `${summary}\n`);
     await this.sessions.updateTaskStatus(task, "done");
     input.onStatus?.({ taskId: task.id, judge: "done", actor: "done", critic: "done" });
@@ -621,9 +754,13 @@ export class Orchestrator {
     input.onStatus?.({ taskId: task.id, judge: "done", actor: "done", critic: "running" });
     let critic = await this.runCritic(input, task, route.critic_engine, judge.dir, actor.dir, workers, turn, feature);
     throwIfCancelled(input.signal);
-    const review = await readTextIfExists(`${critic.dir}/review.md`);
+    let review = await readTextIfExists(`${critic.dir}/review.md`);
+    let decision = criticReviewDecision(review);
+    if (decision === "missing") {
+      throw new Error(`Critic review for ${feature.id} must include APPROVED or REVISION_REQUIRED.`);
+    }
 
-    if (review.includes("REVISION_REQUIRED")) {
+    if (decision === "revision") {
       await this.sessions.updateTaskStatus(task, "revision_needed");
       await updateFeatureStatus(feature, "revision_needed");
       await appendFeatureDialogue(feature, "critic.revision_requested", "critic", "Critic requested Actor revision.", {
@@ -647,6 +784,11 @@ export class Orchestrator {
       input.onStatus?.({ taskId: task.id, judge: "done", actor: "done", critic: "rerunning" });
       critic = await this.runCritic(input, task, route.critic_engine, judge.dir, actor.dir, workers, turn, feature);
       throwIfCancelled(input.signal);
+      review = await readTextIfExists(`${critic.dir}/review.md`);
+      decision = criticReviewDecision(review);
+      if (decision !== "approved") {
+        throw new Error(`Critic did not approve ${feature.id} after Actor revision.`);
+      }
     }
 
     return this.completeTask(task, turn, judge, actor, critic, feature, input, workers);
@@ -884,7 +1026,7 @@ export class Orchestrator {
       role: "actor",
       engine,
       cwd: workspaceDir,
-      ...(featureScoped ? { writableDirs: [task.dir] } : {}),
+      ...(featureScoped ? { writableDirs: uniquePaths([actor.dir, judgeDir, feature.dir, turn.dir]) } : {}),
       filesDir: actor.dir,
       promptPath: actor.promptPath,
       outputLogPath: actor.outputLogPath,
@@ -952,7 +1094,7 @@ export class Orchestrator {
       role: "critic",
       engine,
       cwd: workspaceDir,
-      ...(featureScoped ? { writableDirs: [task.dir] } : {}),
+      ...(featureScoped ? { writableDirs: uniquePaths([critic.dir, judgeDir, actorDir, feature.dir, turn.dir]) } : {}),
       filesDir: critic.dir,
       promptPath: critic.promptPath,
       outputLogPath: critic.outputLogPath,
@@ -967,6 +1109,133 @@ export class Orchestrator {
     });
 
     return critic;
+  }
+
+  private async runWaveCritic(
+    input: HandleRequestInput,
+    task: TaskSession,
+    engine: EngineName,
+    judgeDir: string,
+    workers: WorkerLogRef[],
+    turn: TaskTurn,
+    workspaceDir: string,
+    wave: number,
+    waves: number,
+    featureIds: string[],
+    preserveOutput = false
+  ): Promise<WorkerFiles> {
+    const workerId = `critic-${engine}-wave-${turn.turnId}-${String(wave).padStart(4, "0")}`;
+    const workerFiles = this.workerFiles(task, workerId);
+    const waveTitle = `Wave ${wave}/${waves}`;
+    const critic = await this.sessions.initializeWorker(task, {
+      workerId,
+      featureTitle: waveTitle,
+      role: "critic",
+      engine,
+      preserveOutput: input.retry || preserveOutput,
+      prompt: buildWaveCriticPrompt({
+        request: input.request,
+        taskDir: task.dir,
+        judgeDir,
+        workerDir: workerFiles.dir,
+        workspaceDir,
+        wave,
+        waves,
+        featureIds,
+        turn: await this.promptTurnContext(task, turn),
+        role: this.config.roles.critic
+      })
+    });
+
+    this.recordWorker(input, workers, {
+      id: critic.workerId,
+      role: "critic",
+      engine,
+      label: `Critic (${engine}) · ${waveTitle}`,
+      logPath: critic.outputLogPath,
+      statusPath: critic.statusPath
+    });
+
+    const result = await this.runWorkerWithNativeSession(engine, {
+      workerId: critic.workerId,
+      featureTitle: waveTitle,
+      role: "critic",
+      engine,
+      cwd: workspaceDir,
+      writableDirs: uniquePaths([critic.dir, judgeDir, join(task.dir, "features"), turn.dir]),
+      filesDir: critic.dir,
+      promptPath: critic.promptPath,
+      outputLogPath: critic.outputLogPath,
+      statusPath: critic.statusPath,
+      prompt: await readTextIfExists(critic.promptPath),
+      signal: input.signal
+    });
+    ensureWorkerSuccess(result);
+    return critic;
+  }
+
+  private async runWaveActor(
+    input: HandleRequestInput,
+    task: TaskSession,
+    engine: EngineName,
+    judgeDir: string,
+    workers: WorkerLogRef[],
+    turn: TaskTurn,
+    workspaceDir: string,
+    review: string,
+    wave: number,
+    waves: number,
+    featureIds: string[]
+  ): Promise<WorkerFiles> {
+    const workerId = `actor-${engine}-wave-${turn.turnId}-${String(wave).padStart(4, "0")}`;
+    const workerFiles = this.workerFiles(task, workerId);
+    const waveTitle = `Wave ${wave}/${waves}`;
+    const actor = await this.sessions.initializeWorker(task, {
+      workerId,
+      featureTitle: waveTitle,
+      role: "actor",
+      engine,
+      preserveOutput: input.retry,
+      prompt: buildWaveActorPrompt({
+        request: input.request,
+        taskDir: task.dir,
+        judgeDir,
+        workerDir: workerFiles.dir,
+        workspaceDir,
+        wave,
+        waves,
+        featureIds,
+        review,
+        turn: await this.promptTurnContext(task, turn),
+        role: this.config.roles.actor
+      })
+    });
+
+    this.recordWorker(input, workers, {
+      id: actor.workerId,
+      role: "actor",
+      engine,
+      label: `Actor (${engine}) · ${waveTitle}`,
+      logPath: actor.outputLogPath,
+      statusPath: actor.statusPath
+    });
+
+    const result = await this.runWorkerWithNativeSession(engine, {
+      workerId: actor.workerId,
+      featureTitle: waveTitle,
+      role: "actor",
+      engine,
+      cwd: workspaceDir,
+      writableDirs: uniquePaths([actor.dir, judgeDir, join(task.dir, "features"), turn.dir]),
+      filesDir: actor.dir,
+      promptPath: actor.promptPath,
+      outputLogPath: actor.outputLogPath,
+      statusPath: actor.statusPath,
+      prompt: await readTextIfExists(actor.promptPath),
+      signal: input.signal
+    });
+    ensureWorkerSuccess(result);
+    return actor;
   }
 
   private recordWorker(input: HandleRequestInput, workers: WorkerLogRef[], worker: WorkerLogRef): void {
@@ -993,7 +1262,12 @@ export class Orchestrator {
       statusPath: spec.statusPath
     };
     const storedSession = await this.sessions.readNativeSession(workerFiles);
-    const existing = storedSession ? { ...storedSession, cwd: spec.cwd } : null;
+    const writableDirs = spec.writableDirs?.length ? uniquePaths(spec.writableDirs) : undefined;
+    const existing = storedSession ? {
+      ...storedSession,
+      cwd: spec.cwd,
+      ...(writableDirs ? { writable_dirs: writableDirs } : {})
+    } : null;
     if (existing) {
       await this.sessions.writeNativeSession(workerFiles, {
         ...existing,
@@ -1015,6 +1289,7 @@ export class Orchestrator {
           session_id: sessionId,
           scope,
           cwd: spec.cwd,
+          ...(writableDirs ? { writable_dirs: writableDirs } : {}),
           created_at: previous?.created_at ?? now,
           last_used_at: now,
           source: previous?.source ?? "output-detected"
@@ -1210,6 +1485,17 @@ function buildRevisionRequest(review: string, feature: FeatureChannel): string {
   ].join("\n");
 }
 
+function criticReviewDecision(review: string): "approved" | "revision" | "missing" {
+  const lines = review.split(/\r?\n/).map((line) => line.trim());
+  if (lines.some((line) => /^REVISION_REQUIRED(?:\b|$)/i.test(line))) {
+    return "revision";
+  }
+  if (lines.some((line) => /^APPROVED(?:\b|$)/i.test(line))) {
+    return "approved";
+  }
+  return "missing";
+}
+
 async function mirrorWorkerFileToFeature(sourcePath: string, targetPath: string): Promise<void> {
   const content = await readTextIfExists(sourcePath);
   if (content.trim()) {
@@ -1278,6 +1564,10 @@ function requiredFeatureWorkspace(
   return workspace;
 }
 
+function uniquePaths(paths: string[]): string[] {
+  return [...new Set(paths.filter(Boolean))];
+}
+
 async function allOrThrow<T>(promises: Array<Promise<T>>): Promise<T[]> {
   const results = await Promise.allSettled(promises);
   const failure = results.find((result): result is PromiseRejectedResult => result.status === "rejected");
@@ -1328,7 +1618,7 @@ async function mapWithConcurrency<T, Result>(
   return results as Result[];
 }
 
-function multiFeatureSummary(features: FeatureSummary[]): string {
+function multiFeatureSummary(features: FeatureSummary[], waves: WaveSummary[] = []): string {
   return [
     "# Parallel feature delivery",
     "",
@@ -1337,7 +1627,17 @@ function multiFeatureSummary(features: FeatureSummary[]): string {
       "",
       feature.summary.trim(),
       ""
-    ])
+    ]),
+    ...(waves.length > 0 ? [
+      "# Combined verification",
+      "",
+      ...waves.flatMap((wave) => [
+        `## Wave ${wave.wave}`,
+        "",
+        wave.review.trim(),
+        ""
+      ])
+    ] : [])
   ].join("\n").trim();
 }
 

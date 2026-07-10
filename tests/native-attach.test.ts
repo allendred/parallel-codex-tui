@@ -114,6 +114,7 @@ describe("buildNativeAttachLaunch", () => {
       session_id: "native-feature",
       scope: "task",
       cwd: featureWorkspace,
+      writable_dirs: [workerDir],
       created_at: "2026-06-30T03:30:00.000Z",
       last_used_at: "2026-06-30T03:30:00.000Z",
       source: "manual"
@@ -133,7 +134,7 @@ describe("buildNativeAttachLaunch", () => {
     });
 
     expect(launch.cwd).toBe(featureWorkspace);
-    expect(launch.args).toEqual(["resume", "native-feature", "--add-dir", taskDir]);
+    expect(launch.args).toEqual(["resume", "native-feature", "--add-dir", workerDir]);
   });
 
   it("fails when the selected worker has no native session file", async () => {

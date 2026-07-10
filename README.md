@@ -157,7 +157,10 @@ The doctor output includes `preview:` and `semantic:` ANSI swatch rows so you ca
 - Parallel Actor, Critic, and revision batches honor `[orchestration].maxParallelFeatures` (default `3`).
 - Each planned feature gets an isolated implementation workspace, Actor/Critic worker directories, logs, status, native session ids, and a mailbox under `features/<turn>-<feature>`; the shared dialogue remains in `dialogue/actor-critic.jsonl`.
 - Parallel workspace isolation works for both Git and non-Git projects. A wave records `baseline`, per-feature workspaces, `staging`, and conflict evidence under `sessions/<task>/workspaces/turn-<turn>/wave-<wave>/` while excluding `.git` and the configured runtime data directory.
-- Approved feature changes are three-way merged into staging first. The live workspace is updated only after the complete wave merges cleanly; independent edits to the same text file are combined automatically.
+- Approved feature changes are three-way merged into a task-owned integration workspace first; independent edits to the same text file are combined automatically. The live workspace remains unchanged during this stage.
+- Every staged wave gets a combined Wave Critic run in a disposable verification copy. It checks the full Judge acceptance criteria, cross-feature behavior, tests, and builds. A missing `APPROVED`/`REVISION_REQUIRED` decision fails safely instead of being treated as approval.
+- When combined verification requests changes, a session-backed Wave Actor fixes the integration workspace and the same Wave Critic native session reviews it again. Only an explicit final `APPROVED` allows the wave to reach the live workspace.
+- Wave Actor/Critic prompts, logs, immutable `verification-review-01.md`/`02.md` rounds, native session ids, minimized additional-directory permissions, and `verification.json` audit evidence are stored with the task and remain available through worker logs and native attach.
 - Overlapping edits fail the task without partially changing the live workspace. The chat error names the conflicting paths and points to marker files under the wave's `conflicts/` directory; `Ctrl+R` retries in the same task and native worker sessions.
 - Feature workspaces persist with the task so native attach can reopen the exact worker cwd. Delete an old task session when its audit trail and attachable workspaces are no longer needed.
 - Complex follow-ups stay in the active task, append a numbered turn, reuse the same Actor/Critic native sessions when available, and inject up to five prior turn summaries as file-backed memory.
@@ -165,7 +168,7 @@ The doctor output includes `preview:` and `semantic:` ANSI swatch rows so you ca
 - Failed and cancelled tasks expose `Ctrl+R` retry. Retry keeps the same task and turn, reuses recorded native worker sessions, preserves prior output behind a retry separator, does not route the request again, and reuses the persisted feature dependency plan.
 - Simple follow-up questions run through the persistent Main native session with the active task directory, original request, up to five recent turn summaries, valid worker statuses, and log tails as file-backed context. They do not start another Judge, Actor, or Critic turn.
 - Worker prompts, logs, status, and outputs are written to disk.
-- The bottom status line shows the active task state and feature progress such as `wave 1/2 · actor 2/3` and `wave 1/2 · integration 0/1`.
+- The bottom status line shows the active task state and feature progress such as `wave 1/2 · actor 2/3`, `wave 1/2 · integration 0/1`, and `wave 1/2 · verification 0/1`.
 
 ## Router
 

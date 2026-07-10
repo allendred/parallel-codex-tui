@@ -53,14 +53,22 @@ export async function buildNativeAttachLaunch(input: NativeAttachLaunchInput): P
   if (!(await pathIsDirectory(nativeSession.cwd))) {
     throw new Error(`Native session workspace is not a directory for ${input.worker.label}: ${nativeSession.cwd}`);
   }
+  const recordedDirs = nativeSession.writable_dirs?.length
+    ? nativeSession.writable_dirs
+    : isWithin(nativeSession.cwd, join(taskDir, "workspaces")) ? [taskDir] : [];
+  const additionalDirs: string[] = [];
+  for (const directory of recordedDirs) {
+    if (directory !== nativeSession.cwd && await pathIsDirectory(directory)) {
+      additionalDirs.push(directory);
+    }
+  }
 
   return {
     command: workerConfig.interactive.command,
     args: nativeAttachArgs({
       args: workerConfig.interactive.args.map((arg) => renderTemplate(arg, nativeSession.session_id, modelConfig)),
       engine: input.worker.engine,
-      cwd: nativeSession.cwd,
-      taskDir
+      additionalDirs
     }),
     ...(Object.keys(env).length > 0 ? { env } : {}),
     cwd: nativeSession.cwd,
@@ -69,14 +77,14 @@ export async function buildNativeAttachLaunch(input: NativeAttachLaunchInput): P
   };
 }
 
-function nativeAttachArgs(input: { args: string[]; engine: EngineName; cwd: string; taskDir: string }): string[] {
-  if (
-    (input.engine !== "codex" && input.engine !== "claude")
-    || !isWithin(input.cwd, join(input.taskDir, "workspaces"))
-  ) {
+function nativeAttachArgs(input: { args: string[]; engine: EngineName; additionalDirs: string[] }): string[] {
+  if ((input.engine !== "codex" && input.engine !== "claude") || input.additionalDirs.length === 0) {
     return input.args;
   }
-  return [...input.args, "--add-dir", input.taskDir];
+  return [
+    ...input.args,
+    ...[...new Set(input.additionalDirs)].flatMap((directory) => ["--add-dir", directory])
+  ];
 }
 
 function isWithin(path: string, root: string): boolean {

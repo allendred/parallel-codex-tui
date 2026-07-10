@@ -10,7 +10,7 @@ export interface StatusLineState {
   featureProgress?: {
     wave: number;
     waves: number;
-    phase: "actor" | "critic" | "revision" | "integration";
+    phase: "actor" | "critic" | "revision" | "integration" | "verification";
     completed: number;
     total: number;
   };

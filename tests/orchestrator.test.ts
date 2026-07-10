@@ -202,6 +202,35 @@ describe("Orchestrator", () => {
     expect(await readTextIfExists(join(taskDir, "dialogue", "actor-critic.jsonl"))).toContain('"type":"critic.completed"');
   });
 
+  it("requires an explicit decision from a Feature Critic", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pct-orch-feature-no-decision-"));
+    const config = mockConfig(root);
+    const manager = new SessionManager({
+      projectRoot: root,
+      dataDir: config.dataDir,
+      now: () => new Date("2026-06-30T03:30:01.000Z"),
+      randomId: () => "feature-decision"
+    });
+    const orchestrator = new Orchestrator(
+      config,
+      manager,
+      new Map([["mock", new MissingFeatureDecisionAdapter()]])
+    );
+
+    await expect(orchestrator.handleRequest({
+      request: "实现一个必须审查的功能",
+      cwd: root
+    })).rejects.toThrow("must include APPROVED or REVISION_REQUIRED");
+
+    expect((await readJson(join(
+      root,
+      ".parallel-codex",
+      "sessions",
+      "task-20260630-033001-feature-decision",
+      "meta.json"
+    ), TaskMetaSchema)).status).toBe("failed");
+  });
+
   it("runs independent feature pairs concurrently and waits for dependency waves", async () => {
     const root = await mkdtemp(join(tmpdir(), "pct-orch-parallel-features-"));
     const config = mockConfig(root);
@@ -292,12 +321,162 @@ describe("Orchestrator", () => {
     });
 
     expect(adapter.maxConcurrent).toBe(2);
-    expect(result.workers).toHaveLength(11);
+    expect(result.workers).toHaveLength(12);
     expect(progress).toContainEqual({ wave: 1, waves: 1, phase: "actor", completed: 0, total: 5 });
     expect(progress).toContainEqual({ wave: 1, waves: 1, phase: "actor", completed: 5, total: 5 });
     expect(progress).toContainEqual({ wave: 1, waves: 1, phase: "critic", completed: 5, total: 5 });
     expect(progress).toContainEqual({ wave: 1, waves: 1, phase: "integration", completed: 0, total: 1 });
     expect(progress).toContainEqual({ wave: 1, waves: 1, phase: "integration", completed: 1, total: 1 });
+    expect(progress).toContainEqual({ wave: 1, waves: 1, phase: "verification", completed: 0, total: 1 });
+    expect(progress).toContainEqual({ wave: 1, waves: 1, phase: "verification", completed: 1, total: 1 });
+  });
+
+  it("runs a combined Wave Critic before committing approved features to the live workspace", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pct-orch-wave-critic-"));
+    const config = mockConfig(root);
+    const manager = new SessionManager({
+      projectRoot: root,
+      dataDir: config.dataDir,
+      now: () => new Date("2026-06-30T03:30:12.000Z"),
+      randomId: () => "verify"
+    });
+    const adapter = new CombinedVerificationAdapter(root);
+    const orchestrator = new Orchestrator(config, manager, new Map([["mock", adapter]]));
+    const progress: FeatureRunProgress[] = [];
+
+    const result = await orchestrator.handleRequest({
+      request: "并行创建 alpha 和 beta，并联合验收",
+      cwd: root,
+      onStatus: (status) => {
+        if (status.featureProgress) {
+          progress.push(status.featureProgress);
+        }
+      }
+    });
+
+    const taskDir = join(root, ".parallel-codex", "sessions", result.taskId ?? "");
+    expect(adapter.waveCriticRuns).toBe(1);
+    expect(adapter.waveCriticSawCombinedWorkspace).toBe(true);
+    expect(adapter.liveWasUntouchedDuringVerification).toBe(true);
+    expect(adapter.waveCriticWritableDirs).toContain(join(taskDir, "critic-mock-wave-0001-0001"));
+    expect(adapter.waveCriticWritableDirs).not.toContain(taskDir);
+    expect(adapter.waveCriticWritableDirs).not.toContain(join(
+      taskDir,
+      "workspaces",
+      "turn-0001",
+      "wave-0001",
+      "integration"
+    ));
+    expect(result.workers.map((worker) => worker.id)).toContain("critic-mock-wave-0001-0001");
+    expect(await readTextIfExists(join(taskDir, "critic-mock-wave-0001-0001", "review.md"))).toContain("APPROVED");
+    expect(JSON.parse(await readTextIfExists(join(
+      taskDir,
+      "critic-mock-wave-0001-0001",
+      "native-session.json"
+    ))).writable_dirs).toEqual(adapter.waveCriticWritableDirs);
+    expect(result.summary).toContain("# Combined verification");
+    expect(result.summary).toContain("## Wave 1");
+    expect(JSON.parse(await readTextIfExists(join(
+      taskDir,
+      "workspaces",
+      "turn-0001",
+      "wave-0001",
+      "verification.json"
+    )))).toMatchObject({ state: "approved", revised: false });
+    expect((await orchestrator.listTaskWorkers(result.taskId ?? "")).map((worker) => worker.label)).toContain(
+      "Critic (mock) · Wave 1/1"
+    );
+    expect(await readTextIfExists(join(root, "alpha.txt"))).toBe("alpha\n");
+    expect(await readTextIfExists(join(root, "beta.txt"))).toBe("beta\n");
+    expect(progress).toContainEqual({ wave: 1, waves: 1, phase: "verification", completed: 0, total: 1 });
+    expect(progress).toContainEqual({ wave: 1, waves: 1, phase: "verification", completed: 1, total: 1 });
+  });
+
+  it("runs a Wave Actor revision and reuses the Wave Critic session before live commit", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pct-orch-wave-revision-"));
+    const config = mockConfig(root);
+    const manager = new SessionManager({
+      projectRoot: root,
+      dataDir: config.dataDir,
+      now: () => new Date("2026-06-30T03:30:13.000Z"),
+      randomId: () => "wave-revision"
+    });
+    const adapter = new WaveRevisionAdapter(root);
+    const orchestrator = new Orchestrator(config, manager, new Map([["mock", adapter]]));
+    const progress: FeatureRunProgress[] = [];
+
+    const result = await orchestrator.handleRequest({
+      request: "并行创建 alpha 和 beta，并修复组合问题",
+      cwd: root,
+      onStatus: (status) => {
+        if (status.featureProgress) {
+          progress.push(status.featureProgress);
+        }
+      }
+    });
+
+    const taskDir = join(root, ".parallel-codex", "sessions", result.taskId ?? "");
+    expect(adapter.liveWasUntouchedBeforeRevision).toBe(true);
+    expect(adapter.waveActorRuns).toBe(1);
+    expect(adapter.waveCriticRuns).toBe(2);
+    expect(adapter.secondCriticSawRevision).toBe(true);
+    expect(adapter.waveCriticNativeSessions).toEqual([null, "mock-critic-mock-wave-0001-0001"]);
+    expect(result.workers.map((worker) => worker.id)).toEqual(expect.arrayContaining([
+      "actor-mock-wave-0001-0001",
+      "critic-mock-wave-0001-0001"
+    ]));
+    expect(await readTextIfExists(join(root, "combined.txt"))).toBe("fixed\n");
+    const verification = JSON.parse(await readTextIfExists(join(
+      taskDir,
+      "workspaces",
+      "turn-0001",
+      "wave-0001",
+      "verification.json"
+    )));
+    expect(verification).toMatchObject({ state: "approved", revised: true });
+    expect(verification.review_paths).toHaveLength(2);
+    expect(await readTextIfExists(join(
+      taskDir,
+      "workspaces",
+      "turn-0001",
+      "wave-0001",
+      "verification-review-01.md"
+    ))).toContain("REVISION_REQUIRED");
+    expect(await readTextIfExists(join(
+      taskDir,
+      "workspaces",
+      "turn-0001",
+      "wave-0001",
+      "verification-review-02.md"
+    ))).toContain("APPROVED");
+    expect(progress).toContainEqual({ wave: 1, waves: 1, phase: "revision", completed: 0, total: 1 });
+    expect(progress).toContainEqual({ wave: 1, waves: 1, phase: "revision", completed: 1, total: 1 });
+  });
+
+  it("rejects an ambiguous Wave Critic response without changing the live workspace", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pct-orch-wave-no-decision-"));
+    const config = mockConfig(root);
+    const manager = new SessionManager({
+      projectRoot: root,
+      dataDir: config.dataDir,
+      now: () => new Date("2026-06-30T03:30:14.000Z"),
+      randomId: () => "no-decision"
+    });
+    const orchestrator = new Orchestrator(
+      config,
+      manager,
+      new Map([["mock", new MissingWaveDecisionAdapter(root)]])
+    );
+
+    await expect(orchestrator.handleRequest({
+      request: "并行创建 alpha 和 beta",
+      cwd: root
+    })).rejects.toThrow("did not include APPROVED or REVISION_REQUIRED");
+
+    expect(await pathExists(join(root, "alpha.txt"))).toBe(false);
+    expect(await pathExists(join(root, "beta.txt"))).toBe(false);
+    const taskDir = join(root, ".parallel-codex", "sessions", "task-20260630-033014-no-decision");
+    expect((await readJson(join(taskDir, "meta.json"), TaskMetaSchema)).status).toBe("failed");
   });
 
   it("fails overlapping feature integration atomically and preserves conflict evidence", async () => {
@@ -778,7 +957,7 @@ describe("Orchestrator", () => {
     const summary = await readTextIfExists(join(task.dir, "turns", "0002", "supervisor-summary.md"));
     expect(await readTextIfExists(join(task.dir, "actor-mock", "worklog.md"))).toBe("");
     expect(await readTextIfExists(join(task.dir, "actor-mock", "patch.diff"))).toBe("");
-    expect(await readTextIfExists(join(task.dir, "critic-mock", "review.md"))).toBe("");
+    expect(await readTextIfExists(join(task.dir, "critic-mock", "review.md"))).toContain("APPROVED");
     expect(summary).not.toContain("STALE_ACTOR_WORKLOG");
     expect(summary).not.toContain("STALE_PATCH");
     expect(summary).not.toContain("STALE_CRITIC_REVIEW");
@@ -1320,6 +1499,34 @@ describe("Orchestrator", () => {
     expect(await readTextIfExists(join(taskDir, "turns", "0001", "feature-plan.json"))).toContain('"id": "integration"');
   });
 
+  it("retries failed Wave verification with the same Critic native session", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pct-orch-retry-wave-verify-"));
+    const config = mockConfig(root);
+    const manager = new SessionManager({
+      projectRoot: root,
+      dataDir: config.dataDir,
+      now: () => new Date("2026-06-30T03:31:20.000Z"),
+      randomId: () => "wave-verify"
+    });
+    const adapter = new RetryWaveVerificationAdapter(root);
+    const orchestrator = new Orchestrator(config, manager, new Map([["mock", adapter]]));
+    const taskId = "task-20260630-033120-wave-verify";
+
+    await expect(orchestrator.handleRequest({
+      request: "并行创建 alpha 和 beta",
+      cwd: root
+    })).rejects.toThrow("did not include APPROVED or REVISION_REQUIRED");
+    expect(await pathExists(join(root, "alpha.txt"))).toBe(false);
+
+    const result = await orchestrator.retryTask({ taskId, cwd: root });
+
+    expect(result.taskId).toBe(taskId);
+    expect(adapter.waveCriticNativeSessions).toEqual([null, "mock-critic-mock-wave-0001-0001"]);
+    expect(await readTextIfExists(join(root, "alpha.txt"))).toBe("alpha\n");
+    expect(await readTextIfExists(join(root, "beta.txt"))).toBe("beta\n");
+    expect((await readJson(join(root, ".parallel-codex", "sessions", taskId, "meta.json"), TaskMetaSchema)).status).toBe("done");
+  });
+
   it("retries a failed follow-up turn without adding another turn or rerunning Judge", async () => {
     const root = await mkdtemp(join(tmpdir(), "pct-orch-retry-follow-up-"));
     const config = mockConfig(root);
@@ -1403,6 +1610,16 @@ class FailingJudgeAdapter implements WorkerAdapter {
       };
     }
     return new MockWorkerAdapter().run(spec);
+  }
+}
+
+class MissingFeatureDecisionAdapter extends MockWorkerAdapter {
+  async run(spec: WorkerRunSpec): Promise<WorkerResult> {
+    const result = await super.run(spec);
+    if (spec.role === "critic") {
+      await writeText(join(spec.filesDir, "review.md"), "Review completed without a decision marker.\n");
+    }
+    return result;
   }
 }
 
@@ -1577,6 +1794,106 @@ class LimitedParallelAdapter extends MockWorkerAdapter {
     } finally {
       this.active -= 1;
     }
+  }
+}
+
+class CombinedVerificationAdapter extends MockWorkerAdapter {
+  waveCriticRuns = 0;
+  waveCriticSawCombinedWorkspace = false;
+  liveWasUntouchedDuringVerification = false;
+  waveCriticWritableDirs: string[] = [];
+
+  constructor(private readonly liveRoot: string) {
+    super();
+  }
+
+  async run(spec: WorkerRunSpec): Promise<WorkerResult> {
+    if (spec.role === "judge") {
+      const result = await super.run(spec);
+      await writeJson(join(spec.filesDir, "features.json"), {
+        version: 1,
+        features: [
+          { id: "alpha", title: "Alpha", description: "Create alpha.txt", depends_on: [] },
+          { id: "beta", title: "Beta", description: "Create beta.txt", depends_on: [] }
+        ]
+      });
+      return result;
+    }
+    if (spec.role === "actor" && spec.featureId) {
+      const name = spec.featureId.endsWith("alpha") ? "alpha" : "beta";
+      await writeText(join(spec.cwd, `${name}.txt`), `${name}\n`);
+    }
+    if (spec.role === "critic" && spec.workerId.includes("-wave-")) {
+      this.waveCriticRuns += 1;
+      this.waveCriticWritableDirs = spec.writableDirs ?? [];
+      this.waveCriticSawCombinedWorkspace = (
+        await readTextIfExists(join(spec.cwd, "alpha.txt")) === "alpha\n"
+        && await readTextIfExists(join(spec.cwd, "beta.txt")) === "beta\n"
+      );
+      this.liveWasUntouchedDuringVerification = (
+        !(await pathExists(join(this.liveRoot, "alpha.txt")))
+        && !(await pathExists(join(this.liveRoot, "beta.txt")))
+      );
+    }
+    return super.run(spec);
+  }
+}
+
+class RetryWaveVerificationAdapter extends CombinedVerificationAdapter {
+  readonly waveCriticNativeSessions: Array<string | null> = [];
+
+  async run(spec: WorkerRunSpec): Promise<WorkerResult> {
+    const result = await super.run(spec);
+    if (spec.role === "critic" && spec.workerId.includes("-wave-")) {
+      this.waveCriticNativeSessions.push(spec.nativeSession?.session_id ?? null);
+      if (this.waveCriticNativeSessions.length === 1) {
+        await writeText(join(spec.filesDir, "review.md"), "No decision on the first attempt.\n");
+      }
+    }
+    return result;
+  }
+}
+
+class WaveRevisionAdapter extends CombinedVerificationAdapter {
+  readonly waveCriticNativeSessions: Array<string | null> = [];
+  waveActorRuns = 0;
+  secondCriticSawRevision = false;
+  liveWasUntouchedBeforeRevision = false;
+
+  constructor(private readonly root: string) {
+    super(root);
+  }
+
+  async run(spec: WorkerRunSpec): Promise<WorkerResult> {
+    if (spec.role === "actor" && spec.workerId.includes("-wave-")) {
+      this.waveActorRuns += 1;
+      this.liveWasUntouchedBeforeRevision = (
+        !(await pathExists(join(this.root, "alpha.txt")))
+        && !(await pathExists(join(this.root, "beta.txt")))
+      );
+      await writeText(join(spec.cwd, "combined.txt"), "fixed\n");
+    }
+
+    const result = await super.run(spec);
+    if (spec.role === "critic" && spec.workerId.includes("-wave-")) {
+      this.waveCriticNativeSessions.push(spec.nativeSession?.session_id ?? null);
+      if (this.waveCriticNativeSessions.length === 1) {
+        await writeText(join(spec.filesDir, "review.md"), "REVISION_REQUIRED\nCreate combined.txt.\n");
+      } else {
+        this.secondCriticSawRevision = await readTextIfExists(join(spec.cwd, "combined.txt")) === "fixed\n";
+      }
+    }
+    return result;
+  }
+}
+
+class MissingWaveDecisionAdapter extends CombinedVerificationAdapter {
+  async run(spec: WorkerRunSpec): Promise<WorkerResult> {
+    const result = await super.run(spec);
+    if (spec.role === "critic" && spec.workerId.includes("-wave-")) {
+      await writeText(join(spec.filesDir, "review.md"), "Review completed without a decision marker.\n");
+    }
+    return result;
   }
 }
 
@@ -1757,7 +2074,15 @@ class FeatureOnlyWorklogAdapter extends MockWorkerAdapter {
 
 class NoArtifactAdapter extends MockWorkerAdapter {
   async run(spec: WorkerRunSpec): Promise<WorkerResult> {
-    if (spec.role === "actor" || spec.role === "critic") {
+    if (spec.role === "critic") {
+      await writeText(join(spec.filesDir, "review.md"), "APPROVED\n");
+      return {
+        workerId: spec.workerId,
+        exitCode: 0,
+        signal: null
+      };
+    }
+    if (spec.role === "actor") {
       return {
         workerId: spec.workerId,
         exitCode: 0,

@@ -102,6 +102,22 @@ describe("formatStatusLine", () => {
     })).toBe("a1b2 | wave 2/3 · integration 0/1 | workers 2 | done 2");
   });
 
+  it("shows combined Wave Critic verification before live commit", () => {
+    expect(formatStatusLine({
+      taskId: "task-a1b2",
+      featureProgress: {
+        wave: 2,
+        waves: 3,
+        phase: "verification",
+        completed: 0,
+        total: 1
+      },
+      workers: [
+        { label: "Critic (codex) · Wave 2/3", status: "running" }
+      ]
+    })).toBe("a1b2 | wave 2/3 · verification 0/1 | workers 1 | run 1");
+  });
+
   it("keeps cancelled worker state concise and ahead of completed workers", () => {
     const state = {
       taskId: "task-stop",
