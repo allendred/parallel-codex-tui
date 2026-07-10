@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import * as statusLineModule from "../src/tui/status-line.js";
 import {
   formatFooterHelp,
   formatSelectedWorkerStatus,
@@ -30,6 +31,21 @@ describe("formatStatusLine", () => {
         main: "running"
       })
     ).toBe("main | main run");
+  });
+
+  it("formats concise route evidence while preserving exceptional sources", () => {
+    const formatRouteStatus = (
+      statusLineModule as typeof statusLineModule & {
+        formatRouteStatus?: (route: Record<string, unknown> | null) => string;
+      }
+    ).formatRouteStatus;
+
+    expect(formatRouteStatus).toBeTypeOf("function");
+    expect(formatRouteStatus?.({ mode: "simple", source: "codex", duration_ms: 42 })).toBe("route simple · 42ms");
+    expect(formatRouteStatus?.({ mode: "complex", source: "fallback", duration_ms: 120000 })).toBe(
+      "route complex · fallback · 120s"
+    );
+    expect(formatRouteStatus?.(null)).toBe("");
   });
 
   it("formats worker states as a compact summary instead of full worker logs", () => {

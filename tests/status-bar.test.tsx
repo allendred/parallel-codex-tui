@@ -240,6 +240,35 @@ describe("StatusBar", () => {
     expect(frame).not.toContain("selected main");
   });
 
+  it("renders route evidence as a quiet named segment instead of selected-worker chrome", () => {
+    const { lastFrame } = render(
+      <StatusBar
+        text="main | main done | route simple · 42ms"
+        terminalWidth={80}
+      />
+    );
+
+    const frame = lastFrame() ?? "";
+    expect(frame).toContain("chat done");
+    expect(frame).toContain("route simple · 42ms");
+    expect(frame).not.toContain("@ route");
+  });
+
+  it("keeps fallback route evidence visible by compacting its details in narrow terminals", () => {
+    const { lastFrame } = render(
+      <StatusBar
+        text="093326-1980 | workers 4 | fail 1 done 3 | route complex · fallback · 120s | actor/codex fail"
+        terminalWidth={24}
+      />
+    );
+
+    const frame = lastFrame() ?? "";
+    expect(frame).toContain("f1");
+    expect(frame).toContain("r:fallback");
+    expect(frame).not.toContain("120s");
+    expect(displayWidth(frame)).toBeLessThanOrEqual(24);
+  });
+
   it("renders role runtime statuses as roles instead of repeated selected workers", () => {
     const { lastFrame } = render(
       <StatusBar

@@ -214,6 +214,9 @@ function statusSegmentKeepPriority(segment: Segment): number {
   if (label === "current") {
     return 5;
   }
+  if (label === "route") {
+    return 7;
+  }
   return 6;
 }
 
@@ -265,6 +268,13 @@ function statusSegmentDisplay(segment: Segment, compact: boolean): { label: stri
       value: segment.value
     };
   }
+  if (label === "route") {
+    return {
+      label: compact ? "r" : "route",
+      separator: compact ? ":" : " ",
+      value: compactRouteStatusValue(segment.value, compact)
+    };
+  }
   if (!compact) {
     if (label === "current") {
       return { label: "@", separator: " ", value: segment.value };
@@ -290,6 +300,13 @@ function statusSegmentDisplay(segment: Segment, compact: boolean): { label: stri
     return { label: compactToneLabel(segment.tone), separator: "", value: segment.value };
   }
   return { label, separator: " ", value: segment.value };
+}
+
+function compactRouteStatusValue(value: string, compact: boolean): string {
+  if (compact && /(?:^|\s·\s)fallback(?:\s·\s|$)/i.test(value)) {
+    return "fallback";
+  }
+  return value;
 }
 
 function compactToneLabel(tone: Exclude<StatusTone, "idle">): string {
@@ -366,6 +383,17 @@ function parseStatusText(text: string, options: { hideTask?: boolean } = {}): Se
       continue;
     }
 
+    const routeMatch = part.match(/^route\s+(.+)$/i);
+    if (routeMatch) {
+      const value = routeMatch[1]?.trim() || "unknown";
+      segments.push({
+        label: "ROUTE",
+        value,
+        tone: /(?:^|\s·\s)fallback(?:\s·\s|$)/i.test(value) ? "wait" : undefined
+      });
+      continue;
+    }
+
     const counts = parseStateCounts(part);
     if (counts.length > 0) {
       segments.push(...counts);
@@ -379,7 +407,7 @@ function parseStatusText(text: string, options: { hideTask?: boolean } = {}): Se
 }
 
 function isStatusPart(part: string): boolean {
-  return /^workers\s+\d+$/i.test(part) || parseStateCounts(part).length > 0;
+  return /^workers\s+\d+$/i.test(part) || /^route\s+\S+/i.test(part) || parseStateCounts(part).length > 0;
 }
 
 function parseStateCounts(part: string): Segment[] {

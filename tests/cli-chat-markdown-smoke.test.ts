@@ -94,6 +94,8 @@ describe("CLI chat Markdown smoke", () => {
       expect(linkText).toContain("review.md");
       expect(codeText).toContain("npm test");
       expect(strongText).toContain("ship it");
+      expect(snapshot).toContain("route simple");
+      expect(snapshot).not.toContain("@ route");
     } finally {
       child.kill("SIGTERM");
     }

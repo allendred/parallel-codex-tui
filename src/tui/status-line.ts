@@ -1,3 +1,4 @@
+import type { RouteDecision } from "../domain/schemas.js";
 import { compactEndByDisplayWidth } from "./display-width.js";
 
 export interface StatusLineState {
@@ -48,6 +49,20 @@ export function formatStatusLine(state: StatusLineState | null): string {
   return parts.join(" | ");
 }
 
+export function formatRouteStatus(route: RouteDecision | null): string {
+  if (!route) {
+    return "";
+  }
+  const details: string[] = [route.mode];
+  if (route.source === "forced" || route.source === "fallback") {
+    details.push(route.source);
+  }
+  if (typeof route.duration_ms === "number") {
+    details.push(formatRouteDuration(route.duration_ms));
+  }
+  return `route ${details.join(" · ")}`;
+}
+
 export function formatSelectedWorkerStatus(state: StatusLineState | null, selectedIndex: number): string {
   const worker = state?.workers?.[selectedIndex];
   if (!worker) {
@@ -78,6 +93,16 @@ export function formatFooterHelp(mode: FooterHelpMode = "chat"): string {
 
 function compactNativeSessionId(sessionId: string): string {
   return sessionId.length > 12 ? `${sessionId.slice(0, 8)}...` : sessionId;
+}
+
+function formatRouteDuration(durationMs: number): string {
+  if (durationMs < 1000) {
+    return `${Math.round(durationMs)}ms`;
+  }
+  if (durationMs < 10000) {
+    return `${(durationMs / 1000).toFixed(1).replace(/\.0$/, "")}s`;
+  }
+  return `${Math.round(durationMs / 1000)}s`;
 }
 
 function humanizeWorkerPhase(phase: string): string {

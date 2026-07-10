@@ -25,6 +25,7 @@ const PREVIOUS_TURN_SUMMARY_LENGTH = 600;
 export interface HandleRequestInput {
   request: string;
   cwd: string;
+  onRoute?: (route: RouteDecision) => void;
   onStatus?: (status: WorkerRunStatus) => void;
   onWorker?: (worker: WorkerLogRef) => void;
 }
@@ -80,6 +81,7 @@ export class Orchestrator {
 
   async handleRequest(input: HandleRequestInput): Promise<HandleRequestResult> {
     const route = await this.routeRequest(input.request, input.cwd);
+    input.onRoute?.(route);
     const workers: WorkerLogRef[] = [];
 
     if (route.mode === "simple") {
@@ -182,6 +184,9 @@ export class Orchestrator {
   async handleTaskTurn(input: HandleTaskTurnInput): Promise<HandleRequestResult> {
     const task: TaskSession = this.sessions.taskFromId(input.taskId);
     const route = input.route ?? await this.routeRequest(input.request, input.cwd);
+    if (!input.route) {
+      input.onRoute?.(route);
+    }
     const turn = await this.sessions.appendTurn(task, {
       request: input.request,
       route
@@ -262,6 +267,7 @@ export class Orchestrator {
 
   async routeTaskFollowUp(input: HandleTaskQuestionInput): Promise<TaskFollowUpRouteResult> {
     const route = await this.routeRequest(input.request, input.cwd);
+    input.onRoute?.(route);
 
     return {
       mode: route.mode,

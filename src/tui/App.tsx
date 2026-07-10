@@ -4,10 +4,11 @@ import { Box, Text, useApp, useInput, useStdin, type TextProps } from "ink";
 import { Lexer, type Token } from "marked";
 import type { AppConfig } from "../core/config.js";
 import { readJson } from "../core/file-store.js";
-import { WorkerStatusSchema } from "../domain/schemas.js";
+import { WorkerStatusSchema, type RouteDecision } from "../domain/schemas.js";
 import type { Orchestrator, WorkerLogRef } from "../orchestrator/orchestrator.js";
 import {
   formatSelectedWorkerStatus,
+  formatRouteStatus,
   formatStatusLine,
   formatWorkerRuntimeStatus,
   type StatusLineState
@@ -91,6 +92,7 @@ export function App({
   const [messages, setMessages] = useState<Message[]>([]);
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState<StatusLineState | null>(initialTaskId ? { taskId: initialTaskId } : null);
+  const [lastRoute, setLastRoute] = useState<RouteDecision | null>(null);
   const [view, setView] = useState<"chat" | "worker" | "native">("chat");
   const [workers, setWorkers] = useState<WorkerLogRef[]>([]);
   const [selectedWorkerIndex, setSelectedWorkerIndex] = useState(0);
@@ -130,6 +132,7 @@ export function App({
   const terminalWidth = process.stdout.columns || 120;
   const selectedWorkerStatus = formatSelectedWorkerStatus(status, selectedWorkerIndex);
   const visibleWorkerStatus = view === "chat" ? "" : selectedWorkerStatus;
+  const visibleRouteStatus = formatRouteStatus(lastRoute);
 
   useEffect(() => {
     inputRef.current = input;
@@ -524,10 +527,12 @@ export function App({
     setInput("");
     busyRef.current = true;
     setBusy(true);
+    setLastRoute(null);
     setMessages((current) => [...current, { from: "user", text: request }]);
 
     try {
       const callbacks = {
+        onRoute: setLastRoute,
         onStatus: setStatus,
         onWorker: (worker: WorkerLogRef) => {
           setWorkers((current) => upsertWorker(current, worker));
@@ -602,7 +607,7 @@ export function App({
       view={view}
       cwd={cwd}
       taskId={activeTaskId}
-      statusText={`${formatStatusLine(status)}${visibleWorkerStatus ? ` | ${visibleWorkerStatus}` : ""}`}
+      statusText={[formatStatusLine(status), visibleRouteStatus, visibleWorkerStatus].filter(Boolean).join(" | ")}
       contentHeight={contentHeight}
       showStatusBar={config.ui.showStatusBar}
       input={
