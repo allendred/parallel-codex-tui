@@ -6,6 +6,7 @@ import { formatConfigErrorMessage } from "./core/config-errors.js";
 import { configPath, loadConfig, withUiThemeOverride } from "./core/config.js";
 import { pathExists } from "./core/file-store.js";
 import { prepareWorkspace } from "./core/workspace.js";
+import { auditTuiThemeContrast, TUI_THEME_MIN_CONTRAST_RATIO, type TuiThemeContrastAudit } from "./tui/theme-contrast.js";
 import { formatTuiThemePreview } from "./tui/theme-preview.js";
 import { resolveTuiTheme } from "./tui/theme.js";
 
@@ -53,8 +54,10 @@ export async function runDoctor(
     config = withUiThemeOverride(loadedConfig, options.theme ?? null);
     lines.push(`config: ok (${localConfigPath})`);
     lines.push(`theme: ok (${themeSummary(config.ui.theme, loadedConfig.ui.theme, options.theme ?? null)}; ${themeOverrideSummary(config.ui.colors)})`);
-    lines.push(`palette: ${themePaletteSummary(config.ui.theme, config.ui.colors)}`);
-    lines.push(...formatTuiThemePreview(resolveTuiTheme({ theme: config.ui.theme, colors: config.ui.colors })));
+    const theme = resolveTuiTheme({ theme: config.ui.theme, colors: config.ui.colors });
+    lines.push(`palette: ${themePaletteSummary(theme)}`);
+    lines.push(...formatTuiThemePreview(theme));
+    lines.push(...formatThemeContrastAudit(auditTuiThemeContrast(theme)));
   } catch (error) {
     ok = false;
     lines.push(`config: invalid (${localConfigPath})`);
@@ -116,17 +119,30 @@ function themeOverrideSummary(colors: Awaited<ReturnType<typeof loadConfig>>["ui
   return `colors: ${entries.map(([key, value]) => `${key}=${value}`).join(", ")}`;
 }
 
-function themePaletteSummary(
-  themeName: Awaited<ReturnType<typeof loadConfig>>["ui"]["theme"],
-  colors: Awaited<ReturnType<typeof loadConfig>>["ui"]["colors"]
-): string {
-  const theme = resolveTuiTheme({ theme: themeName, colors });
+function themePaletteSummary(theme: ReturnType<typeof resolveTuiTheme>): string {
   return [
     `chrome=${theme.chrome}`,
     `surface=${theme.surface}`,
     `rail=${theme.rail}`,
     `accent=${theme.accent}`
   ].join(", ");
+}
+
+function formatThemeContrastAudit(audit: TuiThemeContrastAudit): string[] {
+  if (audit.issues.length === 0) {
+    return [`theme contrast: ok (minimum ${formatContrastRatio(audit.minimumRatio)}:1 across ${audit.measurements.length} rendered pairs)`];
+  }
+
+  return [
+    `theme contrast: warning (${audit.issues.length} of ${audit.measurements.length} rendered pairs below ${TUI_THEME_MIN_CONTRAST_RATIO}:1)`,
+    ...audit.issues.map(({ foreground, background, ratio }) =>
+      `theme contrast issue: ${foreground}/${background} ${formatContrastRatio(ratio)}:1`
+    )
+  ];
+}
+
+function formatContrastRatio(ratio: number): string {
+  return ratio.toFixed(2);
 }
 
 function themeSummary(

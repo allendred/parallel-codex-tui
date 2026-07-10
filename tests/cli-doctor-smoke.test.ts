@@ -71,6 +71,7 @@ describe("CLI doctor", () => {
     expect(result.stdout).toContain("preview:");
     expect(result.stdout).toContain("semantic:");
     expect(result.stdout).toContain("\u001b[48;5;234m");
+    expect(result.stdout).toContain("theme contrast: ok (minimum 4.59:1 across 16 rendered pairs)");
     expect(result.stdout).toContain("codex: ok");
     expect(result.stdout).toContain("claude: ok");
     await expect(pathExists(workspace)).resolves.toBe(true);
@@ -243,6 +244,42 @@ describe("CLI doctor", () => {
     expect(result.stdout).toContain("\u001b[38;2;170;187;204m");
     expect(result.stdout).not.toContain("codex: missing");
     expect(result.stdout).not.toContain("claude: missing");
+  });
+
+  it("warns when custom theme colors make rendered text unreadable", async () => {
+    const appRoot = await mkdtemp(join(tmpdir(), "pct-cli-doctor-theme-contrast-"));
+
+    await mkdir(join(appRoot, ".parallel-codex"), { recursive: true });
+    await writeFile(
+      join(appRoot, ".parallel-codex", "config.toml"),
+      [
+        "[router]",
+        'defaultMode = "simple"',
+        "",
+        "[pairing]",
+        'main = "mock"',
+        "",
+        "[ui.colors]",
+        'chrome = "#fff"',
+        'text = "rgb(255, 255, 255)"',
+        'muted = "whiteBright"',
+        'accent = "ansi256(231)"'
+      ].join("\n"),
+      "utf8"
+    );
+
+    const result = await runCli(["--app-root", appRoot, "--doctor"], {
+      env: {
+        PATH: ""
+      }
+    });
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stderr).toBe("");
+    expect(result.stdout).toContain("theme contrast: warning (3 of 16 rendered pairs below 4.5:1)");
+    expect(result.stdout).toContain("theme contrast issue: text/chrome 1.00:1");
+    expect(result.stdout).toContain("theme contrast issue: muted/chrome 1.00:1");
+    expect(result.stdout).toContain("theme contrast issue: accent/chrome 1.00:1");
   });
 
   it("reports the effective TUI theme after a CLI theme override", async () => {

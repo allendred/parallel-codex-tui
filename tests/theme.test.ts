@@ -12,6 +12,7 @@ import {
   TUI_THEME_PRESETS
 } from "../src/tui/theme.js";
 import { workerOutputLineTheme } from "../src/tui/WorkerOutputView.js";
+import { auditTuiThemeContrast, TUI_THEME_RENDERED_CONTRAST_PAIRS } from "../src/tui/theme-contrast.js";
 
 describe("TUI theme", () => {
   afterEach(() => {
@@ -151,31 +152,10 @@ describe("TUI theme", () => {
   it("keeps every bundled palette readable on the surfaces used by the TUI", () => {
     for (const name of TUI_THEME_NAMES) {
       const theme = resolveTuiTheme({ theme: name });
-      const pairs = [
-        ["text/chrome", theme.text, theme.chrome],
-        ["muted/chrome", theme.muted, theme.chrome],
-        ["accent/chrome", theme.accent, theme.chrome],
-        ["text/surface", theme.text, theme.surface],
-        ["muted/surface", theme.muted, theme.surface],
-        ["accent/surface", theme.accent, theme.surface],
-        ["warning/surface", theme.warning, theme.surface],
-        ["success/surface", theme.success, theme.surface],
-        ["text/rail", theme.text, theme.rail],
-        ["muted/rail", theme.muted, theme.rail],
-        ["accent/rail", theme.accent, theme.rail],
-        ["warning/rail", theme.warning, theme.rail],
-        ["success/rail", theme.success, theme.rail],
-        ["danger/rail", theme.danger, theme.rail],
-        ["success/successSurface", theme.success, theme.successSurface],
-        ["danger/dangerSurface", theme.danger, theme.dangerSurface]
-      ] as const;
+      const audit = auditTuiThemeContrast(theme);
 
-      for (const [label, foreground, background] of pairs) {
-        expect(
-          ansi256ContrastRatio(foreground, background),
-          `${name} ${label}`
-        ).toBeGreaterThanOrEqual(4.5);
-      }
+      expect(audit.measurements).toHaveLength(TUI_THEME_RENDERED_CONTRAST_PAIRS.length);
+      expect(audit.issues, name).toEqual([]);
     }
   });
 
