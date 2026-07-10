@@ -89,12 +89,18 @@ describe("CLI task lifecycle smoke", () => {
 
       const actorLog = await readTextIfExists(join(taskDir, "actor-codex", "output.log"));
       const events = await readTextIfExists(join(taskDir, "events.jsonl"));
+      const chatPath = join(workspace, ".parallel-codex", "sessions", "main", "chat.jsonl");
+      await waitForFileText(chatPath, "Complex task completed.");
+      const chat = await readTextIfExists(chatPath);
       expect(actorLog).toContain("actor waiting for cancel");
       expect(actorLog).toContain("Process cancelled by user");
       expect(actorLog).toContain("--- retry");
       expect(actorLog).toContain("actor retry done");
       expect(events).toContain("task.cancelled");
       expect(events).toContain("task.retrying");
+      expect(chat).toContain("做个可取消的俄罗斯方块");
+      expect(chat).toContain("cancelled · request stopped");
+      expect(chat).toContain("Complex task completed.");
       expect(await pathExists(join(taskDir, "turns", "0002"))).toBe(false);
 
       child.write("\x03");
@@ -219,4 +225,14 @@ async function waitForExit(exits: number[]): Promise<void> {
     await new Promise((resolve) => setTimeout(resolve, 50));
   }
   throw new Error("Timed out waiting for TUI to exit");
+}
+
+async function waitForFileText(path: string, text: string): Promise<void> {
+  for (let attempt = 0; attempt < 120; attempt += 1) {
+    if ((await readTextIfExists(path)).includes(text)) {
+      return;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+  throw new Error(`Timed out waiting for ${text} in ${path}`);
 }

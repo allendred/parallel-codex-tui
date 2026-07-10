@@ -84,6 +84,13 @@ export const NativeSessionSchema = z.object({
   source: NativeSessionSourceSchema
 });
 
+export const ChatRecordSchema = z.object({
+  time: z.string().datetime(),
+  from: z.enum(["user", "system"]),
+  text: z.string(),
+  task_id: z.string().min(1).optional()
+});
+
 export const EventRecordSchema = z.object({
   time: z.string().datetime(),
   type: z.string().min(1),
@@ -105,3 +112,4 @@ export type TurnMeta = z.infer<typeof TurnMetaSchema>;
 export type NativeSession = z.infer<typeof NativeSessionSchema>;
 export type NativeSessionSource = z.infer<typeof NativeSessionSourceSchema>;
 export type EventRecord = z.infer<typeof EventRecordSchema>;
+export type ChatRecord = z.infer<typeof ChatRecordSchema>;

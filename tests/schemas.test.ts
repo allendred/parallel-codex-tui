@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  ChatRecordSchema,
   EventRecordSchema,
   NativeSessionSchema,
   RouteDecisionSchema,
@@ -9,6 +10,18 @@ import {
 } from "../src/domain/schemas.js";
 
 describe("domain schemas", () => {
+  it("validates persisted workspace chat records", () => {
+    const result = ChatRecordSchema.parse({
+      time: "2026-07-10T12:00:00.000Z",
+      from: "user",
+      text: "继续优化",
+      task_id: "task-20260710-120000-chat"
+    });
+
+    expect(result.from).toBe("user");
+    expect(result.task_id).toBe("task-20260710-120000-chat");
+  });
+
   it("validates a complex route decision", () => {
     const result = RouteDecisionSchema.parse({
       mode: "complex",

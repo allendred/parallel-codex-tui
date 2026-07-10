@@ -15,6 +15,8 @@ import { formatTaskTimestamp, taskDir } from "./paths.js";
 import { sessionsRoot } from "./paths.js";
 import type { SessionIndex } from "./session-index.js";
 import {
+  type ChatRecord,
+  ChatRecordSchema,
   type EngineName,
   type EventRecord,
   type NativeSession,
@@ -75,6 +77,12 @@ export interface AppendTurnInput {
   route: RouteDecision;
 }
 
+export interface AppendChatMessageInput {
+  from: ChatRecord["from"];
+  text: string;
+  taskId?: string;
+}
+
 export interface TaskTurn {
   turnId: string;
   dir: string;
@@ -130,6 +138,39 @@ export class SessionManager {
 
   mainSessionDir(): string {
     return join(this.projectRoot, this.dataDir, "sessions", "main");
+  }
+
+  async appendChatMessage(input: AppendChatMessageInput): Promise<void> {
+    const record = ChatRecordSchema.parse({
+      time: this.now().toISOString(),
+      from: input.from,
+      text: input.text,
+      task_id: input.taskId
+    });
+    await appendJsonLine(join(this.mainSessionDir(), "chat.jsonl"), record);
+  }
+
+  async readChatHistory(limit = 200): Promise<ChatRecord[]> {
+    const text = await readTextIfExists(join(this.mainSessionDir(), "chat.jsonl"));
+    const records: ChatRecord[] = [];
+    for (const line of text.split(/\r?\n/)) {
+      if (!line.trim()) {
+        continue;
+      }
+      try {
+        const parsed = ChatRecordSchema.safeParse(JSON.parse(line));
+        if (parsed.success) {
+          records.push(parsed.data);
+        }
+      } catch {
+        // A partial final write must not hide the rest of the workspace history.
+      }
+    }
+
+    const boundedLimit = Number.isFinite(limit)
+      ? Math.min(1000, Math.max(0, Math.trunc(limit)))
+      : 200;
+    return boundedLimit === 0 ? [] : records.slice(-boundedLimit);
   }
 
   taskFromId(taskId: string): TaskSession {

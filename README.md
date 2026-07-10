@@ -151,6 +151,7 @@ The doctor output includes `preview:` and `semantic:` ANSI swatch rows so you ca
 - Router classification only receives the user request; workspace selection and session files are kept out of the router prompt.
 - Simple requests stay in the main TUI flow and do not create Judge, Actor, or Critic workers.
 - Consecutive simple requests reuse the main worker's native session across app restarts when the CLI exposes a session id.
+- The workspace chat transcript is appended to `.parallel-codex/sessions/main/chat.jsonl`; startup restores the latest 200 valid messages and skips isolated corrupt rows.
 - Complex requests create a session under `.parallel-codex/sessions/`.
 - Complex requests run Judge -> Actor -> Critic. Judge also writes a bounded `features.json` dependency plan.
 - Judge runs from its task-owned worker directory, reads the selected project without treating it as a write target, and snapshots `requirements.md`, `plan.md`, `acceptance.md`, role briefs, and `features.json` into each numbered turn.
@@ -308,5 +309,5 @@ You can also run the Release workflow manually and enter the same tag value. The
 - `.parallel-codex/config.toml` is local-only and ignored.
 - `.parallel-codex/last-workspace` and `.parallel-codex/workspaces.json` are local workspace-selection state and are ignored.
 - `.parallel-codex/router/` contains local request classification audit records and is ignored.
-- `.parallel-codex/sessions/` contains task prompts, logs, native session ids, isolated feature workspaces, and conflict evidence; never commit it.
+- `.parallel-codex/sessions/` contains the workspace chat transcript, task prompts, logs, native session ids, isolated feature workspaces, and conflict evidence; never commit it.
 - `docs/superpowers/` contains internal planning notes and is ignored for public releases.

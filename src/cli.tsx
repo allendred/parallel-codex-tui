@@ -78,6 +78,7 @@ async function main(): Promise<void> {
     }
     const latestTask = await runtime.sessions.latestTask();
     const initialTaskId = cliArgs.taskId ?? latestTask?.id ?? null;
+    const initialMessages = (await runtime.sessions.readChatHistory()).map(({ from, text }) => ({ from, text }));
 
     render(
       <App
@@ -85,6 +86,11 @@ async function main(): Promise<void> {
         orchestrator={runtime.orchestrator}
         cwd={runtime.workspaceRoot}
         initialTaskId={initialTaskId}
+        initialMessages={initialMessages}
+        persistChatMessage={(message, taskId) => runtime.sessions.appendChatMessage({
+          ...message,
+          taskId
+        })}
       />,
       { exitOnCtrlC: false }
     );

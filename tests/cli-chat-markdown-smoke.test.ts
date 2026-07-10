@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { spawn } from "node-pty";
+import { readTextIfExists } from "../src/core/file-store.js";
 import { NativeTerminalScreen } from "../src/tui/terminal-screen.js";
 import { TUI_THEME_PRESETS } from "../src/tui/theme.js";
 
@@ -288,6 +289,103 @@ describe("CLI chat Markdown smoke", () => {
       child.kill("SIGTERM");
     }
   }, 10000);
+
+  it("restores persisted workspace chat after restarting the CLI", async () => {
+    const workspace = await mkdtemp(join(tmpdir(), "pct-cli-chat-restore-"));
+    const appRoot = await mkdtemp(join(tmpdir(), "pct-cli-chat-restore-app-"));
+    const mainScript = join(appRoot, "restore-main.cjs");
+    const chatPath = join(workspace, ".parallel-codex", "sessions", "main", "chat.jsonl");
+
+    await mkdir(join(appRoot, ".parallel-codex"), { recursive: true });
+    await writeFile(
+      mainScript,
+      [
+        "process.stdin.resume();",
+        "process.stdin.on('end', () => process.stdout.write('已记录蓝色\\n'));"
+      ].join("\n")
+    );
+    await writeFile(
+      join(appRoot, ".parallel-codex", "config.toml"),
+      [
+        "[router]",
+        'defaultMode = "simple"',
+        "",
+        "[workers.codex]",
+        `command = "${escapeToml(process.execPath)}"`,
+        `args = ["${escapeToml(mainScript)}"]`,
+        "",
+        "[pairing]",
+        'main = "codex"',
+        'judge = "codex"',
+        'actor = "codex"',
+        'critic = "codex"'
+      ].join("\n") + "\n"
+    );
+
+    const firstScreen = new NativeTerminalScreen({ cols: 80, rows: 12, scrollback: 1000 });
+    let firstWrites = Promise.resolve();
+    const firstExits: number[] = [];
+    const first = spawn(
+      process.execPath,
+      ["./node_modules/.bin/tsx", "src/cli.tsx", "--app-root", appRoot, "--workspace", workspace],
+      {
+        cwd: process.cwd(),
+        cols: 80,
+        rows: 12,
+        name: "xterm-256color",
+        env: { ...process.env, TERM: "xterm-256color" }
+      }
+    );
+    first.onData((chunk) => {
+      firstWrites = firstWrites.then(() => firstScreen.write(chunk));
+    });
+    first.onExit(({ exitCode }) => firstExits.push(exitCode));
+
+    try {
+      await waitForScreenText(() => firstWrites, firstScreen, "> | message");
+      first.write("记住蓝色\r");
+      await waitForScreenText(() => firstWrites, firstScreen, "已记录蓝色");
+      await waitForFileText(chatPath, "记住蓝色");
+      first.write("\x03");
+      await waitForExit(firstExits);
+
+      const secondScreen = new NativeTerminalScreen({ cols: 80, rows: 12, scrollback: 1000 });
+      let secondWrites = Promise.resolve();
+      const secondExits: number[] = [];
+      const second = spawn(
+        process.execPath,
+        ["./node_modules/.bin/tsx", "src/cli.tsx", "--app-root", appRoot, "--workspace", workspace],
+        {
+          cwd: process.cwd(),
+          cols: 80,
+          rows: 12,
+          name: "xterm-256color",
+          env: { ...process.env, TERM: "xterm-256color" }
+        }
+      );
+      second.onData((chunk) => {
+        secondWrites = secondWrites.then(() => secondScreen.write(chunk));
+      });
+      second.onExit(({ exitCode }) => secondExits.push(exitCode));
+
+      try {
+        await waitForScreenText(() => secondWrites, secondScreen, "> 记住蓝色");
+        await waitForScreenText(() => secondWrites, secondScreen, "已记录蓝色");
+        expect(secondScreen.snapshot().match(/> 记住蓝色/g)).toHaveLength(1);
+        expect(secondScreen.snapshot().match(/已记录蓝色/g)).toHaveLength(1);
+        second.write("\x03");
+        await waitForExit(secondExits);
+      } finally {
+        if (secondExits.length === 0) {
+          second.kill("SIGTERM");
+        }
+      }
+    } finally {
+      if (firstExits.length === 0) {
+        first.kill("SIGTERM");
+      }
+    }
+  }, 15000);
 });
 
 function escapeToml(value: string): string {
@@ -307,4 +405,24 @@ async function waitForScreenText(
     await new Promise((resolve) => setTimeout(resolve, 50));
   }
   throw new Error(`Timed out waiting for ${text}\nSnapshot:\n${screen.snapshot()}`);
+}
+
+async function waitForFileText(path: string, text: string): Promise<void> {
+  for (let attempt = 0; attempt < 120; attempt += 1) {
+    if ((await readTextIfExists(path)).includes(text)) {
+      return;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+  throw new Error(`Timed out waiting for ${text} in ${path}`);
+}
+
+async function waitForExit(exits: number[]): Promise<void> {
+  for (let attempt = 0; attempt < 120; attempt += 1) {
+    if (exits.length > 0) {
+      return;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+  throw new Error("Timed out waiting for CLI exit");
 }

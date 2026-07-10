@@ -2,7 +2,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { pathExists, readJson, readTextIfExists, writeJson, writeText } from "../src/core/file-store.js";
+import { appendText, pathExists, readJson, readTextIfExists, writeJson, writeText } from "../src/core/file-store.js";
 import { SessionIndex } from "../src/core/session-index.js";
 import { SessionManager } from "../src/core/session-manager.js";
 import {
@@ -14,6 +14,55 @@ import {
 } from "../src/domain/schemas.js";
 
 describe("SessionManager", () => {
+  it("persists bounded workspace chat history and skips corrupt JSONL rows", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pct-chat-history-"));
+    const manager = new SessionManager({
+      projectRoot: root,
+      dataDir: ".parallel-codex",
+      now: () => new Date("2026-07-10T12:00:00.000Z")
+    });
+    const chatManager = manager as SessionManager & {
+      appendChatMessage?: (message: { from: "user" | "system"; text: string; taskId?: string }) => Promise<void>;
+      readChatHistory?: (limit?: number) => Promise<Array<{
+        time: string;
+        from: "user" | "system";
+        text: string;
+        task_id?: string;
+      }>>;
+    };
+
+    expect(chatManager.appendChatMessage).toBeTypeOf("function");
+    expect(chatManager.readChatHistory).toBeTypeOf("function");
+    await chatManager.appendChatMessage?.({ from: "user", text: "记住暗号蓝色", taskId: "task-blue" });
+    await chatManager.appendChatMessage?.({ from: "system", text: "已经记住。", taskId: "task-blue" });
+
+    const chatPath = join(root, ".parallel-codex", "sessions", "main", "chat.jsonl");
+    await appendText(chatPath, "not-json\n{\"from\":\"other\",\"text\":\"bad\"}\n");
+
+    await expect(chatManager.readChatHistory?.()).resolves.toEqual([
+      {
+        time: "2026-07-10T12:00:00.000Z",
+        from: "user",
+        text: "记住暗号蓝色",
+        task_id: "task-blue"
+      },
+      {
+        time: "2026-07-10T12:00:00.000Z",
+        from: "system",
+        text: "已经记住。",
+        task_id: "task-blue"
+      }
+    ]);
+    await expect(chatManager.readChatHistory?.(1)).resolves.toEqual([
+      {
+        time: "2026-07-10T12:00:00.000Z",
+        from: "system",
+        text: "已经记住。",
+        task_id: "task-blue"
+      }
+    ]);
+  });
+
   it("creates a complex task session with standard files", async () => {
     const root = await mkdtemp(join(tmpdir(), "pct-session-"));
     const manager = new SessionManager({

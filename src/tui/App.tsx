@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { basename } from "node:path";
 import { Box, Text, useApp, useInput, useStdin, type TextProps } from "ink";
 import { Lexer, type Token, type Tokens } from "marked";
@@ -39,6 +39,8 @@ export interface AppProps {
   orchestrator: Orchestrator;
   cwd: string;
   initialTaskId?: string | null;
+  initialMessages?: Message[];
+  persistChatMessage?: (message: Message, taskId?: string) => Promise<void>;
   prepareNativeAttach?: (worker: WorkerLogRef) => Promise<NativeAttachLaunch>;
   startNativeAttach?: (
     launch: NativeAttachLaunch,
@@ -88,6 +90,8 @@ export function App({
   orchestrator,
   cwd,
   initialTaskId = null,
+  initialMessages = [],
+  persistChatMessage,
   prepareNativeAttach,
   startNativeAttach
 }: AppProps) {
@@ -97,7 +101,7 @@ export function App({
   });
 
   const [input, setInput] = useState("");
-  const [messages, setMessages] = useState<Message[]>([]);
+  const [messages, setMessages] = useState<Message[]>(() => [...initialMessages]);
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState<StatusLineState | null>(initialTaskId ? { taskId: initialTaskId } : null);
   const [lastRoute, setLastRoute] = useState<RouteDecision | null>(null);
@@ -601,6 +605,19 @@ export function App({
     };
   }
 
+  async function appendVisibleMessage(message: Message, taskId?: string): Promise<void> {
+    setMessages((current) => [...current, message]);
+    if (!persistChatMessage) {
+      return;
+    }
+    try {
+      await persistChatMessage(message, taskId);
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : String(error);
+      setAttachError(`Chat history write failed · ${detail}`);
+    }
+  }
+
   async function submit(value: string) {
     const request = value.trim();
     if (!request || busyRef.current) {
@@ -616,7 +633,10 @@ export function App({
     setLastRoute(null);
     const controller = new AbortController();
     activeRunControllerRef.current = controller;
-    setMessages((current) => [...current, { from: "user", text: request }]);
+    await appendVisibleMessage(
+      { from: "user", text: request },
+      activeTaskIdRef.current ?? undefined
+    );
 
     try {
       const callbacks = createRunCallbacks(controller);
@@ -676,19 +696,19 @@ export function App({
       setCanRetryTask(nextMemory.activeTaskId
         ? await orchestrator.canRetryTask(nextMemory.activeTaskId)
         : false);
-      setMessages((current) => [...current, { from: "system", text: result.summary }]);
+      await appendVisibleMessage(
+        { from: "system", text: result.summary },
+        nextMemory.activeTaskId ?? undefined
+      );
     } catch (error) {
       const retryTaskId = activeTaskIdRef.current;
       if (retryTaskId) {
         setCanRetryTask(await orchestrator.canRetryTask(retryTaskId));
       }
-      setMessages((current) => [
-        ...current,
-        {
-          from: "system",
-          text: isAbortError(error) ? "cancelled · request stopped" : error instanceof Error ? error.message : String(error)
-        }
-      ]);
+      await appendVisibleMessage({
+        from: "system",
+        text: isAbortError(error) ? "cancelled · request stopped" : error instanceof Error ? error.message : String(error)
+      }, retryTaskId ?? undefined);
     } finally {
       if (activeRunControllerRef.current === controller) {
         activeRunControllerRef.current = null;
@@ -721,16 +741,13 @@ export function App({
       setActiveTaskId(taskId);
       setActiveMode("complex");
       setCanRetryTask(false);
-      setMessages((current) => [...current, { from: "system", text: result.summary }]);
+      await appendVisibleMessage({ from: "system", text: result.summary }, taskId);
     } catch (error) {
       setCanRetryTask(await orchestrator.canRetryTask(taskId));
-      setMessages((current) => [
-        ...current,
-        {
-          from: "system",
-          text: isAbortError(error) ? "cancelled · retry stopped" : error instanceof Error ? error.message : String(error)
-        }
-      ]);
+      await appendVisibleMessage({
+        from: "system",
+        text: isAbortError(error) ? "cancelled · retry stopped" : error instanceof Error ? error.message : String(error)
+      }, taskId);
     } finally {
       if (activeRunControllerRef.current === controller) {
         activeRunControllerRef.current = null;
@@ -822,7 +839,10 @@ export function ChatView({
   onViewportChange?: (viewport: { offset: number; maxOffset: number }) => void;
 }) {
   const height = viewportHeight ? Math.max(1, viewportHeight) : undefined;
-  const viewport = chatMessageViewport(messages, terminalWidth, height ?? 12, scrollOffset);
+  const viewport = useMemo(
+    () => chatMessageViewport(messages, terminalWidth, height ?? 12, scrollOffset),
+    [height, messages, scrollOffset, terminalWidth]
+  );
 
   useEffect(() => {
     onViewportChange?.({
