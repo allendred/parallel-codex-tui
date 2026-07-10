@@ -143,7 +143,7 @@ The doctor output includes `preview:` and `semantic:` ANSI swatch rows so you ca
 - Complex requests create a session under `.parallel-codex/sessions/`.
 - Complex requests run Judge -> Actor -> Critic.
 - Complex follow-ups stay in the active task, append a numbered turn, reuse the same Actor/Critic native sessions when available, and inject up to five prior turn summaries as file-backed memory.
-- Simple follow-up questions read the active task status and latest worker logs without starting another worker turn.
+- Simple follow-up questions run through the persistent Main native session with the active task directory, original request, up to five recent turn summaries, valid worker statuses, and log tails as file-backed context. They do not start another Judge, Actor, or Critic turn.
 - Worker prompts, logs, status, and outputs are written to disk.
 - The bottom status line shows the active task state.
 

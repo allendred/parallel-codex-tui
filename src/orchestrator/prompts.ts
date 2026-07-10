@@ -1,6 +1,7 @@
 export interface MainPromptInput {
   request: string;
   role?: RolePromptConfig;
+  context?: string;
 }
 
 export interface JudgePromptInput {
@@ -51,6 +52,9 @@ export function buildMainPrompt(input: MainPromptInput): string {
     `# Role: ${role.title}`,
     "",
     ...instructionLines(role.instructions),
+    ...(input.context?.trim()
+      ? ["", "# Active task context", "", input.context.trim()]
+      : []),
     "",
     "User request:",
     input.request,

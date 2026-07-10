@@ -611,7 +611,7 @@ describe("Orchestrator", () => {
     expect(await pathExists(join(appRoot, ".parallel-codex", "sessions", task.id, "turns", "0001", "user.md"))).toBe(false);
   });
 
-  it("answers active task questions from session files without starting a new turn", async () => {
+  it("answers active task questions through the persistent Main session without starting a worker turn", async () => {
     const root = await mkdtemp(join(tmpdir(), "pct-orch-task-question-"));
     const config = mockConfig(root);
     const manager = new SessionManager({
@@ -620,7 +620,8 @@ describe("Orchestrator", () => {
       now: () => new Date("2026-06-30T03:30:00.000Z"),
       randomId: () => "a1b2"
     });
-    const orchestrator = new Orchestrator(config, manager, new Map([["mock", new MockWorkerAdapter()]]));
+    const adapter = new CapturingAdapter();
+    const orchestrator = new Orchestrator(config, manager, new Map([["mock", adapter]]));
     const task = await manager.createTask({
       request: "优化得分",
       cwd: root,
@@ -647,17 +648,37 @@ describe("Orchestrator", () => {
       join(task.dir, "critic-mock", "output.log"),
       "$ mock critic\n\nProcess idle timed out after 300000ms\n"
     );
+    await writeText(
+      join(task.dir, "turns", "0001", "supervisor-summary.md"),
+      "# Summary\n\nThe critic timed out while reviewing the scoring change.\n"
+    );
 
-    const result = await orchestrator.answerTaskQuestion({
+    const first = await orchestrator.answerTaskQuestion({
       taskId: task.id,
       request: "原因呢超时",
       cwd: root
     });
+    const second = await orchestrator.answerTaskQuestion({
+      taskId: task.id,
+      request: "怎么修复",
+      cwd: root
+    });
 
-    expect(result.mode).toBe("simple");
-    expect(result.taskId).toBe(task.id);
-    expect(result.summary).toContain("process-idle-timeout");
-    expect(result.summary).toContain("mock produced no output for 300000ms");
+    expect(first.mode).toBe("simple");
+    expect(first.taskId).toBe(task.id);
+    expect(first.summary).toBe("Mock simple response for: 原因呢超时");
+    expect(first.workers.map((worker) => worker.id)).toEqual(["main-mock"]);
+    expect(second.summary).toBe("Mock simple response for: 怎么修复");
+    expect(adapter.runs.map((run) => run.role)).toEqual(["main", "main"]);
+    expect(adapter.runs[0]?.prompt).toContain("# Active task context");
+    expect(adapter.runs[0]?.prompt).toContain(`Active task: ${task.id}`);
+    expect(adapter.runs[0]?.prompt).toContain("Task status: failed");
+    expect(adapter.runs[0]?.prompt).toContain("Critic (mock): failed/process-idle-timeout");
+    expect(adapter.runs[0]?.prompt).toContain("Process idle timed out after 300000ms");
+    expect(adapter.runs[0]?.prompt).toContain("0001: # Summary The critic timed out while reviewing the scoring change.");
+    expect(adapter.runs[0]?.prompt).toContain("User request:\n原因呢超时");
+    expect(adapter.runs[0]?.nativeSession).toBeNull();
+    expect(adapter.runs[1]?.nativeSession?.session_id).toBe("mock-main-mock");
     expect(await pathExists(join(task.dir, "turns", "0002", "user.md"))).toBe(false);
   });
 
@@ -670,7 +691,8 @@ describe("Orchestrator", () => {
       now: () => new Date("2026-06-30T03:30:00.000Z"),
       randomId: () => "a1b2"
     });
-    const orchestrator = new Orchestrator(config, manager, new Map([["mock", new MockWorkerAdapter()]]));
+    const adapter = new CapturingAdapter();
+    const orchestrator = new Orchestrator(config, manager, new Map([["mock", adapter]]));
     const task = await manager.createTask({
       request: "优化得分",
       cwd: root,
@@ -701,8 +723,10 @@ describe("Orchestrator", () => {
       cwd: root
     });
 
-    expect(result.summary).toContain("process-idle-timeout");
-    expect(result.summary).toContain("mock produced no output for 300000ms");
+    expect(result.summary).toBe("Mock simple response for: 原因呢超时");
+    expect(adapter.runs[0]?.prompt).toContain("Critic (mock): failed/process-idle-timeout");
+    expect(adapter.runs[0]?.prompt).toContain("mock produced no output for 300000ms");
+    expect(adapter.runs[0]?.prompt).not.toContain("Actor (mock)");
   });
 
   it("skips corrupt task metadata when answering active task questions", async () => {
@@ -714,7 +738,8 @@ describe("Orchestrator", () => {
       now: () => new Date("2026-06-30T03:30:00.000Z"),
       randomId: () => "a1b2"
     });
-    const orchestrator = new Orchestrator(config, manager, new Map([["mock", new MockWorkerAdapter()]]));
+    const adapter = new CapturingAdapter();
+    const orchestrator = new Orchestrator(config, manager, new Map([["mock", adapter]]));
     const task = await manager.createTask({
       request: "优化得分",
       cwd: root,
@@ -745,9 +770,11 @@ describe("Orchestrator", () => {
       cwd: root
     });
 
-    expect(result.summary).toContain(`Task ${task.id}.`);
-    expect(result.summary).toContain("process-idle-timeout");
-    expect(result.summary).toContain("mock produced no output for 300000ms");
+    expect(result.summary).toBe("Mock simple response for: 原因呢超时");
+    expect(adapter.runs[0]?.prompt).toContain(`Active task: ${task.id}`);
+    expect(adapter.runs[0]?.prompt).toContain("Task status: unavailable");
+    expect(adapter.runs[0]?.prompt).toContain("Critic (mock): failed/process-idle-timeout");
+    expect(adapter.runs[0]?.prompt).toContain("mock produced no output for 300000ms");
   });
 
   it("routes active task follow-ups through the Codex semantic router", async () => {
