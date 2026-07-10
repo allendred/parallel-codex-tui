@@ -1889,10 +1889,10 @@ describe("WorkerOutputView", () => {
     }
   });
 
-  it("renders consecutive identical process diffs only once", async () => {
+  it("renders repeated process diffs only once while keeping changed diffs", async () => {
     const root = await mkdtemp(join(tmpdir(), "pct-worker-output-repeated-diff-"));
     const workerDir = join(root, "critic-mock");
-    const diff = [
+    const repeatedDiff = [
       "diff --git a/src/a.ts b/src/a.ts",
       "index 1111111..2222222 100644",
       "--- a/src/a.ts",
@@ -1900,11 +1900,28 @@ describe("WorkerOutputView", () => {
       "@@ -0,0 +1 @@",
       "+export const value = 1;"
     ];
+    const changedDiff = [
+      "diff --git a/src/b.ts b/src/b.ts",
+      "index 3333333..4444444 100644",
+      "--- a/src/b.ts",
+      "+++ b/src/b.ts",
+      "@@ -0,0 +1,2 @@",
+      "+export const first = 1;",
+      "+export const second = 2;"
+    ];
 
     await mkdir(workerDir, { recursive: true });
     await writeFile(
       join(workerDir, "output.log"),
-      ["before repeated diff", ...diff, "", ...diff, "after repeated diff"].join("\n")
+      [
+        "before repeated diff",
+        ...repeatedDiff,
+        "progress between snapshots",
+        ...changedDiff,
+        "later progress",
+        ...repeatedDiff,
+        "after repeated diff"
+      ].join("\n")
     );
 
     const { lastFrame, unmount } = render(
@@ -1921,7 +1938,10 @@ describe("WorkerOutputView", () => {
 
       const frame = lastFrame() ?? "";
       expect(frame.match(/· diff 1 file · \+1 · src\/a\.ts/g)).toHaveLength(1);
+      expect(frame.match(/· diff 1 file · \+2 · src\/b\.ts/g)).toHaveLength(1);
       expect(frame).toContain("before repeated diff");
+      expect(frame).toContain("progress between snapshots");
+      expect(frame).toContain("later progress");
       expect(frame).toContain("after repeated diff");
     } finally {
       unmount();
@@ -2976,6 +2996,68 @@ describe("WorkerOutputView", () => {
       expect(frame).not.toContain("Verified:");
       expect(frame).not.toContain("30/30");
       expect(frame).not.toContain("• npm test passed");
+    } finally {
+      unmount();
+    }
+  });
+
+  it("keeps only the final copy of repeated Codex completion narrative", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pct-worker-output-repeated-narrative-"));
+    const workerDir = join(root, "judge-codex");
+
+    await mkdir(workerDir, { recursive: true });
+    await writeFile(
+      join(workerDir, "output.log"),
+      [
+        "codex",
+        "Earlier progress remains visible.",
+        "exec",
+        "/bin/zsh -lc 'printf ready' in /tmp/project",
+        "succeeded in 5ms:",
+        "ready",
+        "codex",
+        "Judge work is complete.",
+        "",
+        "Verified:",
+        "- requirements.md",
+        "- plan.md",
+        "",
+        "exec",
+        "/bin/zsh -lc 'npm test' in /tmp/project",
+        "succeeded in 20ms:",
+        "17 tests passed",
+        "tokens used",
+        "12,345",
+        "Judge work is complete.",
+        "",
+        "Verified:",
+        "- requirements.md",
+        "- plan.md"
+      ].join("\n")
+    );
+
+    const { lastFrame, unmount } = render(
+      <WorkerOutputView
+        title="Judge (codex) output"
+        role="judge"
+        logPath={join(workerDir, "output.log")}
+        height={30}
+      />
+    );
+
+    try {
+      await waitForFrame(lastFrame, "17 tests passed");
+
+      const frame = lastFrame() ?? "";
+      const commandIndex = frame.indexOf("$ npm test");
+      const completionIndex = frame.indexOf("Judge work is complete.");
+      expect(frame.match(/Judge work is complete\./g)).toHaveLength(1);
+      expect(frame.match(/requirements\.md/g)).toHaveLength(1);
+      expect(frame.match(/plan\.md/g)).toHaveLength(1);
+      expect(commandIndex).toBeGreaterThanOrEqual(0);
+      expect(completionIndex).toBeGreaterThan(commandIndex);
+      expect(frame).toContain("Earlier progress remains visible.");
+      expect(frame).toContain("17 tests passed");
     } finally {
       unmount();
     }

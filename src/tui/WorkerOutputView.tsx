@@ -1402,27 +1402,25 @@ function isSingleFilePathListItem(trimmed: string): boolean {
 }
 
 function cleanProcessRenderLines(lines: RenderLine[]): RenderLine[] {
-  return dedupeConsecutiveCollapsedDiffSummaries(
+  return dedupeCollapsedDiffSummaries(
     removePatchDiffReadbackNoise(removeDiffAdjacentCodeSummaries(mergeSmokeStatusSuccessLines(lines)))
   );
 }
 
-function dedupeConsecutiveCollapsedDiffSummaries(lines: RenderLine[]): RenderLine[] {
+function dedupeCollapsedDiffSummaries(lines: RenderLine[]): RenderLine[] {
   const deduped: RenderLine[] = [];
+  const seen = new Set<string>();
 
   for (const line of lines) {
     if (isCollapsedDiffSummaryLine(line)) {
-      const previousIndex = lastIndexWhere(
-        deduped,
-        (candidate) => candidate.kind !== "blank" && Boolean(candidate.text.trim())
-      );
-      const previous = previousIndex >= 0 ? deduped[previousIndex] : undefined;
-      if (previous && isCollapsedDiffSummaryLine(previous) && previous.text.trim() === line.text.trim()) {
+      const key = line.text.trim();
+      if (seen.has(key)) {
         while (deduped[deduped.length - 1]?.kind === "blank") {
           deduped.pop();
         }
         continue;
       }
+      seen.add(key);
     }
     deduped.push(line);
   }
@@ -1609,7 +1607,7 @@ const PROCESS_DIFF_COLLAPSE_MIN_BODY_LINES = 1;
 const PROCESS_DIFF_COLLAPSE_MIN_FILES = 4;
 
 function sanitizeProcessOutput(text: string, options: ProcessOutputSanitizeOptions = {}): string {
-  const rawLines = text.split("\n");
+  const rawLines = dedupeRepeatedAssistantNarrativeBlocks(text.split("\n"));
   const kept: string[] = [];
   const hideAssistantNarration = options.hideAssistantNarration ?? false;
   const renderedArtifactFiles = options.renderedArtifactFiles ?? new Set<string>();
@@ -2021,6 +2019,75 @@ function readQuotedShellSegment(text: string, startIndex: number): { value: stri
 
 function isAssistantNarrativeMarker(trimmed: string): boolean {
   return trimmed === "codex" || trimmed === "assistant";
+}
+
+interface AssistantNarrativeBlock {
+  startIndex: number;
+  endIndex: number;
+  key: string;
+}
+
+function dedupeRepeatedAssistantNarrativeBlocks(rawLines: string[]): string[] {
+  const blocks = collectAssistantNarrativeBlocks(rawLines);
+  const lastBlockByKey = new Map<string, AssistantNarrativeBlock>();
+  for (const block of blocks) {
+    lastBlockByKey.set(block.key, block);
+  }
+
+  const removed = new Set<number>();
+  for (const block of blocks) {
+    if (lastBlockByKey.get(block.key) === block) {
+      continue;
+    }
+    for (let index = block.startIndex; index < block.endIndex; index += 1) {
+      removed.add(index);
+    }
+  }
+
+  return removed.size > 0
+    ? rawLines.filter((_line, index) => !removed.has(index))
+    : rawLines;
+}
+
+function collectAssistantNarrativeBlocks(rawLines: string[]): AssistantNarrativeBlock[] {
+  const blocks: AssistantNarrativeBlock[] = [];
+
+  for (let index = 0; index < rawLines.length;) {
+    const trimmed = normalizedProcessLine(rawLines[index] ?? "").trim();
+    const marked = isAssistantNarrativeMarker(trimmed);
+    const tokenTrailer = /^tokens used$/i.test(trimmed);
+    if (!marked && !tokenTrailer) {
+      index += 1;
+      continue;
+    }
+
+    const contentStart = marked ? index + 1 : skipNoisyProcessLine(rawLines, index);
+    const endIndex = skipAssistantNarrativeTextBlock(rawLines, contentStart);
+    const key = assistantNarrativeBlockKey(rawLines, contentStart, endIndex);
+    if (key) {
+      blocks.push({
+        startIndex: marked ? index : contentStart,
+        endIndex,
+        key
+      });
+    }
+    index = Math.max(index + 1, endIndex);
+  }
+
+  return blocks;
+}
+
+function assistantNarrativeBlockKey(rawLines: string[], startIndex: number, endIndex: number): string {
+  const lines = rawLines
+    .slice(startIndex, endIndex)
+    .map((line) => normalizedProcessLine(line).trimEnd());
+  while (lines.length > 0 && !lines[0]?.trim()) {
+    lines.shift();
+  }
+  while (lines.length > 0 && !lines[lines.length - 1]?.trim()) {
+    lines.pop();
+  }
+  return lines.join("\n");
 }
 
 function skipAssistantNarrativeBlock(rawLines: string[], startIndex: number): number {
