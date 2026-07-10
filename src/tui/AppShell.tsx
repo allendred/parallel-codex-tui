@@ -158,7 +158,7 @@ export function appShellErrorRow(error: string, terminalWidth: number): { text: 
     ? Math.max(1, Math.min(terminalWidth, process.stdout.columns))
     : terminalWidth;
   const contentWidth = Math.max(1, renderWidth - 2);
-  const text = compactEndByDisplayWidth(appShellErrorDisplayText(error), contentWidth);
+  const text = appShellErrorDisplayText(error, contentWidth);
 
   return {
     text,
@@ -166,9 +166,111 @@ export function appShellErrorRow(error: string, terminalWidth: number): { text: 
   };
 }
 
-function appShellErrorDisplayText(error: string): string {
-  const message = error.replace(/^(?:ERROR|Error|error):\s*/, "").trim();
-  return `error · ${message || error}`;
+function appShellErrorDisplayText(error: string, maxWidth: number): string {
+  const normalized = normalizeAppShellError(error);
+  const message = normalized.replace(/^(?:ERROR|Error|error):\s*/, "").trim();
+  const full = `error · ${message || "unknown"}`;
+  if (displayWidth(full) <= maxWidth) {
+    return full;
+  }
+
+  for (const summary of appShellErrorSummaries(message)) {
+    const prefixed = `error · ${summary}`;
+    if (displayWidth(prefixed) <= maxWidth) {
+      return prefixed;
+    }
+    if (displayWidth(summary) <= maxWidth) {
+      return summary;
+    }
+  }
+
+  return ["error", "err", "!"]
+    .find((candidate) => displayWidth(candidate) <= maxWidth)
+    ?? "";
+}
+
+function normalizeAppShellError(error: string): string {
+  return error
+    .replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, "")
+    .replace(/\x1b\][^\x07]*(?:\x07|\x1b\\)/g, "")
+    .replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function appShellErrorSummaries(message: string): string[] {
+  if (/permission denied|\bEACCES\b|\bEPERM\b/i.test(message)) {
+    return ["permission denied", "denied"];
+  }
+
+  const nativeSession = message.match(/no native session for\s+(.+?)(?:\s+·|$)/i);
+  if (nativeSession) {
+    const identity = compactErrorIdentity(nativeSession[1] ?? "");
+    const role = identity.split("/", 1)[0] ?? "";
+    return [
+      identity ? `no native session · ${identity}` : "no native session",
+      role ? `no session · ${role}` : "no session",
+      "no session",
+      "no sid"
+    ];
+  }
+
+  if (/router.*(?:timed out|timeout)|(?:timed out|timeout).*router/i.test(message)) {
+    const duration = compactErrorDuration(message);
+    const proxy = /\bproxy\b|代理/i.test(message);
+    return [
+      proxy
+        ? ["router timeout", duration, "proxy"].filter(Boolean).join(" · ")
+        : ["router timeout", duration].filter(Boolean).join(" · "),
+      duration ? `router timeout · ${duration}` : "router timeout",
+      duration ? `timeout · ${duration}` : "timeout",
+      "timeout",
+      "time"
+    ];
+  }
+
+  if (/\bproxy\b|代理/i.test(message)) {
+    return ["proxy error", "proxy"];
+  }
+  if (/\bnetwork\b|\bECONNREFUSED\b|\bECONNRESET\b|\bENETUNREACH\b|\bEHOSTUNREACH\b/i.test(message)) {
+    return ["network error", "network", "net"];
+  }
+  if (/no workers?/i.test(message)) {
+    return ["no workers · start task", "no workers", "workers"];
+  }
+  if (/command not found|\bENOENT\b/i.test(message)) {
+    return ["command missing", "command"];
+  }
+  if (/not a directory|workspace.*(?:missing|not found|does not exist)/i.test(message)) {
+    return ["workspace missing", "bad path", "path"];
+  }
+
+  const words = message.split(/\s+/).filter(Boolean);
+  const summaries: string[] = [];
+  for (let count = Math.min(4, words.length); count >= 1; count -= 1) {
+    summaries.push(words.slice(0, count).join(" "));
+  }
+  return summaries;
+}
+
+function compactErrorIdentity(label: string): string {
+  const match = label.trim().match(/^([^()]+?)\s*\(([^)]+)\)$/);
+  if (!match) {
+    return label.trim().toLowerCase();
+  }
+  return `${(match[1] ?? "").trim().toLowerCase()}/${(match[2] ?? "").trim().toLowerCase()}`;
+}
+
+function compactErrorDuration(message: string): string | null {
+  const milliseconds = message.match(/\b(\d+(?:\.\d+)?)\s*ms\b/i);
+  if (milliseconds) {
+    const value = Number(milliseconds[1]);
+    if (Number.isFinite(value) && value >= 1000) {
+      return `${(value / 1000).toFixed(value % 1000 === 0 ? 0 : 1)}s`;
+    }
+    return `${milliseconds[1]}ms`;
+  }
+  return message.match(/\b\d+(?:\.\d+)?s\b/i)?.[0] ?? null;
 }
 
 function headerSegmentsDisplayWidth(segments: Array<{ text: string }>, separator: string): number {

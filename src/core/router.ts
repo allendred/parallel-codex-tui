@@ -113,7 +113,8 @@ export async function runCodexRouterProcess(
     if (timeoutMs > 0) {
       timeout = setTimeout(() => {
         terminate();
-        finish(new Error(`Codex router timed out after ${timeoutMs}ms`));
+        const detail = summarizeRouterProcessDetail(stderr);
+        finish(new Error(`Codex router timed out after ${timeoutMs}ms${detail ? `: ${detail}` : ""}`));
       }, timeoutMs);
     }
 
@@ -233,6 +234,20 @@ function summarizeRouterError(error: unknown): string {
     .find((line) => line && !line.toLowerCase().startsWith("tip:") && !line.toLowerCase().startsWith("usage:"));
 
   return (meaningful || "unknown router error").replace(/[.。]+$/u, "");
+}
+
+function summarizeRouterProcessDetail(output: string): string {
+  const lines = output
+    .replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, "")
+    .replace(/\x1b\][^\x07]*(?:\x07|\x1b\\)/g, "")
+    .replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g, " ")
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+  const latest = lines.at(-1) ?? "";
+  return latest
+    .replace(/\b([a-z][a-z0-9+.-]*:\/\/)([^@\s/]+)@/gi, "$1***@")
+    .slice(0, 240);
 }
 
 function simpleRoute(reason: string, config: AppConfig): RouteDecision {

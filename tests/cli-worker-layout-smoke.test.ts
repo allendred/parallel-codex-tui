@@ -350,7 +350,7 @@ describe("CLI worker layout smoke", () => {
     const taskDir = join(workspace, ".parallel-codex", "sessions", taskId);
     const workerDir = join(taskDir, "critic-mock");
     const chunks: string[] = [];
-    const screen = new NativeTerminalScreen({ cols: 80, rows: 16, scrollback: 1000 });
+    const screen = new NativeTerminalScreen({ cols: 24, rows: 16, scrollback: 1000 });
     let screenWrites = Promise.resolve();
 
     await mkdir(workerDir, { recursive: true });
@@ -361,7 +361,7 @@ describe("CLI worker layout smoke", () => {
       ["./node_modules/.bin/tsx", "src/cli.tsx", "--app-root", workspace, "--workspace", workspace, "--task", taskId],
       {
         cwd: process.cwd(),
-        cols: 80,
+        cols: 24,
         rows: 16,
         name: "xterm-256color",
         env: {
@@ -378,17 +378,18 @@ describe("CLI worker layout smoke", () => {
 
     try {
       await waitForScreenText(() => screenWrites, screen, "ready");
-      await waitForScreenText(() => screenWrites, screen, "1 worker");
-      await waitForScreenText(() => screenWrites, screen, "1 done");
+      await waitForScreenText(() => screenWrites, screen, "w1");
+      await waitForScreenText(() => screenWrites, screen, "d1");
       child.write("\x0f");
-      await waitForScreenText(() => screenWrites, screen, "No native session for Critic");
+      await waitForScreenText(() => screenWrites, screen, "no session · critic");
 
       const lines = screen.styledSnapshotLines();
       const headerLineText = lines[0]?.chunks.map((chunk) => chunk.text).join("") ?? "";
-      const errorLine = lines.find((line) => line.chunks.map((chunk) => chunk.text).join("").includes("No native session for Critic"));
+      const errorLine = lines.find((line) => line.chunks.map((chunk) => chunk.text).join("").includes("no session · critic"));
       const errorLineText = errorLine?.chunks.map((chunk) => chunk.text).join("") ?? "";
 
-      expect(errorLineText).toContain("No native session for Critic (mock) · run once before attach");
+      expect(errorLineText).toContain("no session · critic");
+      expect(errorLineText).not.toContain("...");
       expect(displayWidth(errorLineText)).toBe(displayWidth(headerLineText));
       expect(errorLine?.chunks.every((chunk) => chunk.style.backgroundColor === TUI_THEME_PRESETS.codex.dangerSurface)).toBe(true);
     } finally {

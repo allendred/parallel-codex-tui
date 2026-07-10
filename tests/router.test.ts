@@ -192,8 +192,11 @@ describe("routeRequestWithCodex", () => {
     const root = await mkdtemp(join(tmpdir(), "pct-router-timeout-"));
     const config = defaultConfig(root);
     config.router.codex.command = process.execPath;
-    config.router.codex.args = ["-e", "setInterval(() => {}, 1000)"];
-    config.router.codex.timeoutMs = 25;
+    config.router.codex.args = [
+      "-e",
+      "process.stderr.write('Connecting through proxy http://user:secret@127.0.0.1:7890\\n'); setInterval(() => {}, 1000)"
+    ];
+    config.router.codex.timeoutMs = 200;
 
     const route = await routeRequestWithCodex("你好", config, undefined, root);
 
@@ -202,8 +205,10 @@ describe("routeRequestWithCodex", () => {
       source: "fallback",
       suggested_roles: []
     });
-    expect(route.reason).toContain("timed out after 25ms");
-    expect(route.duration_ms).toBeGreaterThanOrEqual(20);
+    expect(route.reason).toContain("timed out after 200ms");
+    expect(route.reason).toContain("Connecting through proxy http://***@127.0.0.1:7890");
+    expect(route.reason).not.toContain("user:secret");
+    expect(route.duration_ms).toBeGreaterThanOrEqual(150);
     expect(route.duration_ms).toBeLessThan(1000);
   });
 

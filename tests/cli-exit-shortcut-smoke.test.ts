@@ -8,6 +8,38 @@ import { TaskMetaSchema, WorkerStatusSchema } from "../src/domain/schemas.js";
 import { NativeTerminalScreen } from "../src/tui/terminal-screen.js";
 
 describe("CLI exit shortcuts", () => {
+  it("exits cleanly when the terminal delivers SIGINT between raw-mode transitions", async () => {
+    const workspace = await mkdtemp(join(tmpdir(), "pct-cli-sigint-exit-"));
+    const exits: number[] = [];
+    const chunks: string[] = [];
+    const child = spawn(
+      process.execPath,
+      ["./node_modules/.bin/tsx", "src/cli.tsx", "--app-root", workspace, "--workspace", workspace],
+      {
+        cwd: process.cwd(),
+        cols: 80,
+        rows: 18,
+        name: "xterm-256color",
+        env: { ...process.env, TERM: "xterm-256color" }
+      }
+    );
+    child.onData((chunk) => chunks.push(chunk));
+    child.onExit(({ exitCode }) => exits.push(exitCode));
+
+    try {
+      await waitForText(chunks, "message");
+      child.kill("SIGINT");
+      await waitForExit(exits);
+
+      expect(exits[0]).toBe(0);
+      expect(chunks.join("")).toContain("\x1b[?1006l\x1b[?1002l\x1b[?1000l\x1b[?2004l\x1b[?25h");
+    } finally {
+      if (exits.length === 0) {
+        child.kill("SIGTERM");
+      }
+    }
+  }, 10000);
+
   it("exits the outer TUI on ctrl-c from the worker log view", async () => {
     const workspace = await mkdtemp(join(tmpdir(), "pct-cli-exit-"));
     const taskId = "task-20260703-000000-exit";

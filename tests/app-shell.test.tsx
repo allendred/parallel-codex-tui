@@ -11,6 +11,37 @@ afterEach(() => {
 });
 
 describe("AppShell", () => {
+  it("keeps error rows semantic across terminal widths", () => {
+    const errors = [
+      ["permission", "Error: Permission denied"],
+      ["session", "No native session for Critic (claude) · run once before attach"],
+      ["network", "Codex router timed out after 30000ms while connecting through proxy 127.0.0.1:7890"],
+      ["proxy", "无法连接代理服务器，请检查端口和网络设置"],
+      ["control", "\x1b[31mError:\x1b[0m Permission\ndenied"]
+    ] as const;
+    const invalid: string[] = [];
+
+    for (const [name, error] of errors) {
+      for (let width = 8; width <= 80; width += 1) {
+        const row = appShellErrorRow(error, width);
+        if (
+          row.text.includes("...") ||
+          row.text.includes("\x1b") ||
+          row.text.includes("\n") ||
+          displayWidth(row.text) + row.trailingWidth > width - 2
+        ) {
+          invalid.push(`${name}:${width}:${row.text}`);
+        }
+      }
+    }
+
+    expect(invalid).toEqual([]);
+    expect(appShellErrorRow(
+      "Codex router timed out after 30000ms while connecting through proxy 127.0.0.1:7890",
+      80
+    ).text).toContain("proxy");
+  });
+
   it("themes error rows with the active danger surface", () => {
     configureTuiTheme({ theme: "paper" });
 

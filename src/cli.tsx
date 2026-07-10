@@ -64,6 +64,7 @@ async function main(): Promise<void> {
       theme: cliArgs.theme ?? startupConfig.ui.theme,
       colors: startupConfig.ui.colors
     });
+    installInteractiveSigintExitHandler();
     const workspaceRoot = await selectWorkspaceForCli({
       appRoot: cliArgs.appRoot,
       cwd: process.cwd(),
@@ -103,6 +104,29 @@ async function main(): Promise<void> {
 
 function canRenderInteractiveTui(): boolean {
   return Boolean(process.stdin.isTTY && process.stdout.isTTY);
+}
+
+function installInteractiveSigintExitHandler(): void {
+  let exiting = false;
+  process.on("SIGINT", () => {
+    if (exiting) {
+      return;
+    }
+    exiting = true;
+
+    if (process.stdin.isTTY && process.stdin.isRaw && typeof process.stdin.setRawMode === "function") {
+      try {
+        process.stdin.setRawMode(false);
+      } catch {
+        // The active view may already be releasing raw mode.
+      }
+    }
+    process.stdin.pause();
+    if (process.stdout.isTTY) {
+      process.stdout.write("\x1b[?1006l\x1b[?1002l\x1b[?1000l\x1b[?2004l\x1b[?25h");
+    }
+    process.exit(0);
+  });
 }
 
 function formatStartupError(error: unknown): string {
