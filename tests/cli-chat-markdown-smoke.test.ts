@@ -20,7 +20,18 @@ describe("CLI chat Markdown smoke", () => {
       [
         "process.stdin.resume();",
         "process.stdin.on('end', () => {",
-        "  process.stdout.write('See [review.md](/tmp/review.md:1), run `npm test`, then **ship it**.\\n');",
+        "  process.stdout.write([",
+        "    '# Result',",
+        "    '',",
+        "    '- See [review.md](/tmp/review.md:1)',",
+        "    '- Run `npm test`, then **ship it**.',",
+        "    '',",
+        "    '> Ready for review.',",
+        "    '',",
+        "    '```ts',",
+        "    'const mode = \\\"complex\\\";',",
+        "    '```'",
+        "  ].join('\\n') + '\\n');",
         "});"
       ].join("\n")
     );
@@ -64,35 +75,48 @@ describe("CLI chat Markdown smoke", () => {
     try {
       await waitForScreenText(() => screenWrites, screen, "> | message");
       child.write("show result\r");
-      await waitForScreenText(() => screenWrites, screen, "See review.md");
+      await waitForScreenText(() => screenWrites, screen, "const mode");
 
       const snapshot = screen.snapshot();
-      const responseLine = screen
+      const responseLines = screen
         .styledSnapshotLines()
-        .find((line) => line.chunks.map((chunk) => chunk.text).join("").includes("See review.md"));
-      const linkText = responseLine?.chunks
+        .filter((line) => /Result|review\.md|npm test|const mode/.test(line.chunks.map((chunk) => chunk.text).join("")));
+      const responseChunks = responseLines.flatMap((line) => line.chunks);
+      const headingText = responseChunks
+        .filter((chunk) => chunk.style.color === TUI_THEME_PRESETS.codex.accent && chunk.style.bold)
+        .map((chunk) => chunk.text)
+        .join("");
+      const linkText = responseChunks
         .filter((chunk) => chunk.style.color === TUI_THEME_PRESETS.codex.accent && chunk.style.underline)
         .map((chunk) => chunk.text)
         .join("") ?? "";
-      const codeText = responseLine?.chunks
+      const codeText = responseChunks
         .filter((chunk) => (
           chunk.style.backgroundColor === TUI_THEME_PRESETS.codex.rail &&
           chunk.style.color === TUI_THEME_PRESETS.codex.warning
         ))
         .map((chunk) => chunk.text)
         .join("") ?? "";
-      const strongText = responseLine?.chunks
+      const strongText = responseChunks
         .filter((chunk) => chunk.style.bold && chunk.style.color === TUI_THEME_PRESETS.codex.text)
         .map((chunk) => chunk.text)
         .join("") ?? "";
 
-      expect(snapshot).toContain("See review.md, run npm test, then ship it.");
+      expect(snapshot).toContain("Result");
+      expect(snapshot).toContain("• See review.md");
+      expect(snapshot).toContain("• Run npm test, then ship it.");
+      expect(snapshot).toContain("│ Ready for review.");
+      expect(snapshot).toContain("| const mode = \"complex\";");
       expect(snapshot).not.toContain("/tmp/review.md:1");
       expect(snapshot).not.toContain("[review.md]");
       expect(snapshot).not.toContain("`npm test`");
       expect(snapshot).not.toContain("**ship it**");
+      expect(snapshot).not.toContain("# Result");
+      expect(snapshot).not.toContain("```ts");
+      expect(headingText).toContain("Result");
       expect(linkText).toContain("review.md");
       expect(codeText).toContain("npm test");
+      expect(codeText).toContain('const mode = "complex";');
       expect(strongText).toContain("ship it");
       expect(snapshot).toContain("route simple");
       expect(snapshot).not.toContain("@ route");

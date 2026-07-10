@@ -445,6 +445,95 @@ describe("ChatView", () => {
     ]);
   });
 
+  it("renders block Markdown as compact semantic chat rows", () => {
+    const lines = chatMessageDisplayLines(
+      [
+        {
+          from: "system",
+          text: [
+            "# Result",
+            "",
+            "- Added **router audit**",
+            "- Run `npm test`",
+            "- [x] Verified",
+            "",
+            "> Ready for [review](/tmp/review.md:1).",
+            "",
+            "```ts",
+            'const mode = "complex";',
+            "```"
+          ].join("\n")
+        }
+      ],
+      80,
+      12
+    );
+
+    expect(lines.map((line) => line.text)).toEqual([
+      "Result",
+      "",
+      "• Added router audit",
+      "• Run npm test",
+      "[x] Verified",
+      "",
+      "│ Ready for review.",
+      "",
+      "ts",
+      '| const mode = "complex";'
+    ]);
+    expect(lines.map((line) => line.background ?? "surface")).toEqual([
+      "surface",
+      "surface",
+      "surface",
+      "surface",
+      "surface",
+      "surface",
+      "surface",
+      "surface",
+      "rail",
+      "rail"
+    ]);
+    expect(lines[0]?.spans).toEqual([{ text: "Result", tone: "heading" }]);
+    expect(lines[2]?.spans).toEqual([
+      { text: "• ", tone: "muted" },
+      { text: "Added ", tone: "text" },
+      { text: "router audit", tone: "strong" }
+    ]);
+    expect(lines[6]?.spans).toEqual([
+      { text: "│ ", tone: "muted" },
+      { text: "Ready for ", tone: "text" },
+      { text: "review", tone: "link" },
+      { text: ".", tone: "text" }
+    ]);
+    expect(lines[9]?.spans).toEqual([
+      { text: "| ", tone: "muted" },
+      { text: 'const mode = "complex";', tone: "code" }
+    ]);
+  });
+
+  it("uses the active palette for block Markdown headings and code rails", () => {
+    configureTuiTheme({ theme: "paper" });
+    const chatSpanTheme = (
+      AppModule as typeof AppModule & {
+        chatSpanTheme?: (
+          from: "user" | "system",
+          tone: string,
+          background?: "surface" | "rail"
+        ) => Record<string, unknown>;
+      }
+    ).chatSpanTheme;
+
+    expect(chatSpanTheme?.("system", "heading")).toEqual({
+      backgroundColor: TUI_THEME_PRESETS.paper.surface,
+      bold: true,
+      color: TUI_THEME_PRESETS.paper.accent
+    });
+    expect(chatSpanTheme?.("system", "muted", "rail")).toEqual({
+      backgroundColor: TUI_THEME_PRESETS.paper.rail,
+      color: TUI_THEME_PRESETS.paper.muted
+    });
+  });
+
   it("compacts complex task summaries for the chat surface", () => {
     const lines = chatMessageDisplayLines(
       [

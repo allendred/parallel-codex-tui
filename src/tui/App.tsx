@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import { basename } from "node:path";
 import { Box, Text, useApp, useInput, useStdin, type TextProps } from "ink";
-import { Lexer, type Token } from "marked";
+import { Lexer, type Token, type Tokens } from "marked";
 import type { AppConfig } from "../core/config.js";
 import { readJson } from "../core/file-store.js";
 import { WorkerStatusSchema, type RouteDecision } from "../domain/schemas.js";
@@ -60,12 +60,20 @@ export interface ChatDisplayLine {
   text: string;
   continuation: boolean;
   spans?: ChatDisplaySpan[];
+  background?: ChatLineBackground;
 }
 
-export type ChatSpanTone = "text" | "strong" | "emphasis" | "code" | "link" | "muted" | "prefix";
+export type ChatLineBackground = "surface" | "rail";
+export type ChatSpanTone = "text" | "strong" | "emphasis" | "code" | "link" | "muted" | "prefix" | "heading";
 export interface ChatDisplaySpan {
   text: string;
   tone: ChatSpanTone;
+}
+
+interface ChatMarkdownLine {
+  spans: ChatDisplaySpan[];
+  background?: ChatLineBackground;
+  continuationPrefix?: string;
 }
 
 type ChatLineTheme = Pick<TextProps, "backgroundColor" | "color">;
@@ -692,20 +700,26 @@ export function ChatView({
 }
 
 export function chatLineTheme(line: ChatDisplayLine): ChatLineTheme {
+  const backgroundColor = chatLineBackgroundColor(line.background);
   if (line.from === "user") {
-    return { backgroundColor: TUI_THEME.surface, color: TUI_THEME.accent };
+    return { backgroundColor, color: TUI_THEME.accent };
   }
   if (!line.text.trim()) {
-    return { backgroundColor: TUI_THEME.surface, color: TUI_THEME.muted };
+    return { backgroundColor, color: TUI_THEME.muted };
   }
-  return { backgroundColor: TUI_THEME.surface, color: TUI_THEME.text };
+  return { backgroundColor, color: TUI_THEME.text };
 }
 
-export function chatSpanTheme(from: Message["from"], tone: ChatSpanTone | string): ChatSpanTheme {
+export function chatSpanTheme(
+  from: Message["from"],
+  tone: ChatSpanTone | string,
+  background: ChatLineBackground = "surface"
+): ChatSpanTheme {
   const baseColor = from === "user" ? TUI_THEME.accent : TUI_THEME.text;
+  const backgroundColor = chatLineBackgroundColor(background);
   if (tone === "link") {
     return {
-      backgroundColor: TUI_THEME.surface,
+      backgroundColor,
       color: TUI_THEME.accent,
       underline: true
     };
@@ -718,28 +732,39 @@ export function chatSpanTheme(from: Message["from"], tone: ChatSpanTone | string
   }
   if (tone === "strong") {
     return {
-      backgroundColor: TUI_THEME.surface,
+      backgroundColor,
       bold: true,
       color: baseColor
     };
   }
+  if (tone === "heading") {
+    return {
+      backgroundColor,
+      bold: true,
+      color: TUI_THEME.accent
+    };
+  }
   if (tone === "emphasis") {
     return {
-      backgroundColor: TUI_THEME.surface,
+      backgroundColor,
       color: baseColor,
       italic: true
     };
   }
   if (tone === "muted" || (tone === "prefix" && from === "system")) {
     return {
-      backgroundColor: TUI_THEME.surface,
+      backgroundColor,
       color: TUI_THEME.muted
     };
   }
   return {
-    backgroundColor: TUI_THEME.surface,
+    backgroundColor,
     color: baseColor
   };
+}
+
+function chatLineBackgroundColor(background: ChatLineBackground | undefined): NonNullable<TextProps["backgroundColor"]> {
+  return background === "rail" ? TUI_THEME.rail : TUI_THEME.surface;
 }
 
 export function chatLineTrailingFillWidth(line: ChatDisplayLine, terminalWidth: number): number {
@@ -782,15 +807,16 @@ function ChatLine({ line, terminalWidth }: { line: ChatDisplayLine; terminalWidt
   const theme = chatLineTheme(line);
   const fillWidth = chatLineTrailingFillWidth(line, terminalWidth);
   const spans = line.text && line.spans?.length ? line.spans : null;
+  const backgroundColor = chatLineBackgroundColor(line.background);
 
   return (
     <Text>
       {spans
         ? spans.map((span, index) => (
-          <Text key={`${span.tone}-${index}`} {...chatSpanTheme(line.from, span.tone)}>{span.text}</Text>
+          <Text key={`${span.tone}-${index}`} {...chatSpanTheme(line.from, span.tone, line.background)}>{span.text}</Text>
         ))
         : <Text {...theme}>{chatLineDisplayText(line)}</Text>}
-      {fillWidth > 0 ? <Text backgroundColor={TUI_THEME.surface}>{" ".repeat(fillWidth)}</Text> : null}
+      {fillWidth > 0 ? <Text backgroundColor={backgroundColor}>{" ".repeat(fillWidth)}</Text> : null}
     </Text>
   );
 }
@@ -804,23 +830,27 @@ function chatContentWidth(terminalWidth: number): number {
 }
 
 function chatSingleMessageDisplayLines(message: Message, contentWidth: number): ChatDisplayLine[] {
-  const rawLines = message.from === "system"
-    ? chatSystemDisplayLines(message.text)
-    : message.text.split(/\r?\n/);
+  const rawLines = chatMessageMarkdownLines(message);
   const rendered: ChatDisplayLine[] = [];
 
   rawLines.forEach((rawLine, rawIndex) => {
     const isFirstRawLine = rawIndex === 0;
     const firstPrefix = message.from === "user" && isFirstRawLine ? "> " : message.from === "user" ? "  " : "";
     const wrapWidth = Math.max(1, contentWidth - displayWidth(firstPrefix));
-    const rawSpans = chatMarkdownSpans(rawLine);
+    const rawSpans = rawLine.spans;
     const visibleRawLine = chatSpanText(rawSpans);
     const wrapped = wrapChatSpans(rawSpans, wrapWidth);
 
     wrapped.forEach((chunkSpans, chunkIndex) => {
       const chunk = chatSpanText(chunkSpans);
       const continuation = !isFirstRawLine || chunkIndex > 0;
-      const prefix = chatLinePrefix(message.from, visibleRawLine, continuation, chunkIndex > 0);
+      const prefix = chatLinePrefix(
+        message.from,
+        visibleRawLine,
+        continuation,
+        chunkIndex > 0,
+        rawLine.continuationPrefix
+      );
       const lineWidth = Math.max(1, contentWidth - displayWidth(prefix));
       const fitted = displayWidth(chunk) > lineWidth
         ? wrapChatSpans(chunkSpans, lineWidth)
@@ -835,13 +865,209 @@ function chatSingleMessageDisplayLines(message: Message, contentWidth: number): 
           from: message.from,
           text: `${prefix}${part}`,
           continuation: continuation || partIndex > 0,
-          spans: displaySpans
+          spans: displaySpans,
+          background: rawLine.background
         });
       });
     });
   });
 
   return rendered;
+}
+
+function chatMessageMarkdownLines(message: Message): ChatMarkdownLine[] {
+  const compact = message.from === "system" ? compactSupervisorSummaryForChat(message.text) : null;
+  if (compact) {
+    return compact.map((line) => ({
+      spans: chatMarkdownSpans(line),
+      continuationPrefix: isCompactChatSummaryLine(line) ? "  " : undefined
+    }));
+  }
+  return chatMarkdownBlockLines(message.text);
+}
+
+function chatMarkdownBlockLines(text: string): ChatMarkdownLine[] {
+  if (!text) {
+    return [{ spans: [] }];
+  }
+  try {
+    const lines = chatBlockTokensToLines(Lexer.lex(text));
+    return lines.length > 0 ? lines : [{ spans: [] }];
+  } catch {
+    return text.split(/\r?\n/).map((line) => ({ spans: chatMarkdownSpans(line) }));
+  }
+}
+
+function chatBlockTokensToLines(tokens: Token[]): ChatMarkdownLine[] {
+  return tokens.flatMap((token) => chatBlockTokenToLines(token));
+}
+
+function chatBlockTokenToLines(token: Token): ChatMarkdownLine[] {
+  if (token.type === "space") {
+    return [{ spans: [] }];
+  }
+  if (token.type === "checkbox") {
+    return [];
+  }
+  if (token.type === "heading") {
+    return chatInlineMarkdownLines(tokenText(token)).map((line) => ({
+      ...line,
+      spans: applyChatSpanTone(line.spans, "heading")
+    }));
+  }
+  if (token.type === "paragraph" || token.type === "text") {
+    return chatInlineMarkdownLines(tokenText(token));
+  }
+  if (isChatListToken(token)) {
+    return chatListTokenToLines(token);
+  }
+  if (token.type === "blockquote") {
+    return chatBlockTokensToLines(tokenTokens(token)).map((line) => (
+      chatMarkdownLineIsBlank(line)
+        ? line
+        : prependChatMarkdownLine(line, "│ ", "muted", "  ")
+    ));
+  }
+  if (isChatCodeToken(token)) {
+    return chatCodeTokenToLines(token);
+  }
+  if (token.type === "hr") {
+    return [{ spans: [{ text: "· · ·", tone: "muted" }] }];
+  }
+  if (isChatTableToken(token)) {
+    return chatTableTokenToLines(token);
+  }
+  if (token.type === "html") {
+    return tokenText(token).split(/\r?\n/).map((line: string) => ({ spans: chatMarkdownSpans(line) }));
+  }
+  if (token.type === "def") {
+    return [];
+  }
+
+  const nested = tokenTokens(token);
+  if (nested.length > 0) {
+    return chatBlockTokensToLines(nested);
+  }
+  return tokenText(token).split(/\r?\n/).map((line) => ({ spans: chatMarkdownSpans(line) }));
+}
+
+function chatInlineMarkdownLines(text: string): ChatMarkdownLine[] {
+  return text.split(/\r?\n/).map((line) => ({ spans: chatMarkdownSpans(line) }));
+}
+
+function chatListTokenToLines(token: Tokens.List): ChatMarkdownLine[] {
+  const rendered: ChatMarkdownLine[] = [];
+  const start = typeof token.start === "number" ? token.start : 1;
+
+  token.items.forEach((item, itemIndex) => {
+    const marker = item.task
+      ? item.checked ? "[x] " : "[ ] "
+      : token.ordered ? `${start + itemIndex}. ` : "• ";
+    const continuationPrefix = " ".repeat(displayWidth(marker));
+    let hasItemContent = false;
+
+    for (const itemToken of item.tokens) {
+      if (isChatListToken(itemToken)) {
+        const nested = chatListTokenToLines(itemToken);
+        rendered.push(...nested.map((line) => (
+          chatMarkdownLineIsBlank(line)
+            ? line
+            : prependChatMarkdownLine(line, continuationPrefix, "muted", continuationPrefix)
+        )));
+        continue;
+      }
+
+      for (const line of chatBlockTokenToLines(itemToken)) {
+        if (chatMarkdownLineIsBlank(line)) {
+          rendered.push(line);
+          continue;
+        }
+        if (!hasItemContent) {
+          rendered.push(prependChatMarkdownLine(line, marker, "muted", continuationPrefix));
+          hasItemContent = true;
+        } else {
+          rendered.push(prependChatMarkdownLine(line, continuationPrefix, "muted", continuationPrefix));
+        }
+      }
+    }
+
+    if (!hasItemContent && !item.tokens.some((itemToken) => itemToken.type === "list")) {
+      rendered.push({ spans: [{ text: marker.trimEnd(), tone: "muted" }] });
+    }
+  });
+
+  return rendered;
+}
+
+function chatCodeTokenToLines(token: Tokens.Code): ChatMarkdownLine[] {
+  const rendered: ChatMarkdownLine[] = [];
+  const language = token.lang?.trim().split(/\s+/)[0] ?? "";
+  if (language) {
+    rendered.push({
+      spans: [{ text: language, tone: "muted" }],
+      background: "rail"
+    });
+  }
+  const codeLines = token.text.split(/\r?\n/);
+  for (const line of codeLines) {
+    rendered.push({
+      spans: mergeChatSpans([
+        { text: "| ", tone: "muted" },
+        ...(line ? [{ text: line, tone: "code" as const }] : [])
+      ]),
+      background: "rail",
+      continuationPrefix: "  "
+    });
+  }
+  return rendered;
+}
+
+function chatTableTokenToLines(token: Tokens.Table): ChatMarkdownLine[] {
+  const row = (cells: Tokens.TableCell[], heading: boolean): ChatMarkdownLine => ({
+    spans: mergeChatSpans([
+      { text: "| ", tone: "muted" },
+      ...cells.flatMap((cell, index) => [
+        ...applyChatSpanTone(chatSpansFromTokens(cell.tokens, "text"), heading ? "strong" : "text"),
+        { text: index === cells.length - 1 ? " |" : " | ", tone: "muted" as const }
+      ])
+    ]),
+    background: "rail",
+    continuationPrefix: "  "
+  });
+  return [row(token.header, true), ...token.rows.map((cells) => row(cells, false))];
+}
+
+function prependChatMarkdownLine(
+  line: ChatMarkdownLine,
+  prefix: string,
+  tone: ChatSpanTone,
+  continuationPrefix: string
+): ChatMarkdownLine {
+  return {
+    ...line,
+    spans: mergeChatSpans([{ text: prefix, tone }, ...line.spans]),
+    continuationPrefix
+  };
+}
+
+function chatMarkdownLineIsBlank(line: ChatMarkdownLine): boolean {
+  return !chatSpanText(line.spans).trim();
+}
+
+function isChatListToken(token: Token): token is Tokens.List {
+  return token.type === "list" && "items" in token && Array.isArray(token.items);
+}
+
+function isChatCodeToken(token: Token): token is Tokens.Code {
+  return token.type === "code" && "text" in token && typeof token.text === "string";
+}
+
+function isChatTableToken(token: Token): token is Tokens.Table {
+  return (
+    token.type === "table" &&
+    "header" in token && Array.isArray(token.header) &&
+    "rows" in token && Array.isArray(token.rows)
+  );
 }
 
 function chatMarkdownSpans(text: string): ChatDisplaySpan[] {
@@ -981,19 +1207,16 @@ function chatLinePrefix(
   from: Message["from"],
   rawLine: string,
   continuation: boolean,
-  wrappedContinuation: boolean
+  wrappedContinuation: boolean,
+  markdownContinuationPrefix: string | undefined
 ): string {
   if (from === "user") {
     return continuation ? "  " : "> ";
   }
-  if (from === "system" && wrappedContinuation && isCompactChatSummaryLine(rawLine)) {
-    return "  ";
+  if (from === "system" && wrappedContinuation) {
+    return markdownContinuationPrefix ?? (isCompactChatSummaryLine(rawLine) ? "  " : "");
   }
   return "";
-}
-
-function chatSystemDisplayLines(text: string): string[] {
-  return compactSupervisorSummaryForChat(text) ?? text.split(/\r?\n/);
 }
 
 function compactSupervisorSummaryForChat(text: string): string[] | null {
