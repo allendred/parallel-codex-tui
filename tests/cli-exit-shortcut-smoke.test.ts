@@ -23,7 +23,7 @@ describe("CLI exit shortcuts", () => {
 
     const child = spawn(
       process.execPath,
-      ["./node_modules/.bin/tsx", "src/cli.tsx", "--workspace", workspace, "--task", taskId],
+      ["./node_modules/.bin/tsx", "src/cli.tsx", "--app-root", workspace, "--workspace", workspace, "--task", taskId],
       {
         cwd: process.cwd(),
         cols: 140,

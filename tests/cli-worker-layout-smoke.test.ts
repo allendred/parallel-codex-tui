@@ -18,7 +18,7 @@ describe("CLI worker layout smoke", () => {
 
     const child = spawn(
       process.execPath,
-      ["./node_modules/.bin/tsx", "src/cli.tsx", "--workspace", workspace],
+      ["./node_modules/.bin/tsx", "src/cli.tsx", "--app-root", workspace, "--workspace", workspace],
       {
         cwd: process.cwd(),
         cols: 80,
@@ -72,7 +72,7 @@ describe("CLI worker layout smoke", () => {
 
     const child = spawn(
       process.execPath,
-      ["./node_modules/.bin/tsx", "src/cli.tsx", "--workspace", workspace],
+      ["./node_modules/.bin/tsx", "src/cli.tsx", "--app-root", workspace, "--workspace", workspace],
       {
         cwd: process.cwd(),
         cols: 80,
@@ -116,7 +116,7 @@ describe("CLI worker layout smoke", () => {
 
     const child = spawn(
       process.execPath,
-      ["./node_modules/.bin/tsx", "src/cli.tsx", "--workspace", workspace, "--task", taskId],
+      ["./node_modules/.bin/tsx", "src/cli.tsx", "--app-root", workspace, "--workspace", workspace, "--task", taskId],
       {
         cwd: process.cwd(),
         cols: 140,
@@ -288,7 +288,7 @@ describe("CLI worker layout smoke", () => {
 
     const child = spawn(
       process.execPath,
-      ["./node_modules/.bin/tsx", "src/cli.tsx", "--theme", "paper", "--workspace", workspace, "--task", taskId],
+      ["./node_modules/.bin/tsx", "src/cli.tsx", "--app-root", workspace, "--theme", "paper", "--workspace", workspace, "--task", taskId],
       {
         cwd: process.cwd(),
         cols: 100,
@@ -358,7 +358,7 @@ describe("CLI worker layout smoke", () => {
 
     const child = spawn(
       process.execPath,
-      ["./node_modules/.bin/tsx", "src/cli.tsx", "--workspace", workspace, "--task", taskId],
+      ["./node_modules/.bin/tsx", "src/cli.tsx", "--app-root", workspace, "--workspace", workspace, "--task", taskId],
       {
         cwd: process.cwd(),
         cols: 80,
@@ -410,7 +410,7 @@ describe("CLI worker layout smoke", () => {
 
     const child = spawn(
       process.execPath,
-      ["./node_modules/.bin/tsx", "src/cli.tsx", "--workspace", workspace, "--task", taskId],
+      ["./node_modules/.bin/tsx", "src/cli.tsx", "--app-root", workspace, "--workspace", workspace, "--task", taskId],
       {
         cwd: process.cwd(),
         cols: 80,
@@ -464,7 +464,7 @@ describe("CLI worker layout smoke", () => {
 
     const child = spawn(
       process.execPath,
-      ["./node_modules/.bin/tsx", "src/cli.tsx", "--workspace", workspace, "--task", taskId],
+      ["./node_modules/.bin/tsx", "src/cli.tsx", "--app-root", workspace, "--workspace", workspace, "--task", taskId],
       {
         cwd: process.cwd(),
         cols: 72,
@@ -516,7 +516,7 @@ describe("CLI worker layout smoke", () => {
 
     const child = spawn(
       process.execPath,
-      ["./node_modules/.bin/tsx", "src/cli.tsx", "--workspace", workspace, "--task", taskId],
+      ["./node_modules/.bin/tsx", "src/cli.tsx", "--app-root", workspace, "--workspace", workspace, "--task", taskId],
       {
         cwd: process.cwd(),
         cols: 72,
@@ -568,7 +568,7 @@ describe("CLI worker layout smoke", () => {
 
     const child = spawn(
       process.execPath,
-      ["./node_modules/.bin/tsx", "src/cli.tsx", "--workspace", workspace, "--task", taskId],
+      ["./node_modules/.bin/tsx", "src/cli.tsx", "--app-root", workspace, "--workspace", workspace, "--task", taskId],
       {
         cwd: process.cwd(),
         cols: 12,
@@ -625,7 +625,7 @@ describe("CLI worker layout smoke", () => {
 
     const child = spawn(
       process.execPath,
-      ["./node_modules/.bin/tsx", "src/cli.tsx", "--workspace", workspace, "--task", taskId],
+      ["./node_modules/.bin/tsx", "src/cli.tsx", "--app-root", workspace, "--workspace", workspace, "--task", taskId],
       {
         cwd: process.cwd(),
         cols: 42,
@@ -685,7 +685,7 @@ describe("CLI worker layout smoke", () => {
 
     const child = spawn(
       process.execPath,
-      ["./node_modules/.bin/tsx", "src/cli.tsx", "--workspace", workspace, "--task", taskId],
+      ["./node_modules/.bin/tsx", "src/cli.tsx", "--app-root", workspace, "--workspace", workspace, "--task", taskId],
       {
         cwd: process.cwd(),
         cols: 18,
@@ -741,7 +741,7 @@ describe("CLI worker layout smoke", () => {
 
     const child = spawn(
       process.execPath,
-      ["./node_modules/.bin/tsx", "src/cli.tsx", "--workspace", workspace, "--task", taskId],
+      ["./node_modules/.bin/tsx", "src/cli.tsx", "--app-root", workspace, "--workspace", workspace, "--task", taskId],
       {
         cwd: process.cwd(),
         cols: 100,
@@ -815,7 +815,7 @@ describe("CLI worker layout smoke", () => {
 
     const child = spawn(
       process.execPath,
-      ["./node_modules/.bin/tsx", "src/cli.tsx", "--workspace", workspace, "--task", taskId],
+      ["./node_modules/.bin/tsx", "src/cli.tsx", "--app-root", workspace, "--workspace", workspace, "--task", taskId],
       {
         cwd: process.cwd(),
         cols: 100,

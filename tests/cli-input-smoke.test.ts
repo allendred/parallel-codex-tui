@@ -11,7 +11,7 @@ describe("CLI input smoke", () => {
   it("keeps quick consecutive Chinese input chunks in the visible chat input", async () => {
     const workspace = await mkdtemp(join(tmpdir(), "pct-cli-input-"));
     const chunks: string[] = [];
-    const child = spawn(process.execPath, ["./node_modules/.bin/tsx", "src/cli.tsx", "--workspace", workspace], {
+    const child = spawn(process.execPath, ["./node_modules/.bin/tsx", "src/cli.tsx", "--app-root", workspace, "--workspace", workspace], {
       cwd: process.cwd(),
       cols: 120,
       rows: 30,
@@ -44,7 +44,7 @@ describe("CLI input smoke", () => {
     const chunks: string[] = [];
     const screen = new NativeTerminalScreen({ cols: 32, rows: 18, scrollback: 1000 });
     let screenWrites = Promise.resolve();
-    const child = spawn(process.execPath, ["./node_modules/.bin/tsx", "src/cli.tsx", "--workspace", workspace], {
+    const child = spawn(process.execPath, ["./node_modules/.bin/tsx", "src/cli.tsx", "--app-root", workspace, "--workspace", workspace], {
       cwd: process.cwd(),
       cols: 32,
       rows: 18,
@@ -82,7 +82,7 @@ describe("CLI input smoke", () => {
     const workspace = await mkdtemp(join(tmpdir(), "pct-cli-cursor-input-"));
     const screen = new NativeTerminalScreen({ cols: 40, rows: 18, scrollback: 1000 });
     let screenWrites = Promise.resolve();
-    const child = spawn(process.execPath, ["./node_modules/.bin/tsx", "src/cli.tsx", "--workspace", workspace], {
+    const child = spawn(process.execPath, ["./node_modules/.bin/tsx", "src/cli.tsx", "--app-root", workspace, "--workspace", workspace], {
       cwd: process.cwd(),
       cols: 40,
       rows: 18,
@@ -135,7 +135,7 @@ describe("CLI input smoke", () => {
 
     const screen = new NativeTerminalScreen({ cols: 60, rows: 18, scrollback: 1000 });
     let screenWrites = Promise.resolve();
-    const child = spawn(process.execPath, ["./node_modules/.bin/tsx", "src/cli.tsx", "--workspace", workspace], {
+    const child = spawn(process.execPath, ["./node_modules/.bin/tsx", "src/cli.tsx", "--app-root", workspace, "--workspace", workspace], {
       cwd: process.cwd(),
       cols: 60,
       rows: 18,

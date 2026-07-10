@@ -19,7 +19,7 @@ describe("CLI worker log scroll smoke", () => {
 
     const child = spawn(
       process.execPath,
-      ["./node_modules/.bin/tsx", "src/cli.tsx", "--workspace", workspace, "--task", taskId],
+      ["./node_modules/.bin/tsx", "src/cli.tsx", "--app-root", workspace, "--workspace", workspace, "--task", taskId],
       {
         cwd: process.cwd(),
         cols: 140,
@@ -61,7 +61,7 @@ describe("CLI worker log scroll smoke", () => {
 
     const child = spawn(
       process.execPath,
-      ["./node_modules/.bin/tsx", "src/cli.tsx", "--workspace", workspace, "--task", taskId],
+      ["./node_modules/.bin/tsx", "src/cli.tsx", "--app-root", workspace, "--workspace", workspace, "--task", taskId],
       {
         cwd: process.cwd(),
         cols: 100,
