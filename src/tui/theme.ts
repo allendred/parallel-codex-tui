@@ -75,16 +75,16 @@ export const TUI_THEME_PRESETS: Readonly<Record<TuiThemeName, Readonly<TuiTheme>
     dangerSurface: bg("ansi256(224)"),
     text: fg("ansi256(235)"),
     muted: fg("ansi256(242)"),
-    accent: fg("ansi256(31)"),
-    warning: fg("ansi256(136)"),
-    success: fg("ansi256(28)"),
-    danger: fg("ansi256(160)")
+    accent: fg("ansi256(25)"),
+    warning: fg("ansi256(94)"),
+    success: fg("ansi256(22)"),
+    danger: fg("ansi256(124)")
   }),
   aurora: freezeTuiTheme({
     chrome: bg("ansi256(24)"),
     surface: bg("ansi256(233)"),
     rail: bg("ansi256(30)"),
-    successSurface: bg("ansi256(29)"),
+    successSurface: bg("ansi256(22)"),
     dangerSurface: bg("ansi256(52)"),
     text: fg("ansi256(255)"),
     muted: fg("ansi256(109)"),

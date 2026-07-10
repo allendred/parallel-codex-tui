@@ -48,7 +48,7 @@ describe("TUI theme", () => {
       rail: "ansi256(255)",
       text: "ansi256(235)",
       muted: "ansi256(242)",
-      accent: "ansi256(31)"
+      accent: "ansi256(25)"
     });
     expect(resolveTuiTheme({ theme: "aurora" })).toMatchObject({
       chrome: "ansi256(24)",
@@ -86,12 +86,12 @@ describe("TUI theme", () => {
     expect(resolveTuiTheme({ theme: "paper" })).toMatchObject({
       successSurface: "ansi256(194)",
       dangerSurface: "ansi256(224)",
-      warning: "ansi256(136)",
-      success: "ansi256(28)",
-      danger: "ansi256(160)"
+      warning: "ansi256(94)",
+      success: "ansi256(22)",
+      danger: "ansi256(124)"
     });
     expect(resolveTuiTheme({ theme: "aurora" })).toMatchObject({
-      successSurface: "ansi256(29)",
+      successSurface: "ansi256(22)",
       dangerSurface: "ansi256(52)",
       warning: "ansi256(222)",
       success: "ansi256(121)",
@@ -124,6 +124,27 @@ describe("TUI theme", () => {
       expect(theme.accent).not.toBe(theme.muted);
       expect(theme.warning).not.toBe(theme.success);
       expect(theme.success).not.toBe(theme.danger);
+    }
+  });
+
+  it("keeps bundled palette text readable against its rendered surfaces", () => {
+    for (const name of TUI_THEME_NAMES) {
+      const theme = resolveTuiTheme({ theme: name });
+      const pairs = [
+        ["text/surface", theme.text, theme.surface],
+        ["muted/surface", theme.muted, theme.surface],
+        ["accent/chrome", theme.accent, theme.chrome],
+        ["warning/surface", theme.warning, theme.surface],
+        ["success/successSurface", theme.success, theme.successSurface],
+        ["danger/dangerSurface", theme.danger, theme.dangerSurface]
+      ] as const;
+
+      for (const [label, foreground, background] of pairs) {
+        expect(
+          ansi256ContrastRatio(foreground, background),
+          `${name} ${label}`
+        ).toBeGreaterThanOrEqual(4.5);
+      }
     }
   });
 
@@ -191,3 +212,41 @@ describe("TUI theme", () => {
     });
   });
 });
+
+function ansi256ContrastRatio(foreground: string, background: string): number {
+  const foregroundLuminance = relativeLuminance(ansi256Rgb(foreground));
+  const backgroundLuminance = relativeLuminance(ansi256Rgb(background));
+  const lighter = Math.max(foregroundLuminance, backgroundLuminance);
+  const darker = Math.min(foregroundLuminance, backgroundLuminance);
+  return (lighter + 0.05) / (darker + 0.05);
+}
+
+function ansi256Rgb(color: string): [number, number, number] {
+  const index = Number(color.match(/^ansi256\((\d+)\)$/)?.[1]);
+  if (!Number.isInteger(index) || index < 16 || index > 255) {
+    throw new Error(`Expected ANSI-256 palette color, received ${color}`);
+  }
+
+  if (index >= 232) {
+    const channel = 8 + ((index - 232) * 10);
+    return [channel, channel, channel];
+  }
+
+  const cubeIndex = index - 16;
+  const levels = [0, 95, 135, 175, 215, 255];
+  return [
+    levels[Math.floor(cubeIndex / 36)] ?? 0,
+    levels[Math.floor(cubeIndex / 6) % 6] ?? 0,
+    levels[cubeIndex % 6] ?? 0
+  ];
+}
+
+function relativeLuminance([red, green, blue]: [number, number, number]): number {
+  const [r, g, b] = [red, green, blue].map((channel) => {
+    const normalized = channel / 255;
+    return normalized <= 0.03928
+      ? normalized / 12.92
+      : ((normalized + 0.055) / 1.055) ** 2.4;
+  });
+  return (0.2126 * (r ?? 0)) + (0.7152 * (g ?? 0)) + (0.0722 * (b ?? 0));
+}

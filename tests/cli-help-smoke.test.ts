@@ -52,12 +52,12 @@ describe("CLI help and version", () => {
     expect(stdout).toContain("parallel-codex-tui themes");
     expect(stdout).toContain("codex: chrome=ansi256(233), surface=ansi256(234), rail=ansi256(236), accent=ansi256(81)");
     expect(stdout).toContain("graphite: chrome=ansi256(236), surface=ansi256(233), rail=ansi256(238), accent=ansi256(110)");
-    expect(stdout).toContain("paper: chrome=ansi256(254), surface=ansi256(231), rail=ansi256(255), accent=ansi256(31)");
+    expect(stdout).toContain("paper: chrome=ansi256(254), surface=ansi256(231), rail=ansi256(255), accent=ansi256(25)");
     expect(stdout).toContain("aurora: chrome=ansi256(24), surface=ansi256(233), rail=ansi256(30), accent=ansi256(159)");
     expect(stdout).toContain("studio: chrome=ansi256(236), surface=ansi256(235), rail=ansi256(238), accent=ansi256(147)");
     expect(stdout).toContain("  palette:");
     expect(stdout).toContain("    text=ansi256(253), muted=ansi256(245), accent=ansi256(81)");
-    expect(stdout).toContain("    successSurface=ansi256(194), success=ansi256(28), warning=ansi256(136)");
+    expect(stdout).toContain("    successSurface=ansi256(194), success=ansi256(22), warning=ansi256(94)");
     expect(stdout).toContain("preview:");
     expect(stdout).toContain("semantic:");
     expect(stdout).toContain("\u001b[48;5;234m");
