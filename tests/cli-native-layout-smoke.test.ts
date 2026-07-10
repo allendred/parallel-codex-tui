@@ -66,6 +66,14 @@ describe("CLI native layout smoke", () => {
         .styledSnapshotLines()
         .find((line) => line.chunks.map((chunk) => chunk.text).join("").includes("native actor/mock"));
       const nativeTitleLineText = nativeTitleLine?.chunks.map((chunk) => chunk.text).join("") ?? "";
+      const nativeIdentityText = nativeTitleLine?.chunks
+        .filter((chunk) => chunk.style.color === TUI_THEME_PRESETS.codex.accent)
+        .map((chunk) => chunk.text)
+        .join("") ?? "";
+      const nativeMetadataText = nativeTitleLine?.chunks
+        .filter((chunk) => chunk.style.color === TUI_THEME_PRESETS.codex.muted)
+        .map((chunk) => chunk.text)
+        .join("") ?? "";
       expect(snapshot).toContain("parallel-codex-tui");
       expect(snapshot).toContain("native");
       expect(snapshot).not.toContain("Native agent");
@@ -76,6 +84,8 @@ describe("CLI native layout smoke", () => {
       expect(snapshot).not.toContain("native · wheel/Pg");
       expect(nativeTitleLine?.chunks.some((chunk) => chunk.style.backgroundColor === TUI_THEME_PRESETS.codex.chrome)).toBe(true);
       expect(nativeTitleLine?.chunks.some((chunk) => chunk.style.backgroundColor === TUI_THEME_PRESETS.codex.rail)).toBe(false);
+      expect(nativeIdentityText).toContain("native actor/mock");
+      expect(nativeMetadataText).toContain("native-layout");
       expect(displayWidth(nativeTitleLineText)).toBe(137);
     } finally {
       child.write("\x1d");
@@ -326,9 +336,17 @@ describe("CLI native layout smoke", () => {
       await waitForScreenText(() => screenWrites, screen, "closed · scroll · ^]");
 
       const snapshot = screen.snapshot();
+      const closedTitleLine = screen
+        .styledSnapshotLines()
+        .find((line) => line.chunks.map((chunk) => chunk.text).join("").includes("native actor/mock · exited 7"));
+      const exitStateText = closedTitleLine?.chunks
+        .filter((chunk) => chunk.style.color === TUI_THEME_PRESETS.codex.danger)
+        .map((chunk) => chunk.text)
+        .join("") ?? "";
       expect(snapshot).toContain("native done");
       expect(snapshot).toContain("process exited · code 7");
       expect(snapshot).toContain("native actor/mock · exited 7");
+      expect(exitStateText).toContain("exited 7");
       expect(snapshot).toContain("closed · scroll · ^]");
       expect(snapshot).not.toContain("closed · scroll · ^] logs");
       expect(snapshot).not.toContain("closed · scroll · ^] back");

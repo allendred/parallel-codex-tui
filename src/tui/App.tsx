@@ -1048,6 +1048,7 @@ export function nativeAttachStartingText(): string {
 
 function NativeAttachTitleRail({ title, width }: { title: string; width: number }) {
   const titleText = ` ${title} `;
+  const segments = nativeAttachTitleSegments(title);
   const renderWidth = typeof process.stdout.columns === "number"
     ? width
     : null;
@@ -1057,10 +1058,44 @@ function NativeAttachTitleRail({ title, width }: { title: string; width: number 
 
   return (
     <Box>
-      <Text backgroundColor={TUI_THEME.chrome} color={TUI_THEME.text} bold>{titleText}</Text>
+      <Text backgroundColor={TUI_THEME.chrome}> </Text>
+      {segments.map((segment, index) => (
+        <Text
+          key={`${segment.tone}-${index}`}
+          backgroundColor={TUI_THEME.chrome}
+          color={segment.tone === "identity" ? TUI_THEME.accent : segment.tone === "danger" ? TUI_THEME.danger : TUI_THEME.muted}
+          bold={segment.tone === "identity"}
+        >
+          {segment.text}
+        </Text>
+      ))}
+      <Text backgroundColor={TUI_THEME.chrome}> </Text>
       {trailingWidth > 0 ? <Text backgroundColor={TUI_THEME.chrome}>{" ".repeat(trailingWidth)}</Text> : null}
     </Box>
   );
+}
+
+function nativeAttachTitleSegments(title: string): Array<{ text: string; tone: "identity" | "muted" | "danger" }> {
+  const parts = title.split(" · ");
+  if (parts.length > 1) {
+    return parts.map((part, index) => ({
+      text: index === 0 ? part : ` · ${part}`,
+      tone: index === 0 ? "identity" : isNativeExitTitlePart(part) ? "danger" : "muted"
+    }));
+  }
+
+  const exitMatch = title.match(/^(.*?)(\s+(?:exited\s+\d+|exit:\d+))$/);
+  if (exitMatch?.[1]) {
+    return [
+      { text: exitMatch[1], tone: "identity" },
+      { text: exitMatch[2] ?? "", tone: "danger" }
+    ];
+  }
+  return [{ text: title, tone: isNativeExitTitlePart(title) ? "danger" : "identity" }];
+}
+
+function isNativeExitTitlePart(text: string): boolean {
+  return /^(?:exited\s+\d+|exit:\d+)$/.test(text.trim());
 }
 
 function nativeAttachPanelRailWidth(terminalWidth: number): number {
