@@ -3,7 +3,7 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { describe, expect, it } from "vitest";
-import { TUI_THEME_FIELDS } from "../src/tui/theme.js";
+import { TUI_THEME_FIELDS, TUI_THEME_PRESETS } from "../src/tui/theme.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -129,6 +129,15 @@ describe("package metadata", () => {
     for (const field of TUI_THEME_FIELDS) {
       expect(example).toContain(`# ${field} = `);
     }
+    expect(example).toContain(`# chrome = "${TUI_THEME_PRESETS.codex.chrome}"`);
+    expect(example).toContain(`# surface = "${TUI_THEME_PRESETS.codex.surface}"`);
+    expect(example).toContain(`# rail = "${TUI_THEME_PRESETS.codex.rail}"`);
+    expect(example).toContain(`# text = "${TUI_THEME_PRESETS.codex.text}"`);
+    expect(example).toContain(`# muted = "${TUI_THEME_PRESETS.codex.muted}"`);
+    expect(example).toContain(`# accent = "${TUI_THEME_PRESETS.codex.accent}"`);
+    expect(example).toContain(`# warning = "${TUI_THEME_PRESETS.codex.warning}"`);
+    expect(example).toContain(`# success = "${TUI_THEME_PRESETS.codex.success}"`);
+    expect(example).toContain(`# danger = "${TUI_THEME_PRESETS.codex.danger}"`);
     expect(example).not.toContain("danger-full-access");
     expect(example).not.toContain("bypassPermissions");
   });
