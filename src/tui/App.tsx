@@ -101,6 +101,7 @@ export function App({
   });
 
   const [input, setInput] = useState("");
+  const [inputCursor, setInputCursor] = useState(0);
   const [messages, setMessages] = useState<Message[]>(() => [...initialMessages]);
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState<StatusLineState | null>(initialTaskId ? { taskId: initialTaskId } : null);
@@ -132,6 +133,7 @@ export function App({
   const activeTaskIdRef = useRef<string | null>(initialTaskId);
   const nativeInputRef = useRef(nativeInput);
   const inputRef = useRef(input);
+  const inputCursorRef = useRef(inputCursor);
   const viewRef = useRef(view);
   const busyRef = useRef(busy);
   const workersRef = useRef(workers);
@@ -158,6 +160,10 @@ export function App({
   useEffect(() => {
     inputRef.current = input;
   }, [input]);
+
+  useEffect(() => {
+    inputCursorRef.current = inputCursor;
+  }, [inputCursor]);
 
   useEffect(() => {
     activeTaskIdRef.current = activeTaskId;
@@ -417,16 +423,19 @@ export function App({
           return;
         }
 
-        const update = applyChatInputChunk(inputRef.current, chunk);
-        inputRef.current = update.value;
+        const update = applyChatInputChunk(inputRef.current, chunk, inputCursorRef.current);
         if (update.exit) {
           activeRunControllerRef.current?.abort();
           exitRef.current();
           return;
         }
-        if (!busyRef.current) {
-          setInput(update.value);
+        if (busyRef.current) {
+          return;
         }
+        inputRef.current = update.value;
+        inputCursorRef.current = update.cursor;
+        setInput(update.value);
+        setInputCursor(update.cursor);
         if (update.submit !== null) {
           void submitRef.current(update.submit);
         }
@@ -639,7 +648,9 @@ export function App({
     }
 
     inputRef.current = "";
+    inputCursorRef.current = 0;
     setInput("");
+    setInputCursor(0);
     chatScrollOffsetRef.current = 0;
     setChatScrollOffset(0);
     busyRef.current = true;
@@ -815,6 +826,7 @@ export function App({
           chatMaxScrollOffset={chatMaxScrollOffset}
           nativeClosed={view === "native" && nativeAttach?.closedCode !== null}
           value={view === "native" ? "" : input}
+          cursor={view === "chat" ? inputCursor : undefined}
           terminalWidth={terminalWidth}
           onChange={view === "native" ? setNativeInput : setInput}
           onSubmit={view === "native" ? undefined : submit}

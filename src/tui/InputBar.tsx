@@ -1,6 +1,6 @@
 import React from "react";
 import { Box, Text } from "ink";
-import { compactTailByDisplayWidth, displayWidth } from "./display-width.js";
+import { compactEndByDisplayWidth, compactTailByDisplayWidth, displayWidth } from "./display-width.js";
 import { TUI_THEME } from "./theme.js";
 
 export interface InputBarProps {
@@ -13,6 +13,7 @@ export interface InputBarProps {
   chatMaxScrollOffset?: number;
   nativeClosed?: boolean;
   value: string;
+  cursor?: number;
   terminalWidth?: number;
   onChange?: (value: string) => void;
   onSubmit?: (value: string) => void;
@@ -28,6 +29,7 @@ export function InputBar({
   chatMaxScrollOffset = 0,
   nativeClosed = false,
   value,
+  cursor,
   terminalWidth: providedTerminalWidth,
   onChange,
   onSubmit
@@ -73,13 +75,14 @@ export function InputBar({
   }
 
   if (value) {
-    const displayValue = chatInputDisplayValue(value, terminalWidth);
+    const display = chatInputDisplayParts(value, cursor ?? Array.from(value).length, terminalWidth);
     return (
-      <InputRail terminalWidth={terminalWidth} textWidth={displayWidth(`${prompt} ${displayValue}|`)} fill={fillRail}>
+      <InputRail terminalWidth={terminalWidth} textWidth={displayWidth(`${prompt} ${display.before}|${display.after}`)} fill={fillRail}>
         <Text backgroundColor={TUI_THEME.rail} color={TUI_THEME.accent} bold>{prompt}</Text>
         <Text backgroundColor={TUI_THEME.rail}> </Text>
-        <Text backgroundColor={TUI_THEME.rail} color={TUI_THEME.text}>{displayValue}</Text>
+        <Text backgroundColor={TUI_THEME.rail} color={TUI_THEME.text}>{display.before}</Text>
         <Text backgroundColor={TUI_THEME.rail} color={TUI_THEME.accent} bold>|</Text>
+        <Text backgroundColor={TUI_THEME.rail} color={TUI_THEME.text}>{display.after}</Text>
       </InputRail>
     );
   }
@@ -172,6 +175,64 @@ export function chatPlaceholderDisplayText(
 export function chatInputDisplayValue(value: string, terminalWidth: number): string {
   const valueWidth = Math.max(1, terminalWidth - 6);
   return compactTailByDisplayWidth(value, valueWidth);
+}
+
+export function chatInputDisplayParts(
+  value: string,
+  cursor: number,
+  terminalWidth: number
+): { before: string; after: string } {
+  const chars = Array.from(value);
+  const clampedCursor = Math.min(chars.length, Math.max(0, Math.trunc(cursor)));
+  const valueWidth = Math.max(1, terminalWidth - 6);
+  if (displayWidth(value) <= valueWidth) {
+    return {
+      before: chars.slice(0, clampedCursor).join(""),
+      after: chars.slice(clampedCursor).join("")
+    };
+  }
+
+  const beforeCursor = chars.slice(0, clampedCursor).join("");
+  const afterCursor = chars.slice(clampedCursor).join("");
+  if (valueWidth < 6) {
+    return clampedCursor > 0
+      ? { before: compactTailByDisplayWidth(beforeCursor, valueWidth), after: "" }
+      : { before: "", after: compactEndByDisplayWidth(afterCursor, valueWidth) };
+  }
+
+  let start = clampedCursor;
+  let end = clampedCursor;
+  const renderedWidth = (nextStart: number, nextEnd: number): number => displayWidth([
+    nextStart > 0 ? "..." : "",
+    chars.slice(nextStart, nextEnd).join(""),
+    nextEnd < chars.length ? "..." : ""
+  ].join(""));
+
+  while (true) {
+    const canExpandLeft = start > 0 && renderedWidth(start - 1, end) <= valueWidth;
+    const canExpandRight = end < chars.length && renderedWidth(start, end + 1) <= valueWidth;
+    if (!canExpandLeft && !canExpandRight) {
+      break;
+    }
+    if (canExpandLeft && canExpandRight) {
+      const leftWidth = displayWidth(chars.slice(start, clampedCursor).join(""));
+      const rightWidth = displayWidth(chars.slice(clampedCursor, end).join(""));
+      if (leftWidth <= rightWidth) {
+        start -= 1;
+      } else {
+        end += 1;
+      }
+    } else if (canExpandLeft) {
+      start -= 1;
+    } else {
+      end += 1;
+    }
+  }
+
+  return {
+    before: `${start > 0 ? "..." : ""}${chars.slice(start, clampedCursor).join("")}`,
+    after: `${chars.slice(clampedCursor, end).join("")}${end < chars.length ? "..." : ""}`
+  };
 }
 
 export function chatPlaceholderDisplayValue(

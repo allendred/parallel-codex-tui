@@ -14,6 +14,7 @@ describe("applyChatInputChunk", () => {
   it("submits the current value on return and clears the visible input", () => {
     expect(applyChatInputChunk("hello", "\r")).toEqual({
       value: "",
+      cursor: 0,
       submit: "hello",
       exit: false
     });
@@ -22,6 +23,7 @@ describe("applyChatInputChunk", () => {
   it("treats ctrl-c as an outer TUI exit shortcut in chat input", () => {
     expect(applyChatInputChunk("hello", "\x03")).toEqual({
       value: "hello",
+      cursor: 5,
       submit: null,
       exit: true
     });
@@ -30,6 +32,7 @@ describe("applyChatInputChunk", () => {
   it("handles backspace by code point", () => {
     expect(applyChatInputChunk("你好", "\x7f")).toEqual({
       value: "你",
+      cursor: 1,
       submit: null,
       exit: false
     });
@@ -38,11 +41,42 @@ describe("applyChatInputChunk", () => {
   it("ignores mouse wheel escape sequences in chat input", () => {
     expect(applyChatInputChunk("hello", "\x1b[<64;10;5M")).toEqual({
       value: "hello",
+      cursor: 5,
       submit: null,
       exit: false
     });
     expect(applyChatInputChunk("hello", "\x1b[M`*%")).toEqual({
       value: "hello",
+      cursor: 5,
+      submit: null,
+      exit: false
+    });
+  });
+
+  it("moves a Unicode cursor and inserts text in the middle", () => {
+    const moved = applyChatInputChunk("你好界", "\x1b[D", 3);
+    expect(moved).toEqual({ value: "你好界", cursor: 2, submit: null, exit: false });
+
+    const inserted = applyChatInputChunk(moved.value, "世", moved.cursor);
+    expect(inserted).toEqual({ value: "你好世界", cursor: 3, submit: null, exit: false });
+
+    expect(applyChatInputChunk(inserted.value, "\x1b[C", inserted.cursor).cursor).toBe(4);
+  });
+
+  it("supports Home, End, Backspace, and Delete around the cursor", () => {
+    expect(applyChatInputChunk("你好世界", "\x1b[H", 3).cursor).toBe(0);
+    expect(applyChatInputChunk("你好世界", "\x01", 3).cursor).toBe(0);
+    expect(applyChatInputChunk("你好世界", "\x1b[F", 1).cursor).toBe(4);
+    expect(applyChatInputChunk("你好世界", "\x05", 1).cursor).toBe(4);
+    expect(applyChatInputChunk("你好世界", "\x7f", 2)).toEqual({
+      value: "你世界",
+      cursor: 1,
+      submit: null,
+      exit: false
+    });
+    expect(applyChatInputChunk("你好世界", "\x1b[3~", 1)).toEqual({
+      value: "你世界",
+      cursor: 1,
       submit: null,
       exit: false
     });

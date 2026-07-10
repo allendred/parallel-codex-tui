@@ -21,6 +21,28 @@ describe("InputBar", () => {
     expect(lastFrame()).not.toContain("Input:");
   });
 
+  it("renders the cursor at a Unicode code-point position", () => {
+    const { lastFrame } = render(
+      <InputBar mode="chat" value="你好世界" cursor={2} terminalWidth={40} onChange={() => {}} />
+    );
+
+    expect(lastFrame()).toContain("> 你好|世界");
+  });
+
+  it("keeps both sides of a middle cursor visible in long narrow input", () => {
+    const value = "前面的中文内容很长需要隐藏中间光标后面的内容同样很长";
+    const cursor = [...value].indexOf("光");
+    const { lastFrame } = render(
+      <InputBar mode="chat" value={value} cursor={cursor} terminalWidth={32} onChange={() => {}} />
+    );
+
+    const frame = lastFrame() ?? "";
+    expect(frame).toContain("中间|光标");
+    expect(frame.match(/\.\.\./g)?.length).toBe(2);
+    expect(frame.split("\n")).toHaveLength(1);
+    expect(displayWidth(frame)).toBeLessThanOrEqual(32);
+  });
+
   it("shows retry as the primary idle action for a failed task", () => {
     const { lastFrame } = render(
       <InputBar mode="chat" canRetry value="" terminalWidth={40} onChange={() => {}} />

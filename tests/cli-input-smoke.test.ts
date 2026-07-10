@@ -76,6 +76,47 @@ describe("CLI input smoke", () => {
       child.kill("SIGTERM");
     }
   }, 10000);
+
+  it("edits Chinese text at the visible cursor with terminal navigation keys", async () => {
+    const workspace = await mkdtemp(join(tmpdir(), "pct-cli-cursor-input-"));
+    const screen = new NativeTerminalScreen({ cols: 40, rows: 18, scrollback: 1000 });
+    let screenWrites = Promise.resolve();
+    const child = spawn(process.execPath, ["./node_modules/.bin/tsx", "src/cli.tsx", "--workspace", workspace], {
+      cwd: process.cwd(),
+      cols: 40,
+      rows: 18,
+      name: "xterm-256color",
+      env: {
+        ...process.env,
+        TERM: "xterm-256color"
+      }
+    });
+
+    child.onData((chunk) => {
+      screenWrites = screenWrites.then(() => screen.write(chunk));
+    });
+    try {
+      await waitForScreenText(() => screenWrites, screen, "> | message");
+      child.write("你好界");
+      await waitForScreenText(() => screenWrites, screen, "> 你好界|");
+
+      child.write("\x1b[D");
+      await waitForScreenText(() => screenWrites, screen, "> 你好|界");
+      child.write("世");
+      await waitForScreenText(() => screenWrites, screen, "> 你好世|界");
+
+      child.write("\x1b[H");
+      await waitForScreenText(() => screenWrites, screen, "> |你好世界");
+      child.write("\x1b[3~");
+      await waitForScreenText(() => screenWrites, screen, "> |好世界");
+      child.write("\x1b[F");
+      await waitForScreenText(() => screenWrites, screen, "> 好世界|");
+
+      expect(screen.snapshot().split("\n").filter((line) => line.includes("好世界|"))).toHaveLength(1);
+    } finally {
+      child.kill("SIGTERM");
+    }
+  }, 10000);
 });
 
 async function waitForText(chunks: string[], text: string): Promise<void> {
