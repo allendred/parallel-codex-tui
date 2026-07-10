@@ -365,9 +365,12 @@ describe("WorkerOutputView", () => {
       await waitForFrame(lastFrame, "Build a playable falling-blocks game.");
 
       const frame = lastFrame() ?? "";
-      expect(frame).toContain("requirements.md");
-      expect(frame).toContain("plan.md");
-      expect(frame).toContain("acceptance.md");
+      expect(frame).toContain("requirements");
+      expect(frame).toContain("plan");
+      expect(frame).toContain("acceptance");
+      expect(frame).not.toContain("requirements.md");
+      expect(frame).not.toContain("plan.md");
+      expect(frame).not.toContain("acceptance.md");
       expect(frame).toContain("judge process output");
       expect(frame).not.toContain("actor-brief.md");
       expect(frame).not.toContain("critic-brief.md");
@@ -977,8 +980,9 @@ describe("WorkerOutputView", () => {
 
       const frame = lastFrame() ?? "";
       expect(frame).toContain("mailbox");
-      expect(frame).toContain("file · 0002/actor-worklog.md");
+      expect(frame).toContain("worklog · 0002");
       expect(frame).not.toContain("file · features/0002/actor-worklog.md");
+      expect(frame).not.toContain("actor-worklog.md");
       expect(frame).not.toContain("critic only");
       expect(frame).toContain("process");
       expect(frame).not.toContain("Feature mailbox");
@@ -1138,9 +1142,9 @@ describe("WorkerOutputView", () => {
 
       const frame = lastFrame() ?? "";
       const lines = frame.split("\n");
-      expect(lines[1]?.trim()).toBe("file · 0010/decisions.md");
+      expect(lines[1]?.trim()).toBe("decision · 0010");
       expect(frame).toContain("Feature 0010");
-      expect(frame).not.toContain("file · 0007/decisions.md");
+      expect(frame).not.toContain("decision · 0007");
       expect(frame).not.toContain("Feature 0007");
     } finally {
       unmount();
@@ -1218,7 +1222,7 @@ describe("WorkerOutputView", () => {
       await waitForFrame(lastFrame, "Summary: done");
 
       const frame = lastFrame() ?? "";
-      expect(frame).toContain("file · 0010/decisions.md");
+      expect(frame).toContain("decision · 0010");
       expect(frame).not.toContain("review.md");
       expect(frame).not.toMatch(/\n\s+Decisions\n/);
       expect(frame).toContain("Feature 0010");
@@ -1377,7 +1381,8 @@ describe("WorkerOutputView", () => {
       const frame = lastFrame() ?? "";
       expect(frame).toContain("Worklog");
       expect(frame).not.toContain("# Worklog");
-      expect(frame).toContain("file · worklog.md");
+      expect(frame).toContain("worklog");
+      expect(frame).not.toContain("file · worklog.md");
       expect(frame).toContain("• Implemented board controls.");
       expect(frame).toContain("[info] to critic");
       expect(frame).toContain("Fixed missing input test");
@@ -3308,19 +3313,27 @@ describe("WorkerOutputView", () => {
     expect(workerOutputLineLayout("code", "const x = 1;")).toEqual({ gutter: "", body: "| const x = 1;" });
     expect(workerOutputLineLayout("section", "features/0010/actor-worklog.md")).toEqual({
       gutter: "",
-      body: "file · 0010/actor-worklog.md"
+      body: "worklog · 0010"
     });
     expect(workerOutputLineLayout("section", "patch.diff")).toEqual({
       gutter: "",
-      body: "diff · patch.diff"
+      body: "diff · patch"
     });
     expect(workerOutputLineLayout("section", "features/0010/actor-replies.jsonl")).toEqual({
       gutter: "",
-      body: "mail · 0010/actor-replies.jsonl"
+      body: "mail · 0010"
     });
     expect(workerOutputLineLayout("section", "features/0010/critic-findings.jsonl")).toEqual({
       gutter: "",
-      body: "findings · 0010/critic-findings.jsonl"
+      body: "findings · 0010"
+    });
+    expect(workerOutputLineLayout("section", "requirements.md")).toEqual({
+      gutter: "",
+      body: "requirements"
+    });
+    expect(workerOutputLineLayout("section", "features/0010/decisions.md")).toEqual({
+      gutter: "",
+      body: "decision · 0010"
     });
     expect(workerOutputLineLayout("quote", "quoted note")).toEqual({
       gutter: "",
@@ -3485,7 +3498,7 @@ describe("WorkerOutputView", () => {
         { kind: "content", text: "Blocking Findings: None." },
         { kind: "content", text: "Critic findings: (empty)" },
         { kind: "blank", text: "" },
-        { kind: "section", text: "file · 0010/decisions.md" },
+        { kind: "section", text: "decision · 0010" },
         { kind: "content", text: "Feature: 0010" },
         { kind: "blank", text: "" },
         { kind: "group", text: "process" },
@@ -3501,13 +3514,13 @@ describe("WorkerOutputView", () => {
         { kind: "content", text: "Critic Review — Turn 0005" },
         { kind: "content", text: "Verdict: APPROVED" },
         { kind: "blank", text: "" },
-        { kind: "section", text: "file · 0007/decisions.md" },
+        { kind: "section", text: "decision · 0007" },
         { kind: "content", text: "Feature: 0007" },
-        { kind: "section", text: "file · 0010/decisions.md" },
+        { kind: "section", text: "decision · 0010" },
         { kind: "content", text: "Feature: 0010" }
       ], 0, 13, { preferGroup: "process" })).toBe(9);
       expect(workerOutputVisibleStart([
-        { kind: "section", text: "file · 0007/decisions.md" },
+        { kind: "section", text: "decision · 0007" },
         { kind: "content", text: "Feature: 0007" },
         { kind: "content", text: "Turn: 0007" },
         { kind: "blank", text: "" },
@@ -3517,7 +3530,7 @@ describe("WorkerOutputView", () => {
         { kind: "content", text: "Blocking Findings: None." },
         { kind: "content", text: "Critic findings: (empty)" },
         { kind: "blank", text: "" },
-        { kind: "section", text: "file · 0010/decisions.md" },
+        { kind: "section", text: "decision · 0010" },
         { kind: "content", text: "Feature: 0010" },
         { kind: "content", text: "Turn: 0010" }
       ], 0, 13, { preferLatestSection: true })).toBe(10);

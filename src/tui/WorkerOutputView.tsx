@@ -3922,7 +3922,7 @@ export function workerOutputLineFillTheme(kind: WorkerOutputLineKind): NonNullab
 
 export function workerOutputLineLayout(kind: WorkerOutputLineKind, text: string): { gutter: string; body: string } {
   if (kind === "section") {
-    return { gutter: "", body: `${workerSectionLabel(text)} · ${formatWorkerSectionTitle(text)}` };
+    return { gutter: "", body: joinWorkerOutputChromeParts([workerSectionLabel(text), formatWorkerSectionTitle(text)]) };
   }
   if (kind === "content" || kind === "placeholder") {
     return { gutter: "", body: formatPlainDisplayText(text) };
@@ -3994,11 +3994,38 @@ export function workerOutputLineLayout(kind: WorkerOutputLineKind, text: string)
 }
 
 function formatWorkerSectionTitle(title: string): string {
+  const featureMatch = title.match(/^features\/([^/]+)\/([^/]+)$/);
+  const turn = featureMatch?.[1] ?? "";
+  const file = (featureMatch?.[2] ?? basename(title)).toLowerCase();
+  if (turn && isTurnScopedWorkerArtifact(file)) {
+    return turn;
+  }
+  if (file === "requirements.md" || file === "plan.md" || file === "acceptance.md" || file === "worklog.md") {
+    return "";
+  }
+  if (file === "patch.diff") {
+    return "patch";
+  }
   return title.replace(/^features\//, "");
 }
 
 function workerSectionLabel(title: string): string {
   const file = basename(title).toLowerCase();
+  if (file === "requirements.md") {
+    return "requirements";
+  }
+  if (file === "plan.md") {
+    return "plan";
+  }
+  if (file === "acceptance.md") {
+    return "acceptance";
+  }
+  if (file === "actor-worklog.md" || file === "worklog.md") {
+    return "worklog";
+  }
+  if (file === "decisions.md") {
+    return "decision";
+  }
   if (file.endsWith(".diff")) {
     return "diff";
   }
@@ -4012,6 +4039,13 @@ function workerSectionLabel(title: string): string {
     return "jsonl";
   }
   return "file";
+}
+
+function isTurnScopedWorkerArtifact(file: string): boolean {
+  return file === "actor-worklog.md" ||
+    file === "decisions.md" ||
+    file === "actor-replies.jsonl" ||
+    file === "critic-findings.jsonl";
 }
 
 function formatSummaryDisplayText(text: string): string {
