@@ -201,6 +201,8 @@ NO_PROXY = "localhost,127.0.0.1"
 
 `router.codex.env` applies only to semantic classification. `workers.codex.model.env` applies to fresh/resumed Codex workers and embedded native attach sessions. Keep these values in local `config.toml`, which is ignored by Git.
 
+Run `parallel-codex-tui --doctor` after changing proxy settings. Doctor checks referenced environment variables, reports when a macOS system proxy is not inherited by Codex subprocesses, and verifies that each configured proxy host and port is reachable without printing proxy credentials.
+
 ## Mock Mode
 
 For deterministic local testing, use this pairing in `.parallel-codex/config.toml`:

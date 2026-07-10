@@ -383,6 +383,45 @@ describe("CLI doctor", () => {
     expect(result.stdout).not.toContain("OPENAI_BASE_URL: missing");
   });
 
+  it("reports missing router environment references before routing starts", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pct-cli-doctor-router-env-"));
+    const binDir = join(root, "bin");
+    const appRoot = join(root, "app");
+
+    await mkdir(binDir, { recursive: true });
+    await mkdir(join(appRoot, ".parallel-codex"), { recursive: true });
+    await writeExecutable(join(binDir, "codex"), "#!/bin/sh\necho codex 1.0\n");
+    await writeFile(
+      join(appRoot, ".parallel-codex", "config.toml"),
+      [
+        "[router]",
+        'defaultMode = "auto"',
+        "",
+        "[router.codex.env]",
+        'HTTPS_PROXY = "{env:HTTPS_PROXY}"',
+        "",
+        "[pairing]",
+        'main = "mock"',
+        'judge = "mock"',
+        'actor = "mock"',
+        'critic = "mock"'
+      ].join("\n"),
+      "utf8"
+    );
+
+    const result = await runCli(["--app-root", appRoot, "--doctor"], {
+      env: {
+        PATH: `${binDir}${delimiter}${process.env.PATH ?? ""}`,
+        HTTPS_PROXY: ""
+      }
+    });
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr).toBe("");
+    expect(result.stdout).toContain("codex: ok");
+    expect(result.stdout).toContain("router.codex.env.HTTPS_PROXY: missing env HTTPS_PROXY");
+  });
+
   it("does not check inactive worker model environment variables", async () => {
     const root = await mkdtemp(join(tmpdir(), "pct-cli-doctor-inactive-model-env-"));
     const appRoot = join(root, "app");

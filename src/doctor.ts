@@ -1,5 +1,7 @@
+import { execFile } from "node:child_process";
 import { constants } from "node:fs";
 import { access } from "node:fs/promises";
+import { createConnection } from "node:net";
 import { delimiter, join } from "node:path";
 import { prepareAppRoot } from "./core/app-root.js";
 import { formatConfigErrorMessage } from "./core/config-errors.js";
@@ -14,6 +16,19 @@ export interface DoctorResult {
   ok: boolean;
   text: string;
 }
+
+export interface SystemProxyEndpoint {
+  host: string;
+  port: number;
+}
+
+export interface ProxyDiagnosticResult {
+  ok: boolean;
+  lines: string[];
+}
+
+type LoadedConfig = Awaited<ReturnType<typeof loadConfig>>;
+type ProxyConnector = (host: string, port: number) => Promise<boolean>;
 
 type ConfiguredEngine = "router-codex" | "codex" | "claude" | "mock";
 type WorkerEngine = "codex" | "claude";
@@ -77,7 +92,7 @@ export async function runDoctor(
     }
   }
 
-  for (const check of configuredWorkerModelEnvChecks(config, env)) {
+  for (const check of configuredEnvironmentChecks(config, env)) {
     if (check.ok) {
       lines.push(`${check.label}: ok`);
     } else {
@@ -86,10 +101,71 @@ export async function runDoctor(
     }
   }
 
+  const proxyDiagnostics = await diagnoseProxyEnvironment(
+    config,
+    env,
+    await detectMacSystemProxy(),
+    canConnectProxy
+  );
+  lines.push(...proxyDiagnostics.lines);
+  ok = ok && proxyDiagnostics.ok;
+
   return {
     ok,
     text: `${lines.join("\n")}\n`
   };
+}
+
+export async function diagnoseProxyEnvironment(
+  config: LoadedConfig,
+  env: NodeJS.ProcessEnv,
+  systemProxy: SystemProxyEndpoint | null,
+  connect: ProxyConnector = canConnectProxy
+): Promise<ProxyDiagnosticResult> {
+  const contexts: Array<{ label: string; env: Record<string, string>; table: string }> = [];
+  if (config.router.defaultMode === "auto") {
+    contexts.push({ label: "router proxy", env: config.router.codex.env, table: "router.codex.env" });
+  }
+  if (configuredWorkerEngines(config).includes("codex")) {
+    contexts.push({
+      label: "workers.codex proxy",
+      env: config.workers.codex.model.env,
+      table: "workers.codex.model.env"
+    });
+  }
+
+  const connectionCache = new Map<string, Promise<boolean>>();
+  const lines: string[] = [];
+  let ok = true;
+  for (const context of contexts) {
+    const endpoint = configuredProxyEndpoint(context.env, env);
+    if (!endpoint) {
+      if (systemProxy) {
+        lines.push(
+          `${context.label}: warning (macOS system proxy ${formatProxyEndpoint(systemProxy)} is not inherited; configure [${context.table}])`
+        );
+      } else {
+        lines.push(`${context.label}: direct (no proxy configured)`);
+      }
+      continue;
+    }
+    if (endpoint === "invalid") {
+      ok = false;
+      lines.push(`${context.label}: invalid proxy URL`);
+      continue;
+    }
+
+    const key = formatProxyEndpoint(endpoint);
+    const reachable = await cachedProxyConnection(connectionCache, key, () => connect(endpoint.host, endpoint.port));
+    if (reachable) {
+      lines.push(`${context.label}: ok (${key})`);
+    } else {
+      ok = false;
+      lines.push(`${context.label}: unreachable (${key})`);
+    }
+  }
+
+  return { ok, lines };
 }
 
 export function isSupportedNodeVersion(version: string): boolean {
@@ -205,11 +281,23 @@ function configuredWorkerEngines(config: Awaited<ReturnType<typeof loadConfig>>)
   );
 }
 
-function configuredWorkerModelEnvChecks(
+function configuredEnvironmentChecks(
   config: Awaited<ReturnType<typeof loadConfig>>,
   env: NodeJS.ProcessEnv
 ): Array<{ label: string; envName: string; ok: boolean }> {
   const checks: Array<{ label: string; envName: string; ok: boolean }> = [];
+
+  if (config.router.defaultMode === "auto") {
+    for (const [key, value] of Object.entries(config.router.codex.env)) {
+      for (const envName of referencedEnvNames(value)) {
+        checks.push({
+          label: `router.codex.env.${key}`,
+          envName,
+          ok: Boolean(env[envName])
+        });
+      }
+    }
+  }
 
   for (const engine of configuredWorkerEngines(config)) {
     const worker = engine === "codex" ? config.workers.codex : config.workers.claude;
@@ -257,4 +345,119 @@ async function canExecute(path: string): Promise<boolean> {
   } catch {
     return false;
   }
+}
+
+function configuredProxyEndpoint(
+  configured: Record<string, string>,
+  processEnvironment: NodeJS.ProcessEnv
+): SystemProxyEndpoint | "invalid" | null {
+  const effective: Record<string, string | undefined> = {
+    ...processEnvironment,
+    ...Object.fromEntries(
+      Object.entries(configured).map(([name, value]) => [name, renderEnvironmentValue(value, processEnvironment)])
+    )
+  };
+  const value = [
+    effective.HTTPS_PROXY,
+    effective.https_proxy,
+    effective.ALL_PROXY,
+    effective.all_proxy,
+    effective.HTTP_PROXY,
+    effective.http_proxy
+  ].find((candidate) => candidate?.trim())?.trim();
+  if (!value) {
+    return null;
+  }
+
+  try {
+    const url = new URL(value.includes("://") ? value : `http://${value}`);
+    const port = url.port ? Number(url.port) : defaultProxyPort(url.protocol);
+    if (!url.hostname || !Number.isInteger(port) || port <= 0 || port > 65535) {
+      return "invalid";
+    }
+    return { host: url.hostname, port };
+  } catch {
+    return "invalid";
+  }
+}
+
+function renderEnvironmentValue(value: string, env: NodeJS.ProcessEnv): string {
+  return value.replace(/\{env:([A-Za-z_][A-Za-z0-9_]*)\}/g, (_match, name: string) => env[name] ?? "");
+}
+
+function defaultProxyPort(protocol: string): number {
+  if (protocol === "https:") {
+    return 443;
+  }
+  if (protocol.startsWith("socks")) {
+    return 1080;
+  }
+  return 80;
+}
+
+function formatProxyEndpoint(endpoint: SystemProxyEndpoint): string {
+  const host = endpoint.host.includes(":") ? `[${endpoint.host}]` : endpoint.host;
+  return `${host}:${endpoint.port}`;
+}
+
+async function cachedProxyConnection(
+  cache: Map<string, Promise<boolean>>,
+  key: string,
+  connect: () => Promise<boolean>
+): Promise<boolean> {
+  const existing = cache.get(key);
+  if (existing) {
+    return existing;
+  }
+  const pending = connect();
+  cache.set(key, pending);
+  return pending;
+}
+
+async function detectMacSystemProxy(): Promise<SystemProxyEndpoint | null> {
+  if (process.platform !== "darwin") {
+    return null;
+  }
+
+  const output = await execFileText("scutil", ["--proxy"]);
+  if (!output) {
+    return null;
+  }
+  const https = parseScutilProxy(output, "HTTPS");
+  return https ?? parseScutilProxy(output, "HTTP");
+}
+
+function parseScutilProxy(output: string, prefix: "HTTP" | "HTTPS"): SystemProxyEndpoint | null {
+  const enabled = output.match(new RegExp(`${prefix}Enable\\s*:\\s*(\\d+)`))?.[1] === "1";
+  const host = output.match(new RegExp(`${prefix}Proxy\\s*:\\s*(\\S+)`))?.[1];
+  const port = Number(output.match(new RegExp(`${prefix}Port\\s*:\\s*(\\d+)`))?.[1]);
+  return enabled && host && Number.isInteger(port) && port > 0 ? { host, port } : null;
+}
+
+function execFileText(command: string, args: string[]): Promise<string> {
+  return new Promise((resolve) => {
+    execFile(command, args, { timeout: 1000 }, (error, stdout) => {
+      resolve(error ? "" : stdout);
+    });
+  });
+}
+
+function canConnectProxy(host: string, port: number): Promise<boolean> {
+  return new Promise((resolve) => {
+    const socket = createConnection({ host, port });
+    let settled = false;
+    const finish = (reachable: boolean) => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      socket.destroy();
+      resolve(reachable);
+    };
+
+    socket.setTimeout(750);
+    socket.once("connect", () => finish(true));
+    socket.once("error", () => finish(false));
+    socket.once("timeout", () => finish(false));
+  });
 }
