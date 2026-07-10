@@ -7,12 +7,13 @@ import { selectWorkspaceForCli } from "./cli-workspace.js";
 import { createRuntime } from "./bootstrap.js";
 import { prepareAppRoot } from "./core/app-root.js";
 import { formatConfigErrorMessage } from "./core/config-errors.js";
-import { configPath, withUiThemeOverride, writeDefaultConfig } from "./core/config.js";
+import { configPath, loadConfig, withUiThemeOverride, writeDefaultConfig } from "./core/config.js";
 import { pathExists } from "./core/file-store.js";
 import { runDoctor } from "./doctor.js";
 import { helpText } from "./cli-help.js";
 import { App } from "./tui/App.js";
 import { formatTuiThemeCatalog } from "./tui/theme-preview.js";
+import { configureTuiTheme } from "./tui/theme.js";
 import { version } from "./version.js";
 
 main().catch((error) => {
@@ -58,6 +59,11 @@ async function main(): Promise<void> {
       console.log(`Wrote ${localConfigPath}`);
     }
   } else {
+    const startupConfig = await loadConfig(cliArgs.appRoot);
+    configureTuiTheme({
+      theme: cliArgs.theme ?? startupConfig.ui.theme,
+      colors: startupConfig.ui.colors
+    });
     const workspaceRoot = await selectWorkspaceForCli({
       appRoot: cliArgs.appRoot,
       cwd: process.cwd(),

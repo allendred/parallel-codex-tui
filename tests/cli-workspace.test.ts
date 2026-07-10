@@ -44,9 +44,10 @@ describe("selectWorkspaceForCli", () => {
       })
     ).resolves.toBe(missing);
     expect(stdout.output()).toContain("Workspace does not exist:");
-    expect(stdout.output()).toContain(missing);
-    expect(stdout.output()).toContain("Select workspace:");
-    expect(stdout.output()).toContain(`Workspace [${missing}, 1/1, n]:`);
+    expect(stdout.output()).toContain("Open project");
+    expect(stdout.output()).toContain("missing");
+    expect(stdout.output()).toContain("new");
+    expect(stdout.output()).not.toContain("Workspace [");
   });
 
   it("still lets a TTY user choose a remembered workspace instead of a missing explicit workspace", async () => {
@@ -84,7 +85,7 @@ describe("selectWorkspaceForCli", () => {
       })
     ).resolves.toBe(remembered);
     expect(stdout.output()).toContain("Workspace is not a directory:");
-    expect(stdout.output()).toContain(fileWorkspace);
+    expect(stdout.output()).toContain("Open project");
   });
 
   it("does not default to an explicit workspace path that is an existing file on first run", async () => {
@@ -103,7 +104,7 @@ describe("selectWorkspaceForCli", () => {
       })
     ).resolves.toBe(appRoot);
     expect(stdout.output()).toContain("Workspace is not a directory:");
-    expect(stdout.output()).toContain("Workspace path:");
+    expect(stdout.output()).toContain("Workspace path");
     expect(stdout.output()).not.toContain(`Workspace path [${fileWorkspace}]`);
   });
 
@@ -123,8 +124,27 @@ describe("selectWorkspaceForCli", () => {
     });
 
     expect(selected).toBe(first);
-    expect(stdout.output()).toContain("Select workspace:");
-    expect(stdout.output()).toContain("n. Create/open another folder");
+    expect(stdout.output()).toContain("parallel-codex-tui");
+    expect(stdout.output()).toContain("Open project");
+    expect(stdout.output()).toContain("New project");
+    expect(stdout.output()).not.toContain("Workspace [");
+  });
+
+  it("lets a TTY user move through recent projects with arrow keys", async () => {
+    const appRoot = await mkdtemp(join(tmpdir(), "pct-cli-workspace-arrows-"));
+    const first = join(appRoot, "first");
+    const second = join(appRoot, "second");
+    await prepareWorkspace(appRoot, first);
+    await prepareWorkspace(appRoot, second);
+
+    await expect(
+      selectWorkspaceForCli({
+        appRoot,
+        cwd: appRoot,
+        stdin: fakeInputChunks(["\u001B[B", "\r"]),
+        stdout: fakeOutput()
+      })
+    ).resolves.toBe(first);
   });
 
   it("lets a TTY user create another workspace path", async () => {
@@ -163,7 +183,7 @@ describe("selectWorkspaceForCli", () => {
       selectWorkspaceForCli({
         appRoot,
         cwd: appRoot,
-        stdin: fakeInput("n\ncreated-step\n"),
+        stdin: fakeInputChunks(["n", "created-step", "\r"]),
         stdout: fakeOutput()
       })
     ).resolves.toBe(join(appRoot, "created-step"));
@@ -182,6 +202,19 @@ describe("selectWorkspaceForCli", () => {
       })
     ).resolves.toBe(join(appRoot, "fresh-project"));
     expect(stdout.output()).toContain("Workspace path");
+  });
+
+  it("submits a pasted Chinese workspace path when Enter shares the same input chunk", async () => {
+    const appRoot = await mkdtemp(join(tmpdir(), "pct-cli-workspace-pasted-enter-"));
+
+    await expect(
+      selectWorkspaceForCli({
+        appRoot,
+        cwd: appRoot,
+        stdin: fakeInputChunks(["中文项目\r"]),
+        stdout: fakeOutput()
+      })
+    ).resolves.toBe(join(appRoot, "中文项目"));
   });
 
   it("uses cwd for first-run TTY startup when the user accepts the default path", async () => {
@@ -234,9 +267,14 @@ describe("selectWorkspaceForCli", () => {
 });
 
 function fakeInput(text: string, options: { tty?: boolean } = {}): NodeJS.ReadStream {
+  const chunks = text.split(/(\n)/).filter(Boolean).map((chunk) => chunk === "\n" ? "\r" : chunk);
+  return fakeInputChunks(chunks.length > 0 ? chunks : [""], options);
+}
+
+function fakeInputChunks(chunks: string[], options: { tty?: boolean } = {}): NodeJS.ReadStream {
   const stream = new PassThrough() as unknown as NodeJS.ReadStream;
   stream.isTTY = options.tty ?? true;
-  const chunks = text.match(/[^\n]*\n|[^\n]+$/g) ?? [""];
+  installFakeTtyInputMethods(stream);
   for (const [index, chunk] of chunks.entries()) {
     setTimeout(() => {
       stream.write(chunk);
@@ -248,6 +286,14 @@ function fakeInput(text: string, options: { tty?: boolean } = {}): NodeJS.ReadSt
   return stream;
 }
 
+function installFakeTtyInputMethods(stream: NodeJS.ReadStream): void {
+  Object.assign(stream, {
+    setRawMode: () => stream,
+    ref: () => stream,
+    unref: () => stream
+  });
+}
+
 function fakeOutput(options: { tty?: boolean } = {}): NodeJS.WriteStream & { output: () => string } {
   let text = "";
   const stream = new Writable({
@@ -257,6 +303,8 @@ function fakeOutput(options: { tty?: boolean } = {}): NodeJS.WriteStream & { out
     }
   }) as NodeJS.WriteStream & { output: () => string };
   stream.isTTY = options.tty ?? true;
+  stream.columns = 100;
+  stream.rows = 24;
   stream.output = () => text;
   return stream;
 }
