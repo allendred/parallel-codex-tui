@@ -130,7 +130,7 @@ parallel-codex-tui --themes
 parallel-codex-tui --theme paper --themes
 ```
 
-The theme catalog includes complete palette groups for every built-in theme plus the same `preview:` and `semantic:` ANSI swatch rows.
+The theme catalog includes complete palette groups for every built-in theme plus the same `preview:` and `semantic:` ANSI swatch rows. Built-in foreground and background pairs are kept at or above a `4.5:1` contrast ratio on every surface where the TUI renders them.
 
 The doctor output includes `preview:` and `semantic:` ANSI swatch rows so you can see the effective terminal colors before starting a worker session.
 

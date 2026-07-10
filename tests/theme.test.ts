@@ -31,7 +31,7 @@ describe("TUI theme", () => {
       surface: "ansi256(234)",
       rail: "ansi256(236)",
       text: "ansi256(253)",
-      muted: "ansi256(245)",
+      muted: "ansi256(247)",
       accent: "ansi256(81)"
     });
     expect(resolveTuiTheme({ theme: "graphite" })).toMatchObject({
@@ -39,21 +39,21 @@ describe("TUI theme", () => {
       surface: "ansi256(233)",
       rail: "ansi256(238)",
       text: "ansi256(255)",
-      muted: "ansi256(246)",
-      accent: "ansi256(110)"
+      muted: "ansi256(249)",
+      accent: "ansi256(117)"
     });
     expect(resolveTuiTheme({ theme: "paper" })).toMatchObject({
       chrome: "ansi256(254)",
       surface: "ansi256(231)",
       rail: "ansi256(255)",
       text: "ansi256(235)",
-      muted: "ansi256(242)",
+      muted: "ansi256(240)",
       accent: "ansi256(25)"
     });
     expect(resolveTuiTheme({ theme: "aurora" })).toMatchObject({
-      chrome: "ansi256(24)",
+      chrome: "ansi256(19)",
       surface: "ansi256(233)",
-      rail: "ansi256(30)",
+      rail: "ansi256(53)",
       text: "ansi256(255)",
       muted: "ansi256(109)",
       accent: "ansi256(159)"
@@ -63,7 +63,7 @@ describe("TUI theme", () => {
       surface: "ansi256(235)",
       rail: "ansi256(238)",
       text: "ansi256(254)",
-      muted: "ansi256(248)",
+      muted: "ansi256(249)",
       accent: "ansi256(147)"
     });
   });
@@ -74,14 +74,14 @@ describe("TUI theme", () => {
       dangerSurface: "ansi256(52)",
       warning: "ansi256(179)",
       success: "ansi256(114)",
-      danger: "ansi256(203)"
+      danger: "ansi256(210)"
     });
     expect(resolveTuiTheme({ theme: "graphite" })).toMatchObject({
       successSurface: "ansi256(22)",
       dangerSurface: "ansi256(52)",
       warning: "ansi256(214)",
       success: "ansi256(150)",
-      danger: "ansi256(210)"
+      danger: "ansi256(217)"
     });
     expect(resolveTuiTheme({ theme: "paper" })).toMatchObject({
       successSurface: "ansi256(194)",
@@ -102,7 +102,7 @@ describe("TUI theme", () => {
       dangerSurface: "ansi256(52)",
       warning: "ansi256(215)",
       success: "ansi256(151)",
-      danger: "ansi256(210)"
+      danger: "ansi256(217)"
     });
   });
 
@@ -135,6 +135,37 @@ describe("TUI theme", () => {
         ["muted/surface", theme.muted, theme.surface],
         ["accent/chrome", theme.accent, theme.chrome],
         ["warning/surface", theme.warning, theme.surface],
+        ["success/successSurface", theme.success, theme.successSurface],
+        ["danger/dangerSurface", theme.danger, theme.dangerSurface]
+      ] as const;
+
+      for (const [label, foreground, background] of pairs) {
+        expect(
+          ansi256ContrastRatio(foreground, background),
+          `${name} ${label}`
+        ).toBeGreaterThanOrEqual(4.5);
+      }
+    }
+  });
+
+  it("keeps every bundled palette readable on the surfaces used by the TUI", () => {
+    for (const name of TUI_THEME_NAMES) {
+      const theme = resolveTuiTheme({ theme: name });
+      const pairs = [
+        ["text/chrome", theme.text, theme.chrome],
+        ["muted/chrome", theme.muted, theme.chrome],
+        ["accent/chrome", theme.accent, theme.chrome],
+        ["text/surface", theme.text, theme.surface],
+        ["muted/surface", theme.muted, theme.surface],
+        ["accent/surface", theme.accent, theme.surface],
+        ["warning/surface", theme.warning, theme.surface],
+        ["success/surface", theme.success, theme.surface],
+        ["text/rail", theme.text, theme.rail],
+        ["muted/rail", theme.muted, theme.rail],
+        ["accent/rail", theme.accent, theme.rail],
+        ["warning/rail", theme.warning, theme.rail],
+        ["success/rail", theme.success, theme.rail],
+        ["danger/rail", theme.danger, theme.rail],
         ["success/successSurface", theme.success, theme.successSurface],
         ["danger/dangerSurface", theme.danger, theme.dangerSurface]
       ] as const;

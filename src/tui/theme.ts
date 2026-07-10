@@ -48,11 +48,11 @@ export const TUI_THEME_PRESETS: Readonly<Record<TuiThemeName, Readonly<TuiTheme>
     successSurface: bg("ansi256(22)"),
     dangerSurface: bg("ansi256(52)"),
     text: fg("ansi256(253)"),
-    muted: fg("ansi256(245)"),
+    muted: fg("ansi256(247)"),
     accent: fg("ansi256(81)"),
     warning: fg("ansi256(179)"),
     success: fg("ansi256(114)"),
-    danger: fg("ansi256(203)")
+    danger: fg("ansi256(210)")
   }),
   graphite: freezeTuiTheme({
     chrome: bg("ansi256(236)"),
@@ -61,11 +61,11 @@ export const TUI_THEME_PRESETS: Readonly<Record<TuiThemeName, Readonly<TuiTheme>
     successSurface: bg("ansi256(22)"),
     dangerSurface: bg("ansi256(52)"),
     text: fg("ansi256(255)"),
-    muted: fg("ansi256(246)"),
-    accent: fg("ansi256(110)"),
+    muted: fg("ansi256(249)"),
+    accent: fg("ansi256(117)"),
     warning: fg("ansi256(214)"),
     success: fg("ansi256(150)"),
-    danger: fg("ansi256(210)")
+    danger: fg("ansi256(217)")
   }),
   paper: freezeTuiTheme({
     chrome: bg("ansi256(254)"),
@@ -74,16 +74,16 @@ export const TUI_THEME_PRESETS: Readonly<Record<TuiThemeName, Readonly<TuiTheme>
     successSurface: bg("ansi256(194)"),
     dangerSurface: bg("ansi256(224)"),
     text: fg("ansi256(235)"),
-    muted: fg("ansi256(242)"),
+    muted: fg("ansi256(240)"),
     accent: fg("ansi256(25)"),
     warning: fg("ansi256(94)"),
     success: fg("ansi256(22)"),
     danger: fg("ansi256(124)")
   }),
   aurora: freezeTuiTheme({
-    chrome: bg("ansi256(24)"),
+    chrome: bg("ansi256(19)"),
     surface: bg("ansi256(233)"),
-    rail: bg("ansi256(30)"),
+    rail: bg("ansi256(53)"),
     successSurface: bg("ansi256(22)"),
     dangerSurface: bg("ansi256(52)"),
     text: fg("ansi256(255)"),
@@ -100,11 +100,11 @@ export const TUI_THEME_PRESETS: Readonly<Record<TuiThemeName, Readonly<TuiTheme>
     successSurface: bg("ansi256(22)"),
     dangerSurface: bg("ansi256(52)"),
     text: fg("ansi256(254)"),
-    muted: fg("ansi256(248)"),
+    muted: fg("ansi256(249)"),
     accent: fg("ansi256(147)"),
     warning: fg("ansi256(215)"),
     success: fg("ansi256(151)"),
-    danger: fg("ansi256(210)")
+    danger: fg("ansi256(217)")
   })
 });
 
