@@ -8,8 +8,9 @@ describe("InputBar", () => {
   it("shows chat input busy state without mounting raw input", () => {
     const { lastFrame } = render(<InputBar mode="chat" busy value="hello" onChange={() => {}} />);
 
-    expect(lastFrame()).toContain("Running...");
+    expect(lastFrame()).toContain("working");
     expect(lastFrame()).toContain("run");
+    expect(lastFrame()).not.toContain("Running...");
   });
 
   it("shows a visible cursor at the end of chat input", () => {
@@ -138,7 +139,7 @@ describe("InputBar", () => {
   it("uses intentional busy text in ultra narrow terminals", () => {
     expect(chatBusyDisplayValue(10)).toBe("");
     expect(chatBusyDisplayValue(16)).toBe("busy");
-    expect(chatBusyDisplayValue(24)).toBe("Running...");
+    expect(chatBusyDisplayValue(24)).toBe("working");
 
     const { lastFrame } = render(
       <InputBar mode="chat" busy value="" terminalWidth={10} onChange={() => {}} />

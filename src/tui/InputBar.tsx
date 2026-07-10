@@ -176,7 +176,7 @@ export function chatBusyDisplayValue(terminalWidth: number): string {
   if (terminalWidth < 22) {
     return "busy";
   }
-  return "Running...";
+  return "working";
 }
 
 function workerInputHints(width: number): { label: string; detail: string } {
