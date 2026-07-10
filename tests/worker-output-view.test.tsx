@@ -97,12 +97,13 @@ describe("WorkerOutputView", () => {
     );
 
     try {
-      expect(lastFrame() ?? "").toContain("Loading worker output...");
-      await waitForFrame(lastFrame, "Waiting for worker output...");
+      expect(lastFrame() ?? "").toContain("loading output");
+      await waitForFrame(lastFrame, "waiting for output");
 
       const frame = lastFrame() ?? "";
-      expect(frame).toContain("Waiting for worker output...");
-      expect(frame).not.toContain("Loading log...");
+      expect(frame).toContain("waiting for output");
+      expect(frame).not.toContain("Loading worker output...");
+      expect(frame).not.toContain("Waiting for worker output...");
     } finally {
       unmount();
     }
@@ -118,13 +119,11 @@ describe("WorkerOutputView", () => {
     );
 
     try {
-      await waitForFrame(lastFrame, "Start a complex task");
+      await waitForFrame(lastFrame, "No workers yet");
 
       const frame = lastFrame() ?? "";
-      expect(frame).toContain("Start a complex task to view worker logs.");
-      expect(frame).not.toContain("No worker selected.");
-      expect(frame).not.toContain("Run a complex task");
-      expect(frame).not.toContain("No worker log selected.");
+      expect(frame).toContain("No workers yet · start a complex task");
+      expect(frame).not.toContain("Start a complex task to view worker logs.");
     } finally {
       unmount();
     }
@@ -147,12 +146,11 @@ describe("WorkerOutputView", () => {
     );
 
     try {
-      await waitForFrame(lastFrame, "Waiting for worker output...");
+      await waitForFrame(lastFrame, "waiting for output");
 
       const frame = lastFrame() ?? "";
-      expect(frame).toContain("Waiting for worker output...");
-      expect(frame).not.toContain("No worker output.");
-      expect(frame).not.toContain("No worker selected.");
+      expect(frame).toContain("waiting for output");
+      expect(frame).not.toContain("Waiting for worker output...");
     } finally {
       unmount();
     }

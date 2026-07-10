@@ -66,8 +66,9 @@ interface WorkerOutputContentState {
   lines: RenderLine[];
 }
 
-const EMPTY_WORKER_OUTPUT_TEXT = "Waiting for worker output...";
-const LOADING_WORKER_OUTPUT_TEXT = "Loading worker output...";
+const EMPTY_WORKER_OUTPUT_TEXT = "waiting for output";
+const LOADING_WORKER_OUTPUT_TEXT = "loading output";
+const NO_WORKER_OUTPUT_TEXT = "No workers yet · start a complex task";
 
 interface ParsedDiffFile {
   title: string;
@@ -118,7 +119,7 @@ export function WorkerOutputView({
       if (!logPath) {
         setContentState({
           key: loadKey,
-          lines: [{ kind: "placeholder", text: "Start a complex task to view worker logs." }]
+          lines: [{ kind: "placeholder", text: NO_WORKER_OUTPUT_TEXT }]
         });
         return;
       }
