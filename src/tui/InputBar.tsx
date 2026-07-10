@@ -343,12 +343,13 @@ function chatTaskPlaceholderDisplayValue(terminalWidth: number, scrollable = fal
   if (scrollable && terminalWidth < 56) {
     return chatInputDisplayValue("message · Pg · ^W · ^O", terminalWidth);
   }
-  return chatInputDisplayValue(
-    scrollable
-      ? "message · scroll · ^W logs · Tab · ^O attach"
-      : "message · ^W logs · Tab · ^O attach",
-    terminalWidth
-  );
+  const roomy = scrollable
+    ? "message · scroll · ^W logs · Tab · ^O attach"
+    : "message · ^W logs · Tab · ^O attach";
+  if (displayWidth(roomy) > Math.max(1, terminalWidth - 6)) {
+    return chatInputDisplayValue(scrollable ? "message · Pg · ^W · ^O" : "message · ^W · ^O", terminalWidth);
+  }
+  return roomy;
 }
 
 export function chatBusyDisplayValue(terminalWidth: number): string {

@@ -133,6 +133,8 @@ describe("InputBar", () => {
   it("shows task shortcuts in the empty chat prompt once workers exist", () => {
     expect(chatPlaceholderDisplayValue(80, { hasWorkers: true })).toBe("message · ^W logs · Tab · ^O attach");
     expect(chatPlaceholderDisplayValue(42, { hasWorkers: true })).toBe("message · ^W logs · Tab · ^O attach");
+    expect(chatPlaceholderDisplayValue(41, { hasWorkers: true })).toBe("message · ^W logs · Tab · ^O attach");
+    expect(chatPlaceholderDisplayValue(40, { hasWorkers: true })).toBe("message · ^W · ^O");
     expect(chatPlaceholderDisplayValue(30, { hasWorkers: true })).toBe("message · ^W · ^O");
     expect(chatPlaceholderDisplayValue(20, { hasWorkers: true })).toBe("msg · ^W · ^O");
     expect(chatPlaceholderDisplayValue(19, { hasWorkers: true })).toBe("msg · ^W · ^O");
@@ -149,6 +151,17 @@ describe("InputBar", () => {
     expect(frame).toContain("^W logs");
     expect(frame).toContain("Tab");
     expect(frame).toContain("^O attach");
+  });
+
+  it("uses an intentional compact task hint instead of a clipped word at 40 columns", () => {
+    const { lastFrame } = render(
+      <InputBar mode="chat" value="" hasWorkers hasActiveTask terminalWidth={40} onChange={() => {}} />
+    );
+
+    const frame = lastFrame() ?? "";
+    expect(frame).toContain("> | message · ^W · ^O");
+    expect(frame).not.toContain("...age");
+    expect(displayWidth(frame)).toBeLessThanOrEqual(40);
   });
 
   it("shows the new-task shortcut only while a complex task is active", () => {

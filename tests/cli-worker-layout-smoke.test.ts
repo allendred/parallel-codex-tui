@@ -617,7 +617,7 @@ describe("CLI worker layout smoke", () => {
     const taskDir = join(workspace, ".parallel-codex", "sessions", taskId);
     const workerDir = join(taskDir, "critic-mock");
     const chunks: string[] = [];
-    const screen = new NativeTerminalScreen({ cols: 42, rows: 18, scrollback: 1000 });
+    const screen = new NativeTerminalScreen({ cols: 40, rows: 18, scrollback: 1000 });
     let screenWrites = Promise.resolve();
 
     await mkdir(workerDir, { recursive: true });
@@ -628,7 +628,7 @@ describe("CLI worker layout smoke", () => {
       ["./node_modules/.bin/tsx", "src/cli.tsx", "--app-root", workspace, "--workspace", workspace, "--task", taskId],
       {
         cwd: process.cwd(),
-        cols: 42,
+        cols: 40,
         rows: 18,
         name: "xterm-256color",
         env: {
@@ -661,11 +661,12 @@ describe("CLI worker layout smoke", () => {
       expect(snapshot).not.toContain("Type a message");
 
       child.write("\x1b");
-      await waitForScreenText(() => screenWrites, screen, "^W logs");
+      await waitForScreenText(() => screenWrites, screen, "> | message · ^W · ^O");
       const chatSnapshot = screen.snapshot();
-      expect(chatSnapshot).toContain("> | message · ^W logs · Tab · ^O attach");
+      expect(chatSnapshot).toContain("> | message · ^W · ^O");
+      expect(chatSnapshot).not.toContain("...age");
       expect(chatSnapshot).not.toContain("@ critic/mock");
-      expect(Math.max(...chatSnapshot.split("\n").map((line) => line.length))).toBeLessThanOrEqual(42);
+      expect(Math.max(...chatSnapshot.split("\n").map((line) => line.length))).toBeLessThanOrEqual(40);
     } finally {
       child.kill("SIGTERM");
     }
