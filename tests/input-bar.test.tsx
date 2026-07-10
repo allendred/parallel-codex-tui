@@ -1,7 +1,7 @@
 import React from "react";
 import { render } from "ink-testing-library";
 import { describe, expect, it } from "vitest";
-import { chatBusyDisplayValue, chatInputDisplayValue, chatPlaceholderDisplayValue, InputBar } from "../src/tui/InputBar.js";
+import { chatBusyDisplayValue, chatInputDisplayValue, chatPlaceholderDisplayValue, InputBar, inputRailLayout } from "../src/tui/InputBar.js";
 import { displayWidth } from "../src/tui/display-width.js";
 
 describe("InputBar", () => {
@@ -50,6 +50,18 @@ describe("InputBar", () => {
     expect(frame).toContain("> | msg");
     expect(frame).not.toContain("...");
     expect(displayWidth(frame)).toBeLessThanOrEqual(12);
+  });
+
+  it("fills short chat input rows to the reserved rail width without stdout columns", () => {
+    const { lastFrame } = render(
+      <InputBar mode="chat" value="" terminalWidth={40} onChange={() => {}} />
+    );
+
+    const frame = lastFrame() ?? "";
+    const layout = inputRailLayout(40, displayWidth("> | message"));
+
+    expect(frame).toContain("> | message");
+    expect(layout.leadingWidth + displayWidth("> | message") + layout.trailingWidth).toBe(39);
   });
 
   it("keeps the prompt marker visible in nano chat terminals", () => {

@@ -20,14 +20,17 @@ export function InputBar({
   hasWorkers = false,
   nativeClosed = false,
   value,
-  terminalWidth = process.stdout.columns || 120,
+  terminalWidth: providedTerminalWidth,
   onChange,
   onSubmit
 }: InputBarProps) {
+  const terminalWidth = providedTerminalWidth ?? process.stdout.columns ?? 120;
+  const fillRail = providedTerminalWidth !== undefined || typeof process.stdout.columns === "number";
+
   if (mode === "worker") {
     const hints = workerInputHints(terminalWidth);
     return (
-      <InputRail terminalWidth={terminalWidth} textWidth={displayWidth(`${hints.label}${hints.detail}`)}>
+      <InputRail terminalWidth={terminalWidth} textWidth={displayWidth(`${hints.label}${hints.detail}`)} fill={fillRail}>
         <Text backgroundColor={TUI_THEME.rail} color={TUI_THEME.accent} bold>{hints.label}</Text>
         {hints.detail ? <Text backgroundColor={TUI_THEME.rail} color={TUI_THEME.muted} dimColor>{hints.detail}</Text> : null}
       </InputRail>
@@ -37,7 +40,7 @@ export function InputBar({
   if (mode === "native") {
     const hints = nativeInputHints(terminalWidth, nativeClosed);
     return (
-      <InputRail terminalWidth={terminalWidth} textWidth={displayWidth(`${hints.label}${hints.detail}`)}>
+      <InputRail terminalWidth={terminalWidth} textWidth={displayWidth(`${hints.label}${hints.detail}`)} fill={fillRail}>
         <Text backgroundColor={TUI_THEME.rail} color={TUI_THEME.accent} bold>{hints.label}</Text>
         {hints.detail ? <Text backgroundColor={TUI_THEME.rail} color={TUI_THEME.muted} dimColor>{hints.detail}</Text> : null}
       </InputRail>
@@ -49,7 +52,7 @@ export function InputBar({
 
   if (busy) {
     return (
-      <InputRail terminalWidth={terminalWidth} textWidth={displayWidth(busyText ? `${prompt} ${busyText}` : prompt)}>
+      <InputRail terminalWidth={terminalWidth} textWidth={displayWidth(busyText ? `${prompt} ${busyText}` : prompt)} fill={fillRail}>
         <Text backgroundColor={TUI_THEME.rail} color={TUI_THEME.warning} bold>{prompt}</Text>
         {busyText ? (
           <>
@@ -64,7 +67,7 @@ export function InputBar({
   if (value) {
     const displayValue = chatInputDisplayValue(value, terminalWidth);
     return (
-      <InputRail terminalWidth={terminalWidth} textWidth={displayWidth(`${prompt} ${displayValue}|`)}>
+      <InputRail terminalWidth={terminalWidth} textWidth={displayWidth(`${prompt} ${displayValue}|`)} fill={fillRail}>
         <Text backgroundColor={TUI_THEME.rail} color={TUI_THEME.accent} bold>{prompt}</Text>
         <Text backgroundColor={TUI_THEME.rail}> </Text>
         <Text backgroundColor={TUI_THEME.rail} color={TUI_THEME.text}>{displayValue}</Text>
@@ -84,6 +87,7 @@ export function InputBar({
     <InputRail
       terminalWidth={terminalWidth}
       textWidth={displayWidth(`${prompt}${hasLeadingPromptSpace ? " " : ""}|${placeholder}`)}
+      fill={fillRail}
     >
       <Text backgroundColor={TUI_THEME.rail} color={TUI_THEME.accent} bold>{prompt}</Text>
       {hasLeadingPromptSpace ? <Text backgroundColor={TUI_THEME.rail}> </Text> : null}
@@ -94,22 +98,17 @@ export function InputBar({
 }
 
 function InputRail({
+  fill,
   terminalWidth,
   textWidth,
   children
 }: {
+  fill: boolean;
   terminalWidth: number;
   textWidth: number;
   children: React.ReactNode;
 }) {
-  const leadingWidth = terminalWidth > 1 ? 1 : 0;
-  const renderWidth = typeof process.stdout.columns === "number"
-    ? Math.max(1, Math.min(terminalWidth, process.stdout.columns))
-    : null;
-  const barWidth = renderWidth === null ? null : Math.max(1, renderWidth - 1);
-  const trailingWidth = barWidth === null
-    ? 0
-    : Math.max(0, barWidth - leadingWidth - textWidth);
+  const { leadingWidth, trailingWidth } = inputRailLayout(terminalWidth, textWidth, { fill });
 
   return (
     <Box>
@@ -118,6 +117,30 @@ function InputRail({
       {trailingWidth > 0 ? <Text backgroundColor={TUI_THEME.rail}>{" ".repeat(trailingWidth)}</Text> : null}
     </Box>
   );
+}
+
+export function inputRailLayout(
+  terminalWidth: number,
+  textWidth: number,
+  options: { fill?: boolean } = {}
+): {
+  leadingWidth: number;
+  trailingWidth: number;
+} {
+  const leadingWidth = terminalWidth > 1 ? 1 : 0;
+  if (options.fill === false) {
+    return { leadingWidth, trailingWidth: 0 };
+  }
+
+  const renderWidth = typeof process.stdout.columns === "number"
+    ? Math.max(1, Math.min(terminalWidth, process.stdout.columns))
+    : Math.max(1, terminalWidth);
+  const barWidth = Math.max(1, renderWidth - 1);
+
+  return {
+    leadingWidth,
+    trailingWidth: Math.max(0, barWidth - leadingWidth - Math.max(0, textWidth))
+  };
 }
 
 export function chatPlaceholderDisplayText(
