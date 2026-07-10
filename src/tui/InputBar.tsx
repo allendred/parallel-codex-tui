@@ -255,19 +255,12 @@ export function chatPlaceholderDisplayValue(
   options: ChatPlaceholderOptions = {}
 ): string {
   if (options.canRetry) {
-    if (terminalWidth < 14) {
-      return "retry";
-    }
-    if (terminalWidth < 22) {
-      return "^R retry";
-    }
-    if (options.hasActiveTask) {
-      if (terminalWidth < 34) {
-        return chatInputDisplayValue("^R retry · ^N", terminalWidth);
-      }
-      return chatInputDisplayValue("message · ^R retry · ^N new", terminalWidth);
-    }
-    return chatInputDisplayValue("message · ^R retry", terminalWidth);
+    return selectChatPlaceholder(
+      terminalWidth,
+      options.hasActiveTask
+        ? ["message · ^R retry · ^N new", "^R retry · ^N", "^R retry", "retry"]
+        : ["message · ^R retry", "^R retry", "retry"]
+    );
   }
   const maxScrollOffset = Math.max(0, options.maxScrollOffset ?? 0);
   const scrollOffset = Math.min(Math.max(0, options.scrollOffset ?? 0), maxScrollOffset);
@@ -275,27 +268,15 @@ export function chatPlaceholderDisplayValue(
     return chatHistoryPlaceholderDisplayValue(terminalWidth, scrollOffset, maxScrollOffset);
   }
   if (options.hasActiveTask && !options.hasWorkers) {
-    if (terminalWidth < 14) {
-      return "msg";
-    }
-    if (terminalWidth < 24) {
-      return "msg · ^N";
-    }
-    return chatInputDisplayValue("message · ^N new", terminalWidth);
+    return selectChatPlaceholder(terminalWidth, ["message · ^N new", "msg · ^N", "msg"]);
   }
   if (options.hasWorkers) {
     return chatTaskPlaceholderDisplayValue(terminalWidth, maxScrollOffset > 0, options.hasActiveTask);
   }
   if (maxScrollOffset > 0 && terminalWidth >= 22) {
-    return chatInputDisplayValue("message · scroll", terminalWidth);
+    return selectChatPlaceholder(terminalWidth, ["message · scroll", "message", "msg"]);
   }
-  if (terminalWidth < 14) {
-    return "msg";
-  }
-  if (terminalWidth < 22) {
-    return "message";
-  }
-  return chatInputDisplayValue("message", terminalWidth);
+  return selectChatPlaceholder(terminalWidth, ["message", "msg"]);
 }
 
 export interface ChatPlaceholderOptions {
@@ -314,42 +295,62 @@ function chatHistoryPlaceholderDisplayValue(terminalWidth: number, offset: numbe
     return `back ${offset}`;
   }
   if (terminalWidth < 38) {
-    return chatInputDisplayValue(`back ${offset}/${maxOffset} · PgDn`, terminalWidth);
+    return selectChatPlaceholder(terminalWidth, [
+      `back ${offset}/${maxOffset} · PgDn`,
+      `back ${offset}/${maxOffset}`,
+      `back ${offset}`,
+      "back"
+    ]);
   }
-  return chatInputDisplayValue(`message · back ${offset}/${maxOffset} · PgDn latest`, terminalWidth);
+  return selectChatPlaceholder(terminalWidth, [
+    `message · back ${offset}/${maxOffset} · PgDn latest`,
+    `back ${offset}/${maxOffset} · PgDn latest`,
+    `back ${offset}/${maxOffset} · PgDn`,
+    `back ${offset}/${maxOffset}`,
+    `back ${offset}`,
+    "back"
+  ]);
 }
 
 function chatTaskPlaceholderDisplayValue(terminalWidth: number, scrollable = false, activeTask = false): string {
   if (activeTask && terminalWidth >= 72) {
-    return chatInputDisplayValue(
-      scrollable
-        ? "message · scroll · ^N new · ^W logs · Tab · ^O attach"
-        : "message · ^N new · ^W logs · Tab · ^O attach",
-      terminalWidth
-    );
+    const active = scrollable
+      ? "message · scroll · ^N new · ^W logs · Tab · ^O attach"
+      : "message · ^N new · ^W logs · Tab · ^O attach";
+    if (displayWidth(active) <= chatPlaceholderValueWidth(terminalWidth)) {
+      return active;
+    }
   }
-  if (terminalWidth < 14) {
-    return "msg";
-  }
-  if (terminalWidth < 19) {
-    return "msg · ^W";
-  }
-  if (terminalWidth < 24) {
-    return "msg · ^W · ^O";
-  }
-  if (terminalWidth < 38) {
-    return chatInputDisplayValue(scrollable ? "message · Pg · ^W · ^O" : "message · ^W · ^O", terminalWidth);
-  }
-  if (scrollable && terminalWidth < 56) {
-    return chatInputDisplayValue("message · Pg · ^W · ^O", terminalWidth);
-  }
-  const roomy = scrollable
-    ? "message · scroll · ^W logs · Tab · ^O attach"
-    : "message · ^W logs · Tab · ^O attach";
-  if (displayWidth(roomy) > Math.max(1, terminalWidth - 6)) {
-    return chatInputDisplayValue(scrollable ? "message · Pg · ^W · ^O" : "message · ^W · ^O", terminalWidth);
-  }
-  return roomy;
+  return selectChatPlaceholder(
+    terminalWidth,
+    scrollable
+      ? [
+          "message · scroll · ^W logs · Tab · ^O attach",
+          "message · Pg · ^W · ^O",
+          "msg · Pg · ^W · ^O",
+          "msg · ^W · ^O",
+          "msg · ^W",
+          "msg"
+        ]
+      : [
+          "message · ^W logs · Tab · ^O attach",
+          "message · ^W · ^O",
+          "msg · ^W · ^O",
+          "msg · ^W",
+          "msg"
+        ]
+  );
+}
+
+function selectChatPlaceholder(terminalWidth: number, candidates: string[]): string {
+  const valueWidth = chatPlaceholderValueWidth(terminalWidth);
+  return candidates.find((candidate) => displayWidth(candidate) <= valueWidth)
+    ?? candidates.at(-1)
+    ?? "";
+}
+
+function chatPlaceholderValueWidth(terminalWidth: number): number {
+  return Math.max(1, terminalWidth - (terminalWidth >= 10 ? 6 : 4));
 }
 
 export function chatBusyDisplayValue(terminalWidth: number): string {

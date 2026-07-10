@@ -5,6 +5,62 @@ import { chatBusyDisplayValue, chatInputDisplayValue, chatPlaceholderDisplayValu
 import { displayWidth } from "../src/tui/display-width.js";
 
 describe("InputBar", () => {
+  it("keeps generated chat placeholders semantic across every supported width", () => {
+    const states = [
+      ["idle", {}],
+      ["workers", { hasWorkers: true }],
+      ["task", { hasWorkers: true, hasActiveTask: true }],
+      ["scrollable", { hasWorkers: true, hasActiveTask: true, maxScrollOffset: 20 }],
+      ["active", { hasActiveTask: true }],
+      ["retry", { canRetry: true }],
+      ["retry-task", { canRetry: true, hasActiveTask: true }],
+      ["back", { hasWorkers: true, scrollOffset: 3, maxScrollOffset: 20 }],
+      ["history", { maxScrollOffset: 20 }]
+    ] as const;
+    const clipped: string[] = [];
+
+    for (const [name, options] of states) {
+      for (let width = 8; width <= 80; width += 1) {
+        const value = chatPlaceholderDisplayValue(width, options);
+        if (value.includes("...")) {
+          clipped.push(`${name}:${width}:${value}`);
+        }
+      }
+    }
+
+    expect(clipped).toEqual([]);
+  });
+
+  it("keeps every empty chat prompt on one row across terminal widths", () => {
+    const states = [
+      ["idle", {}],
+      ["workers", { hasWorkers: true }],
+      ["task", { hasWorkers: true, hasActiveTask: true }],
+      ["scrollable", { hasWorkers: true, hasActiveTask: true, chatMaxScrollOffset: 20 }],
+      ["active", { hasActiveTask: true }],
+      ["retry", { canRetry: true }],
+      ["retry-task", { canRetry: true, hasActiveTask: true }],
+      ["back", { hasWorkers: true, chatScrollOffset: 3, chatMaxScrollOffset: 20 }],
+      ["history", { chatMaxScrollOffset: 20 }]
+    ] as const;
+    const invalid: string[] = [];
+
+    for (const [name, props] of states) {
+      for (let width = 8; width <= 80; width += 1) {
+        const view = render(
+          <InputBar mode="chat" value="" terminalWidth={width} onChange={() => {}} {...props} />
+        );
+        const frame = view.lastFrame() ?? "";
+        if (frame.split("\n").length !== 1 || displayWidth(frame) > width) {
+          invalid.push(`${name}:${width}:${displayWidth(frame)}:${frame}`);
+        }
+        view.unmount();
+      }
+    }
+
+    expect(invalid).toEqual([]);
+  });
+
   it("shows chat input busy state without mounting raw input", () => {
     const { lastFrame } = render(<InputBar mode="chat" busy value="hello" onChange={() => {}} />);
 
@@ -212,10 +268,18 @@ describe("InputBar", () => {
       "message · back 3/20 · PgDn latest"
     );
     expect(chatPlaceholderDisplayValue(30, scrolled)).toBe("back 3/20 · PgDn");
+    expect(chatPlaceholderDisplayValue(20, scrolled)).toBe("back 3/20");
     expect(chatPlaceholderDisplayValue(16, scrolled)).toBe("back 3");
+    expect(chatPlaceholderDisplayValue(38, scrolled)).toBe("back 3/20 · PgDn latest");
     expect(chatPlaceholderDisplayValue(30, { maxScrollOffset: 20 } as Parameters<typeof chatPlaceholderDisplayValue>[1])).toBe(
       "message · scroll"
     );
+    expect(chatPlaceholderDisplayValue(24, {
+      hasWorkers: true,
+      hasActiveTask: true,
+      maxScrollOffset: 20
+    })).toBe("msg · Pg · ^W · ^O");
+    expect(chatPlaceholderDisplayValue(22, { canRetry: true })).toBe("^R retry");
   });
 
   it("keeps ultra-narrow task chat prompt off the terminal edge", () => {
