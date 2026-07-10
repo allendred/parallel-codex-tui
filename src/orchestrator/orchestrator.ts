@@ -153,9 +153,12 @@ export class Orchestrator {
 
   async handleTaskTurn(input: HandleTaskTurnInput): Promise<HandleRequestResult> {
     const task: TaskSession = this.sessions.taskFromId(input.taskId);
-    const route = input.route ?? await this.routeRequest(input.request, input.cwd, input.signal);
+    const route = input.route ?? await this.routeRequest(input.request, input.cwd, input.signal, "follow-up");
     if (!input.route) {
       input.onRoute?.(route);
+    }
+    if (route.mode === "simple") {
+      return this.answerTaskQuestion(input);
     }
     const turn = await this.sessions.appendTurn(task, {
       request: input.request,
@@ -205,7 +208,7 @@ export class Orchestrator {
   }
 
   async routeTaskFollowUp(input: HandleTaskQuestionInput): Promise<TaskFollowUpRouteResult> {
-    const route = await this.routeRequest(input.request, input.cwd, input.signal);
+    const route = await this.routeRequest(input.request, input.cwd, input.signal, "follow-up");
     input.onRoute?.(route);
 
     return {
@@ -669,12 +672,31 @@ export class Orchestrator {
     throw cancelled ? cancellationError() : error;
   }
 
-  private async routeRequest(request: string, workspace: string, signal?: AbortSignal): Promise<RouteDecision> {
-    const route = await routeRequestWithCodex(request, this.config, this.routeRunner, this.routerCwd, signal);
+  private async routeRequest(
+    request: string,
+    workspace: string,
+    signal?: AbortSignal,
+    scope: "initial" | "follow-up" = "initial"
+  ): Promise<RouteDecision> {
+    const routeConfig: AppConfig = scope === "follow-up"
+      ? {
+          ...this.config,
+          router: {
+            ...this.config.router,
+            codex: {
+              ...this.config.router.codex,
+              timeoutMs: this.config.router.codex.followUpTimeoutMs,
+              fallback: "simple"
+            }
+          }
+        }
+      : this.config;
+    const route = await routeRequestWithCodex(request, routeConfig, this.routeRunner, this.routerCwd, signal);
     await appendJsonLine(join(this.routerCwd, "routes.jsonl"), {
       time: new Date().toISOString(),
       request,
       workspace,
+      scope,
       ...route
     });
     return route;

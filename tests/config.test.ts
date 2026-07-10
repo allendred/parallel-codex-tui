@@ -16,14 +16,20 @@ describe("config", () => {
     expect("complexityThreshold" in config.router).toBe(false);
     expect(config.router.codex.args).toEqual([
       "exec",
+      "--ephemeral",
+      "--ignore-rules",
+      "-c",
+      "model_reasoning_effort=low",
       "--skip-git-repo-check",
       "--sandbox",
-      "workspace-write",
+      "read-only",
       "--color",
       "never",
       "-"
     ]);
-    expect(config.router.codex.fallback).toBe("complex");
+    expect(config.router.codex.timeoutMs).toBe(30000);
+    expect(config.router.codex.fallback).toBe("simple");
+    expect(config.router.codex.followUpTimeoutMs).toBe(20000);
     expect(config.workers.codex.args).toEqual([
       "exec",
       "--skip-git-repo-check",
@@ -291,6 +297,7 @@ describe("config", () => {
         'command = "codex"',
         'args = ["exec", "--skip-git-repo-check", "--sandbox", "workspace-write", "--color", "never", "-"]',
         "timeoutMs = 120000",
+        "followUpTimeoutMs = 9000",
         'fallback = "complex"'
       ].join("\n")
     );
@@ -300,6 +307,7 @@ describe("config", () => {
     expect(config.router.codex.command).toBe("codex");
     expect(config.router.codex.args).toContain("exec");
     expect(config.router.codex.timeoutMs).toBe(120000);
+    expect(config.router.codex.followUpTimeoutMs).toBe(9000);
     expect(config.router.codex.fallback).toBe("complex");
   });
 

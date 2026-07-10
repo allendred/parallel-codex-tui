@@ -983,6 +983,105 @@ describe("Orchestrator", () => {
     });
   });
 
+  it("uses a short safe fallback for active task follow-ups when Codex routing fails", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pct-orch-follow-up-fallback-"));
+    const config = mockConfig(root);
+    config.router.defaultMode = "auto";
+    config.router.codex.timeoutMs = 120000;
+    config.router.codex.followUpTimeoutMs = 20000;
+    const manager = new SessionManager({
+      projectRoot: root,
+      dataDir: config.dataDir,
+      now: () => new Date("2026-06-30T03:30:00.000Z"),
+      randomId: () => "a1b2"
+    });
+    const task = await manager.createTask({
+      request: "实现俄罗斯方块",
+      cwd: root,
+      route: {
+        mode: "complex",
+        reason: "Requires workers.",
+        suggested_roles: ["judge", "actor", "critic"],
+        judge_engine: "mock",
+        actor_engine: "mock",
+        critic_engine: "mock"
+      }
+    });
+    let seenTimeout = 0;
+    let seenFallback = "";
+    const orchestrator = new Orchestrator(
+      config,
+      manager,
+      new Map([["mock", new MockWorkerAdapter()]]),
+      async (_prompt, routeConfig) => {
+        seenTimeout = routeConfig.router.codex.timeoutMs;
+        seenFallback = routeConfig.router.codex.fallback;
+        throw new Error("router transport unavailable");
+      }
+    );
+
+    const result = await orchestrator.routeTaskFollowUp({
+      taskId: task.id,
+      request: "你好",
+      cwd: root
+    });
+
+    expect(seenTimeout).toBe(20000);
+    expect(seenFallback).toBe("simple");
+    expect(result).toMatchObject({
+      mode: "simple",
+      taskId: null,
+      route: {
+        mode: "simple",
+        source: "fallback",
+        suggested_roles: []
+      }
+    });
+    expect(result.reason).toContain("fallback forced simple");
+  });
+
+  it("answers a directly handled simple task turn through Main without appending a worker turn", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pct-orch-direct-simple-turn-"));
+    const config = mockConfig(root);
+    config.router.defaultMode = "auto";
+    const manager = new SessionManager({
+      projectRoot: root,
+      dataDir: config.dataDir,
+      now: () => new Date("2026-06-30T03:30:00.000Z"),
+      randomId: () => "a1b2"
+    });
+    const task = await manager.createTask({
+      request: "实现俄罗斯方块",
+      cwd: root,
+      route: {
+        mode: "complex",
+        reason: "Requires workers.",
+        suggested_roles: ["judge", "actor", "critic"],
+        judge_engine: "mock",
+        actor_engine: "mock",
+        critic_engine: "mock"
+      }
+    });
+    const adapter = new CapturingAdapter();
+    const orchestrator = new Orchestrator(
+      config,
+      manager,
+      new Map([["mock", adapter]]),
+      async () => JSON.stringify({ mode: "simple", reason: "Conversational follow-up." })
+    );
+
+    const result = await orchestrator.handleTaskTurn({
+      taskId: task.id,
+      request: "你好",
+      cwd: root
+    });
+
+    expect(result.mode).toBe("simple");
+    expect(adapter.runs.map((run) => run.role)).toEqual(["main"]);
+    expect(await pathExists(join(task.dir, "turns", "0002"))).toBe(false);
+    expect(await pathExists(join(task.dir, "actor-mock"))).toBe(false);
+  });
+
   it("reuses the precomputed complex follow-up decision when starting the task turn", async () => {
     const appRoot = await mkdtemp(join(tmpdir(), "pct-orch-follow-up-once-app-"));
     const workspaceRoot = await mkdtemp(join(tmpdir(), "pct-orch-follow-up-once-workspace-"));

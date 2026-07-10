@@ -1,3 +1,6 @@
+import { mkdtemp } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { defaultConfig } from "../src/core/config.js";
 import * as router from "../src/core/router.js";
@@ -156,15 +159,15 @@ describe("routeRequestWithCodex", () => {
     expect(route.suggested_roles).toEqual([]);
   });
 
-  it("falls back to configured non-rule routing when Codex returns invalid JSON", async () => {
+  it("fails safely to simple routing when Codex returns invalid JSON", async () => {
     const config = defaultConfig("/tmp/project");
     const runner: CodexRouteRunner = async () => "not json";
 
     const route = await routeRequestWithCodex("你好", config, runner);
 
-    expect(route.mode).toBe("complex");
+    expect(route.mode).toBe("simple");
     expect(route.reason).toContain("Codex router failed");
-    expect(route.reason).toContain("Codex router fallback forced complex.");
+    expect(route.reason).toContain("Codex router fallback forced simple.");
     expect(route.source).toBe("fallback");
     expect(route.duration_ms).toEqual(expect.any(Number));
   });
@@ -185,8 +188,28 @@ describe("routeRequestWithCodex", () => {
     });
   });
 
+  it("terminates a stalled router process at the configured timeout", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pct-router-timeout-"));
+    const config = defaultConfig(root);
+    config.router.codex.command = process.execPath;
+    config.router.codex.args = ["-e", "setInterval(() => {}, 1000)"];
+    config.router.codex.timeoutMs = 25;
+
+    const route = await routeRequestWithCodex("你好", config, undefined, root);
+
+    expect(route).toMatchObject({
+      mode: "simple",
+      source: "fallback",
+      suggested_roles: []
+    });
+    expect(route.reason).toContain("timed out after 25ms");
+    expect(route.duration_ms).toBeGreaterThanOrEqual(20);
+    expect(route.duration_ms).toBeLessThan(1000);
+  });
+
   it("summarizes noisy Codex router process errors before adding fallback reason", async () => {
     const config = defaultConfig("/tmp/project");
+    config.router.codex.fallback = "complex";
     const runner: CodexRouteRunner = async () => {
       throw new Error(
         [
@@ -213,14 +236,14 @@ describe("routeRequestWithCodex", () => {
     expect(route.reason).not.toContain("\n");
   });
 
-  it("supports an explicit simple fallback without local rules", async () => {
+  it("supports an explicit complex fallback without local rules", async () => {
     const config = defaultConfig("/tmp/project");
-    config.router.codex.fallback = "simple";
+    config.router.codex.fallback = "complex";
     const runner: CodexRouteRunner = async () => "not json";
 
     const route = await routeRequestWithCodex("实现一个大型功能", config, runner);
 
-    expect(route.mode).toBe("simple");
-    expect(route.reason).toContain("Codex router fallback forced simple.");
+    expect(route.mode).toBe("complex");
+    expect(route.reason).toContain("Codex router fallback forced complex.");
   });
 });

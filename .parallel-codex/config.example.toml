@@ -3,9 +3,11 @@ defaultMode = "auto"
 
 [router.codex]
 command = "codex"
-args = ["exec", "--skip-git-repo-check", "--sandbox", "workspace-write", "--color", "never", "-"]
-timeoutMs = 120000
-fallback = "complex"
+args = ["exec", "--ephemeral", "--ignore-rules", "-c", "model_reasoning_effort=low", "--skip-git-repo-check", "--sandbox", "read-only", "--color", "never", "-"]
+timeoutMs = 30000
+# Active-task follow-ups fail safely to Main after this shorter Codex timeout.
+followUpTimeoutMs = 20000
+fallback = "simple"
 
 [orchestration]
 # Maximum Actor or Critic feature workers running at the same time (1..8).

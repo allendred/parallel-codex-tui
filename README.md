@@ -173,12 +173,13 @@ defaultMode = "auto"
 
 [router.codex]
 command = "codex"
-args = ["exec", "--skip-git-repo-check", "--sandbox", "workspace-write", "--color", "never", "-"]
-timeoutMs = 120000
-fallback = "complex"
+args = ["exec", "--ephemeral", "--ignore-rules", "-c", "model_reasoning_effort=low", "--skip-git-repo-check", "--sandbox", "read-only", "--color", "never", "-"]
+timeoutMs = 30000
+followUpTimeoutMs = 20000
+fallback = "simple"
 ```
 
-Set `defaultMode = "simple"` / `defaultMode = "complex"` to force one path. In `auto` mode, routing is semantic through Codex. If the router process fails or returns invalid JSON, `fallback = "simple"` or `fallback = "complex"` decides the path; there is no keyword-only router.
+Set `defaultMode = "simple"` / `defaultMode = "complex"` to force one path. In `auto` mode, routing is semantic through an ephemeral, low-reasoning Codex run. If initial routing fails or returns invalid JSON, `fallback = "simple"` or `fallback = "complex"` decides the path; the safe default is `simple` and there is no keyword-only router. Active-task follow-ups use `followUpTimeoutMs` and always fail safely to the persistent Main session instead of accidentally starting Actor/Critic workers.
 
 ## Mock Mode
 

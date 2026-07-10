@@ -53,9 +53,22 @@ const UiColorOverridesSchema = z.object(
 
 const CodexRouterConfigSchema = z.object({
   command: z.string().min(1).default("codex"),
-  args: z.array(z.string()).default(["exec", "--skip-git-repo-check", "--sandbox", "workspace-write", "--color", "never", "-"]),
-  timeoutMs: z.number().int().positive().default(120000),
-  fallback: z.enum(["simple", "complex"]).default("complex")
+  args: z.array(z.string()).default([
+    "exec",
+    "--ephemeral",
+    "--ignore-rules",
+    "-c",
+    "model_reasoning_effort=low",
+    "--skip-git-repo-check",
+    "--sandbox",
+    "read-only",
+    "--color",
+    "never",
+    "-"
+  ]),
+  timeoutMs: z.number().int().positive().default(30000),
+  followUpTimeoutMs: z.number().int().positive().max(120000).default(20000),
+  fallback: z.enum(["simple", "complex"]).default("simple")
 });
 
 const OrchestrationConfigSchema = z.object({
@@ -118,9 +131,22 @@ export function defaultConfig(projectRoot: string): AppConfig {
       defaultMode: "auto",
       codex: {
         command: "codex",
-        args: ["exec", "--skip-git-repo-check", "--sandbox", "workspace-write", "--color", "never", "-"],
-        timeoutMs: 120000,
-        fallback: "complex"
+        args: [
+          "exec",
+          "--ephemeral",
+          "--ignore-rules",
+          "-c",
+          "model_reasoning_effort=low",
+          "--skip-git-repo-check",
+          "--sandbox",
+          "read-only",
+          "--color",
+          "never",
+          "-"
+        ],
+        timeoutMs: 30000,
+        followUpTimeoutMs: 20000,
+        fallback: "simple"
       }
     },
     orchestration: {
