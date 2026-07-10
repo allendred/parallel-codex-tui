@@ -3,15 +3,19 @@ import type { AppConfig } from "./config.js";
 import type { RouteDecision } from "../domain/schemas.js";
 import { RouteDecisionSchema } from "../domain/schemas.js";
 
-export type CodexRouteRunner = (prompt: string, config: AppConfig, cwd: string) => Promise<string>;
+export type CodexRouteRunner = (prompt: string, config: AppConfig, cwd: string, signal?: AbortSignal) => Promise<string>;
 
 export async function routeRequestWithCodex(
   request: string,
   config: AppConfig,
   runner: CodexRouteRunner = runCodexRouterProcess,
-  cwd = config.projectRoot
+  cwd = config.projectRoot,
+  signal?: AbortSignal
 ): Promise<RouteDecision> {
   const startedAt = Date.now();
+  if (signal?.aborted) {
+    throw cancellationError();
+  }
   if (config.router.defaultMode === "simple") {
     return annotateRoute(simpleRoute("Forced simple mode from config.", config), "forced", startedAt);
   }
@@ -21,10 +25,13 @@ export async function routeRequestWithCodex(
   }
 
   try {
-    const output = await runner(buildCodexRouterPrompt(request, config), config, cwd);
+    const output = await runner(buildCodexRouterPrompt(request, config), config, cwd, signal);
     const route = parseCodexRoute(output, config);
     return annotateRoute(RouteDecisionSchema.parse(route), "codex", startedAt);
   } catch (error) {
+    if (signal?.aborted || isAbortError(error)) {
+      throw cancellationError();
+    }
     const fallback = annotateRoute(fallbackRoute(config), "fallback", startedAt);
     return {
       ...fallback,
@@ -45,8 +52,17 @@ function annotateRoute(
   };
 }
 
-export async function runCodexRouterProcess(prompt: string, config: AppConfig, cwd = config.projectRoot): Promise<string> {
+export async function runCodexRouterProcess(
+  prompt: string,
+  config: AppConfig,
+  cwd = config.projectRoot,
+  signal?: AbortSignal
+): Promise<string> {
   const { command, args, timeoutMs } = config.router.codex;
+
+  if (signal?.aborted) {
+    throw cancellationError();
+  }
 
   return new Promise<string>((resolve, reject) => {
     const child = spawn(command, args, {
@@ -58,6 +74,7 @@ export async function runCodexRouterProcess(prompt: string, config: AppConfig, c
     let stderr = "";
     let settled = false;
     let timeout: NodeJS.Timeout | undefined;
+    let abortListener: (() => void) | undefined;
 
     const finish = (error: Error | null, output = stdout): void => {
       if (settled) {
@@ -67,6 +84,9 @@ export async function runCodexRouterProcess(prompt: string, config: AppConfig, c
       if (timeout) {
         clearTimeout(timeout);
       }
+      if (abortListener) {
+        signal?.removeEventListener("abort", abortListener);
+      }
       if (error) {
         reject(error);
       } else {
@@ -74,9 +94,22 @@ export async function runCodexRouterProcess(prompt: string, config: AppConfig, c
       }
     };
 
+    const terminate = (): void => {
+      child.kill("SIGTERM");
+      const forceKill = setTimeout(() => child.kill("SIGKILL"), 1500);
+      forceKill.unref();
+      child.once("close", () => clearTimeout(forceKill));
+    };
+
+    abortListener = () => {
+      terminate();
+      finish(cancellationError());
+    };
+    signal?.addEventListener("abort", abortListener, { once: true });
+
     if (timeoutMs > 0) {
       timeout = setTimeout(() => {
-        child.kill("SIGTERM");
+        terminate();
         finish(new Error(`Codex router timed out after ${timeoutMs}ms`));
       }, timeoutMs);
     }
@@ -110,6 +143,16 @@ export async function runCodexRouterProcess(prompt: string, config: AppConfig, c
     child.stdin.write(prompt);
     child.stdin.end();
   });
+}
+
+function cancellationError(): Error {
+  const error = new Error("Request cancelled.");
+  error.name = "AbortError";
+  return error;
+}
+
+function isAbortError(error: unknown): boolean {
+  return error instanceof Error && error.name === "AbortError";
 }
 
 function buildCodexRouterPrompt(request: string, config: AppConfig): string {

@@ -114,6 +114,78 @@ describe("ProcessWorkerAdapter", () => {
     expect(result.exitCode).toBe(0);
   });
 
+  it("cancels a running worker through AbortSignal and persists cancelled state", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pct-process-cancel-"));
+    const filesDir = join(root, "actor-mock");
+    const promptPath = join(filesDir, "prompt.md");
+    const outputLogPath = join(filesDir, "output.log");
+    const statusPath = join(filesDir, "status.json");
+    const controller = new AbortController();
+    const script = "console.log('ready to cancel');setInterval(() => {}, 1000)";
+
+    await writeText(promptPath, "cancel me");
+    await writeText(outputLogPath, "");
+    const adapter = new ProcessWorkerAdapter(process.execPath, ["-e", script]);
+    const running = adapter.run({
+      workerId: "actor-mock",
+      role: "actor",
+      engine: "mock",
+      cwd: root,
+      filesDir,
+      promptPath,
+      outputLogPath,
+      statusPath,
+      prompt: "cancel me",
+      signal: controller.signal
+    });
+
+    await waitForStatusPhase(statusPath, "process-output");
+    controller.abort();
+    const result = await running;
+    const status = await readJson(statusPath, WorkerStatusSchema);
+
+    expect(result.cancelled).toBe(true);
+    expect(status.state).toBe("cancelled");
+    expect(status.phase).toBe("process-cancelled");
+    expect(await readTextIfExists(outputLogPath)).toContain("Process cancelled by user");
+  });
+
+  it("force kills a cancelled worker that ignores SIGTERM", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pct-process-force-cancel-"));
+    const filesDir = join(root, "actor-mock");
+    const promptPath = join(filesDir, "prompt.md");
+    const outputLogPath = join(filesDir, "output.log");
+    const statusPath = join(filesDir, "status.json");
+    const controller = new AbortController();
+    const script = "process.on('SIGTERM',()=>{});console.log('ignoring term');setInterval(()=>{},1000)";
+
+    await writeText(promptPath, "force cancel me");
+    const adapter = new ProcessWorkerAdapter(process.execPath, ["-e", script]);
+    const running = adapter.run({
+      workerId: "actor-mock",
+      role: "actor",
+      engine: "mock",
+      cwd: root,
+      filesDir,
+      promptPath,
+      outputLogPath,
+      statusPath,
+      prompt: "force cancel me",
+      signal: controller.signal
+    });
+
+    await waitForStatusPhase(statusPath, "process-output");
+    controller.abort();
+    const result = await running;
+
+    expect(result.cancelled).toBe(true);
+    expect(result.signal).toBe("SIGKILL");
+    await expect(readJson(statusPath, WorkerStatusSchema)).resolves.toMatchObject({
+      state: "cancelled",
+      phase: "process-cancelled"
+    });
+  }, 5000);
+
   it("fails workers that stop producing output for the idle timeout", async () => {
     const root = await mkdtemp(join(tmpdir(), "pct-process-idle-"));
     const filesDir = join(root, "actor-mock");

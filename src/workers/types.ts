@@ -27,6 +27,7 @@ export interface WorkerRunSpec {
   timeoutMs?: number;
   idleTimeoutMs?: number;
   firstOutputTimeoutMs?: number;
+  signal?: AbortSignal;
   nativeSession?: NativeSession | null;
   nativeSessionConfig?: NativeSessionRunConfig;
   modelConfig?: WorkerModelRunConfig;
@@ -38,6 +39,7 @@ export interface WorkerResult {
   workerId: string;
   exitCode: number;
   signal: NodeJS.Signals | null;
+  cancelled?: boolean;
 }
 
 export interface WorkerAdapter {

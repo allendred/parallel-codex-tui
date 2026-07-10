@@ -9,7 +9,8 @@ export type FeatureState =
   | "critic_running"
   | "revision_needed"
   | "approved"
-  | "failed";
+  | "failed"
+  | "cancelled";
 
 export interface FeatureChannel {
   id: string;

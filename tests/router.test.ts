@@ -169,6 +169,22 @@ describe("routeRequestWithCodex", () => {
     expect(route.duration_ms).toEqual(expect.any(Number));
   });
 
+  it("propagates cancellation instead of converting it into a fallback route", async () => {
+    const config = defaultConfig("/tmp/project");
+    const controller = new AbortController();
+    const runner: CodexRouteRunner = async (_prompt, _config, _cwd, signal) => new Promise((_resolve, reject) => {
+      signal?.addEventListener("abort", () => reject(new Error("router stopped")), { once: true });
+    });
+    const pending = routeRequestWithCodex("实现一个大型功能", config, runner, "/tmp/router", controller.signal);
+
+    controller.abort();
+
+    await expect(pending).rejects.toMatchObject({
+      name: "AbortError",
+      message: "Request cancelled."
+    });
+  });
+
   it("summarizes noisy Codex router process errors before adding fallback reason", async () => {
     const config = defaultConfig("/tmp/project");
     const runner: CodexRouteRunner = async () => {

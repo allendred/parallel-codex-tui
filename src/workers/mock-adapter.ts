@@ -7,6 +7,9 @@ export class MockWorkerAdapter implements WorkerAdapter {
   readonly name = "mock" as const;
 
   async run(spec: WorkerRunSpec): Promise<WorkerResult> {
+    if (spec.signal?.aborted) {
+      return cancelMockWorker(spec);
+    }
     const nativeSessionId = spec.nativeSession?.session_id ?? `mock-${spec.workerId}`;
     await spec.onNativeSession?.(nativeSessionId);
     await setStatus(spec, "running", "mock-running", `${spec.role} mock worker running`, nativeSessionId);
@@ -44,6 +47,10 @@ export class MockWorkerAdapter implements WorkerAdapter {
       await appendText(spec.outputLogPath, `Mock simple response for: ${mainRequestFromPrompt(spec.prompt)}\n`);
     }
 
+    if (spec.signal?.aborted) {
+      return cancelMockWorker(spec, nativeSessionId);
+    }
+
     await appendText(spec.outputLogPath, `[mock:${spec.role}] done\n`);
     await setStatus(spec, "done", "mock-done", `${spec.role} mock worker done`, nativeSessionId);
 
@@ -53,6 +60,17 @@ export class MockWorkerAdapter implements WorkerAdapter {
       signal: null
     };
   }
+}
+
+async function cancelMockWorker(spec: WorkerRunSpec, nativeSessionId?: string): Promise<WorkerResult> {
+  await appendText(spec.outputLogPath, "[mock] cancelled\n");
+  await setStatus(spec, "cancelled", "mock-cancelled", `${spec.role} mock worker cancelled`, nativeSessionId);
+  return {
+    workerId: spec.workerId,
+    exitCode: 130,
+    signal: "SIGTERM",
+    cancelled: true
+  };
 }
 
 function mainRequestFromPrompt(prompt: string): string {

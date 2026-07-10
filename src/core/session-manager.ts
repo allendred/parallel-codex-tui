@@ -2,6 +2,7 @@ import { readdir } from "node:fs/promises";
 import { basename, dirname, join } from "node:path";
 import {
   appendJsonLine,
+  appendText,
   ensureDir,
   pathExists,
   readJson,
@@ -56,6 +57,7 @@ export interface InitializeWorkerInput {
   role: WorkerRole;
   engine: EngineName;
   prompt: string;
+  preserveOutput?: boolean;
 }
 
 export interface WorkerFiles {
@@ -240,7 +242,11 @@ export class SessionManager {
     await ensureDir(dir);
     await this.clearWorkerArtifacts(dir, input.role);
     await writeText(promptPath, input.prompt);
-    await writeText(outputLogPath, "");
+    if (input.preserveOutput && (await pathExists(outputLogPath))) {
+      await appendText(outputLogPath, `\n--- retry ${this.now().toISOString()} ---\n`);
+    } else {
+      await writeText(outputLogPath, "");
+    }
     await writeJson(statusPath, status);
     await this.index?.upsertWorker(task.id, status, {
       dir,

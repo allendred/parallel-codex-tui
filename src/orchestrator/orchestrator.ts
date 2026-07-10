@@ -5,7 +5,7 @@ import { appendJsonLine, ensureDir, pathExists, readJson, readTextIfExists, writ
 import { routerRuntimeDir } from "../core/paths.js";
 import { routeRequestWithCodex, type CodexRouteRunner } from "../core/router.js";
 import type { SessionManager, TaskSession, TaskTurn, WorkerFiles } from "../core/session-manager.js";
-import { TaskMetaSchema, WorkerStatusSchema, type EngineName, type NativeSession, type RouteDecision, type WorkerRole, type WorkerStatus } from "../domain/schemas.js";
+import { RouteDecisionSchema, TaskMetaSchema, WorkerStatusSchema, type EngineName, type NativeSession, type RouteDecision, type WorkerRole, type WorkerStatus } from "../domain/schemas.js";
 import { getAdapter, type WorkerRegistry } from "../workers/registry.js";
 import type { WorkerResult, WorkerRunSpec } from "../workers/types.js";
 import {
@@ -25,6 +25,8 @@ const PREVIOUS_TURN_SUMMARY_LENGTH = 600;
 export interface HandleRequestInput {
   request: string;
   cwd: string;
+  signal?: AbortSignal;
+  retry?: boolean;
   onRoute?: (route: RouteDecision) => void;
   onStatus?: (status: WorkerRunStatus) => void;
   onWorker?: (worker: WorkerLogRef) => void;
@@ -36,6 +38,10 @@ export interface HandleTaskTurnInput extends HandleRequestInput {
 }
 
 export interface HandleTaskQuestionInput extends HandleRequestInput {
+  taskId: string;
+}
+
+export interface RetryTaskInput extends Omit<HandleRequestInput, "request"> {
   taskId: string;
 }
 
@@ -80,20 +86,26 @@ export class Orchestrator {
   ) {}
 
   async handleRequest(input: HandleRequestInput): Promise<HandleRequestResult> {
-    const route = await this.routeRequest(input.request, input.cwd);
+    const route = await this.routeRequest(input.request, input.cwd, input.signal);
     input.onRoute?.(route);
     const workers: WorkerLogRef[] = [];
 
     if (route.mode === "simple") {
-      input.onStatus?.({ taskId: "main", main: "running" });
-      const output = await this.runMain(input, workers);
-      input.onStatus?.({ taskId: "main", main: "done" });
-      return {
-        mode: "simple",
-        taskId: null,
-        summary: extractMainResponse(output) || emptyMainResponseSummary(),
-        workers
-      };
+      try {
+        input.onStatus?.({ taskId: "main", main: "running" });
+        const output = await this.runMain(input, workers);
+        input.onStatus?.({ taskId: "main", main: "done" });
+        return {
+          mode: "simple",
+          taskId: null,
+          summary: extractMainResponse(output) || emptyMainResponseSummary(),
+          workers
+        };
+      } catch (error) {
+        const cancelled = isCancellation(error, input.signal);
+        input.onStatus?.({ taskId: "main", main: cancelled ? "cancelled" : "failed" });
+        throw cancelled ? cancellationError() : error;
+      }
     }
 
     const task = await this.sessions.createTask({
@@ -109,81 +121,12 @@ export class Orchestrator {
       routePath: join(task.dir, "turns", "0001", "route.json")
     };
 
-    try {
-      await this.sessions.updateTaskStatus(task, "judging");
-      input.onStatus?.({ taskId: task.id, judge: "running", actor: "waiting", critic: "waiting" });
-      const judge = await this.runJudge(input, task, route.judge_engine, workers, turn);
-      const feature = await createFeatureChannel({
-        task,
-        turn,
-        request: input.request,
-        judgeDir: judge.dir
-      });
-
-      await this.sessions.updateTaskStatus(task, "actor_running");
-      await updateFeatureStatus(feature, "actor_running");
-      input.onStatus?.({ taskId: task.id, judge: "done", actor: "running", critic: "waiting" });
-      let actor = await this.runActor(input, task, route.actor_engine, judge.dir, workers, turn, feature);
-
-      await this.sessions.updateTaskStatus(task, "critic_running");
-      await updateFeatureStatus(feature, "critic_running");
-      input.onStatus?.({ taskId: task.id, judge: "done", actor: "done", critic: "running" });
-      let critic = await this.runCritic(input, task, route.critic_engine, judge.dir, actor.dir, workers, turn, feature);
-      const review = await readTextIfExists(`${critic.dir}/review.md`);
-
-      if (review.includes("REVISION_REQUIRED")) {
-        await this.sessions.updateTaskStatus(task, "revision_needed");
-        await updateFeatureStatus(feature, "revision_needed");
-        await appendFeatureDialogue(feature, "critic.revision_requested", "critic", "Critic requested Actor revision.", {
-          review: join(critic.dir, "review.md"),
-          findings: feature.criticFindingsPath
-        });
-        input.onStatus?.({ taskId: task.id, judge: "done", actor: "revision", critic: "done" });
-        actor = await this.runActor(
-          input,
-          task,
-          route.actor_engine,
-          judge.dir,
-          workers,
-          turn,
-          feature,
-          buildRevisionRequest(review, feature)
-        );
-        await this.sessions.updateTaskStatus(task, "critic_running");
-        await updateFeatureStatus(feature, "critic_running");
-        input.onStatus?.({ taskId: task.id, judge: "done", actor: "done", critic: "rerunning" });
-        critic = await this.runCritic(input, task, route.critic_engine, judge.dir, actor.dir, workers, turn, feature);
-      }
-
-      await this.sessions.updateTaskStatus(task, "done");
-      input.onStatus?.({ taskId: task.id, judge: "done", actor: "done", critic: "done" });
-      const summary = await buildSupervisorSummary({
-        judgeDir: judge.dir,
-        actorDir: actor.dir,
-        criticDir: critic.dir,
-        turnDir: turn.dir,
-        featureActorWorklogPath: feature.actorWorklogPath,
-        featureCriticFindingsPath: feature.criticFindingsPath
-      });
-      await writeText(join(turn.dir, "supervisor-summary.md"), `${summary}\n`);
-      await writeFeatureDecision(feature, summary);
-      await updateFeatureStatus(feature, "approved");
-
-      return {
-        mode: "complex",
-        taskId: task.id,
-        summary,
-        workers
-      };
-    } catch (error) {
-      await this.sessions.updateTaskStatus(task, "failed");
-      throw error;
-    }
+    return this.runInitialTask(input, task, route, turn, workers);
   }
 
   async handleTaskTurn(input: HandleTaskTurnInput): Promise<HandleRequestResult> {
     const task: TaskSession = this.sessions.taskFromId(input.taskId);
-    const route = input.route ?? await this.routeRequest(input.request, input.cwd);
+    const route = input.route ?? await this.routeRequest(input.request, input.cwd, input.signal);
     if (!input.route) {
       input.onRoute?.(route);
     }
@@ -192,81 +135,50 @@ export class Orchestrator {
       route
     });
     const workers: WorkerLogRef[] = [];
-    const judgeEngine = route.judge_engine;
-    const actorEngine = route.actor_engine;
-    const criticEngine = route.critic_engine;
-    const judge = this.workerFiles(task, `judge-${judgeEngine}`);
-    const feature = await createFeatureChannel({
-      task,
-      turn,
-      request: input.request,
-      judgeDir: judge.dir
-    });
+    return this.runPairTask(input, task, route, turn, workers);
+  }
 
-    try {
-      await this.sessions.updateTaskStatus(task, "actor_running");
-      await updateFeatureStatus(feature, "actor_running");
-      input.onStatus?.({ taskId: task.id, judge: "done", actor: "running", critic: "waiting" });
-      let actor = await this.runActor(input, task, actorEngine, judge.dir, workers, turn, feature);
-
-      await this.sessions.updateTaskStatus(task, "critic_running");
-      await updateFeatureStatus(feature, "critic_running");
-      input.onStatus?.({ taskId: task.id, judge: "done", actor: "done", critic: "running" });
-      let critic = await this.runCritic(input, task, criticEngine, judge.dir, actor.dir, workers, turn, feature);
-      const review = await readTextIfExists(`${critic.dir}/review.md`);
-
-      if (review.includes("REVISION_REQUIRED")) {
-        await this.sessions.updateTaskStatus(task, "revision_needed");
-        await updateFeatureStatus(feature, "revision_needed");
-        await appendFeatureDialogue(feature, "critic.revision_requested", "critic", "Critic requested Actor revision.", {
-          review: join(critic.dir, "review.md"),
-          findings: feature.criticFindingsPath
-        });
-        input.onStatus?.({ taskId: task.id, judge: "done", actor: "revision", critic: "done" });
-        actor = await this.runActor(
-          input,
-          task,
-          actorEngine,
-          judge.dir,
-          workers,
-          turn,
-          feature,
-          buildRevisionRequest(review, feature)
-        );
-        await this.sessions.updateTaskStatus(task, "critic_running");
-        await updateFeatureStatus(feature, "critic_running");
-        input.onStatus?.({ taskId: task.id, judge: "done", actor: "done", critic: "rerunning" });
-        critic = await this.runCritic(input, task, criticEngine, judge.dir, actor.dir, workers, turn, feature);
-      }
-
-      await this.sessions.updateTaskStatus(task, "done");
-      input.onStatus?.({ taskId: task.id, judge: "done", actor: "done", critic: "done" });
-      const summary = await buildSupervisorSummary({
-        judgeDir: judge.dir,
-        actorDir: actor.dir,
-        criticDir: critic.dir,
-        turnDir: turn.dir,
-        featureActorWorklogPath: feature.actorWorklogPath,
-        featureCriticFindingsPath: feature.criticFindingsPath
-      });
-      await writeText(join(turn.dir, "supervisor-summary.md"), `${summary}\n`);
-      await writeFeatureDecision(feature, summary);
-      await updateFeatureStatus(feature, "approved");
-
-      return {
-        mode: "complex",
-        taskId: task.id,
-        summary,
-        workers
-      };
-    } catch (error) {
-      await this.sessions.updateTaskStatus(task, "failed");
-      throw error;
+  async retryTask(input: RetryTaskInput): Promise<HandleRequestResult> {
+    const task = this.sessions.taskFromId(input.taskId);
+    const meta = await readTaskMetaIfValid(task.metaPath);
+    if (!meta) {
+      throw new Error(`Task session not found: ${input.taskId}`);
     }
+    if (meta.status !== "failed" && meta.status !== "cancelled") {
+      throw new Error(`Task ${input.taskId} is ${meta.status}; only failed or cancelled tasks can be retried.`);
+    }
+
+    const turn = await this.sessions.latestTurn(task);
+    if (!turn) {
+      throw new Error(`Task ${input.taskId} has no turn to retry.`);
+    }
+    const request = (await readTextIfExists(turn.userPath)).trim();
+    if (!request) {
+      throw new Error(`Task ${input.taskId} turn ${turn.turnId} has no request to retry.`);
+    }
+    const route = await readJson(turn.routePath, RouteDecisionSchema);
+    const executionInput: HandleRequestInput = {
+      ...input,
+      request,
+      cwd: meta.cwd,
+      retry: true
+    };
+    const workers: WorkerLogRef[] = [];
+
+    await this.sessions.appendEvent(task, "task.retrying", `Retrying turn ${turn.turnId}`);
+    input.onRoute?.(route);
+    return turn.turnId === "0001"
+      ? this.runInitialTask(executionInput, task, route, turn, workers)
+      : this.runPairTask(executionInput, task, route, turn, workers);
+  }
+
+  async canRetryTask(taskId: string): Promise<boolean> {
+    const meta = await readTaskMetaIfValid(this.sessions.taskFromId(taskId).metaPath);
+    return meta?.status === "failed" || meta?.status === "cancelled";
   }
 
   async routeTaskFollowUp(input: HandleTaskQuestionInput): Promise<TaskFollowUpRouteResult> {
-    const route = await this.routeRequest(input.request, input.cwd);
+    const route = await this.routeRequest(input.request, input.cwd, input.signal);
     input.onRoute?.(route);
 
     return {
@@ -355,8 +267,155 @@ export class Orchestrator {
     return workers.sort((left, right) => workerRoleOrder(left.role) - workerRoleOrder(right.role));
   }
 
-  private async routeRequest(request: string, workspace: string): Promise<RouteDecision> {
-    const route = await routeRequestWithCodex(request, this.config, this.routeRunner, this.routerCwd);
+  private async runInitialTask(
+    input: HandleRequestInput,
+    task: TaskSession,
+    route: RouteDecision,
+    turn: TaskTurn,
+    workers: WorkerLogRef[]
+  ): Promise<HandleRequestResult> {
+    let feature: FeatureChannel | null = null;
+    try {
+      await this.sessions.updateTaskStatus(task, "judging");
+      input.onStatus?.({ taskId: task.id, judge: "running", actor: "waiting", critic: "waiting" });
+      const judge = await this.runJudge(input, task, route.judge_engine, workers, turn);
+      throwIfCancelled(input.signal);
+      feature = await createFeatureChannel({
+        task,
+        turn,
+        request: input.request,
+        judgeDir: judge.dir
+      });
+      return await this.runActorCriticPair(input, task, route, turn, workers, judge, feature);
+    } catch (error) {
+      return this.failTask(task, feature, input, error);
+    }
+  }
+
+  private async runPairTask(
+    input: HandleRequestInput,
+    task: TaskSession,
+    route: RouteDecision,
+    turn: TaskTurn,
+    workers: WorkerLogRef[]
+  ): Promise<HandleRequestResult> {
+    const judge = this.workerFiles(task, `judge-${route.judge_engine}`);
+    let feature: FeatureChannel | null = null;
+    try {
+      feature = await createFeatureChannel({
+        task,
+        turn,
+        request: input.request,
+        judgeDir: judge.dir
+      });
+      return await this.runActorCriticPair(input, task, route, turn, workers, judge, feature);
+    } catch (error) {
+      return this.failTask(task, feature, input, error);
+    }
+  }
+
+  private async runActorCriticPair(
+    input: HandleRequestInput,
+    task: TaskSession,
+    route: RouteDecision,
+    turn: TaskTurn,
+    workers: WorkerLogRef[],
+    judge: WorkerFiles,
+    feature: FeatureChannel
+  ): Promise<HandleRequestResult> {
+    throwIfCancelled(input.signal);
+    await this.sessions.updateTaskStatus(task, "actor_running");
+    await updateFeatureStatus(feature, "actor_running");
+    input.onStatus?.({ taskId: task.id, judge: "done", actor: "running", critic: "waiting" });
+    let actor = await this.runActor(input, task, route.actor_engine, judge.dir, workers, turn, feature);
+    throwIfCancelled(input.signal);
+
+    await this.sessions.updateTaskStatus(task, "critic_running");
+    await updateFeatureStatus(feature, "critic_running");
+    input.onStatus?.({ taskId: task.id, judge: "done", actor: "done", critic: "running" });
+    let critic = await this.runCritic(input, task, route.critic_engine, judge.dir, actor.dir, workers, turn, feature);
+    throwIfCancelled(input.signal);
+    const review = await readTextIfExists(`${critic.dir}/review.md`);
+
+    if (review.includes("REVISION_REQUIRED")) {
+      await this.sessions.updateTaskStatus(task, "revision_needed");
+      await updateFeatureStatus(feature, "revision_needed");
+      await appendFeatureDialogue(feature, "critic.revision_requested", "critic", "Critic requested Actor revision.", {
+        review: join(critic.dir, "review.md"),
+        findings: feature.criticFindingsPath
+      });
+      input.onStatus?.({ taskId: task.id, judge: "done", actor: "revision", critic: "done" });
+      actor = await this.runActor(
+        input,
+        task,
+        route.actor_engine,
+        judge.dir,
+        workers,
+        turn,
+        feature,
+        buildRevisionRequest(review, feature)
+      );
+      throwIfCancelled(input.signal);
+      await this.sessions.updateTaskStatus(task, "critic_running");
+      await updateFeatureStatus(feature, "critic_running");
+      input.onStatus?.({ taskId: task.id, judge: "done", actor: "done", critic: "rerunning" });
+      critic = await this.runCritic(input, task, route.critic_engine, judge.dir, actor.dir, workers, turn, feature);
+      throwIfCancelled(input.signal);
+    }
+
+    return this.completeTask(task, turn, judge, actor, critic, feature, input, workers);
+  }
+
+  private async completeTask(
+    task: TaskSession,
+    turn: TaskTurn,
+    judge: WorkerFiles,
+    actor: WorkerFiles,
+    critic: WorkerFiles,
+    feature: FeatureChannel,
+    input: HandleRequestInput,
+    workers: WorkerLogRef[]
+  ): Promise<HandleRequestResult> {
+    throwIfCancelled(input.signal);
+    await this.sessions.updateTaskStatus(task, "done");
+    input.onStatus?.({ taskId: task.id, judge: "done", actor: "done", critic: "done" });
+    const summary = await buildSupervisorSummary({
+      judgeDir: judge.dir,
+      actorDir: actor.dir,
+      criticDir: critic.dir,
+      turnDir: turn.dir,
+      featureActorWorklogPath: feature.actorWorklogPath,
+      featureCriticFindingsPath: feature.criticFindingsPath
+    });
+    await writeText(join(turn.dir, "supervisor-summary.md"), `${summary}\n`);
+    await writeFeatureDecision(feature, summary);
+    await updateFeatureStatus(feature, "approved");
+    return {
+      mode: "complex",
+      taskId: task.id,
+      summary,
+      workers
+    };
+  }
+
+  private async failTask(
+    task: TaskSession,
+    feature: FeatureChannel | null,
+    input: HandleRequestInput,
+    error: unknown
+  ): Promise<never> {
+    const cancelled = isCancellation(error, input.signal);
+    const state = cancelled ? "cancelled" : "failed";
+    if (feature) {
+      await updateFeatureStatus(feature, state);
+    }
+    await this.sessions.updateTaskStatus(task, state);
+    input.onStatus?.({ taskId: task.id });
+    throw cancelled ? cancellationError() : error;
+  }
+
+  private async routeRequest(request: string, workspace: string, signal?: AbortSignal): Promise<RouteDecision> {
+    const route = await routeRequestWithCodex(request, this.config, this.routeRunner, this.routerCwd, signal);
     await appendJsonLine(join(this.routerCwd, "routes.jsonl"), {
       time: new Date().toISOString(),
       request,
@@ -402,7 +461,7 @@ export class Orchestrator {
       statusPath
     });
 
-    await this.runWorkerWithNativeSession(engine, {
+    const result = await this.runWorkerWithNativeSession(engine, {
       workerId,
       role: "main",
       engine,
@@ -411,8 +470,11 @@ export class Orchestrator {
       promptPath,
       outputLogPath,
       statusPath,
-      prompt
+      prompt,
+      signal: input.signal
     }, "main");
+    ensureWorkerSuccess(result);
+    throwIfCancelled(input.signal);
 
     return readTextIfExists(outputLogPath);
   }
@@ -430,6 +492,7 @@ export class Orchestrator {
       workerId,
       role: "judge",
       engine,
+      preserveOutput: input.retry,
       prompt: buildJudgePrompt({
         request: input.request,
         taskDir: task.dir,
@@ -457,9 +520,10 @@ export class Orchestrator {
       promptPath: judge.promptPath,
       outputLogPath: judge.outputLogPath,
       statusPath: judge.statusPath,
-      prompt: await readTextIfExists(judge.promptPath)
+      prompt: await readTextIfExists(judge.promptPath),
+      signal: input.signal
     });
-    ensureWorkerSuccess(result.workerId, result.exitCode);
+    ensureWorkerSuccess(result);
 
     return judge;
   }
@@ -478,6 +542,7 @@ export class Orchestrator {
       workerId: `actor-${engine}`,
       role: "actor",
       engine,
+      preserveOutput: input.retry,
       prompt: buildActorPrompt({
         request: input.request,
         taskDir: task.dir,
@@ -507,9 +572,10 @@ export class Orchestrator {
       promptPath: actor.promptPath,
       outputLogPath: actor.outputLogPath,
       statusPath: actor.statusPath,
-      prompt: await readTextIfExists(actor.promptPath)
+      prompt: await readTextIfExists(actor.promptPath),
+      signal: input.signal
     });
-    ensureWorkerSuccess(result.workerId, result.exitCode);
+    ensureWorkerSuccess(result);
     await mirrorWorkerFileToFeature(join(actor.dir, "worklog.md"), feature.actorWorklogPath);
     await appendFeatureDialogue(feature, "actor.completed", "actor", "Actor completed feature work.", {
       worklog: actor.outputLogPath,
@@ -534,6 +600,7 @@ export class Orchestrator {
       workerId: `critic-${engine}`,
       role: "critic",
       engine,
+      preserveOutput: input.retry,
       prompt: buildCriticPrompt({
         request: input.request,
         taskDir: task.dir,
@@ -563,9 +630,10 @@ export class Orchestrator {
       promptPath: critic.promptPath,
       outputLogPath: critic.outputLogPath,
       statusPath: critic.statusPath,
-      prompt: await readTextIfExists(critic.promptPath)
+      prompt: await readTextIfExists(critic.promptPath),
+      signal: input.signal
     });
-    ensureWorkerSuccess(result.workerId, result.exitCode);
+    ensureWorkerSuccess(result);
     await appendFeatureDialogue(feature, "critic.completed", "critic", "Critic completed feature review.", {
       review: join(critic.dir, "review.md"),
       findings: feature.criticFindingsPath
@@ -748,9 +816,28 @@ function compactPreviousTurnSummary(summary: string): string {
   return `${compact.slice(0, PREVIOUS_TURN_SUMMARY_LENGTH - 3)}...`;
 }
 
-function ensureWorkerSuccess(workerId: string, exitCode: number): void {
-  if (exitCode !== 0) {
-    throw new Error(`${workerId} failed with exit code ${exitCode}`);
+function ensureWorkerSuccess(result: WorkerResult): void {
+  if (result.cancelled) {
+    throw cancellationError();
+  }
+  if (result.exitCode !== 0) {
+    throw new Error(`${result.workerId} failed with exit code ${result.exitCode}`);
+  }
+}
+
+function cancellationError(): Error {
+  const error = new Error("Request cancelled.");
+  error.name = "AbortError";
+  return error;
+}
+
+function isCancellation(error: unknown, signal?: AbortSignal): boolean {
+  return Boolean(signal?.aborted) || (error instanceof Error && error.name === "AbortError");
+}
+
+function throwIfCancelled(signal?: AbortSignal): void {
+  if (signal?.aborted) {
+    throw cancellationError();
   }
 }
 

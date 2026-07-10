@@ -3,12 +3,13 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { defaultConfig } from "../src/core/config.js";
-import { appendJsonLine, pathExists, readJson, readTextIfExists, writeJson, writeText } from "../src/core/file-store.js";
+import { appendJsonLine, appendText, pathExists, readJson, readTextIfExists, writeJson, writeText } from "../src/core/file-store.js";
 import { SessionIndex } from "../src/core/session-index.js";
 import { SessionManager } from "../src/core/session-manager.js";
 import { NativeSessionSchema, TaskMetaSchema, WorkerStatusSchema } from "../src/domain/schemas.js";
 import { Orchestrator } from "../src/orchestrator/orchestrator.js";
 import { MockWorkerAdapter } from "../src/workers/mock-adapter.js";
+import { ProcessWorkerAdapter } from "../src/workers/process-adapter.js";
 import type { WorkerAdapter, WorkerResult, WorkerRunSpec } from "../src/workers/types.js";
 
 function mockConfig(root: string) {
@@ -988,6 +989,115 @@ describe("Orchestrator", () => {
     const meta = await readJson(join(taskDir, "meta.json"), TaskMetaSchema);
     expect(meta.status).toBe("failed");
   });
+
+  it("retries a failed task in the same task and turn with its native worker session", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pct-orch-retry-"));
+    const config = mockConfig(root);
+    const manager = new SessionManager({
+      projectRoot: root,
+      dataDir: config.dataDir,
+      now: () => new Date("2026-06-30T03:31:00.000Z"),
+      randomId: () => "retry"
+    });
+    const adapter = new RetryOnceActorAdapter();
+    const orchestrator = new Orchestrator(config, manager, new Map([["mock", adapter]]));
+    const taskId = "task-20260630-033100-retry";
+
+    await expect(
+      orchestrator.handleRequest({
+        request: "实现一个可玩的俄罗斯方块",
+        cwd: root
+      })
+    ).rejects.toThrow("actor-mock failed with exit code 2");
+
+    const resumedManager = new SessionManager({
+      projectRoot: root,
+      dataDir: config.dataDir,
+      now: () => new Date("2026-06-30T03:31:10.000Z")
+    });
+    const resumedOrchestrator = new Orchestrator(config, resumedManager, new Map([["mock", adapter]]));
+    const result = await resumedOrchestrator.retryTask({ taskId, cwd: root });
+    const taskDir = join(root, ".parallel-codex", "sessions", taskId);
+    const meta = await readJson(join(taskDir, "meta.json"), TaskMetaSchema);
+
+    expect(result.taskId).toBe(taskId);
+    expect(meta.status).toBe("done");
+    expect(adapter.actorRuns).toBe(2);
+    expect(adapter.actorNativeSessions).toEqual([null, "retry-actor-session"]);
+    expect(await pathExists(join(taskDir, "turns", "0002"))).toBe(false);
+    expect(await readTextIfExists(join(taskDir, "actor-mock", "output.log"))).toContain("FIRST_ACTOR_FAILURE");
+    expect(await readTextIfExists(join(taskDir, "events.jsonl"))).toContain("task.retrying");
+  });
+
+  it("retries a failed follow-up turn without adding another turn or rerunning Judge", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pct-orch-retry-follow-up-"));
+    const config = mockConfig(root);
+    const manager = new SessionManager({
+      projectRoot: root,
+      dataDir: config.dataDir,
+      now: () => new Date("2026-06-30T03:31:30.000Z"),
+      randomId: () => "follow"
+    });
+    const adapter = new RetryFollowUpActorAdapter();
+    const orchestrator = new Orchestrator(config, manager, new Map([["mock", adapter]]));
+    const initial = await orchestrator.handleRequest({ request: "实现基础游戏", cwd: root });
+    const taskId = initial.taskId ?? "";
+
+    await expect(
+      orchestrator.handleTaskTurn({ taskId, request: "增加关卡速度", cwd: root })
+    ).rejects.toThrow("actor-mock failed with exit code 2");
+
+    await orchestrator.retryTask({ taskId, cwd: root });
+    const taskDir = join(root, ".parallel-codex", "sessions", taskId);
+
+    expect(adapter.runs.filter((run) => run.role === "judge")).toHaveLength(1);
+    expect(adapter.runs.filter((run) => run.role === "actor")).toHaveLength(3);
+    expect(adapter.runs.filter((run) => run.role === "actor").at(-1)?.nativeSession?.session_id).toBe("mock-actor-mock");
+    expect(await pathExists(join(taskDir, "turns", "0002"))).toBe(true);
+    expect(await pathExists(join(taskDir, "turns", "0003"))).toBe(false);
+    expect(await readTextIfExists(join(taskDir, "actor-mock", "output.log"))).toContain("FOLLOWUP_ACTOR_FAILURE");
+  });
+
+  it("marks an interrupted task cancelled and does not start the next worker", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pct-orch-cancel-"));
+    const config = mockConfig(root);
+    const manager = new SessionManager({
+      projectRoot: root,
+      dataDir: config.dataDir,
+      now: () => new Date("2026-06-30T03:32:00.000Z"),
+      randomId: () => "stop"
+    });
+    const controller = new AbortController();
+    const script = [
+      "const role = process.env.PARALLEL_CODEX_ROLE;",
+      "console.log(role + ' ready');",
+      "if (role === 'actor') setInterval(() => {}, 1000);"
+    ].join("");
+    const adapter = new ProcessWorkerAdapter(process.execPath, ["-e", script]);
+    const orchestrator = new Orchestrator(config, manager, new Map([["mock", adapter]]));
+    const taskId = "task-20260630-033200-stop";
+
+    await expect(
+      orchestrator.handleRequest({
+        request: "实现一个可取消的俄罗斯方块任务",
+        cwd: root,
+        signal: controller.signal,
+        onWorker: (worker) => {
+          if (worker.role === "actor") {
+            setTimeout(() => controller.abort(), 80);
+          }
+        }
+      })
+    ).rejects.toMatchObject({ name: "AbortError", message: "Request cancelled." });
+
+    const taskDir = join(root, ".parallel-codex", "sessions", taskId);
+    const meta = await readJson(join(taskDir, "meta.json"), TaskMetaSchema);
+    const actorStatus = await readJson(join(taskDir, "actor-mock", "status.json"), WorkerStatusSchema);
+    expect(meta.status).toBe("cancelled");
+    expect(actorStatus.state).toBe("cancelled");
+    expect(actorStatus.phase).toBe("process-cancelled");
+    expect(await pathExists(join(taskDir, "critic-mock"))).toBe(false);
+  });
 });
 
 class FailingJudgeAdapter implements WorkerAdapter {
@@ -1002,6 +1112,71 @@ class FailingJudgeAdapter implements WorkerAdapter {
       };
     }
     return new MockWorkerAdapter().run(spec);
+  }
+}
+
+class RetryOnceActorAdapter extends MockWorkerAdapter {
+  actorRuns = 0;
+  readonly actorNativeSessions: Array<string | null> = [];
+
+  async run(spec: WorkerRunSpec): Promise<WorkerResult> {
+    if (spec.role !== "actor") {
+      return super.run(spec);
+    }
+
+    this.actorRuns += 1;
+    this.actorNativeSessions.push(spec.nativeSession?.session_id ?? null);
+    if (this.actorRuns > 1) {
+      return super.run(spec);
+    }
+
+    await spec.onNativeSession?.("retry-actor-session");
+    await appendText(spec.outputLogPath, "FIRST_ACTOR_FAILURE\n");
+    await writeJson(spec.statusPath, {
+      worker_id: spec.workerId,
+      role: spec.role,
+      engine: spec.engine,
+      state: "failed",
+      phase: "test-failure",
+      last_event_at: new Date().toISOString(),
+      summary: "Actor failed once",
+      native_session_id: "retry-actor-session"
+    });
+    return {
+      workerId: spec.workerId,
+      exitCode: 2,
+      signal: null
+    };
+  }
+}
+
+class RetryFollowUpActorAdapter extends MockWorkerAdapter {
+  readonly runs: WorkerRunSpec[] = [];
+  private actorRuns = 0;
+
+  async run(spec: WorkerRunSpec): Promise<WorkerResult> {
+    this.runs.push(spec);
+    if (spec.role !== "actor") {
+      return super.run(spec);
+    }
+
+    this.actorRuns += 1;
+    if (this.actorRuns !== 2) {
+      return super.run(spec);
+    }
+
+    await appendText(spec.outputLogPath, "FOLLOWUP_ACTOR_FAILURE\n");
+    await writeJson(spec.statusPath, {
+      worker_id: spec.workerId,
+      role: spec.role,
+      engine: spec.engine,
+      state: "failed",
+      phase: "test-follow-up-failure",
+      last_event_at: new Date().toISOString(),
+      summary: "Follow-up actor failed once",
+      native_session_id: spec.nativeSession?.session_id
+    });
+    return { workerId: spec.workerId, exitCode: 2, signal: null };
   }
 }
 
