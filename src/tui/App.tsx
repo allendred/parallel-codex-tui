@@ -14,8 +14,9 @@ import {
   formatWorkerRuntimeStatus,
   type StatusLineState
 } from "./status-line.js";
-import { applyChatInputChunk } from "./chat-input.js";
+import { applyChatInputChunk, insertChatPaste } from "./chat-input.js";
 import { chatRequestHistory, navigateChatDraftHistory, type ChatDraftHistoryState } from "./chat-history.js";
+import { createChatPasteDecoder } from "./chat-paste.js";
 import { AppShell } from "./AppShell.js";
 import { InputBar } from "./InputBar.js";
 import { applyNativeInputChunk } from "./native-input.js";
@@ -153,6 +154,7 @@ export function App({
   const newTaskRef = useRef<() => Promise<void>>(startNewTask);
   const exitRef = useRef(exit);
   const rawInputDecoderRef = useRef(createRawInputDecoder());
+  const chatPasteDecoderRef = useRef(createChatPasteDecoder());
   const chatDraftHistoryRef = useRef<ChatDraftHistoryState>({
     offset: 0,
     draft: { value: "", cursor: 0 }
@@ -351,7 +353,36 @@ export function App({
 
   useEffect(() => {
     setRawMode(true);
-    process.stdout.write("\x1b[?1000h\x1b[?1002h\x1b[?1006h");
+    process.stdout.write("\x1b[?2004h\x1b[?1000h\x1b[?1002h\x1b[?1006h");
+    const commitChatInputUpdate = (
+      update: ReturnType<typeof applyChatInputChunk>,
+      previousValue: string,
+      previousCursor: number
+    ): boolean => {
+      if (update.exit) {
+        activeRunControllerRef.current?.abort();
+        exitRef.current();
+        return false;
+      }
+      if (busyRef.current) {
+        return false;
+      }
+      inputRef.current = update.value;
+      inputCursorRef.current = update.cursor;
+      setInput(update.value);
+      setInputCursor(update.cursor);
+      if (update.value !== previousValue || update.cursor !== previousCursor || update.submit !== null) {
+        chatDraftHistoryRef.current = {
+          offset: 0,
+          draft: { value: update.value, cursor: update.cursor }
+        };
+      }
+      if (update.submit !== null) {
+        void submitRef.current(update.submit);
+        return false;
+      }
+      return true;
+    };
     const handleRawInput = (data: unknown) => {
       const chunk = rawInputDecoderRef.current.write(Buffer.isBuffer(data) ? data : String(data ?? ""));
       if (!chunk) {
@@ -381,6 +412,23 @@ export function App({
       }
 
       if (currentView === "chat") {
+        const paste = chatPasteDecoderRef.current.write(chunk);
+        if (paste.intercepted) {
+          if (busyRef.current) {
+            return;
+          }
+          for (const event of paste.events) {
+            const previousValue = inputRef.current;
+            const previousCursor = inputCursorRef.current;
+            const update = event.kind === "paste"
+              ? insertChatPaste(previousValue, event.text, previousCursor)
+              : applyChatInputChunk(previousValue, event.text, previousCursor);
+            if (!commitChatInputUpdate(update, previousValue, previousCursor)) {
+              return;
+            }
+          }
+          return;
+        }
         if (isNewTaskShortcut(chunk, {}) && !busyRef.current) {
           void newTaskRef.current();
           return;
@@ -460,27 +508,7 @@ export function App({
         const previousValue = inputRef.current;
         const previousCursor = inputCursorRef.current;
         const update = applyChatInputChunk(previousValue, chunk, previousCursor);
-        if (update.exit) {
-          activeRunControllerRef.current?.abort();
-          exitRef.current();
-          return;
-        }
-        if (busyRef.current) {
-          return;
-        }
-        inputRef.current = update.value;
-        inputCursorRef.current = update.cursor;
-        setInput(update.value);
-        setInputCursor(update.cursor);
-        if (update.value !== previousValue || update.cursor !== previousCursor || update.submit !== null) {
-          chatDraftHistoryRef.current = {
-            offset: 0,
-            draft: { value: update.value, cursor: update.cursor }
-          };
-        }
-        if (update.submit !== null) {
-          void submitRef.current(update.submit);
-        }
+        commitChatInputUpdate(update, previousValue, previousCursor);
         return;
       }
 
@@ -532,7 +560,8 @@ export function App({
     return () => {
       stdinEvents.removeListener("input", handleRawInput);
       rawInputDecoderRef.current.end();
-      process.stdout.write("\x1b[?1006l\x1b[?1002l\x1b[?1000l");
+      chatPasteDecoderRef.current.reset();
+      process.stdout.write("\x1b[?1006l\x1b[?1002l\x1b[?1000l\x1b[?2004l");
       setRawMode(false);
     };
   }, [outputHeight, setRawMode, stdinEvents]);

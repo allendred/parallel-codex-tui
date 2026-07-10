@@ -57,6 +57,35 @@ export function applyChatInputChunk(currentValue: string, chunk: string, current
   };
 }
 
+export function insertChatPaste(currentValue: string, paste: string, currentCursor?: number): ChatInputUpdate {
+  const chars = Array.from(currentValue);
+  const cursor = clampCursor(currentCursor ?? chars.length, chars.length);
+  const pastedChars = Array.from(sanitizeChatPaste(paste));
+  chars.splice(cursor, 0, ...pastedChars);
+
+  return {
+    value: chars.join(""),
+    cursor: cursor + pastedChars.length,
+    submit: null,
+    exit: false
+  };
+}
+
+function sanitizeChatPaste(value: string): string {
+  const withoutTerminalControls = value
+    .replace(/\x1b\][^\x07]*(?:\x07|\x1b\\)/g, "")
+    .replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, "")
+    .replace(/\x1bO./g, "")
+    .replace(/\r\n?/g, "\n");
+
+  return Array.from(withoutTerminalControls)
+    .filter((char) => {
+      const codePoint = char.codePointAt(0) ?? 0;
+      return char === "\n" || char === "\t" || (codePoint >= 32 && codePoint !== 127 && !(codePoint >= 128 && codePoint < 160));
+    })
+    .join("");
+}
+
 function clampCursor(cursor: number, length: number): number {
   return Math.min(length, Math.max(0, Math.trunc(cursor)));
 }

@@ -29,6 +29,17 @@ describe("InputBar", () => {
     expect(lastFrame()).toContain("> 你好|世界");
   });
 
+  it("renders multiline paste markers on one stable input row", () => {
+    const { lastFrame } = render(
+      <InputBar mode="chat" value={"第一行\t参数\n第二行"} cursor={10} terminalWidth={40} onChange={() => {}} />
+    );
+
+    const frame = lastFrame() ?? "";
+    expect(frame).toContain("> 第一行⇥参数↵第二行|");
+    expect(frame.split("\n")).toHaveLength(1);
+    expect(displayWidth(frame)).toBeLessThanOrEqual(40);
+  });
+
   it("keeps both sides of a middle cursor visible in long narrow input", () => {
     const value = "前面的中文内容很长需要隐藏中间光标后面的内容同样很长";
     const cursor = [...value].indexOf("光");

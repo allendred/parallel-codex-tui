@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { applyChatInputChunk } from "../src/tui/chat-input.js";
+import * as chatInputModule from "../src/tui/chat-input.js";
 
 describe("applyChatInputChunk", () => {
   it("accumulates quick consecutive chunks without dropping characters", () => {
@@ -77,6 +78,22 @@ describe("applyChatInputChunk", () => {
     expect(applyChatInputChunk("你好世界", "\x1b[3~", 1)).toEqual({
       value: "你世界",
       cursor: 1,
+      submit: null,
+      exit: false
+    });
+  });
+
+  it("inserts a sanitized multiline paste at the Unicode cursor without submitting", () => {
+    const insertChatPaste = (
+      chatInputModule as typeof chatInputModule & {
+        insertChatPaste?: (value: string, paste: string, cursor: number) => ReturnType<typeof applyChatInputChunk>;
+      }
+    ).insertChatPaste;
+
+    expect(insertChatPaste).toBeTypeOf("function");
+    expect(insertChatPaste?.("前后", "第一行\r\n第二行\t值\x1b[31m红\x1b[0m\x00", 1)).toEqual({
+      value: "前第一行\n第二行\t值红后",
+      cursor: 11,
       submit: null,
       exit: false
     });

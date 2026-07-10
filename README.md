@@ -153,6 +153,7 @@ The doctor output includes `preview:` and `semantic:` ANSI swatch rows so you ca
 - Consecutive simple requests reuse the main worker's native session across app restarts when the CLI exposes a session id.
 - The workspace chat transcript is appended to `.parallel-codex/sessions/main/chat.jsonl`; startup restores the latest 200 valid messages and skips isolated corrupt rows.
 - Chat drafts support Unicode-safe Left/Right, Home/End, Backspace, and Delete editing; Up/Down recalls persisted user requests and returns to the exact unsent draft. Long input stays on one row with the visible window centered around the logical cursor.
+- Bracketed multiline paste stays in one draft instead of submitting the first line; logical line breaks and tabs appear as `↵` and `⇥` in the single-row input until the complete request is submitted.
 - Complex requests create a session under `.parallel-codex/sessions/`.
 - Complex requests run Judge -> Actor -> Critic. Judge also writes a bounded `features.json` dependency plan.
 - Judge runs from its task-owned worker directory, reads the selected project without treating it as a write target, and snapshots `requirements.md`, `plan.md`, `acceptance.md`, role briefs, and `features.json` into each numbered turn.

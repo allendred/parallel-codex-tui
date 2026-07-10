@@ -174,7 +174,7 @@ export function chatPlaceholderDisplayText(
 
 export function chatInputDisplayValue(value: string, terminalWidth: number): string {
   const valueWidth = Math.max(1, terminalWidth - 6);
-  return compactTailByDisplayWidth(value, valueWidth);
+  return compactTailByDisplayWidth(chatInputVisibleValue(value), valueWidth);
 }
 
 export function chatInputDisplayParts(
@@ -182,10 +182,11 @@ export function chatInputDisplayParts(
   cursor: number,
   terminalWidth: number
 ): { before: string; after: string } {
-  const chars = Array.from(value);
-  const clampedCursor = Math.min(chars.length, Math.max(0, Math.trunc(cursor)));
+  const sourceChars = Array.from(value);
+  const chars = sourceChars.map(chatInputVisibleCharacter);
+  const clampedCursor = Math.min(sourceChars.length, Math.max(0, Math.trunc(cursor)));
   const valueWidth = Math.max(1, terminalWidth - 6);
-  if (displayWidth(value) <= valueWidth) {
+  if (displayWidth(chars.join("")) <= valueWidth) {
     return {
       before: chars.slice(0, clampedCursor).join(""),
       after: chars.slice(clampedCursor).join("")
@@ -233,6 +234,20 @@ export function chatInputDisplayParts(
     before: `${start > 0 ? "..." : ""}${chars.slice(start, clampedCursor).join("")}`,
     after: `${chars.slice(clampedCursor, end).join("")}${end < chars.length ? "..." : ""}`
   };
+}
+
+function chatInputVisibleValue(value: string): string {
+  return Array.from(value).map(chatInputVisibleCharacter).join("");
+}
+
+function chatInputVisibleCharacter(char: string): string {
+  if (char === "\n" || char === "\r") {
+    return "↵";
+  }
+  if (char === "\t") {
+    return "⇥";
+  }
+  return char;
 }
 
 export function chatPlaceholderDisplayValue(
