@@ -77,6 +77,55 @@ describe("CLI doctor", () => {
     await expect(pathExists(workspace)).resolves.toBe(true);
   });
 
+  it("runs an explicit live Codex Router probe without claiming the proxy endpoint proves upstream health", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pct-cli-doctor-probe-"));
+    const binDir = join(root, "bin");
+    const appRoot = join(root, "app");
+    const workspace = join(root, "workspace");
+
+    await mkdir(binDir, { recursive: true });
+    await mkdir(appRoot, { recursive: true });
+    await writeExecutable(
+      join(binDir, "codex"),
+      "#!/bin/sh\ncat >/dev/null\nprintf '%s\\n' '{\"mode\":\"simple\",\"reason\":\"live probe ok\"}'\n"
+    );
+    await writeExecutable(join(binDir, "claude"), "#!/bin/sh\necho claude 1.0\n");
+    await expect(runCli(["--app-root", appRoot, "--init"])).resolves.toMatchObject({ exitCode: 0 });
+
+    const result = await runCli(
+      ["--app-root", appRoot, "--workspace", workspace, "--doctor", "--probe-router"],
+      { env: { PATH: `${binDir}${delimiter}${process.env.PATH ?? ""}` } }
+    );
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stderr).toBe("");
+    expect(result.stdout).toMatch(/router live probe: ok \(simple in \d+ms\)/);
+  });
+
+  it("fails an explicit live Router probe with a useful authentication reason", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pct-cli-doctor-probe-auth-"));
+    const binDir = join(root, "bin");
+    const appRoot = join(root, "app");
+
+    await mkdir(binDir, { recursive: true });
+    await mkdir(appRoot, { recursive: true });
+    await writeExecutable(
+      join(binDir, "codex"),
+      "#!/bin/sh\ncat >/dev/null\necho 'HTTP 401 Unauthorized: sign in required' >&2\nexit 1\n"
+    );
+    await writeExecutable(join(binDir, "claude"), "#!/bin/sh\necho claude 1.0\n");
+    await expect(runCli(["--app-root", appRoot, "--init"])).resolves.toMatchObject({ exitCode: 0 });
+
+    const result = await runCli(["--app-root", appRoot, "--doctor", "--probe-router"], {
+      env: { PATH: `${binDir}${delimiter}${process.env.PATH ?? ""}` }
+    });
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr).toBe("");
+    expect(result.stdout).toContain("router live probe: failed");
+    expect(result.stdout).toContain("HTTP 401 Unauthorized: sign in required");
+  });
+
   it("accepts equals-style workspace values in command mode", async () => {
     const root = await mkdtemp(join(tmpdir(), "pct-cli-doctor-equals-"));
     const binDir = join(root, "bin");

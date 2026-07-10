@@ -9,6 +9,8 @@ describe("buildCliHelpText", () => {
     expect(help).toContain("List built-in TUI theme palettes");
     expect(help).toContain("combine with --theme to filter");
     expect(help).toContain("theme palette");
+    expect(help).toContain("--probe-router");
+    expect(help).toContain("live Codex Router request");
     expect(help).not.toContain("codex, graphite, paper");
   });
 });

@@ -6,7 +6,9 @@ import { delimiter, join } from "node:path";
 import { prepareAppRoot } from "./core/app-root.js";
 import { formatConfigErrorMessage } from "./core/config-errors.js";
 import { configPath, loadConfig, withUiThemeOverride } from "./core/config.js";
-import { pathExists } from "./core/file-store.js";
+import { ensureDir, pathExists } from "./core/file-store.js";
+import { routerRuntimeDir } from "./core/paths.js";
+import { routeRequestWithCodex, type CodexRouteRunner } from "./core/router.js";
 import { prepareWorkspace } from "./core/workspace.js";
 import { auditTuiThemeContrast, TUI_THEME_MIN_CONTRAST_RATIO, type TuiThemeContrastAudit } from "./tui/theme-contrast.js";
 import { formatTuiThemePreview } from "./tui/theme-preview.js";
@@ -30,6 +32,12 @@ export interface ProxyDiagnosticResult {
 type LoadedConfig = Awaited<ReturnType<typeof loadConfig>>;
 type ProxyConnector = (host: string, port: number) => Promise<boolean>;
 
+export interface DoctorOptions {
+  probeRouter?: boolean;
+  routeRunner?: CodexRouteRunner;
+  theme?: Awaited<ReturnType<typeof loadConfig>>["ui"]["theme"] | null;
+}
+
 type ConfiguredEngine = "router-codex" | "codex" | "claude" | "mock";
 type WorkerEngine = "codex" | "claude";
 
@@ -37,7 +45,7 @@ export async function runDoctor(
   appRoot: string,
   workspaceRoot: string,
   env: NodeJS.ProcessEnv = process.env,
-  options: { theme?: Awaited<ReturnType<typeof loadConfig>>["ui"]["theme"] | null } = {}
+  options: DoctorOptions = {}
 ): Promise<DoctorResult> {
   const lines = ["parallel-codex-tui doctor"];
   let ok = true;
@@ -83,7 +91,8 @@ export async function runDoctor(
     };
   }
 
-  for (const command of configuredCommands(config)) {
+  const includeRouter = config.router.defaultMode === "auto" || options.probeRouter === true;
+  for (const command of configuredCommands(config, includeRouter)) {
     if (await commandExists(command, env)) {
       lines.push(`${command}: ok`);
     } else {
@@ -92,7 +101,7 @@ export async function runDoctor(
     }
   }
 
-  for (const check of configuredEnvironmentChecks(config, env)) {
+  for (const check of configuredEnvironmentChecks(config, env, includeRouter)) {
     if (check.ok) {
       lines.push(`${check.label}: ok`);
     } else {
@@ -105,10 +114,19 @@ export async function runDoctor(
     config,
     env,
     await detectMacSystemProxy(),
-    canConnectProxy
+    canConnectProxy,
+    { includeRouter }
   );
   lines.push(...proxyDiagnostics.lines);
   ok = ok && proxyDiagnostics.ok;
+
+  if (options.probeRouter) {
+    const probe = await runRouterProbe(config, appRoot, options.routeRunner);
+    lines.push(probe.line);
+    ok = ok && probe.ok;
+  } else if (config.router.defaultMode === "auto") {
+    lines.push("router live probe: not run (add --probe-router)");
+  }
 
   return {
     ok,
@@ -120,10 +138,11 @@ export async function diagnoseProxyEnvironment(
   config: LoadedConfig,
   env: NodeJS.ProcessEnv,
   systemProxy: SystemProxyEndpoint | null,
-  connect: ProxyConnector = canConnectProxy
+  connect: ProxyConnector = canConnectProxy,
+  options: { includeRouter?: boolean } = {}
 ): Promise<ProxyDiagnosticResult> {
   const contexts: Array<{ label: string; env: Record<string, string>; table: string }> = [];
-  if (config.router.defaultMode === "auto") {
+  if (options.includeRouter ?? config.router.defaultMode === "auto") {
     contexts.push({ label: "router proxy", env: config.router.codex.env, table: "router.codex.env" });
   }
   if (configuredWorkerEngines(config).includes("codex")) {
@@ -158,7 +177,7 @@ export async function diagnoseProxyEnvironment(
     const key = formatProxyEndpoint(endpoint);
     const reachable = await cachedProxyConnection(connectionCache, key, () => connect(endpoint.host, endpoint.port));
     if (reachable) {
-      lines.push(`${context.label}: ok (${key})`);
+      lines.push(`${context.label}: reachable (${key}; local endpoint only)`);
     } else {
       ok = false;
       lines.push(`${context.label}: unreachable (${key})`);
@@ -166,6 +185,54 @@ export async function diagnoseProxyEnvironment(
   }
 
   return { ok, lines };
+}
+
+async function runRouterProbe(
+  config: LoadedConfig,
+  appRoot: string,
+  runner?: CodexRouteRunner
+): Promise<{ ok: boolean; line: string }> {
+  const cwd = routerRuntimeDir(appRoot, config.dataDir);
+  await ensureDir(cwd);
+  const probeConfig: LoadedConfig = {
+    ...config,
+    router: {
+      ...config.router,
+      defaultMode: "auto"
+    }
+  };
+
+  try {
+    const route = await routeRequestWithCodex("hello", probeConfig, runner, cwd);
+    if (route.source === "codex") {
+      return {
+        ok: true,
+        line: `router live probe: ok (${route.mode} in ${Math.round(route.duration_ms ?? 0)}ms)`
+      };
+    }
+    return {
+      ok: false,
+      line: `router live probe: failed (${sanitizeDiagnosticText(route.reason)})`
+    };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return {
+      ok: false,
+      line: `router live probe: failed (${sanitizeDiagnosticText(message)})`
+    };
+  }
+}
+
+function sanitizeDiagnosticText(value: string): string {
+  return value
+    .replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, "")
+    .replace(/\x1b\][^\x07]*(?:\x07|\x1b\\)/g, "")
+    .replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g, " ")
+    .replace(/\b([a-z][a-z0-9+.-]*:\/\/)([^@\s/]+)@/gi, "$1***@")
+    .replace(/\b(api[-_\s]?key|token|authorization)(\s*[:=]\s*)(\S+)/gi, "$1$2***")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 400) || "unknown error";
 }
 
 export function isSupportedNodeVersion(version: string): boolean {
@@ -176,10 +243,10 @@ export function isSupportedNodeVersion(version: string): boolean {
   return major >= 26;
 }
 
-function configuredCommands(config: Awaited<ReturnType<typeof loadConfig>>): string[] {
+function configuredCommands(config: Awaited<ReturnType<typeof loadConfig>>, includeRouter: boolean): string[] {
   return Array.from(
     new Set(
-      configuredEngines(config, { includeRouter: true })
+      configuredEngines(config, { includeRouter })
         .map((engine) => commandForEngine(config, engine))
         .filter((command): command is string => Boolean(command) && command !== "mock")
     )
@@ -255,7 +322,7 @@ function configuredEngines(
 ): ConfiguredEngine[] {
   const engines = new Set<ConfiguredEngine>();
 
-  if (config.router.defaultMode === "auto" && options.includeRouter) {
+  if (options.includeRouter) {
     engines.add("router-codex");
   }
 
@@ -283,11 +350,12 @@ function configuredWorkerEngines(config: Awaited<ReturnType<typeof loadConfig>>)
 
 function configuredEnvironmentChecks(
   config: Awaited<ReturnType<typeof loadConfig>>,
-  env: NodeJS.ProcessEnv
+  env: NodeJS.ProcessEnv,
+  includeRouter: boolean
 ): Array<{ label: string; envName: string; ok: boolean }> {
   const checks: Array<{ label: string; envName: string; ok: boolean }> = [];
 
-  if (config.router.defaultMode === "auto") {
+  if (includeRouter) {
     for (const [key, value] of Object.entries(config.router.codex.env)) {
       for (const envName of referencedEnvNames(value)) {
         checks.push({

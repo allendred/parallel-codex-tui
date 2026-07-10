@@ -8,6 +8,7 @@ export interface CliArgs {
   explicitWorkspace: string | null;
   help: boolean;
   init: boolean;
+  probeRouter: boolean;
   workspaceRoot: string;
   taskId: string | null;
   theme: TuiThemeName | null;
@@ -16,7 +17,7 @@ export interface CliArgs {
 }
 
 const allowedValueOptions = new Set(["--app-root", "--workspace", "-w", "--task", "-t", "--theme"]);
-const allowedBooleanOptions = new Set(["--doctor", "--help", "-h", "--init", "--themes", "--version", "-v"]);
+const allowedBooleanOptions = new Set(["--doctor", "--help", "-h", "--init", "--probe-router", "--themes", "--version", "-v"]);
 
 export function parseCliArgs(args: string[], cwd: string): CliArgs {
   const optionArgs = argsBeforeTerminator(args);
@@ -36,6 +37,7 @@ export function parseCliArgs(args: string[], cwd: string): CliArgs {
   const doctor = optionArgs.includes("--doctor");
   const help = optionArgs.includes("--help") || optionArgs.includes("-h");
   const init = optionArgs.includes("--init");
+  const probeRouter = optionArgs.includes("--probe-router");
   const themes = optionArgs.includes("--themes");
   const version = optionArgs.includes("--version") || optionArgs.includes("-v");
   const appRootValue = flagValue(optionArgs, appRootFlagIndex);
@@ -51,6 +53,7 @@ export function parseCliArgs(args: string[], cwd: string): CliArgs {
     explicitWorkspace,
     help,
     init,
+    probeRouter,
     workspaceRoot,
     taskId,
     theme,
@@ -96,6 +99,9 @@ export function validateCliArgs(args: string[]): string[] {
   const rawThemeValue = flagValue(optionArgs, themeFlagIndex);
   if (rawThemeValue?.trim() && !normalizeTuiThemeName(rawThemeValue)) {
     errors.push(`Invalid --theme: ${rawThemeValue.trim()} (expected ${TUI_THEME_NAMES.join(", ")})`);
+  }
+  if (optionArgs.includes("--probe-router") && !optionArgs.includes("--doctor")) {
+    errors.push("--probe-router requires --doctor");
   }
   return errors;
 }

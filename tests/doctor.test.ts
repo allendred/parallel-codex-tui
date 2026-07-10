@@ -44,8 +44,8 @@ describe("diagnoseProxyEnvironment", () => {
 
     expect(result.ok).toBe(true);
     expect(result.lines).toEqual([
-      "router proxy: ok (127.0.0.1:7890)",
-      "workers.codex proxy: ok (127.0.0.1:7890)"
+      "router proxy: reachable (127.0.0.1:7890; local endpoint only)",
+      "workers.codex proxy: reachable (127.0.0.1:7890; local endpoint only)"
     ]);
     expect(result.lines.join("\n")).not.toContain("secret");
     expect(checked).toEqual(["127.0.0.1:7890"]);

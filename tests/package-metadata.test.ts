@@ -173,7 +173,10 @@ describe("package metadata", () => {
     expect(readme).toContain("Chat drafts support Unicode-safe Left/Right, Home/End, Backspace, and Delete editing");
     expect(readme).toContain("Up/Down recalls persisted user requests and returns to the exact unsent draft");
     expect(readme).toContain("Bracketed multiline paste stays in one draft");
-    expect(readme).toContain('`--doctor` checks the configured commands and any `{env:NAME}` references');
+    expect(readme).toContain('`--doctor` checks configured commands and `{env:NAME}` references');
+    expect(readme).toContain("proxy host/port reachability as a local-endpoint check");
+    expect(readme).toContain("parallel-codex-tui --doctor --probe-router");
+    expect(readme).toContain("one real classification through the configured Codex Router");
     expect(readme).toContain("reports the loaded TUI theme, core palette values, ANSI swatch previews, and color override values");
     expect(readme).toContain("including any temporary `--theme` override");
     expect(readme).toContain('OPENAI_API_KEY = "{env:OPENAI_API_KEY}"');

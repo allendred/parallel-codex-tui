@@ -23,6 +23,7 @@ Run it against the project you want the workers to operate on:
 cd /path/to/project
 parallel-codex-tui --init
 parallel-codex-tui --doctor
+parallel-codex-tui --doctor --probe-router
 parallel-codex-tui --workspace /path/to/project
 parallel-codex-tui --theme aurora --workspace /path/to/project
 parallel-codex-tui --theme studio --workspace /path/to/project
@@ -58,10 +59,11 @@ Check available flags or the installed version without starting the TUI:
 ```bash
 parallel-codex-tui --help
 parallel-codex-tui --doctor
+parallel-codex-tui --doctor --probe-router
 parallel-codex-tui --version
 ```
 
-`--doctor` checks the configured commands and any `{env:NAME}` references in active worker model environment settings before workers start. It also reports the loaded TUI theme, core palette values, ANSI swatch previews, and color override values, including any temporary `--theme` override.
+`--doctor` checks configured commands and `{env:NAME}` references before workers start. It reports proxy host/port reachability as a local-endpoint check, not as proof that the proxy upstream or model API is healthy. Add `--probe-router` to run one real classification through the configured Codex Router; the command exits non-zero when that live request falls back or fails. Doctor also reports the loaded TUI theme, core palette values, ANSI swatch previews, and color override values, including any temporary `--theme` override.
 
 ## Quick Start
 
@@ -220,7 +222,7 @@ NO_PROXY = "localhost,127.0.0.1"
 
 `router.codex.env` applies only to semantic classification. `workers.codex.model.env` applies to fresh/resumed Codex workers and embedded native attach sessions. Keep these values in local `config.toml`, which is ignored by Git.
 
-Run `parallel-codex-tui --doctor` after changing proxy settings. Doctor checks referenced environment variables, reports when a macOS system proxy is not inherited by Codex subprocesses, and verifies that each configured proxy host and port is reachable without printing proxy credentials.
+Run `parallel-codex-tui --doctor` after changing proxy settings. Doctor checks referenced environment variables, reports when a macOS system proxy is not inherited by Codex subprocesses, and labels configured proxy host/port checks as local-endpoint reachability without printing credentials. Then run `parallel-codex-tui --doctor --probe-router` when you also need to verify the real Codex Router path through that proxy; this explicit probe can take up to `router.codex.timeoutMs`.
 
 ## Mock Mode
 

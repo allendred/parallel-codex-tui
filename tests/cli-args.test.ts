@@ -11,6 +11,7 @@ describe("parseCliArgs", () => {
     expect(parsed.explicitWorkspace).toBeNull();
     expect(parsed.help).toBe(false);
     expect(parsed.init).toBe(false);
+    expect(parsed.probeRouter).toBe(false);
     expect(parsed.taskId).toBeNull();
     expect(parsed.theme).toBeNull();
     expect(parsed.themes).toBe(false);
@@ -74,9 +75,10 @@ describe("parseCliArgs", () => {
   });
 
   it("accepts doctor without changing workspace parsing", () => {
-    const parsed = parseCliArgs(["--doctor", "--workspace", "game"], "/app");
+    const parsed = parseCliArgs(["--doctor", "--probe-router", "--workspace", "game"], "/app");
 
     expect(parsed.doctor).toBe(true);
+    expect(parsed.probeRouter).toBe(true);
     expect(parsed.appRoot).toBe("/app");
     expect(parsed.workspaceRoot).toBe("/app/game");
     expect(parsed.explicitWorkspace).toBe("game");
@@ -206,6 +208,11 @@ describe("validateCliArgs", () => {
 
   it("accepts the theme catalog command", () => {
     expect(validateCliArgs(["--themes"])).toEqual([]);
+  });
+
+  it("requires doctor mode for a live Router probe", () => {
+    expect(validateCliArgs(["--probe-router"])).toEqual(["--probe-router requires --doctor"]);
+    expect(validateCliArgs(["--doctor", "--probe-router"])).toEqual([]);
   });
 
   it("allows positional text after an option terminator", () => {
