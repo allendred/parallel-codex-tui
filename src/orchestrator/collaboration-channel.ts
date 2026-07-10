@@ -2,6 +2,7 @@ import { join } from "node:path";
 import { appendJsonLine, ensureDir, writeJson, writeText } from "../core/file-store.js";
 import type { TaskSession, TaskTurn } from "../core/session-manager.js";
 import type { WorkerRole } from "../domain/schemas.js";
+import type { FeatureDefinition } from "./feature-plan.js";
 
 export type FeatureState =
   | "created"
@@ -14,6 +15,9 @@ export type FeatureState =
 
 export interface FeatureChannel {
   id: string;
+  title: string;
+  description: string;
+  dependsOn: string[];
   taskId: string;
   turnId: string;
   dir: string;
@@ -28,6 +32,10 @@ export interface FeatureChannel {
 
 export interface FeaturePromptContext {
   featureId: string;
+  featureTitle: string;
+  featureDescription: string;
+  featureSpecPath: string;
+  featureDependencies: string[];
   featureDir: string;
   dialoguePath: string;
   actorWorklogPath: string;
@@ -41,14 +49,20 @@ export interface CreateFeatureChannelInput {
   turn: TaskTurn;
   request: string;
   judgeDir: string;
+  feature?: FeatureDefinition;
 }
 
 export async function createFeatureChannel(input: CreateFeatureChannelInput): Promise<FeatureChannel> {
-  const id = featureIdForTurn(input.turn, input.request);
+  const id = input.feature
+    ? `${input.turn.turnId}-${input.feature.id}`
+    : featureIdForTurn(input.turn, input.request);
   const dir = join(input.task.dir, "features", id);
   const dialoguePath = join(input.task.dir, "dialogue", "actor-critic.jsonl");
   const channel: FeatureChannel = {
     id,
+    title: input.feature?.title ?? input.request.trim(),
+    description: input.feature?.description ?? input.request.trim(),
+    dependsOn: input.feature?.depends_on ?? [],
     taskId: input.task.id,
     turnId: input.turn.turnId,
     dir,
@@ -76,6 +90,10 @@ export async function createFeatureChannel(input: CreateFeatureChannelInput): Pr
 export function featurePromptContext(channel: FeatureChannel): FeaturePromptContext {
   return {
     featureId: channel.id,
+    featureTitle: channel.title,
+    featureDescription: channel.description,
+    featureSpecPath: channel.specPath,
+    featureDependencies: channel.dependsOn,
     featureDir: channel.dir,
     dialoguePath: channel.dialoguePath,
     actorWorklogPath: channel.actorWorklogPath,
@@ -134,6 +152,9 @@ function buildFeatureSpec(input: CreateFeatureChannelInput, channel: FeatureChan
     "# Feature Mailbox",
     "",
     `Feature: ${channel.id}`,
+    `Title: ${channel.title}`,
+    `Description: ${channel.description}`,
+    `Depends on: ${channel.dependsOn.length > 0 ? channel.dependsOn.join(", ") : "(none)"}`,
     `Task: ${input.task.id}`,
     `Turn: ${input.turn.turnId}`,
     `Turn directory: ${input.turn.dir}`,

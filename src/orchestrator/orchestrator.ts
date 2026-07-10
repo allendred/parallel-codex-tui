@@ -17,6 +17,7 @@ import {
   writeFeatureDecision
 } from "./collaboration-channel.js";
 import { buildActorPrompt, buildCriticPrompt, buildJudgePrompt, buildMainPrompt } from "./prompts.js";
+import { featureExecutionWaves, parseFeaturePlan, type FeatureDefinition, type FeaturePlan } from "./feature-plan.js";
 import { buildSupervisorSummary } from "./supervisor-summary.js";
 
 const PREVIOUS_TURN_SUMMARY_LIMIT = 5;
@@ -69,11 +70,28 @@ export interface WorkerRunStatus {
 
 export interface WorkerLogRef {
   id: string;
+  featureId?: string;
   role: WorkerRole;
   engine: EngineName;
   label: string;
   logPath: string;
   statusPath: string;
+}
+
+interface FeatureActorRun {
+  definition: FeatureDefinition;
+  channel: FeatureChannel;
+  actor: WorkerFiles;
+}
+
+interface FeaturePairRun extends FeatureActorRun {
+  critic: WorkerFiles;
+}
+
+interface FeatureSummary {
+  id: string;
+  title: string;
+  summary: string;
 }
 
 export class Orchestrator {
@@ -256,15 +274,19 @@ export class Orchestrator {
       }
       workers.push({
         id: status.worker_id,
+        ...(status.feature_id ? { featureId: status.feature_id } : {}),
         role: status.role,
         engine: status.engine,
-        label: `${capitalize(status.role)} (${status.engine})`,
+        label: workerLabel(status.role, status.engine, status.feature_title ?? status.feature_id),
         logPath: join(dir, "output.log"),
         statusPath
       });
     }
 
-    return workers.sort((left, right) => workerRoleOrder(left.role) - workerRoleOrder(right.role));
+    return workers.sort((left, right) => (
+      workerRoleOrder(left.role) - workerRoleOrder(right.role)
+      || left.id.localeCompare(right.id)
+    ));
   }
 
   private async runInitialTask(
@@ -274,21 +296,34 @@ export class Orchestrator {
     turn: TaskTurn,
     workers: WorkerLogRef[]
   ): Promise<HandleRequestResult> {
-    let feature: FeatureChannel | null = null;
+    let features: FeatureChannel[] = [];
     try {
       await this.sessions.updateTaskStatus(task, "judging");
       input.onStatus?.({ taskId: task.id, judge: "running", actor: "waiting", critic: "waiting" });
       const judge = await this.runJudge(input, task, route.judge_engine, workers, turn);
       throwIfCancelled(input.signal);
-      feature = await createFeatureChannel({
+      const featurePlan = await this.loadFeaturePlan(judge, turn);
+      if (featurePlan && featurePlan.features.length > 1) {
+        features = await Promise.all(featurePlan.features.map((feature) => createFeatureChannel({
+          task,
+          turn,
+          request: input.request,
+          judgeDir: judge.dir,
+          feature
+        })));
+        return await this.runFeaturePlan(input, task, route, turn, workers, judge, featurePlan, features);
+      }
+
+      const feature = await createFeatureChannel({
         task,
         turn,
         request: input.request,
         judgeDir: judge.dir
       });
+      features = [feature];
       return await this.runActorCriticPair(input, task, route, turn, workers, judge, feature);
     } catch (error) {
-      return this.failTask(task, feature, input, error);
+      return this.failTask(task, features, input, error);
     }
   }
 
@@ -300,18 +335,190 @@ export class Orchestrator {
     workers: WorkerLogRef[]
   ): Promise<HandleRequestResult> {
     const judge = this.workerFiles(task, `judge-${route.judge_engine}`);
-    let feature: FeatureChannel | null = null;
+    let features: FeatureChannel[] = [];
     try {
-      feature = await createFeatureChannel({
+      const feature = await createFeatureChannel({
         task,
         turn,
         request: input.request,
         judgeDir: judge.dir
       });
+      features = [feature];
       return await this.runActorCriticPair(input, task, route, turn, workers, judge, feature);
     } catch (error) {
-      return this.failTask(task, feature, input, error);
+      return this.failTask(task, features, input, error);
     }
+  }
+
+  private async loadFeaturePlan(judge: WorkerFiles, turn: TaskTurn): Promise<FeaturePlan | null> {
+    const persistedPath = join(turn.dir, "feature-plan.json");
+    const judgePath = join(judge.dir, "features.json");
+    const sourcePath = (await pathExists(persistedPath))
+      ? persistedPath
+      : (await pathExists(judgePath)) ? judgePath : null;
+    if (!sourcePath) {
+      return null;
+    }
+
+    let input: unknown;
+    try {
+      input = JSON.parse(await readTextIfExists(sourcePath));
+    } catch (error) {
+      throw new Error(`Invalid feature plan JSON at ${sourcePath}: ${errorMessage(error)}`);
+    }
+
+    try {
+      const plan = parseFeaturePlan(input);
+      await writeJson(persistedPath, plan);
+      return plan;
+    } catch (error) {
+      throw new Error(`Invalid feature plan at ${sourcePath}: ${errorMessage(error)}`);
+    }
+  }
+
+  private async runFeaturePlan(
+    input: HandleRequestInput,
+    task: TaskSession,
+    route: RouteDecision,
+    turn: TaskTurn,
+    workers: WorkerLogRef[],
+    judge: WorkerFiles,
+    plan: FeaturePlan,
+    features: FeatureChannel[]
+  ): Promise<HandleRequestResult> {
+    const channels = new Map(plan.features.map((definition, index) => [definition.id, features[index]]));
+    const summaries: FeatureSummary[] = [];
+
+    for (const wave of featureExecutionWaves(plan)) {
+      throwIfCancelled(input.signal);
+      await this.sessions.updateTaskStatus(task, "actor_running");
+      await Promise.all(wave.map((definition) => updateFeatureStatus(requiredChannel(channels, definition), "actor_running")));
+      input.onStatus?.({ taskId: task.id, judge: "done", actor: "running", critic: "waiting" });
+
+      const actorRuns = await allOrThrow(wave.map(async (definition): Promise<FeatureActorRun> => {
+        const channel = requiredChannel(channels, definition);
+        const actor = await this.runActor(
+          input,
+          task,
+          route.actor_engine,
+          judge.dir,
+          workers,
+          turn,
+          channel,
+          undefined,
+          true
+        );
+        return { definition, channel, actor };
+      }));
+      throwIfCancelled(input.signal);
+
+      await this.sessions.updateTaskStatus(task, "critic_running");
+      await Promise.all(actorRuns.map(({ channel }) => updateFeatureStatus(channel, "critic_running")));
+      input.onStatus?.({ taskId: task.id, judge: "done", actor: "done", critic: "running" });
+      const pairRuns = await allOrThrow(actorRuns.map(async (actorRun): Promise<FeaturePairRun> => ({
+        ...actorRun,
+        critic: await this.runCritic(
+          input,
+          task,
+          route.critic_engine,
+          judge.dir,
+          actorRun.actor.dir,
+          workers,
+          turn,
+          actorRun.channel,
+          true
+        )
+      })));
+      throwIfCancelled(input.signal);
+
+      const revisionRuns: Array<FeaturePairRun & { review: string }> = [];
+      for (const pair of pairRuns) {
+        const review = await readTextIfExists(join(pair.critic.dir, "review.md"));
+        if (review.includes("REVISION_REQUIRED")) {
+          revisionRuns.push({ ...pair, review });
+        }
+      }
+
+      let finalPairs = pairRuns;
+      if (revisionRuns.length > 0) {
+        await this.sessions.updateTaskStatus(task, "revision_needed");
+        await Promise.all(revisionRuns.map(async ({ channel, critic }) => {
+          await updateFeatureStatus(channel, "revision_needed");
+          await appendFeatureDialogue(channel, "critic.revision_requested", "critic", "Critic requested Actor revision.", {
+            review: join(critic.dir, "review.md"),
+            findings: channel.criticFindingsPath
+          });
+        }));
+        input.onStatus?.({ taskId: task.id, judge: "done", actor: "revision", critic: "done" });
+
+        const revisedActors = await allOrThrow(revisionRuns.map(async (pair) => ({
+          ...pair,
+          actor: await this.runActor(
+            input,
+            task,
+            route.actor_engine,
+            judge.dir,
+            workers,
+            turn,
+            pair.channel,
+            buildRevisionRequest(pair.review, pair.channel),
+            true
+          )
+        })));
+        throwIfCancelled(input.signal);
+
+        await this.sessions.updateTaskStatus(task, "critic_running");
+        await Promise.all(revisedActors.map(({ channel }) => updateFeatureStatus(channel, "critic_running")));
+        input.onStatus?.({ taskId: task.id, judge: "done", actor: "done", critic: "rerunning" });
+        const revisedPairs = await allOrThrow(revisedActors.map(async (pair): Promise<FeaturePairRun> => ({
+          definition: pair.definition,
+          channel: pair.channel,
+          actor: pair.actor,
+          critic: await this.runCritic(
+            input,
+            task,
+            route.critic_engine,
+            judge.dir,
+            pair.actor.dir,
+            workers,
+            turn,
+            pair.channel,
+            true
+          )
+        })));
+        const replacements = new Map(revisedPairs.map((pair) => [pair.definition.id, pair]));
+        finalPairs = pairRuns.map((pair) => replacements.get(pair.definition.id) ?? pair);
+        throwIfCancelled(input.signal);
+      }
+
+      const waveSummaries = await allOrThrow(finalPairs.map(async (pair): Promise<FeatureSummary> => {
+        const summary = await buildSupervisorSummary({
+          judgeDir: judge.dir,
+          actorDir: pair.actor.dir,
+          criticDir: pair.critic.dir,
+          turnDir: turn.dir,
+          featureActorWorklogPath: pair.channel.actorWorklogPath,
+          featureCriticFindingsPath: pair.channel.criticFindingsPath
+        });
+        await writeFeatureDecision(pair.channel, summary);
+        await updateFeatureStatus(pair.channel, "approved");
+        return { id: pair.channel.id, title: pair.definition.title, summary };
+      }));
+      summaries.push(...waveSummaries);
+      await this.sessions.appendEvent(task, "feature.wave_completed", `Completed feature wave: ${wave.map((feature) => feature.id).join(", ")}`);
+    }
+
+    throwIfCancelled(input.signal);
+    const summary = multiFeatureSummary(summaries);
+    await writeText(join(turn.dir, "supervisor-summary.md"), `${summary}\n`);
+    await this.sessions.updateTaskStatus(task, "done");
+    input.onStatus?.({ taskId: task.id, judge: "done", actor: "done", critic: "done" });
+    return {
+      mode: "complex",
+      taskId: task.id,
+      summary,
+      workers
+    };
   }
 
   private async runActorCriticPair(
@@ -400,15 +607,17 @@ export class Orchestrator {
 
   private async failTask(
     task: TaskSession,
-    feature: FeatureChannel | null,
+    features: FeatureChannel[],
     input: HandleRequestInput,
     error: unknown
   ): Promise<never> {
     const cancelled = isCancellation(error, input.signal);
     const state = cancelled ? "cancelled" : "failed";
-    if (feature) {
-      await updateFeatureStatus(feature, state);
-    }
+    await Promise.all(features.map(async (feature) => {
+      if (!(await featureIsApproved(feature))) {
+        await updateFeatureStatus(feature, state);
+      }
+    }));
     await this.sessions.updateTaskStatus(task, state);
     input.onStatus?.({ taskId: task.id });
     throw cancelled ? cancellationError() : error;
@@ -536,10 +745,14 @@ export class Orchestrator {
     workers: WorkerLogRef[],
     turn: TaskTurn,
     feature: FeatureChannel,
-    revision?: string
+    revision?: string,
+    featureScoped = false
   ): Promise<WorkerFiles> {
+    const workerId = featureScoped ? `actor-${engine}-${feature.id}` : `actor-${engine}`;
     const actor = await this.sessions.initializeWorker(task, {
-      workerId: `actor-${engine}`,
+      workerId,
+      ...(featureScoped ? { featureId: feature.id } : {}),
+      ...(featureScoped ? { featureTitle: feature.title } : {}),
       role: "actor",
       engine,
       preserveOutput: input.retry,
@@ -556,15 +769,18 @@ export class Orchestrator {
 
     this.recordWorker(input, workers, {
       id: actor.workerId,
+      ...(featureScoped ? { featureId: feature.id } : {}),
       role: "actor",
       engine,
-      label: `Actor (${engine})`,
+      label: featureScoped ? `Actor (${engine}) · ${feature.title}` : `Actor (${engine})`,
       logPath: actor.outputLogPath,
       statusPath: actor.statusPath
     });
 
     const result = await this.runWorkerWithNativeSession(engine, {
       workerId: actor.workerId,
+      ...(featureScoped ? { featureId: feature.id } : {}),
+      ...(featureScoped ? { featureTitle: feature.title } : {}),
       role: "actor",
       engine,
       cwd: input.cwd,
@@ -594,10 +810,14 @@ export class Orchestrator {
     actorDir: string,
     workers: WorkerLogRef[],
     turn: TaskTurn,
-    feature: FeatureChannel
+    feature: FeatureChannel,
+    featureScoped = false
   ): Promise<WorkerFiles> {
+    const workerId = featureScoped ? `critic-${engine}-${feature.id}` : `critic-${engine}`;
     const critic = await this.sessions.initializeWorker(task, {
-      workerId: `critic-${engine}`,
+      workerId,
+      ...(featureScoped ? { featureId: feature.id } : {}),
+      ...(featureScoped ? { featureTitle: feature.title } : {}),
       role: "critic",
       engine,
       preserveOutput: input.retry,
@@ -614,15 +834,18 @@ export class Orchestrator {
 
     this.recordWorker(input, workers, {
       id: critic.workerId,
+      ...(featureScoped ? { featureId: feature.id } : {}),
       role: "critic",
       engine,
-      label: `Critic (${engine})`,
+      label: featureScoped ? `Critic (${engine}) · ${feature.title}` : `Critic (${engine})`,
       logPath: critic.outputLogPath,
       statusPath: critic.statusPath
     });
 
     const result = await this.runWorkerWithNativeSession(engine, {
       workerId: critic.workerId,
+      ...(featureScoped ? { featureId: feature.id } : {}),
+      ...(featureScoped ? { featureTitle: feature.title } : {}),
       role: "critic",
       engine,
       cwd: input.cwd,
@@ -903,7 +1126,12 @@ function emptyMainResponseSummary(): string {
 }
 
 function labelWorker(status: WorkerStatus): string {
-  return `${capitalize(status.role)} (${status.engine})`;
+  return workerLabel(status.role, status.engine, status.feature_title ?? status.feature_id);
+}
+
+function workerLabel(role: WorkerRole, engine: EngineName, featureId?: string): string {
+  const base = `${capitalize(role)} (${engine})`;
+  return featureId ? `${base} · ${featureId}` : base;
 }
 
 function capitalize(value: string): string {
@@ -921,4 +1149,50 @@ function tailText(text: string, lines: number): string {
     .slice(-lines)
     .join("\n")
     .trim();
+}
+
+function requiredChannel(
+  channels: ReadonlyMap<string, FeatureChannel | undefined>,
+  definition: FeatureDefinition
+): FeatureChannel {
+  const channel = channels.get(definition.id);
+  if (!channel) {
+    throw new Error(`Feature channel missing: ${definition.id}`);
+  }
+  return channel;
+}
+
+async function allOrThrow<T>(promises: Array<Promise<T>>): Promise<T[]> {
+  const results = await Promise.allSettled(promises);
+  const failure = results.find((result): result is PromiseRejectedResult => result.status === "rejected");
+  if (failure) {
+    throw failure.reason;
+  }
+  return results.map((result) => (result as PromiseFulfilledResult<T>).value);
+}
+
+function multiFeatureSummary(features: FeatureSummary[]): string {
+  return [
+    "# Parallel feature delivery",
+    "",
+    ...features.flatMap((feature) => [
+      `## ${feature.title} (${feature.id})`,
+      "",
+      feature.summary.trim(),
+      ""
+    ])
+  ].join("\n").trim();
+}
+
+async function featureIsApproved(feature: FeatureChannel): Promise<boolean> {
+  try {
+    const status = JSON.parse(await readTextIfExists(feature.statusPath)) as { state?: unknown };
+    return status.state === "approved";
+  } catch {
+    return false;
+  }
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }

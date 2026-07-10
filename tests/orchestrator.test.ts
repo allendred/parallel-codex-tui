@@ -202,6 +202,61 @@ describe("Orchestrator", () => {
     expect(await readTextIfExists(join(taskDir, "dialogue", "actor-critic.jsonl"))).toContain('"type":"critic.completed"');
   });
 
+  it("runs independent feature pairs concurrently and waits for dependency waves", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pct-orch-parallel-features-"));
+    const config = mockConfig(root);
+    const manager = new SessionManager({
+      projectRoot: root,
+      dataDir: config.dataDir,
+      now: () => new Date("2026-06-30T03:30:00.000Z"),
+      randomId: () => "wave"
+    });
+    const adapter = new MultiFeatureAdapter();
+    const orchestrator = new Orchestrator(config, manager, new Map([["mock", adapter]]));
+
+    const result = await orchestrator.handleRequest({
+      request: "实现游戏界面、规则引擎并完成集成",
+      cwd: root
+    });
+
+    const taskDir = join(root, ".parallel-codex", "sessions", result.taskId ?? "");
+    expect(adapter.maxConcurrentActors).toBe(2);
+    expect(adapter.events.indexOf("actor:start:0001-integration")).toBeGreaterThan(
+      adapter.events.indexOf("critic:end:0001-ui")
+    );
+    expect(adapter.events.indexOf("actor:start:0001-integration")).toBeGreaterThan(
+      adapter.events.indexOf("critic:end:0001-engine")
+    );
+    expect(result.workers.map((worker) => worker.id)).toEqual(expect.arrayContaining([
+      "judge-mock",
+      "actor-mock-0001-ui",
+      "actor-mock-0001-engine",
+      "critic-mock-0001-ui",
+      "critic-mock-0001-engine",
+      "actor-mock-0001-integration",
+      "critic-mock-0001-integration"
+    ]));
+    expect(result.summary).toContain("Game UI");
+    expect(result.summary).toContain("Game engine");
+    expect(result.summary).toContain("Integration");
+    const restoredWorkers = await orchestrator.listTaskWorkers(result.taskId ?? "");
+    expect(restoredWorkers.map((worker) => worker.label)).toEqual(expect.arrayContaining([
+      "Actor (mock) · Game UI",
+      "Critic (mock) · Game UI",
+      "Actor (mock) · Integration",
+      "Critic (mock) · Integration"
+    ]));
+    expect(await readTextIfExists(join(taskDir, "turns", "0001", "feature-plan.json"))).toContain('"depends_on"');
+    expect(JSON.parse(await readTextIfExists(join(taskDir, "actor-mock-0001-ui", "status.json")))).toMatchObject({
+      feature_id: "0001-ui",
+      feature_title: "Game UI",
+      state: "done"
+    });
+    expect(JSON.parse(await readTextIfExists(join(taskDir, "features", "0001-ui", "status.json")))).toMatchObject({ state: "approved" });
+    expect(JSON.parse(await readTextIfExists(join(taskDir, "features", "0001-engine", "status.json")))).toMatchObject({ state: "approved" });
+    expect(JSON.parse(await readTextIfExists(join(taskDir, "features", "0001-integration", "status.json")))).toMatchObject({ state: "approved" });
+  });
+
   it("lists workers from an existing task session after TUI restart", async () => {
     const root = await mkdtemp(join(tmpdir(), "pct-orch-list-workers-"));
     const config = mockConfig(root);
@@ -1029,6 +1084,35 @@ describe("Orchestrator", () => {
     expect(await readTextIfExists(join(taskDir, "events.jsonl"))).toContain("task.retrying");
   });
 
+  it("retries a failed feature worker with the persisted plan and native session", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pct-orch-retry-feature-"));
+    const config = mockConfig(root);
+    const manager = new SessionManager({
+      projectRoot: root,
+      dataDir: config.dataDir,
+      now: () => new Date("2026-06-30T03:31:15.000Z"),
+      randomId: () => "feature"
+    });
+    const adapter = new RetryMultiFeatureAdapter();
+    const orchestrator = new Orchestrator(config, manager, new Map([["mock", adapter]]));
+    const taskId = "task-20260630-033115-feature";
+
+    await expect(orchestrator.handleRequest({
+      request: "实现游戏界面、规则引擎并完成集成",
+      cwd: root
+    })).rejects.toThrow("actor-mock-0001-ui failed with exit code 2");
+
+    const result = await orchestrator.retryTask({ taskId, cwd: root });
+    const taskDir = join(root, ".parallel-codex", "sessions", taskId);
+
+    expect(result.taskId).toBe(taskId);
+    expect(adapter.uiNativeSessions).toEqual([null, "retry-ui-session"]);
+    expect(result.workers.map((worker) => worker.id)).toContain("actor-mock-0001-integration");
+    expect(await pathExists(join(taskDir, "turns", "0002"))).toBe(false);
+    expect(await readTextIfExists(join(taskDir, "actor-mock-0001-ui", "output.log"))).toContain("FIRST_UI_FAILURE");
+    expect(await readTextIfExists(join(taskDir, "turns", "0001", "feature-plan.json"))).toContain('"id": "integration"');
+  });
+
   it("retries a failed follow-up turn without adding another turn or rerunning Judge", async () => {
     const root = await mkdtemp(join(tmpdir(), "pct-orch-retry-follow-up-"));
     const config = mockConfig(root);
@@ -1147,6 +1231,99 @@ class RetryOnceActorAdapter extends MockWorkerAdapter {
       exitCode: 2,
       signal: null
     };
+  }
+}
+
+class MultiFeatureAdapter extends MockWorkerAdapter {
+  readonly events: string[] = [];
+  maxConcurrentActors = 0;
+  private activeActors = 0;
+
+  async run(spec: WorkerRunSpec): Promise<WorkerResult> {
+    if (spec.role === "judge") {
+      const result = await super.run(spec);
+      await writeJson(join(spec.filesDir, "features.json"), {
+        version: 1,
+        features: [
+          { id: "ui", title: "Game UI", description: "Render board and controls", depends_on: [] },
+          { id: "engine", title: "Game engine", description: "Implement board rules", depends_on: [] },
+          { id: "integration", title: "Integration", description: "Connect UI and engine", depends_on: ["ui", "engine"] }
+        ]
+      });
+      return result;
+    }
+
+    const featureId = spec.featureId ?? "none";
+    if (spec.role === "actor") {
+      this.activeActors += 1;
+      this.maxConcurrentActors = Math.max(this.maxConcurrentActors, this.activeActors);
+      this.events.push(`actor:start:${featureId}`);
+      try {
+        await new Promise((resolve) => setTimeout(resolve, featureId.includes("integration") ? 20 : 80));
+        return await super.run(spec);
+      } finally {
+        this.events.push(`actor:end:${featureId}`);
+        this.activeActors -= 1;
+      }
+    }
+
+    if (spec.role === "critic") {
+      this.events.push(`critic:start:${featureId}`);
+      await new Promise((resolve) => setTimeout(resolve, 30));
+      const result = await super.run(spec);
+      this.events.push(`critic:end:${featureId}`);
+      return result;
+    }
+
+    return super.run(spec);
+  }
+}
+
+class RetryMultiFeatureAdapter extends MultiFeatureAdapter {
+  readonly uiNativeSessions: Array<string | null> = [];
+  private uiRuns = 0;
+  private judgeRuns = 0;
+
+  async run(spec: WorkerRunSpec): Promise<WorkerResult> {
+    if (spec.role === "judge") {
+      this.judgeRuns += 1;
+      const result = await super.run(spec);
+      if (this.judgeRuns > 1) {
+        await writeJson(join(spec.filesDir, "features.json"), {
+          version: 1,
+          features: [
+            { id: "drifted", title: "Drifted plan", description: "Must not replace persisted plan", depends_on: [] }
+          ]
+        });
+      }
+      return result;
+    }
+
+    if (spec.role !== "actor" || spec.featureId !== "0001-ui") {
+      return super.run(spec);
+    }
+
+    this.uiRuns += 1;
+    this.uiNativeSessions.push(spec.nativeSession?.session_id ?? null);
+    if (this.uiRuns > 1) {
+      return super.run(spec);
+    }
+
+    await spec.onNativeSession?.("retry-ui-session");
+    await appendText(spec.outputLogPath, "FIRST_UI_FAILURE\n");
+    await writeJson(spec.statusPath, {
+      worker_id: spec.workerId,
+      feature_id: spec.featureId,
+      feature_title: spec.featureTitle,
+      role: spec.role,
+      engine: spec.engine,
+      state: "failed",
+      phase: "test-feature-failure",
+      last_event_at: new Date().toISOString(),
+      summary: "UI actor failed once",
+      native_session_id: "retry-ui-session"
+    });
+    return { workerId: spec.workerId, exitCode: 2, signal: null };
   }
 }
 

@@ -141,10 +141,12 @@ The doctor output includes `preview:` and `semantic:` ANSI swatch rows so you ca
 - Simple requests stay in the main TUI flow and do not create Judge, Actor, or Critic workers.
 - Consecutive simple requests reuse the main worker's native session across app restarts when the CLI exposes a session id.
 - Complex requests create a session under `.parallel-codex/sessions/`.
-- Complex requests run Judge -> Actor -> Critic.
+- Complex requests run Judge -> Actor -> Critic. Judge also writes a bounded `features.json` dependency plan.
+- Independent features run as parallel Actor batches followed by parallel Critic batches. Dependent features start only after their prerequisite feature mailboxes are approved.
+- Each planned feature gets isolated Actor/Critic worker directories, logs, status, native session ids, and a mailbox under `features/<turn>-<feature>`; the shared dialogue remains in `dialogue/actor-critic.jsonl`.
 - Complex follow-ups stay in the active task, append a numbered turn, reuse the same Actor/Critic native sessions when available, and inject up to five prior turn summaries as file-backed memory.
 - Pressing `Esc` while a request is running stops the router or active worker and records an interrupted complex task as `cancelled`; exiting the outer TUI also terminates the active run.
-- Failed and cancelled tasks expose `Ctrl+R` retry. Retry keeps the same task and turn, reuses recorded native worker sessions, preserves prior output behind a retry separator, and does not route the request again.
+- Failed and cancelled tasks expose `Ctrl+R` retry. Retry keeps the same task and turn, reuses recorded native worker sessions, preserves prior output behind a retry separator, does not route the request again, and reuses the persisted feature dependency plan.
 - Simple follow-up questions run through the persistent Main native session with the active task directory, original request, up to five recent turn summaries, valid worker statuses, and log tails as file-backed context. They do not start another Judge, Actor, or Critic turn.
 - Worker prompts, logs, status, and outputs are written to disk.
 - The bottom status line shows the active task state.

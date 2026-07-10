@@ -50,6 +50,8 @@ export const TaskMetaSchema = z.object({
 
 export const WorkerStatusSchema = z.object({
   worker_id: z.string().min(1),
+  feature_id: z.string().min(1).optional(),
+  feature_title: z.string().min(1).optional(),
   role: WorkerRoleSchema,
   engine: EngineNameSchema,
   state: WorkerStateSchema,

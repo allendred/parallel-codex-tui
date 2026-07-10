@@ -16,6 +16,8 @@ export interface WorkerModelRunConfig {
 
 export interface WorkerRunSpec {
   workerId: string;
+  featureId?: string;
+  featureTitle?: string;
   role: WorkerRole;
   engine: EngineName;
   cwd: string;

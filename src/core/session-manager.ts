@@ -54,6 +54,8 @@ export interface TaskSession {
 
 export interface InitializeWorkerInput {
   workerId: string;
+  featureId?: string;
+  featureTitle?: string;
   role: WorkerRole;
   engine: EngineName;
   prompt: string;
@@ -231,6 +233,8 @@ export class SessionManager {
     const statusPath = join(dir, "status.json");
     const status: WorkerStatus = {
       worker_id: input.workerId,
+      ...(input.featureId ? { feature_id: input.featureId } : {}),
+      ...(input.featureTitle ? { feature_title: input.featureTitle } : {}),
       role: input.role,
       engine: input.engine,
       state: "idle",

@@ -437,6 +437,8 @@ async function setStatus(
 ): Promise<void> {
   await writeJson(spec.statusPath, {
     worker_id: spec.workerId,
+    ...(spec.featureId ? { feature_id: spec.featureId } : {}),
+    ...(spec.featureTitle ? { feature_title: spec.featureTitle } : {}),
     role: spec.role,
     engine: spec.engine,
     state,

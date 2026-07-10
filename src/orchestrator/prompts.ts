@@ -36,6 +36,10 @@ export interface PromptTurnContext {
 
 export interface PromptFeatureContext {
   featureId: string;
+  featureTitle: string;
+  featureDescription: string;
+  featureSpecPath: string;
+  featureDependencies: string[];
   featureDir: string;
   dialoguePath: string;
   actorWorklogPath: string;
@@ -81,6 +85,12 @@ export function buildJudgePrompt(input: JudgePromptInput): string {
     "- acceptance.md",
     "- actor-brief.md",
     "- critic-brief.md",
+    "- features.json",
+    "",
+    "features.json must contain version 1 and at most 8 features.",
+    "Use safe lowercase ids made from letters, numbers, and hyphens.",
+    "List dependencies in \"depends_on\"; independent features can run in parallel.",
+    "Example: {\"version\":1,\"features\":[{\"id\":\"ui\",\"title\":\"UI\",\"description\":\"Build the interface\",\"depends_on\":[]}]}",
     "",
     "User request:",
     input.request,
@@ -173,6 +183,11 @@ function featureLines(feature: PromptFeatureContext | undefined): string[] {
 
   return [
     `Feature id: ${feature.featureId}`,
+    `Feature title: ${feature.featureTitle}`,
+    `Feature description: ${feature.featureDescription}`,
+    `Feature specification: ${feature.featureSpecPath}`,
+    `Feature dependencies: ${feature.featureDependencies.length > 0 ? feature.featureDependencies.join(", ") : "(none)"}`,
+    "Work only on this feature scope and honor completed dependency outputs.",
     `Feature directory: ${feature.featureDir}`,
     `Actor/Critic dialogue log: ${feature.dialoguePath}`,
     `Actor feature worklog: ${feature.actorWorklogPath}`,
