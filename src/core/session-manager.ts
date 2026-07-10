@@ -256,6 +256,17 @@ export class SessionManager {
     return this.turnFiles(task, turnId);
   }
 
+  async readLatestRoute(task: TaskSession): Promise<RouteDecision | null> {
+    const latestTurn = await this.latestTurn(task);
+    if (latestTurn) {
+      const latestRoute = await readRouteDecisionIfValid(latestTurn.routePath);
+      if (latestRoute) {
+        return latestRoute;
+      }
+    }
+    return readRouteDecisionIfValid(task.routePath);
+  }
+
   async readMeta(task: TaskSession): Promise<TaskMeta> {
     return readJson(task.metaPath, TaskMetaSchema);
   }

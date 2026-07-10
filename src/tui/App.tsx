@@ -42,6 +42,7 @@ export interface AppProps {
   orchestrator: Orchestrator;
   cwd: string;
   initialTaskId?: string | null;
+  initialRoute?: RouteDecision | null;
   initialMessages?: Message[];
   persistChatMessage?: (message: Message, taskId?: string) => Promise<void>;
   prepareNativeAttach?: (worker: WorkerLogRef) => Promise<NativeAttachLaunch>;
@@ -93,6 +94,7 @@ export function App({
   orchestrator,
   cwd,
   initialTaskId = null,
+  initialRoute = null,
   initialMessages = [],
   persistChatMessage,
   prepareNativeAttach,
@@ -108,7 +110,7 @@ export function App({
   const [messages, setMessages] = useState<Message[]>(() => [...initialMessages]);
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState<StatusLineState | null>(initialTaskId ? { taskId: initialTaskId } : null);
-  const [lastRoute, setLastRoute] = useState<RouteDecision | null>(null);
+  const [lastRoute, setLastRoute] = useState<RouteDecision | null>(initialRoute);
   const [routePending, setRoutePending] = useState<RouteStartInfo | null>(null);
   const [view, setView] = useState<"chat" | "worker" | "native">("chat");
   const [workers, setWorkers] = useState<WorkerLogRef[]>([]);
