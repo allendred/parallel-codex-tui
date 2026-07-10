@@ -2005,6 +2005,7 @@ function collectParallelHiddenCommandBatch(
 
   const output: string[] = [];
   let allSucceeded = true;
+  const includesWorkerLogReadback = commands.some((command) => processCommandReadsWorkerOutputLog(command.command));
   for (let commandIndex = 0; commandIndex < commands.length; commandIndex += 1) {
     const status = normalizedProcessLine(rawLines[index] ?? "").trim();
     if (!isProcessStatusLine(status)) {
@@ -2013,7 +2014,10 @@ function collectParallelHiddenCommandBatch(
     allSucceeded &&= /^succeeded\s+in\s+/i.test(status);
 
     const outputStart = index + 1;
-    const outputEnd = parallelReadOutputEnd(rawLines, outputStart, commandIndex < commands.length - 1);
+    const isLastOutput = commandIndex === commands.length - 1;
+    const outputEnd = includesWorkerLogReadback && isLastOutput
+      ? nestedWorkerLogReadbackEnd(rawLines, outputStart)
+      : parallelReadOutputEnd(rawLines, outputStart, !isLastOutput);
     if (outputEnd === null) {
       return null;
     }
@@ -2025,6 +2029,26 @@ function collectParallelHiddenCommandBatch(
     lines: allSucceeded ? [] : [...commands.map((command) => command.commandLine), ...output],
     nextIndex: index
   };
+}
+
+function processCommandReadsWorkerOutputLog(command: string): boolean {
+  const trimmed = command.trim();
+  return (
+    /^(?:cat|sed|nl|head|tail|bat|less|more)\b/.test(trimmed) &&
+    trimmed.includes(".parallel-codex/sessions/") &&
+    /\/output\.log\b/.test(trimmed)
+  );
+}
+
+function nestedWorkerLogReadbackEnd(rawLines: string[], startIndex: number): number | null {
+  for (let index = startIndex; index < rawLines.length - 1; index += 1) {
+    const marker = normalizedProcessLine(rawLines[index] ?? "").trim();
+    const command = normalizedProcessLine(rawLines[index + 1] ?? "").trim();
+    if (marker === "exec" && parseShellExecCommand(command) !== null) {
+      return index;
+    }
+  }
+  return null;
 }
 
 function parallelReadOutputEnd(rawLines: string[], startIndex: number, expectsStatus: boolean): number | null {

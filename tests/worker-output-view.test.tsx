@@ -2755,6 +2755,68 @@ describe("WorkerOutputView", () => {
     }
   });
 
+  it("hides nested Actor transcript content read from a worker output log", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pct-worker-output-nested-worker-log-"));
+    const workerDir = join(root, "critic-codex");
+
+    await mkdir(workerDir, { recursive: true });
+    await writeFile(join(workerDir, "review.md"), "APPROVED\nCritic review only.\n");
+    await writeFile(
+      join(workerDir, "output.log"),
+      [
+        "exec",
+        "/bin/zsh -lc \"tail -n 100 .parallel-codex/sessions/task-1/actor-codex/output.log\" in /tmp/project",
+        "exec",
+        "/bin/zsh -lc \"sed -n '1,200p' .parallel-codex/sessions/task-1/actor-codex/status.json\" in /tmp/project",
+        "exec",
+        "/bin/zsh -lc \"sed -n '1,200p' .parallel-codex/sessions/task-1/features/0002/status.json\" in /tmp/project",
+        "succeeded in 0ms:",
+        "{\"state\":\"done\"}",
+        "succeeded in 1ms:",
+        "{\"state\":\"done\"}",
+        "succeeded in 2ms:",
+        "diff --git a/.parallel-codex/sessions/task-1/actor-codex/worklog.md b/.parallel-codex/sessions/task-1/actor-codex/worklog.md",
+        "--- a/.parallel-codex/sessions/task-1/actor-codex/worklog.md",
+        "+++ b/.parallel-codex/sessions/task-1/actor-codex/worklog.md",
+        "@@ -0,0 +1,1 @@",
+        "+Actor worklog body",
+        "codex",
+        "ACTOR FINAL SHOULD BE HIDDEN",
+        "tokens used",
+        "10,000",
+        "ACTOR FINAL SHOULD BE HIDDEN",
+        "exec",
+        "/bin/zsh -lc 'npm test' in /tmp/project",
+        "succeeded in 20ms:",
+        "17 tests passed"
+      ].join("\n")
+    );
+
+    const { lastFrame, unmount } = render(
+      <WorkerOutputView
+        title="Critic (codex) output"
+        role="critic"
+        logPath={join(workerDir, "output.log")}
+        height={24}
+      />
+    );
+
+    try {
+      await waitForFrame(lastFrame, "17 tests passed");
+
+      const frame = lastFrame() ?? "";
+      expect(frame).toContain("Critic review only.");
+      expect(frame).toContain("$ npm test");
+      expect(frame).toContain("17 tests passed");
+      expect(frame).not.toContain("$ tail -n 100");
+      expect(frame).not.toContain("ACTOR FINAL SHOULD BE HIDDEN");
+      expect(frame).not.toContain("Actor worklog body");
+      expect(frame).not.toContain("diff 1 file");
+    } finally {
+      unmount();
+    }
+  });
+
   it("hides successful parallel conditional probes of session artifacts", async () => {
     const root = await mkdtemp(join(tmpdir(), "pct-worker-output-conditional-readbacks-"));
     const workerDir = join(root, "actor-codex");
