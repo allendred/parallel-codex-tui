@@ -463,8 +463,7 @@ describe("CLI worker layout smoke", () => {
 
     try {
       await waitForScreenText(() => screenWrites, screen, "ready");
-      child.write("\x17");
-      await waitForScreenText(() => screenWrites, screen, "preserve tail");
+      await openWorkerLogs(child, () => screenWrites, screen, "preserve tail");
 
       const lines = screen.styledSnapshotLines();
       const titleLine = lines.find((line) => line.chunks.map((chunk) => chunk.text).join("").includes("actor/mock"));
@@ -516,8 +515,7 @@ describe("CLI worker layout smoke", () => {
 
     try {
       await waitForScreenText(() => screenWrites, screen, "ready");
-      child.write("\x17");
-      await waitForScreenText(() => screenWrites, screen, "keep source tail");
+      await openWorkerLogs(child, () => screenWrites, screen, "keep source tail");
 
       const lines = screen.styledSnapshotLines();
       const titleLine = lines.find((line) => line.chunks.map((chunk) => chunk.text).join("").includes("actor/mock"));
@@ -1139,12 +1137,41 @@ async function waitForScreenText(
   screen: NativeTerminalScreen,
   text: string
 ): Promise<void> {
-  for (let attempt = 0; attempt < 100; attempt += 1) {
+  if (await tryWaitForScreenText(screenWritesRef, screen, text, 100)) {
+    return;
+  }
+  throw new Error(`Timed out waiting for screen text ${text}\nSnapshot:\n${screen.snapshot()}`);
+}
+
+async function openWorkerLogs(
+  child: { write(data: string): void },
+  screenWritesRef: () => Promise<void>,
+  screen: NativeTerminalScreen,
+  expectedText: string
+): Promise<void> {
+  await waitForScreenText(screenWritesRef, screen, "^W logs");
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    child.write("\x17");
+    if (await tryWaitForScreenText(screenWritesRef, screen, expectedText, 20)) {
+      return;
+    }
+    await waitForScreenText(screenWritesRef, screen, "^W logs");
+  }
+  await waitForScreenText(screenWritesRef, screen, expectedText);
+}
+
+async function tryWaitForScreenText(
+  screenWritesRef: () => Promise<void>,
+  screen: NativeTerminalScreen,
+  text: string,
+  attempts: number
+): Promise<boolean> {
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
     await screenWritesRef();
     if (screen.snapshot().includes(text)) {
-      return;
+      return true;
     }
     await new Promise((resolve) => setTimeout(resolve, 50));
   }
-  throw new Error(`Timed out waiting for screen text ${text}\nSnapshot:\n${screen.snapshot()}`);
+  return false;
 }
