@@ -1083,6 +1083,100 @@ describe("WorkerOutputView", () => {
     }
   });
 
+  it("compacts parallel source read batches before their outputs can drift", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pct-worker-output-parallel-read-batch-"));
+    const workerDir = join(root, "judge-codex");
+
+    await mkdir(workerDir, { recursive: true });
+    await writeFile(
+      join(workerDir, "output.log"),
+      [
+        "exec",
+        "/bin/zsh -lc \"sed -n '1,20p' src/a.ts\" in /tmp/project",
+        "exec",
+        "/bin/zsh -lc \"sed -n '1,20p' src/b.ts\" in /tmp/project",
+        "exec",
+        "/bin/zsh -lc \"sed -n '1,20p' test/c.test.ts\" in /tmp/project",
+        "succeeded in 0ms:",
+        "export const a = 1;",
+        "export const b = 2;",
+        "succeeded in 1ms:",
+        "delete this[name];",
+        "return value;",
+        "succeeded in 2ms:",
+        "assert.equal(actual, expected);",
+        "});",
+        "codex",
+        "Parallel inspection is complete."
+      ].join("\n")
+    );
+
+    const { lastFrame, unmount } = render(
+      <WorkerOutputView
+        title="Judge (codex) output"
+        role="judge"
+        logPath={join(workerDir, "output.log")}
+        height={16}
+      />
+    );
+
+    try {
+      await waitForFrame(lastFrame, "Parallel inspection is complete.");
+
+      const frame = lastFrame() ?? "";
+      expect(frame).toContain("· read 3 chunks · 6 lines · a.ts, b.ts, test/c.test.ts");
+      expect(frame).toContain("Parallel inspection is complete.");
+      expect(frame).not.toContain("$ sed -n");
+      expect(frame).not.toContain("delete this[name]");
+      expect(frame).not.toContain("export const a");
+      expect(frame).not.toContain("assert.equal");
+    } finally {
+      unmount();
+    }
+  });
+
+  it("keeps a parallel source read batch expanded when any command fails", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pct-worker-output-failed-parallel-read-"));
+    const workerDir = join(root, "judge-codex");
+
+    await mkdir(workerDir, { recursive: true });
+    await writeFile(
+      join(workerDir, "output.log"),
+      [
+        "exec",
+        "/bin/zsh -lc \"sed -n '1,20p' src/a.ts\" in /tmp/project",
+        "exec",
+        "/bin/zsh -lc \"sed -n '1,20p' missing-b.ts\" in /tmp/project",
+        "succeeded in 0ms:",
+        "export const a = 1;",
+        "failed in 3ms:",
+        "sed: missing-b.ts: No such file or directory"
+      ].join("\n")
+    );
+
+    const { lastFrame, unmount } = render(
+      <WorkerOutputView
+        title="Judge (codex) output"
+        role="judge"
+        logPath={join(workerDir, "output.log")}
+        height={14}
+      />
+    );
+
+    try {
+      await waitForFrame(lastFrame, "missing-b.ts: No such file");
+
+      const frame = lastFrame() ?? "";
+      expect(frame).toContain("$ sed -n '1,20p' src/a.ts");
+      expect(frame).toContain("$ sed -n '1,20p' missing-b.ts");
+      expect(frame).toContain("· fail 3ms");
+      expect(frame).toContain("sed: missing-b.ts: No such file or directory");
+      expect(frame).not.toContain("read 2 chunks");
+    } finally {
+      unmount();
+    }
+  });
+
   it("renders feature mailbox artifacts for the selected role", async () => {
     const root = await mkdtemp(join(tmpdir(), "pct-worker-output-"));
     const workerDir = join(root, "actor-mock");

@@ -1653,16 +1653,16 @@ function sanitizeProcessOutput(text: string, options: ProcessOutputSanitizeOptio
       continue;
     }
 
+    const parallelRead = collectParallelReadCommandBatch(rawLines, index, renderedArtifactFiles);
+    if (parallelRead) {
+      kept.push(parallelRead.summary);
+      index = parallelRead.nextIndex;
+      continue;
+    }
+
     const execCommand = collectProcessExecCommand(rawLines, index);
     if (execCommand) {
-      if (
-        processCommandReadsRenderedArtifact(execCommand.command, renderedArtifactFiles) ||
-        processCommandReadsParallelCodexTaskFile(execCommand.command) ||
-        processCommandInspectsSessionMetadata(execCommand.command) ||
-        processCommandInspectsSessionCwd(execCommand.command, execCommand.cwd) ||
-        processCommandReadsSessionSystemFile(execCommand.command) ||
-        processCommandReadsSkillDocument(execCommand.command)
-      ) {
+      if (shouldHideProcessCommand(execCommand, renderedArtifactFiles)) {
         index = skipProcessCommandOutputBlock(rawLines, execCommand.nextIndex);
         continue;
       }
@@ -1822,10 +1822,17 @@ function formatRecoveredNetworkSummary(reconnectAttempts: string[], httpsFallbac
   return `Network recovered after ${reconnect}${fallback}`;
 }
 
+interface ProcessExecCommand {
+  command: string;
+  commandLine: string;
+  cwd: string | null;
+  nextIndex: number;
+}
+
 function collectProcessExecCommand(
   rawLines: string[],
   startIndex: number
-): { command: string; commandLine: string; cwd: string | null; nextIndex: number } | null {
+): ProcessExecCommand | null {
   const line = normalizedProcessLine(rawLines[startIndex] ?? "");
   const trimmed = line.trim();
 
@@ -1856,13 +1863,83 @@ function collectProcessExecCommand(
   };
 }
 
+function collectParallelReadCommandBatch(
+  rawLines: string[],
+  startIndex: number,
+  renderedArtifactFiles: Set<string>
+): { summary: string; nextIndex: number } | null {
+  const commands: ProcessExecCommand[] = [];
+  let index = startIndex;
+
+  while (index < rawLines.length) {
+    const command = collectProcessExecCommand(rawLines, index);
+    if (!command) {
+      break;
+    }
+    commands.push(command);
+    index = command.nextIndex;
+  }
+  if (commands.length < 2 || commands.some((command) => shouldHideProcessCommand(command, renderedArtifactFiles))) {
+    return null;
+  }
+
+  const targets: string[] = [];
+  for (const command of commands) {
+    const readTargets = sedReadTargets(command.command);
+    if (!readTargets) {
+      return null;
+    }
+    targets.push(...readTargets);
+  }
+
+  let totalLines = 0;
+  let contentLines = 0;
+  for (let commandIndex = 0; commandIndex < commands.length; commandIndex += 1) {
+    const status = normalizedProcessLine(rawLines[index] ?? "").trim();
+    if (!/^succeeded\s+in\s+\d+(?:ms|s|m)?:?$/i.test(status)) {
+      return null;
+    }
+
+    const outputStart = index + 1;
+    const outputEnd = parallelReadOutputEnd(rawLines, outputStart, commandIndex < commands.length - 1);
+    if (outputEnd === null) {
+      return null;
+    }
+    const outputLines = compactableReadOutputLines(rawLines, outputStart, outputEnd);
+    totalLines += outputLines.length;
+    contentLines += outputLines.filter((line) => normalizedProcessLine(line).trim()).length;
+    index = outputEnd;
+  }
+
+  if (contentLines < CODE_OUTPUT_COLLAPSE_MIN_LINES) {
+    return null;
+  }
+  return {
+    summary: `Collapsed read summaries: ${targets.length} chunks, ${totalLines} lines (${compactReadSummaryTargets(targets.map(formatReadTarget))})`,
+    nextIndex: index
+  };
+}
+
+function parallelReadOutputEnd(rawLines: string[], startIndex: number, expectsStatus: boolean): number | null {
+  for (let index = startIndex; index < rawLines.length; index += 1) {
+    const trimmed = normalizedProcessLine(rawLines[index] ?? "").trim();
+    if (expectsStatus && isProcessStatusLine(trimmed)) {
+      return index;
+    }
+    if (isChainedReadOutputBoundary(trimmed)) {
+      return expectsStatus ? null : index;
+    }
+  }
+  return null;
+}
+
 function collectChainedReadCommandBlock(
   rawLines: string[],
   command: string,
   statusIndex: number
 ): { summary: string; nextIndex: number } | null {
-  const targets = chainedSedReadTargets(command);
-  if (!targets) {
+  const targets = sedReadTargets(command);
+  if (!targets || targets.length < 2) {
     return null;
   }
 
@@ -1881,18 +1958,7 @@ function collectChainedReadCommandBlock(
     nextIndex += 1;
   }
 
-  const outputLines = rawLines
-    .slice(outputStart, nextIndex)
-    .filter((line) => {
-      const normalized = normalizedProcessLine(line);
-      return !shouldDropNoisyProcessLine(normalized.trim(), normalized);
-    });
-  while (outputLines.length > 0 && !normalizedProcessLine(outputLines[0] ?? "").trim()) {
-    outputLines.shift();
-  }
-  while (outputLines.length > 0 && !normalizedProcessLine(outputLines[outputLines.length - 1] ?? "").trim()) {
-    outputLines.pop();
-  }
+  const outputLines = compactableReadOutputLines(rawLines, outputStart, nextIndex);
   const contentLineCount = outputLines.filter((line) => normalizedProcessLine(line).trim()).length;
   if (contentLineCount < CODE_OUTPUT_COLLAPSE_MIN_LINES) {
     return null;
@@ -1905,12 +1971,24 @@ function collectChainedReadCommandBlock(
   };
 }
 
-function chainedSedReadTargets(command: string): string[] | null {
-  const segments = command.split(/\s+&&\s+/);
-  if (segments.length < 2) {
-    return null;
+function compactableReadOutputLines(rawLines: string[], startIndex: number, endIndex: number): string[] {
+  const outputLines = rawLines
+    .slice(startIndex, endIndex)
+    .filter((line) => {
+      const normalized = normalizedProcessLine(line);
+      return !shouldDropNoisyProcessLine(normalized.trim(), normalized);
+    });
+  while (outputLines.length > 0 && !normalizedProcessLine(outputLines[0] ?? "").trim()) {
+    outputLines.shift();
   }
+  while (outputLines.length > 0 && !normalizedProcessLine(outputLines[outputLines.length - 1] ?? "").trim()) {
+    outputLines.pop();
+  }
+  return outputLines;
+}
 
+function sedReadTargets(command: string): string[] | null {
+  const segments = command.split(/\s+&&\s+/);
   const targets: string[] = [];
   for (const segment of segments) {
     const match = segment.trim().match(/^sed\s+-n\s+(\S+)\s+(.+)$/);
@@ -1922,6 +2000,17 @@ function chainedSedReadTargets(command: string): string[] | null {
     targets.push(target);
   }
   return targets;
+}
+
+function shouldHideProcessCommand(command: ProcessExecCommand, artifactFiles: Set<string>): boolean {
+  return (
+    processCommandReadsRenderedArtifact(command.command, artifactFiles) ||
+    processCommandReadsParallelCodexTaskFile(command.command) ||
+    processCommandInspectsSessionMetadata(command.command) ||
+    processCommandInspectsSessionCwd(command.command, command.cwd) ||
+    processCommandReadsSessionSystemFile(command.command) ||
+    processCommandReadsSkillDocument(command.command)
+  );
 }
 
 function singleShellTokenValue(text: string): string | null {
