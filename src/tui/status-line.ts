@@ -1,4 +1,5 @@
 import type { RouteDecision } from "../domain/schemas.js";
+import type { RouteStartInfo } from "../orchestrator/orchestrator.js";
 import { compactEndByDisplayWidth } from "./display-width.js";
 
 export interface StatusLineState {
@@ -81,6 +82,17 @@ export function formatRouteStatus(route: RouteDecision | null): string {
     details.push(formatRouteDuration(route.duration_ms));
   }
   return `route ${details.join(" · ")}`;
+}
+
+export function formatRoutePendingStatus(state: RouteStartInfo | null): string {
+  if (!state) {
+    return "";
+  }
+  if (state.mode !== "auto") {
+    return `route ${state.mode} · forced`;
+  }
+  const label = state.scope === "follow-up" ? "follow-up" : "checking";
+  return `route ${label} · ${formatRouteDuration(state.timeoutMs)} max`;
 }
 
 function formatRouteFailureCause(reason: string): string | null {

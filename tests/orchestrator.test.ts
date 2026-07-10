@@ -1380,6 +1380,7 @@ describe("Orchestrator", () => {
     });
     let seenTimeout = 0;
     let seenFallback = "";
+    let routeStart: unknown;
     const orchestrator = new Orchestrator(
       config,
       manager,
@@ -1394,11 +1395,19 @@ describe("Orchestrator", () => {
     const result = await orchestrator.routeTaskFollowUp({
       taskId: task.id,
       request: "你好",
-      cwd: root
+      cwd: root,
+      onRouteStart: (state: unknown) => {
+        routeStart = state;
+      }
     });
 
     expect(seenTimeout).toBe(20000);
     expect(seenFallback).toBe("simple");
+    expect(routeStart).toEqual({
+      scope: "follow-up",
+      mode: "auto",
+      timeoutMs: 20000
+    });
     expect(result).toMatchObject({
       mode: "simple",
       taskId: null,

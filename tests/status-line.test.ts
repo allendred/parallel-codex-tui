@@ -76,6 +76,26 @@ describe("formatStatusLine", () => {
     expect(formatRouteStatus?.(null)).toBe("");
   });
 
+  it("formats the active router scope and maximum wait before a decision", () => {
+    const formatRoutePendingStatus = (
+      statusLineModule as typeof statusLineModule & {
+        formatRoutePendingStatus?: (state: Record<string, unknown> | null) => string;
+      }
+    ).formatRoutePendingStatus;
+
+    expect(formatRoutePendingStatus).toBeTypeOf("function");
+    expect(formatRoutePendingStatus?.({ scope: "initial", mode: "auto", timeoutMs: 30000 })).toBe(
+      "route checking · 30s max"
+    );
+    expect(formatRoutePendingStatus?.({ scope: "follow-up", mode: "auto", timeoutMs: 20000 })).toBe(
+      "route follow-up · 20s max"
+    );
+    expect(formatRoutePendingStatus?.({ scope: "initial", mode: "complex", timeoutMs: 120000 })).toBe(
+      "route complex · forced"
+    );
+    expect(formatRoutePendingStatus?.(null)).toBe("");
+  });
+
   it("formats worker states as a compact summary instead of full worker logs", () => {
     const state: NonNullable<Parameters<typeof formatStatusLine>[0]> = {
       taskId: "task-a1b2",

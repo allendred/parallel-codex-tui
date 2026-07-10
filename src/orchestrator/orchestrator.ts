@@ -47,6 +47,7 @@ export interface HandleRequestInput {
   cwd: string;
   signal?: AbortSignal;
   retry?: boolean;
+  onRouteStart?: (state: RouteStartInfo) => void;
   onRoute?: (route: RouteDecision) => void;
   onStatus?: (status: WorkerRunStatus) => void;
   onWorker?: (worker: WorkerLogRef) => void;
@@ -70,6 +71,12 @@ export interface TaskFollowUpRouteResult {
   taskId: string | null;
   reason: string;
   route: RouteDecision;
+}
+
+export interface RouteStartInfo {
+  scope: "initial" | "follow-up";
+  mode: AppConfig["router"]["defaultMode"];
+  timeoutMs: number;
 }
 
 export interface HandleRequestResult {
@@ -140,7 +147,7 @@ export class Orchestrator {
   ) {}
 
   async handleRequest(input: HandleRequestInput): Promise<HandleRequestResult> {
-    const route = await this.routeRequest(input.request, input.cwd, input.signal);
+    const route = await this.routeRequest(input.request, input.cwd, input.signal, "initial", input.onRouteStart);
     input.onRoute?.(route);
     const workers: WorkerLogRef[] = [];
 
@@ -180,7 +187,13 @@ export class Orchestrator {
 
   async handleTaskTurn(input: HandleTaskTurnInput): Promise<HandleRequestResult> {
     const task: TaskSession = this.sessions.taskFromId(input.taskId);
-    const route = input.route ?? await this.routeRequest(input.request, input.cwd, input.signal, "follow-up");
+    const route = input.route ?? await this.routeRequest(
+      input.request,
+      input.cwd,
+      input.signal,
+      "follow-up",
+      input.onRouteStart
+    );
     if (!input.route) {
       input.onRoute?.(route);
     }
@@ -235,7 +248,13 @@ export class Orchestrator {
   }
 
   async routeTaskFollowUp(input: HandleTaskQuestionInput): Promise<TaskFollowUpRouteResult> {
-    const route = await this.routeRequest(input.request, input.cwd, input.signal, "follow-up");
+    const route = await this.routeRequest(
+      input.request,
+      input.cwd,
+      input.signal,
+      "follow-up",
+      input.onRouteStart
+    );
     input.onRoute?.(route);
 
     return {
@@ -1011,7 +1030,8 @@ export class Orchestrator {
     request: string,
     workspace: string,
     signal?: AbortSignal,
-    scope: "initial" | "follow-up" = "initial"
+    scope: "initial" | "follow-up" = "initial",
+    onRouteStart?: (state: RouteStartInfo) => void
   ): Promise<RouteDecision> {
     const router = this.routerConfigLoader
       ? await this.routerConfigLoader()
@@ -1033,6 +1053,11 @@ export class Orchestrator {
           }
         }
       : currentConfig;
+    onRouteStart?.({
+      scope,
+      mode: router.defaultMode,
+      timeoutMs: routeConfig.router.codex.timeoutMs
+    });
     const route = await routeRequestWithCodex(request, routeConfig, this.routeRunner, this.routerCwd, signal);
     await appendJsonLine(join(this.routerCwd, "routes.jsonl"), {
       time: new Date().toISOString(),

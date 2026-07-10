@@ -417,7 +417,7 @@ function parseStatusText(text: string, options: { hideTask?: boolean } = {}): Se
       segments.push({
         label: "ROUTE",
         value,
-        tone: /(?:^|\s·\s)fallback(?:\s·\s|$)/i.test(value) ? "wait" : undefined
+        tone: /(?:^|\s·\s)fallback(?:\s·\s|$)|^(?:checking|follow-up)\b/i.test(value) ? "wait" : undefined
       });
       continue;
     }

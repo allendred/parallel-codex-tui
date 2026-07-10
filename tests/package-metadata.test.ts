@@ -166,6 +166,7 @@ describe("package metadata", () => {
     expect(readme).toContain("Router classification only receives the user request");
     expect(readme).toContain("Valid `[router]` changes are reloaded before the next classification without restarting the TUI");
     expect(readme).toContain("Worker, pairing, role, orchestration, data-directory, and UI changes still require a restart");
+    expect(readme).toContain("While classification is running, it shows the effective limit such as `route checking · 30s max`");
     expect(readme).toContain("`.parallel-codex/sessions/main/chat.jsonl`");
     expect(readme).toContain("startup restores the latest 200 valid messages");
     expect(readme).toContain("Chat drafts support Unicode-safe Left/Right, Home/End, Backspace, and Delete editing");

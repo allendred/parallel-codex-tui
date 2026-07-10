@@ -316,6 +316,20 @@ describe("StatusBar", () => {
     expect(displayWidth(frame)).toBeLessThanOrEqual(24);
   });
 
+  it("keeps an active follow-up route wait visible ahead of stale worker counts", () => {
+    const { lastFrame } = render(
+      <StatusBar
+        text="093326-1980 | workers 3 | done 3 | route follow-up · 20s max"
+        terminalWidth={24}
+      />
+    );
+
+    const frame = lastFrame() ?? "";
+    expect(frame).toContain("r:follow-up · 20s max");
+    expect(frame).not.toContain("w3");
+    expect(displayWidth(frame)).toBeLessThanOrEqual(24);
+  });
+
   it("renders role runtime statuses as roles instead of repeated selected workers", () => {
     const { lastFrame } = render(
       <StatusBar

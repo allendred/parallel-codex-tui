@@ -152,7 +152,7 @@ describe("CLI chat Markdown smoke", () => {
         "[router.codex]",
         `command = "${escapeToml(process.execPath)}"`,
         `args = ["${escapeToml(routerScript)}"]`,
-        "timeoutMs = 25",
+        "timeoutMs = 600",
         'fallback = "simple"',
         "",
         "[workers.codex]",
@@ -189,6 +189,7 @@ describe("CLI chat Markdown smoke", () => {
     try {
       await waitForScreenText(() => screenWrites, screen, "> | message");
       child.write("hello\r");
+      await waitForScreenText(() => screenWrites, screen, "route checking · 600ms max");
       await waitForScreenText(() => screenWrites, screen, "Fallback chat response");
       await waitForScreenText(() => screenWrites, screen, "route simple · fallback · timeout");
 

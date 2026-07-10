@@ -5,8 +5,9 @@ import { Lexer, type Token, type Tokens } from "marked";
 import type { AppConfig } from "../core/config.js";
 import { readJson } from "../core/file-store.js";
 import { WorkerStatusSchema, type RouteDecision } from "../domain/schemas.js";
-import type { Orchestrator, WorkerLogRef, WorkerRunStatus } from "../orchestrator/orchestrator.js";
+import type { Orchestrator, RouteStartInfo, WorkerLogRef, WorkerRunStatus } from "../orchestrator/orchestrator.js";
 import {
+  formatRoutePendingStatus,
   formatSelectedWorkerStatus,
   formatRouteStatus,
   formatStatusLine,
@@ -107,6 +108,7 @@ export function App({
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState<StatusLineState | null>(initialTaskId ? { taskId: initialTaskId } : null);
   const [lastRoute, setLastRoute] = useState<RouteDecision | null>(null);
+  const [routePending, setRoutePending] = useState<RouteStartInfo | null>(null);
   const [view, setView] = useState<"chat" | "worker" | "native">("chat");
   const [workers, setWorkers] = useState<WorkerLogRef[]>([]);
   const [selectedWorkerIndex, setSelectedWorkerIndex] = useState(0);
@@ -161,7 +163,10 @@ export function App({
   const terminalWidth = process.stdout.columns || 120;
   const selectedWorkerStatus = formatSelectedWorkerStatus(status, selectedWorkerIndex);
   const visibleWorkerStatus = view === "chat" ? "" : selectedWorkerStatus;
-  const visibleRouteStatus = formatRouteStatus(lastRoute);
+  const visibleRouteStatus = routePending
+    ? formatRoutePendingStatus(routePending)
+    : formatRouteStatus(lastRoute);
+  const visibleTaskStatus = routePending && !activeTaskId ? "" : formatStatusLine(status);
 
   useEffect(() => {
     inputRef.current = input;
@@ -650,7 +655,11 @@ export function App({
   function createRunCallbacks(controller: AbortController) {
     return {
       signal: controller.signal,
-      onRoute: setLastRoute,
+      onRouteStart: setRoutePending,
+      onRoute: (route: RouteDecision) => {
+        setRoutePending(null);
+        setLastRoute(route);
+      },
       onStatus: (nextStatus: WorkerRunStatus) => {
         setStatus(nextStatus);
         if (nextStatus.taskId !== "main") {
@@ -700,6 +709,7 @@ export function App({
     setChatScrollOffset(0);
     busyRef.current = true;
     setBusy(true);
+    setRoutePending(null);
     setLastRoute(null);
     const controller = new AbortController();
     activeRunControllerRef.current = controller;
@@ -783,6 +793,7 @@ export function App({
       if (activeRunControllerRef.current === controller) {
         activeRunControllerRef.current = null;
       }
+      setRoutePending(null);
       busyRef.current = false;
       setBusy(false);
     }
@@ -799,6 +810,7 @@ export function App({
     busyRef.current = true;
     setBusy(true);
     setCanRetryTask(false);
+    setRoutePending(null);
     setLastRoute(null);
 
     try {
@@ -822,6 +834,7 @@ export function App({
       if (activeRunControllerRef.current === controller) {
         activeRunControllerRef.current = null;
       }
+      setRoutePending(null);
       busyRef.current = false;
       setBusy(false);
     }
@@ -838,6 +851,7 @@ export function App({
     setActiveMode(nextMemory.activeMode);
     setCanRetryTask(false);
     setStatus(null);
+    setRoutePending(null);
     setLastRoute(null);
     setWorkers([]);
     workersRef.current = [];
@@ -861,7 +875,7 @@ export function App({
       view={view}
       cwd={cwd}
       taskId={activeTaskId}
-      statusText={[formatStatusLine(status), visibleRouteStatus, visibleWorkerStatus].filter(Boolean).join(" | ")}
+      statusText={[visibleTaskStatus, visibleRouteStatus, visibleWorkerStatus].filter(Boolean).join(" | ")}
       contentHeight={contentHeight}
       showStatusBar={config.ui.showStatusBar}
       input={
