@@ -169,6 +169,16 @@ describe("CLI worker layout smoke", () => {
       expect(displayWidth(headerLineText)).toBe(139);
       expect(workerTitleLine?.chunks.some((chunk) => chunk.style.backgroundColor === TUI_THEME_PRESETS.codex.chrome)).toBe(true);
       expect(workerTitleContentChunks.some((chunk) => chunk.style.backgroundColor === TUI_THEME_PRESETS.codex.surface)).toBe(false);
+      const workerIdentityText = workerTitleContentChunks
+        .filter((chunk) => chunk.style.color === TUI_THEME_PRESETS.codex.accent)
+        .map((chunk) => chunk.text)
+        .join("");
+      const workerMetadataText = workerTitleContentChunks
+        .filter((chunk) => chunk.style.color === TUI_THEME_PRESETS.codex.muted)
+        .map((chunk) => chunk.text)
+        .join("");
+      expect(workerIdentityText).toContain("critic/mock");
+      expect(workerMetadataText).toContain("1/1");
       expect(displayWidth(workerTitleLineText)).toBe(137);
       expect(snapshot).toContain("line 80");
       expect(snapshot).toContain("logs · scroll");

@@ -211,6 +211,7 @@ export function WorkerOutputView({
 
 function WorkerOutputTitleRail({ title, width }: { title: string; width: number }) {
   const titleText = ` ${title} `;
+  const segments = workerOutputTitleSegments(title);
   const renderWidth = typeof process.stdout.columns === "number"
     ? width
     : null;
@@ -220,10 +221,30 @@ function WorkerOutputTitleRail({ title, width }: { title: string; width: number 
 
   return (
     <Box>
-      <Text backgroundColor={TUI_THEME.chrome} color={TUI_THEME.text} bold>{titleText}</Text>
+      <Text backgroundColor={TUI_THEME.chrome}> </Text>
+      <Text backgroundColor={TUI_THEME.chrome} color={TUI_THEME.accent} bold>{segments.identity}</Text>
+      {segments.metadata ? (
+        <Text backgroundColor={TUI_THEME.chrome} color={TUI_THEME.muted}>{segments.metadata}</Text>
+      ) : null}
+      <Text backgroundColor={TUI_THEME.chrome}> </Text>
       {trailingWidth > 0 ? <Text backgroundColor={TUI_THEME.chrome}>{" ".repeat(trailingWidth)}</Text> : null}
     </Box>
   );
+}
+
+function workerOutputTitleSegments(title: string): { identity: string; metadata: string } {
+  const separatorIndex = title.indexOf(" · ");
+  if (separatorIndex >= 0) {
+    return {
+      identity: title.slice(0, separatorIndex),
+      metadata: title.slice(separatorIndex)
+    };
+  }
+
+  const spaceIndex = title.indexOf(" ");
+  return spaceIndex > 0
+    ? { identity: title.slice(0, spaceIndex), metadata: title.slice(spaceIndex) }
+    : { identity: title, metadata: "" };
 }
 
 function workerOutputPanelRailWidth(terminalWidth: number): number {
