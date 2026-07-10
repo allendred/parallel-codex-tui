@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import { basename } from "node:path";
 import { Box, Text, useApp, useInput, useStdin, type TextProps } from "ink";
+import { Lexer, type Token } from "marked";
 import type { AppConfig } from "../core/config.js";
 import { readJson } from "../core/file-store.js";
 import { WorkerStatusSchema } from "../domain/schemas.js";
@@ -23,6 +24,7 @@ import { WorkerOutputView } from "./WorkerOutputView.js";
 import { compactEndByDisplayWidth, displayWidth, wrapByDisplayWidth } from "./display-width.js";
 import { isAttachShortcut, isExitShortcut, isLogsShortcut, mouseScrollDelta, scrollDelta } from "./keyboard.js";
 import { createRawInputDecoder } from "./raw-input-decoder.js";
+import { decodeHtmlEntities } from "./markdown-text.js";
 import { configureTuiTheme, TUI_THEME } from "./theme.js";
 import {
   buildNativeAttachLaunch,
@@ -56,9 +58,17 @@ export interface ChatDisplayLine {
   from: Message["from"];
   text: string;
   continuation: boolean;
+  spans?: ChatDisplaySpan[];
+}
+
+export type ChatSpanTone = "text" | "strong" | "emphasis" | "code" | "link" | "muted" | "prefix";
+export interface ChatDisplaySpan {
+  text: string;
+  tone: ChatSpanTone;
 }
 
 type ChatLineTheme = Pick<TextProps, "backgroundColor" | "color">;
+type ChatSpanTheme = Pick<TextProps, "backgroundColor" | "bold" | "color" | "italic" | "underline">;
 type ChatEmptyStateTheme = Pick<TextProps, "backgroundColor" | "bold" | "color">;
 type ChatViewportBlankLineTheme = Pick<TextProps, "backgroundColor">;
 type NativeAttachStartingTheme = Pick<TextProps, "backgroundColor" | "color">;
@@ -685,6 +695,47 @@ export function chatLineTheme(line: ChatDisplayLine): ChatLineTheme {
   return { backgroundColor: TUI_THEME.surface, color: TUI_THEME.text };
 }
 
+export function chatSpanTheme(from: Message["from"], tone: ChatSpanTone | string): ChatSpanTheme {
+  const baseColor = from === "user" ? TUI_THEME.accent : TUI_THEME.text;
+  if (tone === "link") {
+    return {
+      backgroundColor: TUI_THEME.surface,
+      color: TUI_THEME.accent,
+      underline: true
+    };
+  }
+  if (tone === "code") {
+    return {
+      backgroundColor: TUI_THEME.rail,
+      color: TUI_THEME.warning
+    };
+  }
+  if (tone === "strong") {
+    return {
+      backgroundColor: TUI_THEME.surface,
+      bold: true,
+      color: baseColor
+    };
+  }
+  if (tone === "emphasis") {
+    return {
+      backgroundColor: TUI_THEME.surface,
+      color: baseColor,
+      italic: true
+    };
+  }
+  if (tone === "muted" || (tone === "prefix" && from === "system")) {
+    return {
+      backgroundColor: TUI_THEME.surface,
+      color: TUI_THEME.muted
+    };
+  }
+  return {
+    backgroundColor: TUI_THEME.surface,
+    color: baseColor
+  };
+}
+
 export function chatLineTrailingFillWidth(line: ChatDisplayLine, terminalWidth: number): number {
   return Math.max(0, chatContentWidth(terminalWidth) - displayWidth(chatLineDisplayText(line)));
 }
@@ -724,10 +775,15 @@ function chatViewportBlankLineWidth(terminalWidth: number): number {
 function ChatLine({ line, terminalWidth }: { line: ChatDisplayLine; terminalWidth: number }) {
   const theme = chatLineTheme(line);
   const fillWidth = chatLineTrailingFillWidth(line, terminalWidth);
+  const spans = line.text && line.spans?.length ? line.spans : null;
 
   return (
     <Text>
-      <Text {...theme}>{chatLineDisplayText(line)}</Text>
+      {spans
+        ? spans.map((span, index) => (
+          <Text key={`${span.tone}-${index}`} {...chatSpanTheme(line.from, span.tone)}>{span.text}</Text>
+        ))
+        : <Text {...theme}>{chatLineDisplayText(line)}</Text>}
       {fillWidth > 0 ? <Text backgroundColor={TUI_THEME.surface}>{" ".repeat(fillWidth)}</Text> : null}
     </Text>
   );
@@ -751,26 +807,168 @@ function chatSingleMessageDisplayLines(message: Message, contentWidth: number): 
     const isFirstRawLine = rawIndex === 0;
     const firstPrefix = message.from === "user" && isFirstRawLine ? "> " : message.from === "user" ? "  " : "";
     const wrapWidth = Math.max(1, contentWidth - displayWidth(firstPrefix));
-    const wrapped = wrapByDisplayWidth(rawLine, wrapWidth);
+    const rawSpans = chatMarkdownSpans(rawLine);
+    const visibleRawLine = chatSpanText(rawSpans);
+    const wrapped = wrapChatSpans(rawSpans, wrapWidth);
 
-    wrapped.forEach((chunk, chunkIndex) => {
+    wrapped.forEach((chunkSpans, chunkIndex) => {
+      const chunk = chatSpanText(chunkSpans);
       const continuation = !isFirstRawLine || chunkIndex > 0;
-      const prefix = chatLinePrefix(message.from, rawLine, continuation, chunkIndex > 0);
+      const prefix = chatLinePrefix(message.from, visibleRawLine, continuation, chunkIndex > 0);
       const lineWidth = Math.max(1, contentWidth - displayWidth(prefix));
       const fitted = displayWidth(chunk) > lineWidth
-        ? wrapByDisplayWidth(chunk, lineWidth)
-        : [chunk];
-      fitted.forEach((part, partIndex) => {
+        ? wrapChatSpans(chunkSpans, lineWidth)
+        : [chunkSpans];
+      fitted.forEach((partSpans, partIndex) => {
+        const part = chatSpanText(partSpans);
+        const displaySpans = mergeChatSpans([
+          ...(prefix ? [{ text: prefix, tone: "prefix" as const }] : []),
+          ...partSpans
+        ]);
         rendered.push({
           from: message.from,
           text: `${prefix}${part}`,
-          continuation: continuation || partIndex > 0
+          continuation: continuation || partIndex > 0,
+          spans: displaySpans
         });
       });
     });
   });
 
   return rendered;
+}
+
+function chatMarkdownSpans(text: string): ChatDisplaySpan[] {
+  if (!text) {
+    return [];
+  }
+  try {
+    return mergeChatSpans(chatSpansFromTokens(Lexer.lexInline(text), "text"));
+  } catch {
+    return [{ text, tone: "text" }];
+  }
+}
+
+function chatSpansFromTokens(tokens: Token[], inheritedTone: ChatSpanTone): ChatDisplaySpan[] {
+  return tokens.flatMap((token) => chatSpansFromToken(token, inheritedTone));
+}
+
+function chatSpansFromToken(token: Token, inheritedTone: ChatSpanTone): ChatDisplaySpan[] {
+  const nested = tokenTokens(token);
+  if (token.type === "codespan" || token.type === "code") {
+    return [{ text: tokenText(token), tone: "code" }];
+  }
+  if (token.type === "link" || token.type === "image") {
+    const label = chatSpanText(chatSpansFromTokens(nested, "text")) || tokenText(token);
+    const href = tokenHref(token);
+    return mergeChatSpans([
+      ...(label ? [{ text: label, tone: "link" as const }] : []),
+      ...(href && isExternalChatLink(href) && href !== label
+        ? [{ text: ` <${href}>`, tone: "muted" as const }]
+        : [])
+    ]);
+  }
+  if (token.type === "strong") {
+    return applyChatSpanTone(chatSpansFromTokens(nested, inheritedTone), "strong");
+  }
+  if (token.type === "em") {
+    return applyChatSpanTone(chatSpansFromTokens(nested, inheritedTone), "emphasis");
+  }
+  if (token.type === "del") {
+    return applyChatSpanTone(chatSpansFromTokens(nested, inheritedTone), "muted");
+  }
+  if (token.type === "br") {
+    return [{ text: " ", tone: inheritedTone }];
+  }
+  if (nested.length > 0) {
+    return chatSpansFromTokens(nested, inheritedTone);
+  }
+
+  const text = token.type === "html"
+    ? tokenText(token).replace(/<[^>]*>/g, "")
+    : tokenText(token);
+  return text ? [{ text: decodeHtmlEntities(text), tone: inheritedTone }] : [];
+}
+
+function tokenTokens(token: Token): Token[] {
+  return "tokens" in token && Array.isArray(token.tokens) ? token.tokens : [];
+}
+
+function tokenText(token: Token): string {
+  if ("text" in token && typeof token.text === "string") {
+    return token.text;
+  }
+  return typeof token.raw === "string" ? token.raw : "";
+}
+
+function tokenHref(token: Token): string {
+  return "href" in token && typeof token.href === "string" ? token.href.trim() : "";
+}
+
+function applyChatSpanTone(spans: ChatDisplaySpan[], tone: ChatSpanTone): ChatDisplaySpan[] {
+  return spans.map((span) => ({
+    ...span,
+    tone: span.tone === "code" || span.tone === "link" ? span.tone : tone
+  }));
+}
+
+function isExternalChatLink(href: string): boolean {
+  return /^(?:https?:|mailto:)/i.test(href);
+}
+
+function chatSpanText(spans: ChatDisplaySpan[]): string {
+  return spans.map((span) => span.text).join("");
+}
+
+function mergeChatSpans(spans: ChatDisplaySpan[]): ChatDisplaySpan[] {
+  const merged: ChatDisplaySpan[] = [];
+  for (const span of spans) {
+    if (!span.text) {
+      continue;
+    }
+    const previous = merged.at(-1);
+    if (previous?.tone === span.tone) {
+      previous.text += span.text;
+    } else {
+      merged.push({ ...span });
+    }
+  }
+  return merged;
+}
+
+function wrapChatSpans(spans: ChatDisplaySpan[], maxWidth: number): ChatDisplaySpan[][] {
+  const text = chatSpanText(spans);
+  if (!text) {
+    return [[]];
+  }
+  const chunks = wrapByDisplayWidth(text, maxWidth);
+  let cursor = 0;
+  return chunks.map((chunk) => {
+    const found = text.indexOf(chunk, cursor);
+    const start = found >= 0 ? found : cursor;
+    const end = start + chunk.length;
+    cursor = end;
+    return sliceChatSpans(spans, start, end);
+  });
+}
+
+function sliceChatSpans(spans: ChatDisplaySpan[], start: number, end: number): ChatDisplaySpan[] {
+  const sliced: ChatDisplaySpan[] = [];
+  let offset = 0;
+  for (const span of spans) {
+    const spanStart = offset;
+    const spanEnd = spanStart + span.text.length;
+    offset = spanEnd;
+    const overlapStart = Math.max(start, spanStart);
+    const overlapEnd = Math.min(end, spanEnd);
+    if (overlapStart < overlapEnd) {
+      sliced.push({
+        text: span.text.slice(overlapStart - spanStart, overlapEnd - spanStart),
+        tone: span.tone
+      });
+    }
+  }
+  return mergeChatSpans(sliced);
 }
 
 function chatLinePrefix(

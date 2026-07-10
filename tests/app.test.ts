@@ -1,6 +1,7 @@
 import React from "react";
 import { render } from "ink-testing-library";
 import { afterEach, describe, expect, it } from "vitest";
+import * as AppModule from "../src/tui/App.js";
 import { appContentHeight, chatEmptyStateTheme, chatEmptyStateTrailingFillWidth, chatLineTheme, chatLineTrailingFillWidth, chatMessageDisplayLines, chatViewportBlankLineTheme, ChatView, nativeAttachExitLine, nativeAttachStartingText, nativeAttachStartingTheme, nativeAttachTerminalColumns, nativeAttachTitleDisplay, nativeTerminalScrollDisplay } from "../src/tui/App.js";
 import { displayWidth } from "../src/tui/display-width.js";
 import { configureTuiTheme, resetTuiTheme, TUI_THEME_PRESETS } from "../src/tui/theme.js";
@@ -157,6 +158,31 @@ describe("ChatView", () => {
     expect(chatLineTheme({ from: "system", text: "", continuation: false })).toEqual({
       backgroundColor: TUI_THEME_PRESETS.paper.surface,
       color: TUI_THEME_PRESETS.paper.muted
+    });
+  });
+
+  it("maps semantic Markdown spans onto the active theme", () => {
+    configureTuiTheme({ theme: "paper" });
+    const chatSpanTheme = (
+      AppModule as typeof AppModule & {
+        chatSpanTheme?: (from: "user" | "system", tone: string) => Record<string, unknown>;
+      }
+    ).chatSpanTheme;
+
+    expect(chatSpanTheme).toBeTypeOf("function");
+    expect(chatSpanTheme?.("system", "link")).toEqual({
+      backgroundColor: TUI_THEME_PRESETS.paper.surface,
+      color: TUI_THEME_PRESETS.paper.accent,
+      underline: true
+    });
+    expect(chatSpanTheme?.("system", "code")).toEqual({
+      backgroundColor: TUI_THEME_PRESETS.paper.rail,
+      color: TUI_THEME_PRESETS.paper.warning
+    });
+    expect(chatSpanTheme?.("system", "strong")).toEqual({
+      backgroundColor: TUI_THEME_PRESETS.paper.surface,
+      bold: true,
+      color: TUI_THEME_PRESETS.paper.text
     });
   });
 
@@ -388,6 +414,35 @@ describe("ChatView", () => {
     expect(frame).toContain("> 你好");
     expect(frame).toContain("简单对话通道没有收到可显示回复。");
     expect(frame).not.toContain("ready");
+  });
+
+  it("renders inline Markdown as semantic chat spans before wrapping", () => {
+    const lines = chatMessageDisplayLines(
+      [
+        {
+          from: "system",
+          text: "See [review.md](/tmp/review.md:1), run `npm test`, then **ship it**."
+        }
+      ],
+      80,
+      4
+    );
+    const spans = lines.flatMap((line) => (
+      line as typeof line & { spans?: Array<{ text: string; tone: string }> }
+    ).spans ?? []);
+
+    expect(lines.map((line) => line.text)).toEqual([
+      "See review.md, run npm test, then ship it."
+    ]);
+    expect(spans).toEqual([
+      { text: "See ", tone: "text" },
+      { text: "review.md", tone: "link" },
+      { text: ", run ", tone: "text" },
+      { text: "npm test", tone: "code" },
+      { text: ", then ", tone: "text" },
+      { text: "ship it", tone: "strong" },
+      { text: ".", tone: "text" }
+    ]);
   });
 
   it("compacts complex task summaries for the chat surface", () => {

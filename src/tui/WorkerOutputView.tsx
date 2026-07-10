@@ -5,6 +5,7 @@ import { Box, Text, type TextProps } from "ink";
 import { pathExists, readTextIfExists } from "../core/file-store.js";
 import type { WorkerRole } from "../domain/schemas.js";
 import { compactEndByDisplayWidth, displayWidth, wrapByDisplayWidth } from "./display-width.js";
+import { decodeHtmlEntities } from "./markdown-text.js";
 import { selectViewportLines } from "./scrolling.js";
 import { TUI_THEME } from "./theme.js";
 
@@ -3716,21 +3717,6 @@ function stripInlineMarkdownLinkText(text: string): string {
 
 function isExternalMarkdownLinkTarget(target: string): boolean {
   return /^(?:https?:|mailto:)/i.test(target);
-}
-
-function decodeHtmlEntities(text: string): string {
-  return text
-    .replace(/&larr;/g, "←")
-    .replace(/&rarr;/g, "→")
-    .replace(/&uarr;/g, "↑")
-    .replace(/&darr;/g, "↓")
-    .replace(/&middot;/g, "·")
-    .replace(/&nbsp;/g, " ")
-    .replace(/&amp;/g, "&")
-    .replace(/&lt;/g, "<")
-    .replace(/&gt;/g, ">")
-    .replace(/&quot;/g, "\"")
-    .replace(/&#39;/g, "'");
 }
 
 function renderJsonLine(line: string): RenderLine[] {
