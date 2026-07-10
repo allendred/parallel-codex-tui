@@ -36,6 +36,7 @@ describe("config", () => {
     expect(config.pairing.main).toBe("claude");
     expect(config.pairing.actor).toBe("codex");
     expect(config.pairing.critic).toBe("codex");
+    expect(config.orchestration.maxParallelFeatures).toBe(3);
     expect(config.roles.actor.title).toBe("Actor");
     expect(config.roles.critic.instructions.join("\n")).toContain("blocking findings");
     expect(config.ui.theme).toBe("codex");
@@ -70,6 +71,23 @@ describe("config", () => {
 
     expect(config.workers.codex.command).toBe("codex");
     expect(config.ui.showStatusBar).toBe(true);
+  });
+
+  it("loads and bounds the parallel feature limit", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pct-config-parallel-limit-"));
+    await writeText(
+      join(root, ".parallel-codex", "config.toml"),
+      ["[orchestration]", "maxParallelFeatures = 2"].join("\n")
+    );
+
+    const config = await loadConfig(root);
+    expect(config.orchestration.maxParallelFeatures).toBe(2);
+
+    await writeText(
+      join(root, ".parallel-codex", "config.toml"),
+      ["[orchestration]", "maxParallelFeatures = 9"].join("\n")
+    );
+    await expect(loadConfig(root)).rejects.toThrow();
   });
 
   it("writes the curated example config for init", async () => {

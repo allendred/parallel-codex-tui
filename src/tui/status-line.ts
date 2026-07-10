@@ -7,6 +7,13 @@ export interface StatusLineState {
   judge?: string;
   actor?: string;
   critic?: string;
+  featureProgress?: {
+    wave: number;
+    waves: number;
+    phase: "actor" | "critic" | "revision";
+    completed: number;
+    total: number;
+  };
   workers?: Array<{
     label: string;
     status: string;
@@ -28,6 +35,9 @@ export function formatStatusLine(state: StatusLineState | null): string {
   }
 
   const parts = [compactTaskId(state.taskId)];
+  if (state.featureProgress) {
+    parts.push(formatFeatureProgress(state.featureProgress));
+  }
   if (state.workers?.length) {
     parts.push(formatWorkerSummary(state.workers));
     return parts.join(" | ");
@@ -47,6 +57,10 @@ export function formatStatusLine(state: StatusLineState | null): string {
   }
 
   return parts.join(" | ");
+}
+
+function formatFeatureProgress(progress: NonNullable<StatusLineState["featureProgress"]>): string {
+  return `wave ${progress.wave}/${progress.waves} · ${progress.phase} ${progress.completed}/${progress.total}`;
 }
 
 export function formatRouteStatus(route: RouteDecision | null): string {

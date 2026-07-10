@@ -58,6 +58,10 @@ const CodexRouterConfigSchema = z.object({
   fallback: z.enum(["simple", "complex"]).default("complex")
 });
 
+const OrchestrationConfigSchema = z.object({
+  maxParallelFeatures: z.number().int().min(1).max(8)
+}).strict();
+
 const UiConfigSchema = z.object({
   showStatusBar: z.boolean(),
   autoOpenFailedWorker: z.boolean(),
@@ -83,6 +87,7 @@ const AppConfigSchema = z.object({
     defaultMode: z.enum(["auto", "simple", "complex"]),
     codex: CodexRouterConfigSchema.default({})
   }),
+  orchestration: OrchestrationConfigSchema,
   workers: z.object({
     codex: WorkerCommandSchema,
     claude: WorkerCommandSchema,
@@ -117,6 +122,9 @@ export function defaultConfig(projectRoot: string): AppConfig {
         timeoutMs: 120000,
         fallback: "complex"
       }
+    },
+    orchestration: {
+      maxParallelFeatures: 3
     },
     workers: {
       codex: {
@@ -245,6 +253,10 @@ export async function loadConfig(projectRoot: string): Promise<AppConfig> {
         ...(parsed.router?.codex ?? {})
       }
     },
+    orchestration: {
+      ...base.orchestration,
+      ...(parsed.orchestration ?? {})
+    },
     workers: {
       codex: {
         ...base.workers.codex,
@@ -360,6 +372,7 @@ function assertObjectSections(parsed: Partial<AppConfig>): void {
   const sections: Array<[string, unknown]> = [
     ["router", parsed.router],
     ["router.codex", parsed.router?.codex],
+    ["orchestration", parsed.orchestration],
     ["workers", parsed.workers],
     ["workers.codex", parsed.workers?.codex],
     ["workers.codex.model", parsed.workers?.codex?.model],

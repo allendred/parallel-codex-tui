@@ -110,6 +110,7 @@ describe("package metadata", () => {
     expect(gitignore).toContain(".parallel-codex/last-workspace");
     expect(gitignore).toContain(".parallel-codex/sessions/");
     expect(gitignore).toContain(".parallel-codex/workspaces.json");
+    expect(gitignore).toContain(".parallel-codex/router/");
     expect(gitignore).toContain("docs/superpowers/");
   });
 

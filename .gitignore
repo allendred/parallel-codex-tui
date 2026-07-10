@@ -2,6 +2,7 @@ node_modules/
 dist/
 .parallel-codex/config.toml
 .parallel-codex/last-workspace
+.parallel-codex/router/
 .parallel-codex/session-index.sqlite
 .parallel-codex/sessions/
 .parallel-codex/workspaces.json

@@ -7,7 +7,7 @@ import { appendJsonLine, appendText, pathExists, readJson, readTextIfExists, wri
 import { SessionIndex } from "../src/core/session-index.js";
 import { SessionManager } from "../src/core/session-manager.js";
 import { NativeSessionSchema, TaskMetaSchema, WorkerStatusSchema } from "../src/domain/schemas.js";
-import { Orchestrator } from "../src/orchestrator/orchestrator.js";
+import { Orchestrator, type FeatureRunProgress } from "../src/orchestrator/orchestrator.js";
 import { MockWorkerAdapter } from "../src/workers/mock-adapter.js";
 import { ProcessWorkerAdapter } from "../src/workers/process-adapter.js";
 import type { WorkerAdapter, WorkerResult, WorkerRunSpec } from "../src/workers/types.js";
@@ -255,6 +255,62 @@ describe("Orchestrator", () => {
     expect(JSON.parse(await readTextIfExists(join(taskDir, "features", "0001-ui", "status.json")))).toMatchObject({ state: "approved" });
     expect(JSON.parse(await readTextIfExists(join(taskDir, "features", "0001-engine", "status.json")))).toMatchObject({ state: "approved" });
     expect(JSON.parse(await readTextIfExists(join(taskDir, "features", "0001-integration", "status.json")))).toMatchObject({ state: "approved" });
+  });
+
+  it("limits concurrent feature workers and reports phase progress", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pct-orch-parallel-limit-"));
+    const config = mockConfig(root);
+    config.orchestration.maxParallelFeatures = 2;
+    const manager = new SessionManager({
+      projectRoot: root,
+      dataDir: config.dataDir,
+      now: () => new Date("2026-06-30T03:30:10.000Z"),
+      randomId: () => "limit"
+    });
+    const adapter = new LimitedParallelAdapter();
+    const orchestrator = new Orchestrator(config, manager, new Map([["mock", adapter]]));
+    const progress: FeatureRunProgress[] = [];
+
+    const result = await orchestrator.handleRequest({
+      request: "并行实现五个独立模块",
+      cwd: root,
+      onStatus: (status) => {
+        const featureProgress = status.featureProgress;
+        if (featureProgress) {
+          progress.push(featureProgress);
+        }
+      }
+    });
+
+    expect(adapter.maxConcurrent).toBe(2);
+    expect(result.workers).toHaveLength(11);
+    expect(progress).toContainEqual({ wave: 1, waves: 1, phase: "actor", completed: 0, total: 5 });
+    expect(progress).toContainEqual({ wave: 1, waves: 1, phase: "actor", completed: 5, total: 5 });
+    expect(progress).toContainEqual({ wave: 1, waves: 1, phase: "critic", completed: 5, total: 5 });
+  });
+
+  it("stops scheduling queued feature workers after a parallel failure", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pct-orch-parallel-stop-"));
+    const config = mockConfig(root);
+    config.orchestration.maxParallelFeatures = 2;
+    const manager = new SessionManager({
+      projectRoot: root,
+      dataDir: config.dataDir,
+      now: () => new Date("2026-06-30T03:30:20.000Z"),
+      randomId: () => "stop-queue"
+    });
+    const adapter = new StopQueuedFeaturesAdapter();
+    const orchestrator = new Orchestrator(config, manager, new Map([["mock", adapter]]));
+
+    await expect(orchestrator.handleRequest({
+      request: "并行实现五个独立模块",
+      cwd: root
+    })).rejects.toThrow("actor-mock-0001-module-1 failed with exit code 2");
+
+    const taskDir = join(root, ".parallel-codex", "sessions", "task-20260630-033020-stop-queue");
+    expect(adapter.startedActors.sort()).toEqual(["0001-module-1", "0001-module-2"]);
+    expect(await pathExists(join(taskDir, "actor-mock-0001-module-3"))).toBe(false);
+    expect(await pathExists(join(taskDir, "critic-mock-0001-module-1"))).toBe(false);
   });
 
   it("lists workers from an existing task session after TUI restart", async () => {
@@ -1324,6 +1380,73 @@ class RetryMultiFeatureAdapter extends MultiFeatureAdapter {
       native_session_id: "retry-ui-session"
     });
     return { workerId: spec.workerId, exitCode: 2, signal: null };
+  }
+}
+
+class LimitedParallelAdapter extends MockWorkerAdapter {
+  maxConcurrent = 0;
+  private active = 0;
+
+  async run(spec: WorkerRunSpec): Promise<WorkerResult> {
+    if (spec.role === "judge") {
+      const result = await super.run(spec);
+      await writeJson(join(spec.filesDir, "features.json"), {
+        version: 1,
+        features: Array.from({ length: 5 }, (_, index) => ({
+          id: `module-${index + 1}`,
+          title: `Module ${index + 1}`,
+          description: `Implement module ${index + 1}`,
+          depends_on: []
+        }))
+      });
+      return result;
+    }
+
+    if (spec.role !== "actor" && spec.role !== "critic") {
+      return super.run(spec);
+    }
+
+    this.active += 1;
+    this.maxConcurrent = Math.max(this.maxConcurrent, this.active);
+    try {
+      await new Promise((resolve) => setTimeout(resolve, 35));
+      return await super.run(spec);
+    } finally {
+      this.active -= 1;
+    }
+  }
+}
+
+class StopQueuedFeaturesAdapter extends MockWorkerAdapter {
+  readonly startedActors: string[] = [];
+
+  async run(spec: WorkerRunSpec): Promise<WorkerResult> {
+    if (spec.role === "judge") {
+      const result = await super.run(spec);
+      await writeJson(join(spec.filesDir, "features.json"), {
+        version: 1,
+        features: Array.from({ length: 5 }, (_, index) => ({
+          id: `module-${index + 1}`,
+          title: `Module ${index + 1}`,
+          description: `Implement module ${index + 1}`,
+          depends_on: []
+        }))
+      });
+      return result;
+    }
+
+    if (spec.role !== "actor") {
+      return super.run(spec);
+    }
+
+    this.startedActors.push(spec.featureId ?? "unknown");
+    if (spec.featureId === "0001-module-1") {
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      return { workerId: spec.workerId, exitCode: 2, signal: null };
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    return super.run(spec);
   }
 }
 

@@ -275,6 +275,13 @@ function statusSegmentDisplay(segment: Segment, compact: boolean): { label: stri
       value: compactRouteStatusValue(segment.value, compact)
     };
   }
+  if (label === "wave") {
+    return {
+      label: "wave",
+      separator: " ",
+      value: compact ? compactWaveStatusValue(segment.value) : segment.value
+    };
+  }
   if (!compact) {
     if (label === "current") {
       return { label: "@", separator: " ", value: segment.value };
@@ -307,6 +314,13 @@ function compactRouteStatusValue(value: string, compact: boolean): string {
     return "fallback";
   }
   return value;
+}
+
+function compactWaveStatusValue(value: string): string {
+  return value
+    .replace(/\s+·\s+actor\s+/i, " a")
+    .replace(/\s+·\s+critic\s+/i, " c")
+    .replace(/\s+·\s+revision\s+/i, " r");
 }
 
 function compactToneLabel(tone: Exclude<StatusTone, "idle">): string {
@@ -377,6 +391,12 @@ function parseStatusText(text: string, options: { hideTask?: boolean } = {}): Se
   }
 
   for (const part of statusParts) {
+    const wave = parseWaveProgress(part);
+    if (wave) {
+      segments.push(wave);
+      continue;
+    }
+
     const workerMatch = part.match(/^workers\s+(\d+)$/i);
     if (workerMatch) {
       segments.push({ label: "WORKERS", value: workerMatch[1] ?? "0" });
@@ -407,7 +427,22 @@ function parseStatusText(text: string, options: { hideTask?: boolean } = {}): Se
 }
 
 function isStatusPart(part: string): boolean {
-  return /^workers\s+\d+$/i.test(part) || /^route\s+\S+/i.test(part) || parseStateCounts(part).length > 0;
+  return parseWaveProgress(part) !== null
+    || /^workers\s+\d+$/i.test(part)
+    || /^route\s+\S+/i.test(part)
+    || parseStateCounts(part).length > 0;
+}
+
+function parseWaveProgress(part: string): Segment | null {
+  const match = part.match(/^wave\s+(\d+\/\d+)\s+·\s+(actor|critic|revision)\s+(\d+\/\d+)$/i);
+  if (!match) {
+    return null;
+  }
+  return {
+    label: "WAVE",
+    value: `${match[1]} · ${(match[2] ?? "actor").toLowerCase()} ${match[3]}`,
+    tone: "run"
+  };
 }
 
 function parseStateCounts(part: string): Segment[] {

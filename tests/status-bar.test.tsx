@@ -64,6 +64,30 @@ describe("StatusBar", () => {
     expect(frame.indexOf("1 failed")).toBeLessThan(frame.indexOf("1 done"));
   });
 
+  it("renders feature wave progress as named chrome instead of a selected worker", () => {
+    const wide = render(
+      <StatusBar
+        text="a1b2 | wave 1/3 · actor 2/4 | workers 4 | run 2 done 2"
+        terminalWidth={80}
+      />
+    );
+    const wideFrame = wide.lastFrame() ?? "";
+    expect(wideFrame).toContain("wave 1/3 · actor 2/4");
+    expect(wideFrame).not.toContain("@ wave");
+    wide.unmount();
+
+    const narrow = render(
+      <StatusBar
+        text="a1b2 | wave 1/3 · actor 2/4 | workers 4 | run 2 done 2"
+        terminalWidth={34}
+      />
+    );
+    const narrowFrame = narrow.lastFrame() ?? "";
+    expect(narrowFrame).toContain("wave 1/3 a2/4");
+    expect(narrowFrame).toContain("w4");
+    expect(displayWidth(narrowFrame)).toBeLessThanOrEqual(34);
+  });
+
   it("fills an explicitly sized status rail without stdout columns", () => {
     const { lastFrame } = render(
       <StatusBar

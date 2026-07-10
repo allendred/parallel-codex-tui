@@ -7,6 +7,10 @@ args = ["exec", "--skip-git-repo-check", "--sandbox", "workspace-write", "--colo
 timeoutMs = 120000
 fallback = "complex"
 
+[orchestration]
+# Maximum Actor or Critic feature workers running at the same time (1..8).
+maxParallelFeatures = 3
+
 [workers.codex]
 command = "codex"
 args = ["exec", "--skip-git-repo-check", "--sandbox", "workspace-write", "--color", "never", "-"]

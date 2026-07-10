@@ -93,6 +93,17 @@ Then start the TUI:
 parallel-codex-tui --workspace /path/to/project
 ```
 
+## Parallel Work
+
+Limit how many feature-level Actor or Critic agents may run at once:
+
+```toml
+[orchestration]
+maxParallelFeatures = 3 # 1..8
+```
+
+Judge may plan up to eight dependency-aware features. The orchestrator keeps dependency order while running at most this many agents concurrently. When one worker fails, already-running peers are allowed to finish cleanly and queued features are not started.
+
 ## Theme
 
 Set the TUI palette in `.parallel-codex/config.toml`:
@@ -143,13 +154,14 @@ The doctor output includes `preview:` and `semantic:` ANSI swatch rows so you ca
 - Complex requests create a session under `.parallel-codex/sessions/`.
 - Complex requests run Judge -> Actor -> Critic. Judge also writes a bounded `features.json` dependency plan.
 - Independent features run as parallel Actor batches followed by parallel Critic batches. Dependent features start only after their prerequisite feature mailboxes are approved.
+- Parallel Actor, Critic, and revision batches honor `[orchestration].maxParallelFeatures` (default `3`).
 - Each planned feature gets isolated Actor/Critic worker directories, logs, status, native session ids, and a mailbox under `features/<turn>-<feature>`; the shared dialogue remains in `dialogue/actor-critic.jsonl`.
 - Complex follow-ups stay in the active task, append a numbered turn, reuse the same Actor/Critic native sessions when available, and inject up to five prior turn summaries as file-backed memory.
 - Pressing `Esc` while a request is running stops the router or active worker and records an interrupted complex task as `cancelled`; exiting the outer TUI also terminates the active run.
 - Failed and cancelled tasks expose `Ctrl+R` retry. Retry keeps the same task and turn, reuses recorded native worker sessions, preserves prior output behind a retry separator, does not route the request again, and reuses the persisted feature dependency plan.
 - Simple follow-up questions run through the persistent Main native session with the active task directory, original request, up to five recent turn summaries, valid worker statuses, and log tails as file-backed context. They do not start another Judge, Actor, or Critic turn.
 - Worker prompts, logs, status, and outputs are written to disk.
-- The bottom status line shows the active task state.
+- The bottom status line shows the active task state and feature progress such as `wave 1/2 · actor 2/3`.
 
 ## Router
 
@@ -260,5 +272,6 @@ You can also run the Release workflow manually and enter the same tag value. The
 
 - `.parallel-codex/config.toml` is local-only and ignored.
 - `.parallel-codex/last-workspace` and `.parallel-codex/workspaces.json` are local workspace-selection state and are ignored.
+- `.parallel-codex/router/` contains local request classification audit records and is ignored.
 - `.parallel-codex/sessions/` contains task prompts, logs, native session ids, and worker output; never commit it.
 - `docs/superpowers/` contains internal planning notes and is ignored for public releases.

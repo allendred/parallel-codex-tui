@@ -66,6 +66,15 @@ export interface WorkerRunStatus {
   judge?: string;
   actor?: string;
   critic?: string;
+  featureProgress?: FeatureRunProgress;
+}
+
+export interface FeatureRunProgress {
+  wave: number;
+  waves: number;
+  phase: "actor" | "critic" | "revision";
+  completed: number;
+  total: number;
 }
 
 export interface WorkerLogRef {
@@ -388,14 +397,37 @@ export class Orchestrator {
   ): Promise<HandleRequestResult> {
     const channels = new Map(plan.features.map((definition, index) => [definition.id, features[index]]));
     const summaries: FeatureSummary[] = [];
+    const featureWaves = featureExecutionWaves(plan);
+    const concurrency = this.config.orchestration.maxParallelFeatures;
 
-    for (const wave of featureExecutionWaves(plan)) {
+    for (const [waveIndex, wave] of featureWaves.entries()) {
+      const reportProgress = (
+        phase: FeatureRunProgress["phase"],
+        completed: number,
+        total: number,
+        actor: string,
+        critic: string
+      ) => input.onStatus?.({
+        taskId: task.id,
+        judge: "done",
+        actor,
+        critic,
+        featureProgress: {
+          wave: waveIndex + 1,
+          waves: featureWaves.length,
+          phase,
+          completed,
+          total
+        }
+      });
+
       throwIfCancelled(input.signal);
       await this.sessions.updateTaskStatus(task, "actor_running");
       await Promise.all(wave.map((definition) => updateFeatureStatus(requiredChannel(channels, definition), "actor_running")));
-      input.onStatus?.({ taskId: task.id, judge: "done", actor: "running", critic: "waiting" });
+      let actorCompleted = 0;
+      reportProgress("actor", actorCompleted, wave.length, "running", "waiting");
 
-      const actorRuns = await allOrThrow(wave.map(async (definition): Promise<FeatureActorRun> => {
+      const actorRuns = await mapWithConcurrency(wave, concurrency, async (definition): Promise<FeatureActorRun> => {
         const channel = requiredChannel(channels, definition);
         const actor = await this.runActor(
           input,
@@ -408,16 +440,18 @@ export class Orchestrator {
           undefined,
           true
         );
+        actorCompleted += 1;
+        reportProgress("actor", actorCompleted, wave.length, "running", "waiting");
         return { definition, channel, actor };
-      }));
+      });
       throwIfCancelled(input.signal);
 
       await this.sessions.updateTaskStatus(task, "critic_running");
       await Promise.all(actorRuns.map(({ channel }) => updateFeatureStatus(channel, "critic_running")));
-      input.onStatus?.({ taskId: task.id, judge: "done", actor: "done", critic: "running" });
-      const pairRuns = await allOrThrow(actorRuns.map(async (actorRun): Promise<FeaturePairRun> => ({
-        ...actorRun,
-        critic: await this.runCritic(
+      let criticCompleted = 0;
+      reportProgress("critic", criticCompleted, actorRuns.length, "done", "running");
+      const pairRuns = await mapWithConcurrency(actorRuns, concurrency, async (actorRun): Promise<FeaturePairRun> => {
+        const critic = await this.runCritic(
           input,
           task,
           route.critic_engine,
@@ -427,8 +461,11 @@ export class Orchestrator {
           turn,
           actorRun.channel,
           true
-        )
-      })));
+        );
+        criticCompleted += 1;
+        reportProgress("critic", criticCompleted, actorRuns.length, "done", "running");
+        return { ...actorRun, critic };
+      });
       throwIfCancelled(input.signal);
 
       const revisionRuns: Array<FeaturePairRun & { review: string }> = [];
@@ -449,11 +486,11 @@ export class Orchestrator {
             findings: channel.criticFindingsPath
           });
         }));
-        input.onStatus?.({ taskId: task.id, judge: "done", actor: "revision", critic: "done" });
+        let revisionCompleted = 0;
+        reportProgress("revision", revisionCompleted, revisionRuns.length, "revision", "done");
 
-        const revisedActors = await allOrThrow(revisionRuns.map(async (pair) => ({
-          ...pair,
-          actor: await this.runActor(
+        const revisedActors = await mapWithConcurrency(revisionRuns, concurrency, async (pair) => {
+          const actor = await this.runActor(
             input,
             task,
             route.actor_engine,
@@ -463,18 +500,19 @@ export class Orchestrator {
             pair.channel,
             buildRevisionRequest(pair.review, pair.channel),
             true
-          )
-        })));
+          );
+          revisionCompleted += 1;
+          reportProgress("revision", revisionCompleted, revisionRuns.length, "revision", "done");
+          return { ...pair, actor };
+        });
         throwIfCancelled(input.signal);
 
         await this.sessions.updateTaskStatus(task, "critic_running");
         await Promise.all(revisedActors.map(({ channel }) => updateFeatureStatus(channel, "critic_running")));
-        input.onStatus?.({ taskId: task.id, judge: "done", actor: "done", critic: "rerunning" });
-        const revisedPairs = await allOrThrow(revisedActors.map(async (pair): Promise<FeaturePairRun> => ({
-          definition: pair.definition,
-          channel: pair.channel,
-          actor: pair.actor,
-          critic: await this.runCritic(
+        let recheckCompleted = 0;
+        reportProgress("critic", recheckCompleted, revisedActors.length, "done", "rerunning");
+        const revisedPairs = await mapWithConcurrency(revisedActors, concurrency, async (pair): Promise<FeaturePairRun> => {
+          const critic = await this.runCritic(
             input,
             task,
             route.critic_engine,
@@ -484,8 +522,16 @@ export class Orchestrator {
             turn,
             pair.channel,
             true
-          )
-        })));
+          );
+          recheckCompleted += 1;
+          reportProgress("critic", recheckCompleted, revisedActors.length, "done", "rerunning");
+          return {
+            definition: pair.definition,
+            channel: pair.channel,
+            actor: pair.actor,
+            critic
+          };
+        });
         const replacements = new Map(revisedPairs.map((pair) => [pair.definition.id, pair]));
         finalPairs = pairRuns.map((pair) => replacements.get(pair.definition.id) ?? pair);
         throwIfCancelled(input.signal);
@@ -1169,6 +1215,47 @@ async function allOrThrow<T>(promises: Array<Promise<T>>): Promise<T[]> {
     throw failure.reason;
   }
   return results.map((result) => (result as PromiseFulfilledResult<T>).value);
+}
+
+async function mapWithConcurrency<T, Result>(
+  items: readonly T[],
+  limit: number,
+  mapper: (item: T, index: number) => Promise<Result>
+): Promise<Result[]> {
+  if (items.length === 0) {
+    return [];
+  }
+
+  const noFailure = Symbol("no-failure");
+  let failure: unknown | typeof noFailure = noFailure;
+  let nextIndex = 0;
+  const results: Array<Result | undefined> = new Array(items.length);
+  const runnerCount = Math.min(items.length, Math.max(1, Math.floor(limit)));
+
+  const runNext = async () => {
+    while (failure === noFailure) {
+      const index = nextIndex;
+      nextIndex += 1;
+      if (index >= items.length) {
+        return;
+      }
+
+      try {
+        results[index] = await mapper(items[index] as T, index);
+      } catch (error) {
+        if (failure === noFailure) {
+          failure = error;
+        }
+        return;
+      }
+    }
+  };
+
+  await Promise.all(Array.from({ length: runnerCount }, () => runNext()));
+  if (failure !== noFailure) {
+    throw failure;
+  }
+  return results as Result[];
 }
 
 function multiFeatureSummary(features: FeatureSummary[]): string {

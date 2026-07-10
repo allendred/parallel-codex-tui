@@ -49,7 +49,7 @@ describe("formatStatusLine", () => {
   });
 
   it("formats worker states as a compact summary instead of full worker logs", () => {
-    const state = {
+    const state: NonNullable<Parameters<typeof formatStatusLine>[0]> = {
       taskId: "task-a1b2",
       workers: [
         { label: "Actor (codex)", status: "running/editing native:019f1e36...: writing files" },
@@ -60,6 +60,29 @@ describe("formatStatusLine", () => {
 
     expect(formatStatusLine(state)).toBe("a1b2 | workers 3 | fail 1 run 1 done 1");
     expect(formatSelectedWorkerStatus(state, 1)).toBe("critic/claude done");
+  });
+
+  it("keeps feature wave progress alongside worker counts", () => {
+    const state: NonNullable<Parameters<typeof formatStatusLine>[0]> = {
+      taskId: "task-a1b2",
+      featureProgress: {
+        wave: 1,
+        waves: 3,
+        phase: "actor",
+        completed: 2,
+        total: 4
+      },
+      workers: [
+        { label: "Actor (codex) · UI", status: "running" },
+        { label: "Actor (codex) · Engine", status: "running" },
+        { label: "Actor (codex) · Audio", status: "done" },
+        { label: "Actor (codex) · Input", status: "done" }
+      ]
+    };
+
+    expect(formatStatusLine(state)).toBe(
+      "a1b2 | wave 1/3 · actor 2/4 | workers 4 | run 2 done 2"
+    );
   });
 
   it("keeps cancelled worker state concise and ahead of completed workers", () => {
