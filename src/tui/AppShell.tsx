@@ -77,7 +77,13 @@ export function AppShell({
 
       {input}
 
-      {showStatusBar ? <StatusBar text={statusText} terminalWidth={terminalWidth} /> : null}
+      {showStatusBar ? (
+        <StatusBar
+          text={statusText}
+          terminalWidth={terminalWidth}
+          fillRail={typeof process.stdout.columns === "number"}
+        />
+      ) : null}
       {errorRow ? (
         <Box>
           <Text {...errorTheme}> </Text>

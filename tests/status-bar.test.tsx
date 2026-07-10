@@ -1,7 +1,7 @@
 import React from "react";
 import { render } from "ink-testing-library";
 import { describe, expect, it } from "vitest";
-import { StatusBar, statusSegmentLabelTheme, statusSegmentValueTheme } from "../src/tui/StatusBar.js";
+import { StatusBar, statusRailLayout, statusSegmentLabelTheme, statusSegmentValueTheme } from "../src/tui/StatusBar.js";
 import { displayWidth } from "../src/tui/display-width.js";
 import { TUI_THEME_PRESETS } from "../src/tui/theme.js";
 
@@ -41,7 +41,7 @@ describe("StatusBar", () => {
     const { lastFrame } = render(
       <StatusBar
         text="20260702-000000-wheel | workers 3 | fail 1 run 1 done 1 | critic/claude done"
-        terminalWidth={120}
+        terminalWidth={80}
       />
     );
 
@@ -64,6 +64,21 @@ describe("StatusBar", () => {
     expect(frame).not.toContain("f1");
     expect(frame.indexOf("1 failed")).toBeLessThan(frame.indexOf("1 running"));
     expect(frame.indexOf("1 failed")).toBeLessThan(frame.indexOf("1 done"));
+  });
+
+  it("fills an explicitly sized status rail without stdout columns", () => {
+    const { lastFrame } = render(
+      <StatusBar
+        text="workers 1 | done 1"
+        terminalWidth={40}
+      />
+    );
+
+    const frame = lastFrame() ?? "";
+    const layout = statusRailLayout(40, displayWidth("w1 d1"));
+    expect(frame).toContain("w1 d1");
+    expect(layout).toEqual({ leadingWidth: 1, trailingWidth: 33 });
+    expect(layout.leadingWidth + displayWidth("w1 d1") + layout.trailingWidth).toBe(39);
   });
 
   it("keeps status segments compact in narrow terminals", () => {
