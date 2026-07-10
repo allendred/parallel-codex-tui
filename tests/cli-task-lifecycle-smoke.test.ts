@@ -87,6 +87,26 @@ describe("CLI task lifecycle smoke", () => {
       await waitForTaskState(join(taskDir, "meta.json"), "done");
       await waitForScreenText(() => screenWrites, screen, "done · complex task completed");
 
+      const completionLines = screen.styledSnapshotLines().filter((line) => (
+        /done · complex task completed|review · APPROVED|findings · none/.test(
+          line.chunks.map((chunk) => chunk.text).join("")
+        )
+      ));
+      const successText = completionLines
+        .flatMap((line) => line.chunks)
+        .filter((chunk) => chunk.style.color === TUI_THEME_PRESETS.codex.success && chunk.style.bold)
+        .map((chunk) => chunk.text)
+        .join("");
+      const mutedText = completionLines
+        .flatMap((line) => line.chunks)
+        .filter((chunk) => chunk.style.color === TUI_THEME_PRESETS.codex.muted)
+        .map((chunk) => chunk.text)
+        .join("");
+      expect(successText).toContain("done");
+      expect(successText).toContain("APPROVED");
+      expect(mutedText).toContain("review · ");
+      expect(mutedText).toContain("findings · none");
+
       const actorLog = await readTextIfExists(join(taskDir, "actor-codex", "output.log"));
       const events = await readTextIfExists(join(taskDir, "events.jsonl"));
       const chatPath = join(workspace, ".parallel-codex", "sessions", "main", "chat.jsonl");

@@ -66,7 +66,7 @@ export interface ChatDisplayLine {
 }
 
 export type ChatLineBackground = "surface" | "rail";
-export type ChatSpanTone = "text" | "strong" | "emphasis" | "code" | "link" | "muted" | "prefix" | "heading";
+export type ChatSpanTone = "text" | "strong" | "emphasis" | "code" | "link" | "muted" | "prefix" | "heading" | "success";
 export interface ChatDisplaySpan {
   text: string;
   tone: ChatSpanTone;
@@ -912,6 +912,13 @@ export function chatSpanTheme(
       color: baseColor
     };
   }
+  if (tone === "success") {
+    return {
+      backgroundColor,
+      bold: true,
+      color: TUI_THEME.success
+    };
+  }
   if (tone === "heading") {
     return {
       backgroundColor,
@@ -1073,7 +1080,7 @@ function chatMessageMarkdownLines(message: Message): ChatMarkdownLine[] {
   const compact = message.from === "system" ? compactSupervisorSummaryForChat(message.text) : null;
   if (compact) {
     return compact.map((line) => ({
-      spans: chatMarkdownSpans(line),
+      spans: compactChatSummarySpans(line),
       continuationPrefix: isCompactChatSummaryLine(line) ? "  " : undefined
     }));
   }
@@ -1471,6 +1478,28 @@ function isChatSummaryHeading(line: string): boolean {
 
 function isCompactChatSummaryLine(line: string): boolean {
   return /^(?:done|requirements|actor|review|findings) · /i.test(line.trim());
+}
+
+function compactChatSummarySpans(line: string): ChatDisplaySpan[] {
+  const match = line.match(/^([^·]+?)\s+·\s+(.+)$/u);
+  if (!match) {
+    return chatMarkdownSpans(line);
+  }
+
+  const label = (match[1] ?? "").trim();
+  const value = (match[2] ?? "").trim();
+  const labelTone: ChatSpanTone = label === "done" ? "success" : "muted";
+  const valueSpans: ChatDisplaySpan[] = label === "review" && /^APPROVED\b/i.test(value)
+    ? [{ text: value, tone: "success" }]
+    : label === "findings" && /^none$/i.test(value)
+      ? [{ text: value, tone: "muted" }]
+      : chatMarkdownSpans(value);
+
+  return mergeChatSpans([
+    { text: label, tone: labelTone },
+    { text: " · ", tone: "muted" },
+    ...valueSpans
+  ]);
 }
 
 function ChatEmptyState({

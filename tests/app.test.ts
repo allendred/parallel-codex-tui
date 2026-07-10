@@ -532,6 +532,11 @@ describe("ChatView", () => {
       backgroundColor: TUI_THEME_PRESETS.paper.rail,
       color: TUI_THEME_PRESETS.paper.muted
     });
+    expect(chatSpanTheme?.("system", "success")).toEqual({
+      backgroundColor: TUI_THEME_PRESETS.paper.surface,
+      bold: true,
+      color: TUI_THEME_PRESETS.paper.success
+    });
   });
 
   it("compacts complex task summaries for the chat surface", () => {
@@ -578,6 +583,19 @@ describe("ChatView", () => {
     expect(lines.some((line) => line.text.includes("Requirements:"))).toBe(false);
     expect(lines.some((line) => line.text.includes("# Worklog"))).toBe(false);
     expect(lines.some((line) => line.text.includes("(empty)"))).toBe(false);
+    expect(lines[0]?.spans).toEqual([
+      { text: "done", tone: "success" },
+      { text: " · ", tone: "muted" },
+      { text: "complex task completed", tone: "text" }
+    ]);
+    expect(lines[1]?.spans?.[0]).toEqual({ text: "requirements · ", tone: "muted" });
+    expect(lines[3]?.spans).toEqual([
+      { text: "review · ", tone: "muted" },
+      { text: "APPROVED", tone: "success" }
+    ]);
+    expect(lines[4]?.spans).toEqual([
+      { text: "findings · none", tone: "muted" }
+    ]);
   });
 
   it("indents wrapped complex summary continuations in narrow chat views", () => {
