@@ -37,6 +37,7 @@ export interface NativeAttachProcessHandlers {
 
 export interface NativeAttachProcessRef {
   write(input: string): void;
+  resize(cols: number, rows: number): void;
   kill(): void;
 }
 
@@ -108,11 +109,13 @@ export function startNativeAttachProcess(
       TERM: process.env.TERM || "xterm-256color"
     }
   });
+  let closed = false;
 
   child.onData((chunk) => {
     handlers.onOutput?.(chunk);
   });
   child.onExit(({ exitCode }) => {
+    closed = true;
     handlers.onClose?.(exitCode);
   });
 
@@ -120,7 +123,19 @@ export function startNativeAttachProcess(
     write(input: string): void {
       child.write(input);
     },
+    resize(cols: number, rows: number): void {
+      if (closed) {
+        return;
+      }
+      child.resize(
+        Math.max(1, Math.trunc(cols)),
+        Math.max(1, Math.trunc(rows))
+      );
+    },
     kill(): void {
+      if (closed) {
+        return;
+      }
       child.kill("SIGTERM");
     }
   };

@@ -43,6 +43,20 @@ describe("nativeAttachTitleDisplay", () => {
     expect(nativeAttachTerminalColumns(1)).toBe(1);
   });
 
+  it("sizes native terminal rows from the current outer chrome budget", () => {
+    const nativeAttachTerminalRows = (
+      AppModule as typeof AppModule & {
+        nativeAttachTerminalRows?: (rows: number, hasError?: boolean, showStatusBar?: boolean) => number;
+      }
+    ).nativeAttachTerminalRows;
+
+    expect(nativeAttachTerminalRows).toBeTypeOf("function");
+    expect(nativeAttachTerminalRows?.(24)).toBe(19);
+    expect(nativeAttachTerminalRows?.(16)).toBe(11);
+    expect(nativeAttachTerminalRows?.(16, true)).toBe(10);
+    expect(nativeAttachTerminalRows?.(16, false, false)).toBe(12);
+  });
+
   it("keeps native process exit lines from wrapping in narrow terminals", () => {
     expect(nativeAttachExitLine(7, 40)).toBe("process exited · code 7");
     expect(nativeAttachExitLine(7, 18)).toBe("exit code 7");

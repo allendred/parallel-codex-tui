@@ -69,6 +69,20 @@ export class NativeTerminalScreen {
     });
   }
 
+  resize(cols: number, rows: number): void {
+    this.terminal.resize(
+      Math.max(1, Math.trunc(cols)),
+      Math.max(1, Math.trunc(rows))
+    );
+  }
+
+  dimensions(): { cols: number; rows: number } {
+    return {
+      cols: this.terminal.cols,
+      rows: this.terminal.rows
+    };
+  }
+
   snapshot(): string {
     return this.snapshotLines().join("\n");
   }

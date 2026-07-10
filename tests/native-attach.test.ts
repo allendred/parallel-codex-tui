@@ -573,6 +573,43 @@ describe("buildNativeAttachLaunch", () => {
     expect(output.join("")).toContain("size:42x9");
     expect(closed).toEqual([0]);
   });
+
+  it("resizes a running embedded PTY and delivers SIGWINCH to the native process", async () => {
+    const output: string[] = [];
+    const closed: number[] = [];
+    const script = [
+      "console.log(`initial:${process.stdout.columns}x${process.stdout.rows}`);",
+      "process.on('SIGWINCH', () => {",
+      "  console.log(`resized:${process.stdout.columns}x${process.stdout.rows}`);",
+      "  if (process.stdout.columns === 55 && process.stdout.rows === 11) process.exit(0);",
+      "});",
+      "setTimeout(() => process.exit(2), 3000);"
+    ].join("\n");
+    const processRef = startNativeAttachProcess(
+      {
+        command: process.execPath,
+        args: ["-e", script],
+        cwd: process.cwd(),
+        sessionId: "native-resize",
+        label: "Actor (node)",
+        cols: 42,
+        rows: 9
+      },
+      {
+        onOutput: (chunk) => output.push(chunk),
+        onClose: (code) => closed.push(code)
+      }
+    );
+    const resizable = processRef as typeof processRef & { resize?: (cols: number, rows: number) => void };
+
+    await waitForText(output, "initial:42x9");
+    expect(resizable.resize).toBeTypeOf("function");
+    resizable.resize?.(55, 11);
+    await waitForClose(closed);
+
+    expect(output.join("")).toContain("resized:55x11");
+    expect(closed).toEqual([0]);
+  });
 });
 
 async function waitForText(chunks: string[], text: string): Promise<void> {

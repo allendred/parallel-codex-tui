@@ -357,6 +357,71 @@ describe("CLI native layout smoke", () => {
       child.kill("SIGTERM");
     }
   }, 10000);
+
+  it("resizes the embedded native screen and PTY with the outer terminal", async () => {
+    const workspace = await mkdtemp(join(tmpdir(), "pct-cli-native-resize-"));
+    const appRoot = await mkdtemp(join(tmpdir(), "pct-cli-native-resize-app-"));
+    const taskId = "task-20260705-000000-native-resize";
+    const taskDir = join(workspace, ".parallel-codex", "sessions", taskId);
+    const workerDir = join(taskDir, "actor-mock");
+    const agentScript = join(workspace, "resize-agent.cjs");
+    const chunks: string[] = [];
+    const screen = new NativeTerminalScreen({ cols: 100, rows: 24, scrollback: 1000 });
+    let screenWrites = Promise.resolve();
+
+    await mkdir(workerDir, { recursive: true });
+    await mkdir(join(appRoot, ".parallel-codex"), { recursive: true });
+    await writeFile(
+      agentScript,
+      [
+        "const report = () => console.log(`inner-size:${process.stdout.columns}x${process.stdout.rows}`);",
+        "report();",
+        "process.on('SIGWINCH', report);",
+        "setInterval(() => {}, 1000);"
+      ].join("\n")
+    );
+    await writeConfig(appRoot, agentScript);
+    await writeTaskFiles({ workspace, taskId, taskDir, workerDir, nativeSessionId: "native-resize" });
+
+    const child = spawn(
+      process.execPath,
+      ["./node_modules/.bin/tsx", "src/cli.tsx", "--app-root", appRoot, "--workspace", workspace, "--task", taskId],
+      {
+        cwd: process.cwd(),
+        cols: 100,
+        rows: 24,
+        name: "xterm-256color",
+        env: {
+          ...process.env,
+          TERM: "xterm-256color"
+        }
+      }
+    );
+    child.onData((chunk) => {
+      chunks.push(chunk);
+      screenWrites = screenWrites.then(() => screen.write(chunk));
+    });
+
+    try {
+      await waitForText(chunks, "attach");
+      child.write("\x0f");
+      await waitForText(chunks, "inner-size:98x19");
+
+      child.resize(60, 16);
+      const resizableScreen = screen as NativeTerminalScreen & { resize?: (cols: number, rows: number) => void };
+      resizableScreen.resize?.(60, 16);
+      await waitForText(chunks, "inner-size:58x11");
+      await waitForScreenText(() => screenWrites, screen, "inner-size:58x11");
+
+      const snapshot = screen.snapshot();
+      expect(snapshot.split("\n")[0]).toContain("pct");
+      expect(snapshot).toContain("native actor/mock");
+      expect(Math.max(...snapshot.split("\n").map((line) => displayWidth(line)))).toBeLessThanOrEqual(60);
+    } finally {
+      child.write("\x1d");
+      child.kill("SIGTERM");
+    }
+  }, 10000);
 });
 
 async function writeConfig(appRoot: string, agentScript: string): Promise<void> {

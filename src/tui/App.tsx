@@ -235,6 +235,40 @@ export function App({
   }, [nativeAttach]);
 
   useEffect(() => {
+    const screen = nativeAttach?.screen;
+    const nativeProcess = nativeAttach?.process;
+    if (view !== "native" || !screen || !nativeProcess) {
+      return;
+    }
+
+    const resizeNativeAttach = () => {
+      const cols = nativeAttachTerminalColumns(process.stdout.columns || 120);
+      const rows = nativeAttachTerminalRows(
+        process.stdout.rows || 30,
+        Boolean(attachError),
+        config.ui.showStatusBar
+      );
+      screen.resize(cols, rows);
+      nativeProcess.resize(cols, rows);
+      setNativeAttach((current) =>
+        current && current.screen === screen
+          ? {
+              ...current,
+              launch: { ...current.launch, cols, rows },
+              snapshot: screen.snapshot()
+            }
+          : current
+      );
+    };
+
+    process.stdout.on("resize", resizeNativeAttach);
+    resizeNativeAttach();
+    return () => {
+      process.stdout.off("resize", resizeNativeAttach);
+    };
+  }, [attachError, config.ui.showStatusBar, nativeAttach?.process, nativeAttach?.screen, view]);
+
+  useEffect(() => {
     nativeInputRef.current = nativeInput;
   }, [nativeInput]);
 
@@ -624,7 +658,11 @@ export function App({
           }));
       const terminalCols = process.stdout.columns || 120;
       const nativeTerminalCols = nativeAttachTerminalColumns(terminalCols);
-      const terminalRows = Math.max(1, contentHeight - 2);
+      const terminalRows = nativeAttachTerminalRows(
+        process.stdout.rows || 30,
+        Boolean(attachError),
+        config.ui.showStatusBar
+      );
       const screen = new NativeTerminalScreen({
         cols: nativeTerminalCols,
         rows: terminalRows
@@ -649,7 +687,7 @@ export function App({
           });
         },
         onClose: (code) => {
-          void screen.write(`\r\n${nativeAttachExitLine(code, nativeTerminalCols)}\r\n`).then(() => {
+          void screen.write(`\r\n${nativeAttachExitLine(code, screen.dimensions().cols)}\r\n`).then(() => {
             setNativeAttach((current) =>
               current && current.screen === screen
                 ? {
@@ -1961,6 +1999,14 @@ export function nativeTerminalScrollDisplay(offset: number, maxOffset: number, w
 
 export function nativeAttachTerminalColumns(terminalWidth = process.stdout.columns || 120): number {
   return Math.max(1, terminalWidth - 2);
+}
+
+export function nativeAttachTerminalRows(
+  terminalRows = process.stdout.rows || 30,
+  hasError = false,
+  showStatusBar = true
+): number {
+  return Math.max(1, appContentHeight(terminalRows, hasError, showStatusBar) - 2);
 }
 
 export function nativeAttachExitLine(code: number, nativeTerminalCols: number): string {

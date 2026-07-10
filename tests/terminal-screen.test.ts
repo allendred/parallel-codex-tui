@@ -96,6 +96,22 @@ describe("NativeTerminalScreen", () => {
     expect(screen.snapshot()).toContain("line 17");
   });
 
+  it("resizes the headless terminal without discarding its current screen", async () => {
+    const screen = new NativeTerminalScreen({ cols: 12, rows: 2 });
+    const resizable = screen as NativeTerminalScreen & {
+      resize?: (cols: number, rows: number) => void;
+      dimensions?: () => { cols: number; rows: number };
+    };
+    await screen.write("resize me");
+
+    expect(resizable.resize).toBeTypeOf("function");
+    expect(resizable.dimensions).toBeTypeOf("function");
+    resizable.resize?.(20, 4);
+
+    expect(resizable.dimensions?.()).toEqual({ cols: 20, rows: 4 });
+    expect(screen.snapshot()).toContain("resize me");
+  });
+
   it("can be imported by the tsx runtime used by npm run dev", async () => {
     const { stdout } = await execFileAsync(
       "npx",
