@@ -62,6 +62,19 @@ describe("formatStatusLine", () => {
     expect(formatSelectedWorkerStatus(state, 1)).toBe("critic/claude done");
   });
 
+  it("keeps cancelled worker state concise and ahead of completed workers", () => {
+    const state = {
+      taskId: "task-stop",
+      workers: [
+        { label: "Judge (codex)", status: "done/process-exited" },
+        { label: "Actor (codex)", status: "cancelled/process-cancelled" }
+      ]
+    };
+
+    expect(formatStatusLine(state)).toBe("stop | workers 2 | stop 1 done 1");
+    expect(formatSelectedWorkerStatus(state, 1)).toBe("actor/codex stop");
+  });
+
   it("shortens dated task ids for the footer", () => {
     expect(
       formatStatusLine({

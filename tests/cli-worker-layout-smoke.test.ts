@@ -834,7 +834,7 @@ describe("CLI worker layout smoke", () => {
     });
 
     try {
-      await waitForScreenText(() => screenWrites, screen, "^W logs");
+      await waitForScreenText(() => screenWrites, screen, "^R retry");
       child.write("\x1b");
       await writeJson(
         join(actorDir, "status.json"),
@@ -853,7 +853,7 @@ describe("CLI worker layout smoke", () => {
 
       const snapshot = screen.snapshot();
       expect(snapshot).toContain("chat");
-      expect(snapshot).toContain("^W logs");
+      expect(snapshot).toContain("^R retry");
       expect(snapshot).toContain("2 workers");
       expect(snapshot).toContain("1 failed");
       expect(snapshot).not.toContain("@ actor/mock");

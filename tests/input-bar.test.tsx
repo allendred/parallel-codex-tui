@@ -9,6 +9,7 @@ describe("InputBar", () => {
     const { lastFrame } = render(<InputBar mode="chat" busy value="hello" onChange={() => {}} />);
 
     expect(lastFrame()).toContain("working");
+    expect(lastFrame()).toContain("Esc stop");
     expect(lastFrame()).toContain("run");
     expect(lastFrame()).not.toContain("Running...");
   });
@@ -18,6 +19,14 @@ describe("InputBar", () => {
 
     expect(lastFrame()).toContain("> hello|");
     expect(lastFrame()).not.toContain("Input:");
+  });
+
+  it("shows retry as the primary idle action for a failed task", () => {
+    const { lastFrame } = render(
+      <InputBar mode="chat" canRetry value="" terminalWidth={40} onChange={() => {}} />
+    );
+
+    expect(lastFrame()).toContain("> | message · ^R retry");
   });
 
   it("keeps long chat input to one visible tail row", () => {
@@ -152,6 +161,7 @@ describe("InputBar", () => {
     expect(chatBusyDisplayValue(10)).toBe("");
     expect(chatBusyDisplayValue(16)).toBe("busy");
     expect(chatBusyDisplayValue(24)).toBe("working");
+    expect(chatBusyDisplayValue(40)).toBe("working · Esc stop");
 
     const { lastFrame } = render(
       <InputBar mode="chat" busy value="" terminalWidth={10} onChange={() => {}} />

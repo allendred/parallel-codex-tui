@@ -5,7 +5,7 @@ import { Lexer, type Token, type Tokens } from "marked";
 import type { AppConfig } from "../core/config.js";
 import { readJson } from "../core/file-store.js";
 import { WorkerStatusSchema, type RouteDecision } from "../domain/schemas.js";
-import type { Orchestrator, WorkerLogRef } from "../orchestrator/orchestrator.js";
+import type { Orchestrator, WorkerLogRef, WorkerRunStatus } from "../orchestrator/orchestrator.js";
 import {
   formatSelectedWorkerStatus,
   formatRouteStatus,
@@ -106,6 +106,7 @@ export function App({
   const [selectedWorkerIndex, setSelectedWorkerIndex] = useState(0);
   const [activeTaskId, setActiveTaskId] = useState<string | null>(initialTaskId);
   const [activeMode, setActiveMode] = useState<"simple" | "complex" | null>(initialTaskId ? "complex" : null);
+  const [canRetryTask, setCanRetryTask] = useState(false);
   const [attachError, setAttachError] = useState<string | null>(null);
   const [nativeInput, setNativeInput] = useState("");
   const [workerScrollOffset, setWorkerScrollOffset] = useState(0);
@@ -121,6 +122,8 @@ export function App({
   const { exit } = useApp();
   const { setRawMode, internal_eventEmitter: stdinEvents } = useStdin();
   const nativeAttachRef = useRef(nativeAttach);
+  const activeRunControllerRef = useRef<AbortController | null>(null);
+  const activeTaskIdRef = useRef<string | null>(initialTaskId);
   const nativeInputRef = useRef(nativeInput);
   const inputRef = useRef(input);
   const viewRef = useRef(view);
@@ -132,6 +135,7 @@ export function App({
   const userSelectedWorkerRef = useRef(false);
   const attachSelectedWorkerRef = useRef<(worker: WorkerLogRef) => Promise<void>>(attachSelectedWorker);
   const submitRef = useRef<(value: string) => Promise<void>>(submit);
+  const retryRef = useRef<() => Promise<void>>(retryActiveTask);
   const exitRef = useRef(exit);
   const rawInputDecoderRef = useRef(createRawInputDecoder());
 
@@ -145,6 +149,10 @@ export function App({
   useEffect(() => {
     inputRef.current = input;
   }, [input]);
+
+  useEffect(() => {
+    activeTaskIdRef.current = activeTaskId;
+  }, [activeTaskId]);
 
   useEffect(() => {
     viewRef.current = view;
@@ -173,6 +181,7 @@ export function App({
   useEffect(() => {
     attachSelectedWorkerRef.current = attachSelectedWorker;
     submitRef.current = submit;
+    retryRef.current = retryActiveTask;
   });
 
   useEffect(() => {
@@ -192,8 +201,15 @@ export function App({
     let active = true;
     async function loadInitialWorkers() {
       try {
-        const restored = await orchestrator.listTaskWorkers(taskId);
-        if (!active || restored.length === 0) {
+        const [restored, retryable] = await Promise.all([
+          orchestrator.listTaskWorkers(taskId),
+          orchestrator.canRetryTask(taskId)
+        ]);
+        if (!active) {
+          return;
+        }
+        setCanRetryTask(retryable);
+        if (restored.length === 0) {
           return;
         }
         setWorkers(restored);
@@ -300,6 +316,7 @@ export function App({
       const currentView = viewRef.current;
       if (currentView === "worker") {
         if (isExitShortcut(chunk, {})) {
+          activeRunControllerRef.current?.abort();
           exitRef.current();
           return;
         }
@@ -317,6 +334,10 @@ export function App({
 
       if (currentView === "chat") {
         if (chunk === "\x1b") {
+          if (busyRef.current) {
+            activeRunControllerRef.current?.abort();
+            return;
+          }
           userSelectedWorkerRef.current = true;
           setView("chat");
           return;
@@ -350,10 +371,15 @@ export function App({
           setWorkerScrollOffset(0);
           return;
         }
+        if (chunk === "\u0012" && !busyRef.current) {
+          void retryRef.current();
+          return;
+        }
 
         const update = applyChatInputChunk(inputRef.current, chunk);
         inputRef.current = update.value;
         if (update.exit) {
+          activeRunControllerRef.current?.abort();
           exitRef.current();
           return;
         }
@@ -419,9 +445,14 @@ export function App({
     };
   }, [outputHeight, setRawMode, stdinEvents]);
 
+  useEffect(() => () => {
+    activeRunControllerRef.current?.abort();
+  }, []);
+
   useInput((inputKey, key) => {
     if (view === "worker") {
       if (isExitShortcut(inputKey, key)) {
+        activeRunControllerRef.current?.abort();
         exitRef.current();
         return;
       }
@@ -525,6 +556,24 @@ export function App({
     }
   }
 
+  function createRunCallbacks(controller: AbortController) {
+    return {
+      signal: controller.signal,
+      onRoute: setLastRoute,
+      onStatus: (nextStatus: WorkerRunStatus) => {
+        setStatus(nextStatus);
+        if (nextStatus.taskId !== "main") {
+          activeTaskIdRef.current = nextStatus.taskId;
+          setActiveTaskId(nextStatus.taskId);
+          setActiveMode("complex");
+        }
+      },
+      onWorker: (worker: WorkerLogRef) => {
+        setWorkers((current) => upsertWorker(current, worker));
+      }
+    };
+  }
+
   async function submit(value: string) {
     const request = value.trim();
     if (!request || busyRef.current) {
@@ -536,16 +585,12 @@ export function App({
     busyRef.current = true;
     setBusy(true);
     setLastRoute(null);
+    const controller = new AbortController();
+    activeRunControllerRef.current = controller;
     setMessages((current) => [...current, { from: "user", text: request }]);
 
     try {
-      const callbacks = {
-        onRoute: setLastRoute,
-        onStatus: setStatus,
-        onWorker: (worker: WorkerLogRef) => {
-          setWorkers((current) => upsertWorker(current, worker));
-        }
-      };
+      const callbacks = createRunCallbacks(controller);
       const memory = {
         activeTaskId,
         activeMode
@@ -598,13 +643,69 @@ export function App({
       );
       setActiveMode(nextMemory.activeMode);
       setActiveTaskId(nextMemory.activeTaskId);
+      activeTaskIdRef.current = nextMemory.activeTaskId;
+      setCanRetryTask(nextMemory.activeTaskId
+        ? await orchestrator.canRetryTask(nextMemory.activeTaskId)
+        : false);
       setMessages((current) => [...current, { from: "system", text: result.summary }]);
     } catch (error) {
+      const retryTaskId = activeTaskIdRef.current;
+      if (retryTaskId) {
+        setCanRetryTask(await orchestrator.canRetryTask(retryTaskId));
+      }
       setMessages((current) => [
         ...current,
-        { from: "system", text: error instanceof Error ? error.message : String(error) }
+        {
+          from: "system",
+          text: isAbortError(error) ? "cancelled · request stopped" : error instanceof Error ? error.message : String(error)
+        }
       ]);
     } finally {
+      if (activeRunControllerRef.current === controller) {
+        activeRunControllerRef.current = null;
+      }
+      busyRef.current = false;
+      setBusy(false);
+    }
+  }
+
+  async function retryActiveTask() {
+    const taskId = activeTaskIdRef.current;
+    if (!taskId || busyRef.current || !canRetryTask) {
+      return;
+    }
+
+    const controller = new AbortController();
+    activeRunControllerRef.current = controller;
+    busyRef.current = true;
+    setBusy(true);
+    setCanRetryTask(false);
+    setLastRoute(null);
+
+    try {
+      const result = await orchestrator.retryTask({
+        taskId,
+        cwd,
+        ...createRunCallbacks(controller)
+      });
+      activeTaskIdRef.current = taskId;
+      setActiveTaskId(taskId);
+      setActiveMode("complex");
+      setCanRetryTask(false);
+      setMessages((current) => [...current, { from: "system", text: result.summary }]);
+    } catch (error) {
+      setCanRetryTask(await orchestrator.canRetryTask(taskId));
+      setMessages((current) => [
+        ...current,
+        {
+          from: "system",
+          text: isAbortError(error) ? "cancelled · retry stopped" : error instanceof Error ? error.message : String(error)
+        }
+      ]);
+    } finally {
+      if (activeRunControllerRef.current === controller) {
+        activeRunControllerRef.current = null;
+      }
       busyRef.current = false;
       setBusy(false);
     }
@@ -622,6 +723,7 @@ export function App({
         <InputBar
           mode={view}
           busy={busy}
+          canRetry={canRetryTask}
           hasWorkers={workers.length > 0}
           nativeClosed={view === "native" && nativeAttach?.closedCode !== null}
           value={view === "native" ? "" : input}
@@ -1663,4 +1765,8 @@ function compactNativeAttachRole(label: string): string {
 
 function compactNativeSessionForTitle(sessionId: string, maxLength: number): string {
   return compactEndByDisplayWidth(sessionId, Math.min(maxLength, 16));
+}
+
+function isAbortError(error: unknown): boolean {
+  return error instanceof Error && error.name === "AbortError";
 }

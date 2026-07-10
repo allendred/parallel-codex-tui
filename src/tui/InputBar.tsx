@@ -6,6 +6,7 @@ import { TUI_THEME } from "./theme.js";
 export interface InputBarProps {
   mode: "chat" | "worker" | "native";
   busy?: boolean;
+  canRetry?: boolean;
   hasWorkers?: boolean;
   nativeClosed?: boolean;
   value: string;
@@ -17,6 +18,7 @@ export interface InputBarProps {
 export function InputBar({
   mode,
   busy = false,
+  canRetry = false,
   hasWorkers = false,
   nativeClosed = false,
   value,
@@ -79,7 +81,7 @@ export function InputBar({
   const hasLeadingPromptSpace = terminalWidth >= 10;
   const placeholder = chatPlaceholderDisplayText(
     terminalWidth,
-    { hasWorkers },
+    { hasWorkers, canRetry },
     { leadingSpace: hasLeadingPromptSpace }
   );
 
@@ -92,7 +94,7 @@ export function InputBar({
       <Text backgroundColor={TUI_THEME.rail} color={TUI_THEME.accent} bold>{prompt}</Text>
       {hasLeadingPromptSpace ? <Text backgroundColor={TUI_THEME.rail}> </Text> : null}
       <Text backgroundColor={TUI_THEME.rail} color={TUI_THEME.accent} bold>|</Text>
-      <Text backgroundColor={TUI_THEME.rail} color={TUI_THEME.muted}>{placeholder}</Text>
+      <Text backgroundColor={TUI_THEME.rail} color={canRetry ? TUI_THEME.warning : TUI_THEME.muted}>{placeholder}</Text>
     </InputRail>
   );
 }
@@ -145,7 +147,7 @@ export function inputRailLayout(
 
 export function chatPlaceholderDisplayText(
   terminalWidth: number,
-  options: { hasWorkers?: boolean } = {},
+  options: { hasWorkers?: boolean; canRetry?: boolean } = {},
   display: { leadingSpace?: boolean } = {}
 ): string {
   const placeholder = chatPlaceholderDisplayValue(terminalWidth, options);
@@ -162,8 +164,17 @@ export function chatInputDisplayValue(value: string, terminalWidth: number): str
 
 export function chatPlaceholderDisplayValue(
   terminalWidth: number,
-  options: { hasWorkers?: boolean } = {}
+  options: { hasWorkers?: boolean; canRetry?: boolean } = {}
 ): string {
+  if (options.canRetry) {
+    if (terminalWidth < 14) {
+      return "retry";
+    }
+    if (terminalWidth < 22) {
+      return "^R retry";
+    }
+    return chatInputDisplayValue("message · ^R retry", terminalWidth);
+  }
   if (options.hasWorkers) {
     return chatTaskPlaceholderDisplayValue(terminalWidth);
   }
@@ -198,6 +209,9 @@ export function chatBusyDisplayValue(terminalWidth: number): string {
   }
   if (terminalWidth < 22) {
     return "busy";
+  }
+  if (terminalWidth >= 34) {
+    return "working · Esc stop";
   }
   return "working";
 }

@@ -129,7 +129,7 @@ function formatWorkerSummary(workers: NonNullable<StatusLineState["workers"]>): 
     counts.set(state, (counts.get(state) ?? 0) + 1);
   }
 
-  const priority = ["fail", "run", "wait", "done"];
+  const priority = ["fail", "stop", "run", "wait", "done"];
   const orderedStates = [
     ...priority.filter((state) => counts.has(state)),
     ...Array.from(counts.keys()).filter((state) => !priority.includes(state)).sort()
@@ -149,6 +149,9 @@ function compactStatus(status: string): string {
   }
   if (state === "failed" || state === "error") {
     return "fail";
+  }
+  if (state === "cancelled" || state === "canceled") {
+    return "stop";
   }
   if (state === "waiting" || state === "queued") {
     return "wait";

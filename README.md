@@ -143,6 +143,8 @@ The doctor output includes `preview:` and `semantic:` ANSI swatch rows so you ca
 - Complex requests create a session under `.parallel-codex/sessions/`.
 - Complex requests run Judge -> Actor -> Critic.
 - Complex follow-ups stay in the active task, append a numbered turn, reuse the same Actor/Critic native sessions when available, and inject up to five prior turn summaries as file-backed memory.
+- Pressing `Esc` while a request is running stops the router or active worker and records an interrupted complex task as `cancelled`; exiting the outer TUI also terminates the active run.
+- Failed and cancelled tasks expose `Ctrl+R` retry. Retry keeps the same task and turn, reuses recorded native worker sessions, preserves prior output behind a retry separator, and does not route the request again.
 - Simple follow-up questions run through the persistent Main native session with the active task directory, original request, up to five recent turn summaries, valid worker statuses, and log tails as file-backed context. They do not start another Judge, Actor, or Critic turn.
 - Worker prompts, logs, status, and outputs are written to disk.
 - The bottom status line shows the active task state.
@@ -221,7 +223,7 @@ Keep `[router.codex]` on `workspace-write`; routing only classifies requests and
 
 The process adapter sends each role prompt to stdin and records stdout/stderr in `output.log`.
 
-In chat, press `Ctrl+W` to open worker logs and `Tab` to cycle the selected worker when workers exist. In worker-log views, scroll with the mouse wheel or PageUp/PageDown, press `Tab` to cycle workers, and press `Esc` to return to chat.
+In chat, press `Ctrl+W` to open worker logs and `Tab` to cycle the selected worker when workers exist. While a request is running, press `Esc` to stop it. After a failed or cancelled task, press `Ctrl+R` to retry the same turn. In worker-log views, scroll with the mouse wheel or PageUp/PageDown, press `Tab` to cycle workers, and press `Esc` to return to chat.
 
 In chat or worker-log views, press `Ctrl+O` to attach to the selected worker's native session inside `parallel-codex-tui`. Native attach runs through a PTY, so full-screen CLIs such as `codex resume {sessionId}` receive a real terminal instead of pipe stdin. Input is forwarded to the configured interactive command and output is shown in the native attach panel. Press `Ctrl+]` to return to worker logs; `Ctrl+C` is forwarded to the native agent while attached. In chat and worker-log views, press `Ctrl+C` to exit the outer TUI.
 
