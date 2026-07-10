@@ -3,6 +3,7 @@ import { render } from "ink-testing-library";
 import { describe, expect, it } from "vitest";
 import { StatusBar, statusRailLayout, statusSegmentLabelTheme, statusSegmentValueTheme } from "../src/tui/StatusBar.js";
 import { displayWidth } from "../src/tui/display-width.js";
+import { formatRouteStatus, formatStatusLine } from "../src/tui/status-line.js";
 import { TUI_THEME_PRESETS } from "../src/tui/theme.js";
 
 describe("StatusBar", () => {
@@ -371,6 +372,37 @@ describe("StatusBar", () => {
     expect(frame).toContain("chat done");
     expect(frame).toContain("route simple · 42ms");
     expect(frame).not.toContain("@ route");
+  });
+
+  it("shows the current simple Main turn without historical worker counts", () => {
+    const task = formatStatusLine({
+      taskId: "task-20260707-033720-fefc",
+      main: "done",
+      workers: [
+        { label: "Judge (codex)", status: "done/process-exited" },
+        { label: "Actor (codex)", status: "done/process-exited" },
+        { label: "Critic (codex)", status: "done/process-exited" }
+      ]
+    });
+    const route = formatRouteStatus({
+      mode: "simple",
+      reason: "Simple task question.",
+      suggested_roles: [],
+      judge_engine: "codex",
+      actor_engine: "codex",
+      critic_engine: "codex",
+      source: "codex",
+      duration_ms: 13000
+    });
+    const { lastFrame } = render(
+      <StatusBar text={`${task} | ${route}`} terminalWidth={80} />
+    );
+
+    const frame = lastFrame() ?? "";
+    expect(frame).toContain("chat done");
+    expect(frame).toContain("route simple · 13s");
+    expect(frame).not.toContain("workers");
+    expect(frame).not.toContain("done 3");
   });
 
   it("keeps fallback route evidence visible by compacting its details in narrow terminals", () => {

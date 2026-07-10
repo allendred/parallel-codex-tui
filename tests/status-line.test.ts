@@ -33,6 +33,18 @@ describe("formatStatusLine", () => {
     ).toBe("main | main run");
   });
 
+  it("keeps the current Main turn ahead of completed historical task workers", () => {
+    expect(formatStatusLine({
+      taskId: "task-20260707-033720-fefc",
+      main: "done",
+      workers: [
+        { label: "Judge (codex)", status: "done/process-exited" },
+        { label: "Actor (codex)", status: "done/process-exited" },
+        { label: "Critic (codex)", status: "done/process-exited" }
+      ]
+    })).toBe("033720-fefc | main done");
+  });
+
   it("formats concise route evidence while preserving exceptional sources", () => {
     const formatRouteStatus = (
       statusLineModule as typeof statusLineModule & {

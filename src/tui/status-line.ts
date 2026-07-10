@@ -36,6 +36,10 @@ export function formatStatusLine(state: StatusLineState | null): string {
   }
 
   const parts = [compactTaskId(state.taskId)];
+  if (state.main) {
+    parts.push(`main ${compactStatus(state.main)}`);
+    return parts.join(" | ");
+  }
   if (state.featureProgress) {
     parts.push(formatFeatureProgress(state.featureProgress));
   }
@@ -44,9 +48,6 @@ export function formatStatusLine(state: StatusLineState | null): string {
     return parts.join(" | ");
   }
 
-  if (state.main) {
-    parts.push(`main ${compactStatus(state.main)}`);
-  }
   if (state.judge) {
     parts.push(`judge ${compactStatus(state.judge)}`);
   }
