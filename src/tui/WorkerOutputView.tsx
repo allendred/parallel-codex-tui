@@ -1631,8 +1631,8 @@ function sanitizeProcessOutput(text: string, options: ProcessOutputSanitizeOptio
       continue;
     }
 
-    if (hideAssistantNarration && isAssistantNarrativeMarker(trimmed)) {
-      index = skipAssistantNarrativeBlock(rawLines, index);
+    if (isAssistantNarrativeMarker(trimmed)) {
+      index = hideAssistantNarration ? skipAssistantNarrativeBlock(rawLines, index) : index + 1;
       continue;
     }
 
@@ -3038,6 +3038,8 @@ function shouldDropNoisyProcessLine(trimmed: string, line: string): boolean {
   }
   return (
     /^tokens used$/i.test(trimmed) ||
+    /^apply patch$/i.test(trimmed) ||
+    /^patch:\s+completed$/i.test(trimmed) ||
     isCodexPluginManifestNoise(trimmed) ||
     isCodexTelemetryNoise(trimmed) ||
     trimmed.includes("codex_models_manager::manager: failed to refresh available models") ||

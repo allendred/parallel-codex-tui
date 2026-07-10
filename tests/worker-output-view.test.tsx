@@ -3152,6 +3152,53 @@ describe("WorkerOutputView", () => {
     }
   });
 
+  it("hides Codex transport labels while keeping patch failures actionable", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pct-worker-output-transport-labels-"));
+    const workerDir = join(root, "actor-codex");
+
+    await mkdir(workerDir, { recursive: true });
+    await writeFile(
+      join(workerDir, "output.log"),
+      [
+        "codex",
+        "Preparing the focused update.",
+        "apply patch",
+        "patch: completed",
+        "assistant",
+        "Verifying the updated behavior.",
+        "apply patch",
+        "patch: failed",
+        "ERROR: patch context mismatch"
+      ].join("\n")
+    );
+
+    const { lastFrame, unmount } = render(
+      <WorkerOutputView
+        title="Actor (codex) output"
+        role="actor"
+        logPath={join(workerDir, "output.log")}
+        height={16}
+      />
+    );
+
+    try {
+      await waitForFrame(lastFrame, "patch context mismatch");
+
+      const frame = lastFrame() ?? "";
+      const visibleLines = frame.split("\n").map((line) => line.trim());
+      expect(frame).toContain("Preparing the focused update.");
+      expect(frame).toContain("Verifying the updated behavior.");
+      expect(frame).toContain("patch: failed");
+      expect(frame).toContain("patch context mismatch");
+      expect(visibleLines).not.toContain("codex");
+      expect(visibleLines).not.toContain("assistant");
+      expect(visibleLines).not.toContain("apply patch");
+      expect(visibleLines).not.toContain("patch: completed");
+    } finally {
+      unmount();
+    }
+  });
+
   it("hides Claude critic completion prose when a review artifact exists", async () => {
     const root = await mkdtemp(join(tmpdir(), "pct-worker-output-claude-narrative-"));
     const workerDir = join(root, "critic-claude");
