@@ -217,9 +217,9 @@ describe("InputBar", () => {
     );
 
     const frame = lastFrame() ?? "";
-    expect(frame).toContain("logs · Pg · ^O");
+    expect(frame).toContain("logs · Pg · Esc");
     expect(frame).not.toContain("Tab");
-    expect(frame).not.toContain("Esc");
+    expect(frame).not.toContain("^O");
     expect(frame.split("\n")).toHaveLength(1);
     expect(displayWidth(frame)).toBeLessThanOrEqual(24);
   });
@@ -230,21 +230,23 @@ describe("InputBar", () => {
     );
 
     const frame = lastFrame() ?? "";
-    expect(frame).toContain("log · Pg · ^O");
+    expect(frame).toContain("log · Pg · Esc");
     expect(frame).not.toContain("logs");
     expect(frame).not.toContain("read");
+    expect(frame).not.toContain("^O");
     expect(frame.split("\n")).toHaveLength(1);
   });
 
-  it("keeps an attach shortcut visible in sub-15-column worker terminals", () => {
+  it("keeps the chat return shortcut visible in sub-15-column worker terminals", () => {
     const { lastFrame } = render(
       <InputBar mode="worker" value="" terminalWidth={13} onChange={() => {}} />
     );
 
     const frame = lastFrame() ?? "";
-    expect(frame).toContain("log · ^O");
+    expect(frame).toContain("log · Esc");
     expect(frame).not.toContain("read");
     expect(frame).not.toContain("Pg");
+    expect(frame).not.toContain("^O");
     expect(frame.split("\n")).toHaveLength(1);
     expect(displayWidth(frame)).toBeLessThanOrEqual(13);
   });
