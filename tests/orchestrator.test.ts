@@ -316,6 +316,49 @@ describe("Orchestrator", () => {
     expect(workerCwds).toEqual([workspaceRoot, workspaceRoot, workspaceRoot]);
   });
 
+  it("records simple decisions in one shared router audit across workspaces", async () => {
+    const appRoot = await mkdtemp(join(tmpdir(), "pct-orch-router-audit-app-"));
+    const workspaceRoot = await mkdtemp(join(tmpdir(), "pct-orch-router-audit-workspace-"));
+    const routerCwdRoot = join(appRoot, ".parallel-codex", "router");
+    const config = mockConfig(appRoot);
+    config.router.defaultMode = "auto";
+    const manager = new SessionManager({
+      projectRoot: workspaceRoot,
+      dataDir: config.dataDir,
+      now: () => new Date("2026-06-30T03:30:00.000Z"),
+      randomId: () => "a1b2"
+    });
+    const orchestrator = new Orchestrator(
+      config,
+      manager,
+      new Map([["mock", new MockWorkerAdapter()]]),
+      async () => JSON.stringify({ mode: "simple", reason: "Greeting needs Main only." }),
+      routerCwdRoot
+    );
+
+    const result = await orchestrator.handleRequest({
+      request: "你好",
+      cwd: workspaceRoot
+    });
+    const records = (await readTextIfExists(join(routerCwdRoot, "routes.jsonl")))
+      .trim()
+      .split("\n")
+      .filter(Boolean)
+      .map((line) => JSON.parse(line) as Record<string, unknown>);
+
+    expect(result.mode).toBe("simple");
+    expect(records).toHaveLength(1);
+    expect(records[0]).toMatchObject({
+      request: "你好",
+      workspace: workspaceRoot,
+      mode: "simple",
+      reason: "Greeting needs Main only.",
+      source: "codex"
+    });
+    expect(records[0]?.time).toEqual(expect.any(String));
+    expect(records[0]?.duration_ms).toEqual(expect.any(Number));
+  });
+
   it("passes configured role prompts into worker prompts", async () => {
     const root = await mkdtemp(join(tmpdir(), "pct-orch-role-prompts-"));
     const config = mockConfig(root);
@@ -826,6 +869,57 @@ describe("Orchestrator", () => {
       mode: "complex",
       taskId: task.id
     });
+  });
+
+  it("reuses the precomputed complex follow-up decision when starting the task turn", async () => {
+    const appRoot = await mkdtemp(join(tmpdir(), "pct-orch-follow-up-once-app-"));
+    const workspaceRoot = await mkdtemp(join(tmpdir(), "pct-orch-follow-up-once-workspace-"));
+    const routerCwdRoot = join(appRoot, ".parallel-codex", "router");
+    const config = mockConfig(appRoot);
+    config.router.defaultMode = "auto";
+    const manager = new SessionManager({
+      projectRoot: workspaceRoot,
+      dataDir: config.dataDir,
+      now: () => new Date("2026-06-30T03:30:00.000Z"),
+      randomId: () => "a1b2"
+    });
+    let routeCalls = 0;
+    const orchestrator = new Orchestrator(
+      config,
+      manager,
+      new Map([["mock", new MockWorkerAdapter()]]),
+      async () => {
+        routeCalls += 1;
+        return JSON.stringify({ mode: "complex", reason: "Project work needs the pair." });
+      },
+      routerCwdRoot
+    );
+    const initial = await orchestrator.handleRequest({
+      request: "实现计分功能",
+      cwd: workspaceRoot
+    });
+    const followUp = await orchestrator.routeTaskFollowUp({
+      taskId: initial.taskId ?? "",
+      request: "再增加等级速度",
+      cwd: workspaceRoot
+    });
+    const precomputedRoute = (
+      followUp as typeof followUp & { route?: unknown }
+    ).route;
+
+    await orchestrator.handleTaskTurn({
+      taskId: initial.taskId ?? "",
+      request: "再增加等级速度",
+      cwd: workspaceRoot,
+      route: precomputedRoute
+    } as Parameters<Orchestrator["handleTaskTurn"]>[0]);
+
+    expect(routeCalls).toBe(2);
+    const auditLines = (await readTextIfExists(join(routerCwdRoot, "routes.jsonl")))
+      .trim()
+      .split("\n")
+      .filter(Boolean);
+    expect(auditLines).toHaveLength(2);
   });
 
   it("routes active task follow-ups using only the current user request", async () => {

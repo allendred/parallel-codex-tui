@@ -11,25 +11,38 @@ export async function routeRequestWithCodex(
   runner: CodexRouteRunner = runCodexRouterProcess,
   cwd = config.projectRoot
 ): Promise<RouteDecision> {
+  const startedAt = Date.now();
   if (config.router.defaultMode === "simple") {
-    return simpleRoute("Forced simple mode from config.", config);
+    return annotateRoute(simpleRoute("Forced simple mode from config.", config), "forced", startedAt);
   }
 
   if (config.router.defaultMode === "complex") {
-    return complexRoute("Forced complex mode from config.", config);
+    return annotateRoute(complexRoute("Forced complex mode from config.", config), "forced", startedAt);
   }
 
   try {
     const output = await runner(buildCodexRouterPrompt(request, config), config, cwd);
     const route = parseCodexRoute(output, config);
-    return RouteDecisionSchema.parse(route);
+    return annotateRoute(RouteDecisionSchema.parse(route), "codex", startedAt);
   } catch (error) {
-    const fallback = fallbackRoute(config);
+    const fallback = annotateRoute(fallbackRoute(config), "fallback", startedAt);
     return {
       ...fallback,
       reason: `Codex router failed: ${summarizeRouterError(error)}. ${fallback.reason}`
     };
   }
+}
+
+function annotateRoute(
+  route: RouteDecision,
+  source: NonNullable<RouteDecision["source"]>,
+  startedAt: number
+): RouteDecision {
+  return {
+    ...route,
+    source,
+    duration_ms: Math.max(0, Date.now() - startedAt)
+  };
 }
 
 export async function runCodexRouterProcess(prompt: string, config: AppConfig, cwd = config.projectRoot): Promise<string> {

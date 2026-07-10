@@ -1,10 +1,11 @@
 import { readdir } from "node:fs/promises";
 import { join } from "node:path";
 import type { AppConfig } from "../core/config.js";
-import { ensureDir, pathExists, readJson, readTextIfExists, writeJson, writeText } from "../core/file-store.js";
+import { appendJsonLine, ensureDir, pathExists, readJson, readTextIfExists, writeJson, writeText } from "../core/file-store.js";
+import { routerRuntimeDir } from "../core/paths.js";
 import { routeRequestWithCodex, type CodexRouteRunner } from "../core/router.js";
 import type { SessionManager, TaskSession, TaskTurn, WorkerFiles } from "../core/session-manager.js";
-import { TaskMetaSchema, WorkerStatusSchema, type EngineName, type NativeSession, type WorkerRole, type WorkerStatus } from "../domain/schemas.js";
+import { TaskMetaSchema, WorkerStatusSchema, type EngineName, type NativeSession, type RouteDecision, type WorkerRole, type WorkerStatus } from "../domain/schemas.js";
 import { getAdapter, type WorkerRegistry } from "../workers/registry.js";
 import type { WorkerResult, WorkerRunSpec } from "../workers/types.js";
 import {
@@ -30,6 +31,7 @@ export interface HandleRequestInput {
 
 export interface HandleTaskTurnInput extends HandleRequestInput {
   taskId: string;
+  route?: RouteDecision;
 }
 
 export interface HandleTaskQuestionInput extends HandleRequestInput {
@@ -40,6 +42,7 @@ export interface TaskFollowUpRouteResult {
   mode: "simple" | "complex";
   taskId: string | null;
   reason: string;
+  route: RouteDecision;
 }
 
 export interface HandleRequestResult {
@@ -72,11 +75,11 @@ export class Orchestrator {
     private readonly sessions: SessionManager,
     private readonly workers: WorkerRegistry,
     private readonly routeRunner?: CodexRouteRunner,
-    private readonly routerCwd = config.projectRoot
+    private readonly routerCwd = routerRuntimeDir(config.projectRoot, config.dataDir)
   ) {}
 
   async handleRequest(input: HandleRequestInput): Promise<HandleRequestResult> {
-    const route = await this.routeRequest(input.request);
+    const route = await this.routeRequest(input.request, input.cwd);
     const workers: WorkerLogRef[] = [];
 
     if (route.mode === "simple") {
@@ -178,7 +181,7 @@ export class Orchestrator {
 
   async handleTaskTurn(input: HandleTaskTurnInput): Promise<HandleRequestResult> {
     const task: TaskSession = this.sessions.taskFromId(input.taskId);
-    const route = await this.routeRequest(input.request);
+    const route = input.route ?? await this.routeRequest(input.request, input.cwd);
     const turn = await this.sessions.appendTurn(task, {
       request: input.request,
       route
@@ -258,12 +261,13 @@ export class Orchestrator {
   }
 
   async routeTaskFollowUp(input: HandleTaskQuestionInput): Promise<TaskFollowUpRouteResult> {
-    const route = await this.routeRequest(input.request);
+    const route = await this.routeRequest(input.request, input.cwd);
 
     return {
       mode: route.mode,
       taskId: route.mode === "complex" ? input.taskId : null,
-      reason: route.reason
+      reason: route.reason,
+      route
     };
   }
 
@@ -345,8 +349,15 @@ export class Orchestrator {
     return workers.sort((left, right) => workerRoleOrder(left.role) - workerRoleOrder(right.role));
   }
 
-  private routeRequest(request: string) {
-    return routeRequestWithCodex(request, this.config, this.routeRunner, this.routerCwd);
+  private async routeRequest(request: string, workspace: string): Promise<RouteDecision> {
+    const route = await routeRequestWithCodex(request, this.config, this.routeRunner, this.routerCwd);
+    await appendJsonLine(join(this.routerCwd, "routes.jsonl"), {
+      time: new Date().toISOString(),
+      request,
+      workspace,
+      ...route
+    });
+    return route;
   }
 
   private async runMain(input: HandleRequestInput, workers: WorkerLogRef[], context?: string): Promise<string> {

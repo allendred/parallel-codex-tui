@@ -562,6 +562,7 @@ export function App({
               request,
               cwd,
               taskId: target.taskId,
+              route: followUpRoute?.route,
               ...callbacks
             })
           : target.kind === "task-question"

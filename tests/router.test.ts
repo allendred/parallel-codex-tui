@@ -18,6 +18,7 @@ describe("routeRequestWithCodex", () => {
 
     return expect(routeRequestWithCodex("实现一个大型功能", config, runner)).resolves.toMatchObject({
       mode: "simple",
+      source: "forced",
       suggested_roles: []
     });
   });
@@ -51,6 +52,8 @@ describe("routeRequestWithCodex", () => {
 
     expect(route.mode).toBe("complex");
     expect(route.reason).toBe("Codex saw an optimization request.");
+    expect(route.source).toBe("codex");
+    expect(route.duration_ms).toEqual(expect.any(Number));
   });
 
   it("uses configured role pairing instead of router-provided engines", async () => {
@@ -162,6 +165,8 @@ describe("routeRequestWithCodex", () => {
     expect(route.mode).toBe("complex");
     expect(route.reason).toContain("Codex router failed");
     expect(route.reason).toContain("Codex router fallback forced complex.");
+    expect(route.source).toBe("fallback");
+    expect(route.duration_ms).toEqual(expect.any(Number));
   });
 
   it("summarizes noisy Codex router process errors before adding fallback reason", async () => {

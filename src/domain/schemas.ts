@@ -31,6 +31,8 @@ export const WorkerStateSchema = z.enum([
 export const RouteDecisionSchema = z.object({
   mode: RouteModeSchema,
   reason: z.string().min(1),
+  source: z.enum(["codex", "forced", "fallback"]).optional(),
+  duration_ms: z.number().nonnegative().optional(),
   suggested_roles: z.array(WorkerRoleSchema).default([]),
   judge_engine: EngineNameSchema.default("codex"),
   actor_engine: EngineNameSchema.default("codex"),
