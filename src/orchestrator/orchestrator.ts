@@ -19,6 +19,7 @@ import {
 import { buildActorPrompt, buildCriticPrompt, buildJudgePrompt, buildMainPrompt } from "./prompts.js";
 import { featureExecutionWaves, parseFeaturePlan, type FeatureDefinition, type FeaturePlan } from "./feature-plan.js";
 import { buildSupervisorSummary } from "./supervisor-summary.js";
+import { ParallelWorkspaceManager } from "./workspace-sandbox.js";
 
 const PREVIOUS_TURN_SUMMARY_LIMIT = 5;
 const PREVIOUS_TURN_SUMMARY_LENGTH = 600;
@@ -72,7 +73,7 @@ export interface WorkerRunStatus {
 export interface FeatureRunProgress {
   wave: number;
   waves: number;
-  phase: "actor" | "critic" | "revision";
+  phase: "actor" | "critic" | "revision" | "integration";
   completed: number;
   total: number;
 }
@@ -402,8 +403,23 @@ export class Orchestrator {
     const summaries: FeatureSummary[] = [];
     const featureWaves = featureExecutionWaves(plan);
     const concurrency = this.config.orchestration.maxParallelFeatures;
+    const workspaceManager = new ParallelWorkspaceManager({
+      workspaceRoot: input.cwd,
+      taskDir: task.dir,
+      dataDir: this.config.dataDir
+    });
 
     for (const [waveIndex, wave] of featureWaves.entries()) {
+      const workspaceWave = await workspaceManager.prepareWave({
+        turnId: turn.turnId,
+        wave: waveIndex + 1,
+        featureIds: wave.map((definition) => requiredChannel(channels, definition).id)
+      });
+      await this.sessions.appendEvent(
+        task,
+        "feature.wave_isolated",
+        `Prepared isolated workspaces for feature wave: ${wave.map((feature) => feature.id).join(", ")}`
+      );
       const reportProgress = (
         phase: FeatureRunProgress["phase"],
         completed: number,
@@ -441,7 +457,8 @@ export class Orchestrator {
           turn,
           channel,
           undefined,
-          true
+          true,
+          requiredFeatureWorkspace(workspaceWave.featureDirs, channel)
         );
         actorCompleted += 1;
         reportProgress("actor", actorCompleted, wave.length, "running", "waiting");
@@ -463,7 +480,8 @@ export class Orchestrator {
           workers,
           turn,
           actorRun.channel,
-          true
+          true,
+          requiredFeatureWorkspace(workspaceWave.featureDirs, actorRun.channel)
         );
         criticCompleted += 1;
         reportProgress("critic", criticCompleted, actorRuns.length, "done", "running");
@@ -502,7 +520,8 @@ export class Orchestrator {
             turn,
             pair.channel,
             buildRevisionRequest(pair.review, pair.channel),
-            true
+            true,
+            requiredFeatureWorkspace(workspaceWave.featureDirs, pair.channel)
           );
           revisionCompleted += 1;
           reportProgress("revision", revisionCompleted, revisionRuns.length, "revision", "done");
@@ -524,7 +543,8 @@ export class Orchestrator {
             workers,
             turn,
             pair.channel,
-            true
+            true,
+            requiredFeatureWorkspace(workspaceWave.featureDirs, pair.channel)
           );
           recheckCompleted += 1;
           reportProgress("critic", recheckCompleted, revisedActors.length, "done", "rerunning");
@@ -550,10 +570,20 @@ export class Orchestrator {
           featureCriticFindingsPath: pair.channel.criticFindingsPath
         });
         await writeFeatureDecision(pair.channel, summary);
-        await updateFeatureStatus(pair.channel, "approved");
         return { id: pair.channel.id, title: pair.definition.title, summary };
       }));
+      await this.sessions.updateTaskStatus(task, "integrating");
+      await Promise.all(finalPairs.map(({ channel }) => updateFeatureStatus(channel, "integrating")));
+      reportProgress("integration", 0, 1, "done", "done");
+      const integration = await workspaceManager.integrateWave(workspaceWave);
+      reportProgress("integration", 1, 1, "done", "done");
+      await Promise.all(finalPairs.map(({ channel }) => updateFeatureStatus(channel, "approved")));
       summaries.push(...waveSummaries);
+      await this.sessions.appendEvent(
+        task,
+        "feature.wave_integrated",
+        `Integrated feature wave (${integration.changedPaths.length} changed paths): ${wave.map((feature) => feature.id).join(", ")}`
+      );
       await this.sessions.appendEvent(task, "feature.wave_completed", `Completed feature wave: ${wave.map((feature) => feature.id).join(", ")}`);
     }
 
@@ -814,7 +844,8 @@ export class Orchestrator {
     turn: TaskTurn,
     feature: FeatureChannel,
     revision?: string,
-    featureScoped = false
+    featureScoped = false,
+    workspaceDir = input.cwd
   ): Promise<WorkerFiles> {
     const workerId = featureScoped ? `actor-${engine}-${feature.id}` : `actor-${engine}`;
     const actor = await this.sessions.initializeWorker(task, {
@@ -830,6 +861,7 @@ export class Orchestrator {
         judgeDir,
         turn: await this.promptTurnContext(task, turn),
         feature: featurePromptContext(feature),
+        ...(featureScoped ? { workspaceDir } : {}),
         revision,
         role: this.config.roles.actor
       })
@@ -851,7 +883,8 @@ export class Orchestrator {
       ...(featureScoped ? { featureTitle: feature.title } : {}),
       role: "actor",
       engine,
-      cwd: input.cwd,
+      cwd: workspaceDir,
+      ...(featureScoped ? { writableDirs: [task.dir] } : {}),
       filesDir: actor.dir,
       promptPath: actor.promptPath,
       outputLogPath: actor.outputLogPath,
@@ -879,7 +912,8 @@ export class Orchestrator {
     workers: WorkerLogRef[],
     turn: TaskTurn,
     feature: FeatureChannel,
-    featureScoped = false
+    featureScoped = false,
+    workspaceDir = input.cwd
   ): Promise<WorkerFiles> {
     const workerId = featureScoped ? `critic-${engine}-${feature.id}` : `critic-${engine}`;
     const critic = await this.sessions.initializeWorker(task, {
@@ -896,6 +930,7 @@ export class Orchestrator {
         actorDir,
         turn: await this.promptTurnContext(task, turn),
         feature: featurePromptContext(feature),
+        ...(featureScoped ? { workspaceDir } : {}),
         role: this.config.roles.critic
       })
     });
@@ -916,7 +951,8 @@ export class Orchestrator {
       ...(featureScoped ? { featureTitle: feature.title } : {}),
       role: "critic",
       engine,
-      cwd: input.cwd,
+      cwd: workspaceDir,
+      ...(featureScoped ? { writableDirs: [task.dir] } : {}),
       filesDir: critic.dir,
       promptPath: critic.promptPath,
       outputLogPath: critic.outputLogPath,
@@ -956,7 +992,8 @@ export class Orchestrator {
       outputLogPath: spec.outputLogPath,
       statusPath: spec.statusPath
     };
-    const existing = await this.sessions.readNativeSession(workerFiles);
+    const storedSession = await this.sessions.readNativeSession(workerFiles);
+    const existing = storedSession ? { ...storedSession, cwd: spec.cwd } : null;
     if (existing) {
       await this.sessions.writeNativeSession(workerFiles, {
         ...existing,
@@ -1228,6 +1265,17 @@ function requiredChannel(
     throw new Error(`Feature channel missing: ${definition.id}`);
   }
   return channel;
+}
+
+function requiredFeatureWorkspace(
+  featureDirs: ReadonlyMap<string, string>,
+  channel: FeatureChannel
+): string {
+  const workspace = featureDirs.get(channel.id);
+  if (!workspace) {
+    throw new Error(`Feature workspace missing: ${channel.id}`);
+  }
+  return workspace;
 }
 
 async function allOrThrow<T>(promises: Array<Promise<T>>): Promise<T[]> {

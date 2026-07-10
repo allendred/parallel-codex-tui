@@ -86,6 +86,17 @@ describe("StatusBar", () => {
     expect(narrowFrame).toContain("wave 1/3 a2/4");
     expect(narrowFrame).toContain("w4");
     expect(displayWidth(narrowFrame)).toBeLessThanOrEqual(34);
+    narrow.unmount();
+
+    const integration = render(
+      <StatusBar
+        text="a1b2 | wave 2/3 · integration 0/1 | workers 4 | done 4"
+        terminalWidth={38}
+      />
+    );
+    const integrationFrame = integration.lastFrame() ?? "";
+    expect(integrationFrame).toContain("wave 2/3 i0/1");
+    expect(displayWidth(integrationFrame)).toBeLessThanOrEqual(38);
   });
 
   it("fills an explicitly sized status rail without stdout columns", () => {

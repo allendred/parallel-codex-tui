@@ -17,7 +17,8 @@ fallback = "simple"
 # NO_PROXY = "localhost,127.0.0.1"
 
 [orchestration]
-# Maximum Actor or Critic feature workers running at the same time (1..8).
+# Maximum isolated Actor or Critic feature workers running at the same time (1..8).
+# Each feature receives its own workspace snapshot; approved waves are merged atomically.
 maxParallelFeatures = 3
 
 [workers.codex]

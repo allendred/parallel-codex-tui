@@ -2,7 +2,7 @@ import { accessSync, chmodSync, constants, existsSync } from "node:fs";
 import { createRequire } from "node:module";
 import { readdir } from "node:fs/promises";
 import { homedir } from "node:os";
-import { dirname, join } from "node:path";
+import { dirname, join, relative, sep } from "node:path";
 import { spawn } from "node-pty";
 import type { AppConfig } from "../core/config.js";
 import { pathExists, pathIsDirectory, readJson, readTextIfExists, removeIfExists, writeJson } from "../core/file-store.js";
@@ -45,6 +45,8 @@ export async function buildNativeAttachLaunch(input: NativeAttachLaunchInput): P
   const workerConfig = input.config.workers[input.worker.engine];
   const modelConfig = workerConfig.model;
   const env = modelEnvironment(modelConfig);
+  const workerDir = dirname(input.worker.statusPath);
+  const taskDir = dirname(workerDir);
   if (!(await pathExists(nativeSession.cwd))) {
     throw new Error(`Native session workspace not found for ${input.worker.label}: ${nativeSession.cwd}`);
   }
@@ -54,12 +56,32 @@ export async function buildNativeAttachLaunch(input: NativeAttachLaunchInput): P
 
   return {
     command: workerConfig.interactive.command,
-    args: workerConfig.interactive.args.map((arg) => renderTemplate(arg, nativeSession.session_id, modelConfig)),
+    args: nativeAttachArgs({
+      args: workerConfig.interactive.args.map((arg) => renderTemplate(arg, nativeSession.session_id, modelConfig)),
+      engine: input.worker.engine,
+      cwd: nativeSession.cwd,
+      taskDir
+    }),
     ...(Object.keys(env).length > 0 ? { env } : {}),
     cwd: nativeSession.cwd,
     sessionId: nativeSession.session_id,
     label: input.worker.label
   };
+}
+
+function nativeAttachArgs(input: { args: string[]; engine: EngineName; cwd: string; taskDir: string }): string[] {
+  if (
+    (input.engine !== "codex" && input.engine !== "claude")
+    || !isWithin(input.cwd, join(input.taskDir, "workspaces"))
+  ) {
+    return input.args;
+  }
+  return [...input.args, "--add-dir", input.taskDir];
+}
+
+function isWithin(path: string, root: string): boolean {
+  const pathFromRoot = relative(root, path);
+  return pathFromRoot === "" || (!pathFromRoot.startsWith(`..${sep}`) && pathFromRoot !== "..");
 }
 
 export function startNativeAttachProcess(

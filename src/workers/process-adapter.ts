@@ -44,7 +44,14 @@ export class ProcessWorkerAdapter implements WorkerAdapter {
 
   async run(spec: WorkerRunSpec): Promise<WorkerResult> {
     const model = spec.modelConfig ?? this.defaults.model;
-    const launch = buildLaunch(this.args, spec.nativeSession, spec.nativeSessionConfig, model);
+    const launch = buildLaunch(
+      this.args,
+      this.name,
+      spec.nativeSession,
+      spec.nativeSessionConfig,
+      model,
+      spec.writableDirs
+    );
     const runSpec = {
       ...spec,
       timeoutMs: spec.timeoutMs ?? this.defaults.timeoutMs,
@@ -68,7 +75,7 @@ export class ProcessWorkerAdapter implements WorkerAdapter {
       `\nNative resume for ${retiredSessionId ?? "unknown session"} is unrecoverable; starting a fresh native session.\n`
     );
 
-    const freshLaunch = buildFreshLaunch(this.args, model);
+    const freshLaunch = buildFreshLaunch(this.args, this.name, model, runSpec.writableDirs);
     return (await this.runAttempt(
       {
         ...runSpec,
@@ -127,6 +134,7 @@ export class ProcessWorkerAdapter implements WorkerAdapter {
       let terminalState: WorkerStatus["state"] | undefined;
       let outputWrites = Promise.resolve();
       let detectedNativeSessionId = options.initialNativeSessionId ?? runSpec.nativeSession?.session_id;
+      let sessionDetectionTail = "";
       let sawOutput = false;
       const outputChunks: string[] = [];
 
@@ -203,10 +211,16 @@ export class ProcessWorkerAdapter implements WorkerAdapter {
         outputChunks.push(text);
         outputWrites = outputWrites.then(async () => {
           await appendText(runSpec.outputLogPath, text);
-          const sessionId = detectNativeSessionId(text);
-          if (sessionId && sessionId !== detectedNativeSessionId && runSpec.nativeSessionConfig?.detectSessionId !== false) {
-            detectedNativeSessionId = sessionId;
-            await runSpec.onNativeSession?.(sessionId);
+          if (!detectedNativeSessionId && runSpec.nativeSessionConfig?.detectSessionId !== false) {
+            const detectionText = `${sessionDetectionTail}${text}`;
+            const sessionId = detectNativeSessionId(detectionText);
+            if (sessionId) {
+              detectedNativeSessionId = sessionId;
+              sessionDetectionTail = "";
+              await runSpec.onNativeSession?.(sessionId);
+            } else {
+              sessionDetectionTail = detectionText.slice(-512);
+            }
           }
           if (!settled && terminalState !== "cancelled") {
             await setStatus(runSpec, "running", "process-output", summarizeOutput(text), detectedNativeSessionId);
@@ -331,31 +345,78 @@ export class ProcessWorkerAdapter implements WorkerAdapter {
 
 function buildLaunch(
   defaultArgs: string[],
+  engine: EngineName,
   nativeSession: WorkerRunSpec["nativeSession"],
   nativeSessionConfig: WorkerRunSpec["nativeSessionConfig"],
-  modelConfig?: WorkerModelRunConfig
+  modelConfig?: WorkerModelRunConfig,
+  writableDirs?: string[]
 ): ProcessLaunch {
   const modelArgs = buildModelArgs(modelConfig);
   if (!nativeSession || !nativeSessionConfig?.enabled || nativeSessionConfig.resumeArgs.length === 0) {
-    return buildFreshLaunch(defaultArgs, modelConfig);
+    return buildFreshLaunch(defaultArgs, engine, modelConfig, writableDirs);
   }
 
   return {
-    args: [
+    args: withWritableDirectoryArgs([
       ...nativeSessionConfig.resumeArgs.map((arg) => renderTemplate(arg, nativeSession.session_id, modelConfig)),
       ...modelArgs
-    ],
+    ], engine, true, writableDirs),
     isResume: true,
     nativeSession
   };
 }
 
-function buildFreshLaunch(defaultArgs: string[], modelConfig?: WorkerModelRunConfig): ProcessLaunch {
+function buildFreshLaunch(
+  defaultArgs: string[],
+  engine: EngineName,
+  modelConfig?: WorkerModelRunConfig,
+  writableDirs?: string[]
+): ProcessLaunch {
   return {
-    args: [...defaultArgs, ...buildModelArgs(modelConfig)],
+    args: withWritableDirectoryArgs([...defaultArgs, ...buildModelArgs(modelConfig)], engine, false, writableDirs),
     isResume: false,
     nativeSession: null
   };
+}
+
+function withWritableDirectoryArgs(
+  args: string[],
+  engine: EngineName,
+  isResume: boolean,
+  writableDirs: string[] | undefined
+): string[] {
+  const directories = [...new Set((writableDirs ?? []).filter(Boolean))];
+  if (directories.length === 0 || engine === "mock") {
+    return args;
+  }
+
+  const directoryArgs = directories.flatMap((directory) => ["--add-dir", directory]);
+  if (engine === "claude") {
+    return [...args, ...directoryArgs];
+  }
+
+  if (isResume) {
+    const resumeIndex = args.indexOf("resume");
+    const execIndex = args.lastIndexOf("exec", resumeIndex);
+    if (resumeIndex < 0 || execIndex < 0) {
+      return args;
+    }
+    return [
+      ...args.slice(0, resumeIndex),
+      ...directoryArgs,
+      ...args.slice(resumeIndex)
+    ];
+  }
+
+  const promptIndex = args.lastIndexOf("-");
+  if (promptIndex < 0) {
+    return [...args, ...directoryArgs];
+  }
+  return [
+    ...args.slice(0, promptIndex),
+    ...directoryArgs,
+    ...args.slice(promptIndex)
+  ];
 }
 
 function buildModelArgs(modelConfig: WorkerModelRunConfig | undefined): string[] {

@@ -9,6 +9,7 @@ export type FeatureState =
   | "actor_running"
   | "critic_running"
   | "revision_needed"
+  | "integrating"
   | "approved"
   | "failed"
   | "cancelled";

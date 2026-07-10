@@ -221,6 +221,15 @@ describe("Orchestrator", () => {
 
     const taskDir = join(root, ".parallel-codex", "sessions", result.taskId ?? "");
     expect(adapter.maxConcurrentActors).toBe(2);
+    expect(adapter.actorCwds.get("0001-ui")).not.toBe(root);
+    expect(adapter.actorCwds.get("0001-engine")).not.toBe(root);
+    expect(adapter.actorCwds.get("0001-ui")).not.toBe(adapter.actorCwds.get("0001-engine"));
+    expect(adapter.criticCwds.get("0001-ui")).toBe(adapter.actorCwds.get("0001-ui"));
+    expect(adapter.criticCwds.get("0001-engine")).toBe(adapter.actorCwds.get("0001-engine"));
+    expect(adapter.integrationSawDependencies).toBe(true);
+    expect(await readTextIfExists(join(root, "src", "0001-ui.txt"))).toContain("0001-ui");
+    expect(await readTextIfExists(join(root, "src", "0001-engine.txt"))).toContain("0001-engine");
+    expect(await readTextIfExists(join(root, "src", "0001-integration.txt"))).toContain("0001-integration");
     expect(adapter.events.indexOf("actor:start:0001-integration")).toBeGreaterThan(
       adapter.events.indexOf("critic:end:0001-ui")
     );
@@ -287,6 +296,49 @@ describe("Orchestrator", () => {
     expect(progress).toContainEqual({ wave: 1, waves: 1, phase: "actor", completed: 0, total: 5 });
     expect(progress).toContainEqual({ wave: 1, waves: 1, phase: "actor", completed: 5, total: 5 });
     expect(progress).toContainEqual({ wave: 1, waves: 1, phase: "critic", completed: 5, total: 5 });
+    expect(progress).toContainEqual({ wave: 1, waves: 1, phase: "integration", completed: 0, total: 1 });
+    expect(progress).toContainEqual({ wave: 1, waves: 1, phase: "integration", completed: 1, total: 1 });
+  });
+
+  it("fails overlapping feature integration atomically and preserves conflict evidence", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pct-orch-parallel-conflict-"));
+    await writeText(join(root, "src", "shared.ts"), "export const owner = 'base';\n");
+    const config = mockConfig(root);
+    const manager = new SessionManager({
+      projectRoot: root,
+      dataDir: config.dataDir,
+      now: () => new Date("2026-06-30T03:30:15.000Z"),
+      randomId: () => "conflict"
+    });
+    const orchestrator = new Orchestrator(
+      config,
+      manager,
+      new Map([["mock", new ConflictingFeatureAdapter()]])
+    );
+
+    await expect(orchestrator.handleRequest({
+      request: "并行实现两个会修改共享配置的功能",
+      cwd: root
+    })).rejects.toThrow("Workspace integration conflict in 1 path: src/shared.ts");
+
+    const taskDir = join(root, ".parallel-codex", "sessions", "task-20260630-033015-conflict");
+    expect(await readTextIfExists(join(root, "src", "shared.ts"))).toBe("export const owner = 'base';\n");
+    expect((await readJson(join(taskDir, "meta.json"), TaskMetaSchema)).status).toBe("failed");
+    expect(JSON.parse(await readTextIfExists(join(taskDir, "features", "0001-ui", "status.json")))).toMatchObject({ state: "failed" });
+    expect(JSON.parse(await readTextIfExists(join(taskDir, "features", "0001-engine", "status.json")))).toMatchObject({ state: "failed" });
+    const conflict = await readTextIfExists(join(
+      taskDir,
+      "workspaces",
+      "turn-0001",
+      "wave-0001",
+      "conflicts",
+      "0001-engine",
+      "src",
+      "shared.ts"
+    ));
+    expect(conflict).toContain("<<<<<<< current");
+    expect(conflict).toContain("owner = 'ui'");
+    expect(conflict).toContain("owner = 'engine'");
   });
 
   it("stops scheduling queued feature workers after a parallel failure", async () => {
@@ -1391,7 +1443,10 @@ class RetryOnceActorAdapter extends MockWorkerAdapter {
 
 class MultiFeatureAdapter extends MockWorkerAdapter {
   readonly events: string[] = [];
+  readonly actorCwds = new Map<string, string>();
+  readonly criticCwds = new Map<string, string>();
   maxConcurrentActors = 0;
+  integrationSawDependencies = false;
   private activeActors = 0;
 
   async run(spec: WorkerRunSpec): Promise<WorkerResult> {
@@ -1410,6 +1465,14 @@ class MultiFeatureAdapter extends MockWorkerAdapter {
 
     const featureId = spec.featureId ?? "none";
     if (spec.role === "actor") {
+      this.actorCwds.set(featureId, spec.cwd);
+      if (featureId === "0001-integration") {
+        this.integrationSawDependencies = (
+          await pathExists(join(spec.cwd, "src", "0001-ui.txt"))
+          && await pathExists(join(spec.cwd, "src", "0001-engine.txt"))
+        );
+      }
+      await writeText(join(spec.cwd, "src", `${featureId}.txt`), `implemented ${featureId}\n`);
       this.activeActors += 1;
       this.maxConcurrentActors = Math.max(this.maxConcurrentActors, this.activeActors);
       this.events.push(`actor:start:${featureId}`);
@@ -1423,6 +1486,7 @@ class MultiFeatureAdapter extends MockWorkerAdapter {
     }
 
     if (spec.role === "critic") {
+      this.criticCwds.set(featureId, spec.cwd);
       this.events.push(`critic:start:${featureId}`);
       await new Promise((resolve) => setTimeout(resolve, 30));
       const result = await super.run(spec);
@@ -1513,6 +1577,27 @@ class LimitedParallelAdapter extends MockWorkerAdapter {
     } finally {
       this.active -= 1;
     }
+  }
+}
+
+class ConflictingFeatureAdapter extends MockWorkerAdapter {
+  async run(spec: WorkerRunSpec): Promise<WorkerResult> {
+    if (spec.role === "judge") {
+      const result = await super.run(spec);
+      await writeJson(join(spec.filesDir, "features.json"), {
+        version: 1,
+        features: [
+          { id: "ui", title: "UI", description: "Update shared ownership for UI", depends_on: [] },
+          { id: "engine", title: "Engine", description: "Update shared ownership for engine", depends_on: [] }
+        ]
+      });
+      return result;
+    }
+    if (spec.role === "actor") {
+      const owner = spec.featureId === "0001-ui" ? "ui" : "engine";
+      await writeText(join(spec.cwd, "src", "shared.ts"), `export const owner = '${owner}';\n`);
+    }
+    return super.run(spec);
   }
 }
 

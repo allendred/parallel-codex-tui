@@ -85,6 +85,23 @@ describe("formatStatusLine", () => {
     );
   });
 
+  it("shows the atomic integration phase after feature review", () => {
+    expect(formatStatusLine({
+      taskId: "task-a1b2",
+      featureProgress: {
+        wave: 2,
+        waves: 3,
+        phase: "integration",
+        completed: 0,
+        total: 1
+      },
+      workers: [
+        { label: "Actor (codex) · UI", status: "done" },
+        { label: "Critic (claude) · UI", status: "done" }
+      ]
+    })).toBe("a1b2 | wave 2/3 · integration 0/1 | workers 2 | done 2");
+  });
+
   it("keeps cancelled worker state concise and ahead of completed workers", () => {
     const state = {
       taskId: "task-stop",

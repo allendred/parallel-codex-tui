@@ -101,6 +101,41 @@ describe("buildNativeAttachLaunch", () => {
     });
   });
 
+  it("keeps the task mailbox writable when attaching to an isolated feature session", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pct-native-attach-feature-"));
+    const taskDir = join(root, ".parallel-codex", "sessions", "task-a");
+    const workerDir = join(taskDir, "actor-codex-0001-ui");
+    const featureWorkspace = join(taskDir, "workspaces", "turn-0001", "wave-0001", "features", "0001-ui");
+    await writeText(join(featureWorkspace, "src", "ui.ts"), "export {};\n");
+    await writeJson(join(workerDir, "native-session.json"), {
+      engine: "codex",
+      role: "actor",
+      worker_id: "actor-codex-0001-ui",
+      session_id: "native-feature",
+      scope: "task",
+      cwd: featureWorkspace,
+      created_at: "2026-06-30T03:30:00.000Z",
+      last_used_at: "2026-06-30T03:30:00.000Z",
+      source: "manual"
+    });
+
+    const launch = await buildNativeAttachLaunch({
+      config: defaultConfig(root),
+      worker: {
+        id: "actor-codex-0001-ui",
+        featureId: "0001-ui",
+        role: "actor",
+        engine: "codex",
+        label: "Actor (codex) · UI",
+        logPath: join(workerDir, "output.log"),
+        statusPath: join(workerDir, "status.json")
+      }
+    });
+
+    expect(launch.cwd).toBe(featureWorkspace);
+    expect(launch.args).toEqual(["resume", "native-feature", "--add-dir", taskDir]);
+  });
+
   it("fails when the selected worker has no native session file", async () => {
     const root = await mkdtemp(join(tmpdir(), "pct-native-attach-missing-"));
     const workerDir = join(root, "task-a", "critic-claude");

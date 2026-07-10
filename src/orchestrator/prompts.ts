@@ -17,6 +17,7 @@ export interface RolePromptInput {
   taskDir: string;
   judgeDir: string;
   actorDir?: string;
+  workspaceDir?: string;
   revision?: string;
   turn?: PromptTurnContext;
   feature?: PromptFeatureContext;
@@ -109,6 +110,10 @@ export function buildActorPrompt(input: RolePromptInput): string {
     "",
     `Task directory: ${input.taskDir}`,
     `Judge directory: ${input.judgeDir}`,
+    ...(input.workspaceDir ? [
+      `Feature workspace: ${input.workspaceDir}`,
+      "Keep all implementation changes inside this feature workspace. Use task and feature directories only for coordination files."
+    ] : []),
     ...turnLines(input.turn),
     ...featureLines(input.feature),
     "",
@@ -146,6 +151,10 @@ export function buildCriticPrompt(input: RolePromptInput): string {
     `Task directory: ${input.taskDir}`,
     `Judge directory: ${input.judgeDir}`,
     `Actor directory: ${input.actorDir ?? ""}`,
+    ...(input.workspaceDir ? [
+      `Feature workspace: ${input.workspaceDir}`,
+      "Review the implementation in this feature workspace. Do not modify the live workspace."
+    ] : []),
     ...turnLines(input.turn),
     ...featureLines(input.feature),
     "",

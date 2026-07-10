@@ -12,6 +12,7 @@ export const TaskStateSchema = z.enum([
   "actor_running",
   "critic_running",
   "revision_needed",
+  "integrating",
   "verifying",
   "done",
   "failed",

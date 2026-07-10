@@ -7,6 +7,126 @@ import { WorkerStatusSchema } from "../src/domain/schemas.js";
 import { ProcessWorkerAdapter } from "../src/workers/process-adapter.js";
 
 describe("ProcessWorkerAdapter", () => {
+  it("passes isolated worker coordination directories to Codex before the stdin prompt marker", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pct-process-codex-add-dir-"));
+    const filesDir = join(root, "actor-codex");
+    const promptPath = join(filesDir, "prompt.md");
+    const outputLogPath = join(filesDir, "output.log");
+    const statusPath = join(filesDir, "status.json");
+    const coordinationDir = join(root, "task files");
+    const script = "console.log(process.argv.slice(1).join('|'))";
+    await writeText(promptPath, "isolated prompt");
+
+    const adapter = new ProcessWorkerAdapter(process.execPath, ["-e", script, "exec", "-"], "codex");
+    const result = await adapter.run({
+      workerId: "actor-codex",
+      role: "actor",
+      engine: "codex",
+      cwd: root,
+      writableDirs: [coordinationDir],
+      filesDir,
+      promptPath,
+      outputLogPath,
+      statusPath,
+      prompt: "isolated prompt"
+    });
+
+    expect(result.exitCode).toBe(0);
+    expect(await readTextIfExists(outputLogPath)).toContain(`exec|--add-dir|${coordinationDir}|-`);
+  });
+
+  it("passes isolated worker coordination directories to resumed Claude workers", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pct-process-claude-add-dir-"));
+    const filesDir = join(root, "critic-claude");
+    const promptPath = join(filesDir, "prompt.md");
+    const outputLogPath = join(filesDir, "output.log");
+    const statusPath = join(filesDir, "status.json");
+    const coordinationDir = join(root, "task-files");
+    const script = "console.log(process.argv.slice(1).join('|'))";
+    await writeText(promptPath, "resume review");
+
+    const adapter = new ProcessWorkerAdapter(process.execPath, ["-e", script, "fresh"], "claude");
+    const result = await adapter.run({
+      workerId: "critic-claude",
+      role: "critic",
+      engine: "claude",
+      cwd: root,
+      writableDirs: [coordinationDir],
+      filesDir,
+      promptPath,
+      outputLogPath,
+      statusPath,
+      prompt: "resume review",
+      nativeSession: {
+        engine: "claude",
+        role: "critic",
+        worker_id: "critic-claude",
+        session_id: "session-123",
+        scope: "task",
+        cwd: root,
+        created_at: "2026-06-30T03:30:00.000Z",
+        last_used_at: "2026-06-30T03:30:00.000Z",
+        source: "manual"
+      },
+      nativeSessionConfig: {
+        enabled: true,
+        resumeArgs: ["-e", script, "resume", "{sessionId}"],
+        detectSessionId: true,
+        fallback: "fail"
+      }
+    });
+
+    expect(result.exitCode).toBe(0);
+    expect(await readTextIfExists(outputLogPath)).toContain(`resume|session-123|--add-dir|${coordinationDir}`);
+  });
+
+  it("passes coordination directories through Codex exec before the resume subcommand", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pct-process-codex-resume-add-dir-"));
+    const filesDir = join(root, "actor-codex");
+    const promptPath = join(filesDir, "prompt.md");
+    const outputLogPath = join(filesDir, "output.log");
+    const statusPath = join(filesDir, "status.json");
+    const coordinationDir = join(root, "task-files");
+    const script = "console.log(process.argv.slice(1).join('|'))";
+    await writeText(promptPath, "resume implementation");
+
+    const adapter = new ProcessWorkerAdapter(process.execPath, ["-e", script, "fresh"], "codex");
+    const result = await adapter.run({
+      workerId: "actor-codex",
+      role: "actor",
+      engine: "codex",
+      cwd: root,
+      writableDirs: [coordinationDir],
+      filesDir,
+      promptPath,
+      outputLogPath,
+      statusPath,
+      prompt: "resume implementation",
+      nativeSession: {
+        engine: "codex",
+        role: "actor",
+        worker_id: "actor-codex",
+        session_id: "session-456",
+        scope: "task",
+        cwd: root,
+        created_at: "2026-06-30T03:30:00.000Z",
+        last_used_at: "2026-06-30T03:30:00.000Z",
+        source: "manual"
+      },
+      nativeSessionConfig: {
+        enabled: true,
+        resumeArgs: ["-e", script, "exec", "resume", "{sessionId}", "-"],
+        detectSessionId: true,
+        fallback: "fail"
+      }
+    });
+
+    expect(result.exitCode).toBe(0);
+    expect(await readTextIfExists(outputLogPath)).toContain(
+      `exec|--add-dir|${coordinationDir}|resume|session-456|-`
+    );
+  });
+
   it("streams process output into output.log", async () => {
     const root = await mkdtemp(join(tmpdir(), "pct-process-"));
     const filesDir = join(root, "main-mock");
@@ -336,6 +456,52 @@ describe("ProcessWorkerAdapter", () => {
     expect(detected).toEqual(["native-123"]);
     const status = await readJson(statusPath, WorkerStatusSchema);
     expect(status.native_session_id).toBe("native-123");
+  });
+
+  it("locks the first streamed native session id instead of adopting ids printed by agent tools", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pct-process-lock-session-"));
+    const filesDir = join(root, "critic-codex");
+    const promptPath = join(filesDir, "prompt.md");
+    const outputLogPath = join(filesDir, "output.log");
+    const statusPath = join(filesDir, "status.json");
+    const ownSession = "019f4b32-84b1-7be1-b250-7c9bd60984ed";
+    const actorSession = "019f4b30-747d-7e71-9411-fd2830021ade";
+    const script = [
+      "process.stdout.write('session ');",
+      `setTimeout(() => process.stdout.write('id: ${ownSession}\\n'), 5);`,
+      `setTimeout(() => console.log(JSON.stringify({session_id:'${actorSession}'})), 15);`,
+      "setTimeout(() => process.exit(0), 25);"
+    ].join("");
+    const detected: string[] = [];
+    await writeText(promptPath, "review actor session metadata");
+
+    const adapter = new ProcessWorkerAdapter(process.execPath, ["-e", script], "codex");
+    const result = await adapter.run({
+      workerId: "critic-codex",
+      role: "critic",
+      engine: "codex",
+      cwd: root,
+      filesDir,
+      promptPath,
+      outputLogPath,
+      statusPath,
+      prompt: "review actor session metadata",
+      nativeSessionConfig: {
+        enabled: true,
+        resumeArgs: ["resume", "{sessionId}", "-"],
+        detectSessionId: true,
+        fallback: "fail"
+      },
+      onNativeSession: (sessionId) => {
+        detected.push(sessionId);
+      }
+    });
+
+    expect(result.exitCode).toBe(0);
+    expect(detected).toEqual([ownSession]);
+    expect(await readJson(statusPath, WorkerStatusSchema)).toMatchObject({
+      native_session_id: ownSession
+    });
   });
 
   it("detects Codex resume session ids from process output", async () => {

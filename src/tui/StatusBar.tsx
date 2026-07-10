@@ -320,7 +320,8 @@ function compactWaveStatusValue(value: string): string {
   return value
     .replace(/\s+·\s+actor\s+/i, " a")
     .replace(/\s+·\s+critic\s+/i, " c")
-    .replace(/\s+·\s+revision\s+/i, " r");
+    .replace(/\s+·\s+revision\s+/i, " r")
+    .replace(/\s+·\s+integration\s+/i, " i");
 }
 
 function compactToneLabel(tone: Exclude<StatusTone, "idle">): string {
@@ -434,7 +435,7 @@ function isStatusPart(part: string): boolean {
 }
 
 function parseWaveProgress(part: string): Segment | null {
-  const match = part.match(/^wave\s+(\d+\/\d+)\s+·\s+(actor|critic|revision)\s+(\d+\/\d+)$/i);
+  const match = part.match(/^wave\s+(\d+\/\d+)\s+·\s+(actor|critic|revision|integration)\s+(\d+\/\d+)$/i);
   if (!match) {
     return null;
   }
