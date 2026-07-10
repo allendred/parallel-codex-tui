@@ -23,7 +23,7 @@ import { TerminalOutput } from "./TerminalOutput.js";
 import { NativeTerminalScreen } from "./terminal-screen.js";
 import { WorkerOutputView } from "./WorkerOutputView.js";
 import { compactEndByDisplayWidth, displayWidth, wrapByDisplayWidth } from "./display-width.js";
-import { isAttachShortcut, isExitShortcut, isLogsShortcut, mouseScrollDelta, scrollDelta } from "./keyboard.js";
+import { isAttachShortcut, isExitShortcut, isLogsShortcut, mouseScrollDelta, rawPageScrollDelta, scrollDelta } from "./keyboard.js";
 import { createRawInputDecoder } from "./raw-input-decoder.js";
 import { decodeHtmlEntities } from "./markdown-text.js";
 import { configureTuiTheme, TUI_THEME } from "./theme.js";
@@ -111,6 +111,8 @@ export function App({
   const [nativeInput, setNativeInput] = useState("");
   const [workerScrollOffset, setWorkerScrollOffset] = useState(0);
   const [workerMaxScrollOffset, setWorkerMaxScrollOffset] = useState(0);
+  const [chatScrollOffset, setChatScrollOffset] = useState(0);
+  const [chatMaxScrollOffset, setChatMaxScrollOffset] = useState(0);
   const [nativeAttach, setNativeAttach] = useState<{
     hasOutput: boolean;
     launch: NativeAttachLaunch;
@@ -131,6 +133,8 @@ export function App({
   const workersRef = useRef(workers);
   const selectedWorkerIndexRef = useRef(selectedWorkerIndex);
   const workerMaxScrollOffsetRef = useRef(workerMaxScrollOffset);
+  const chatScrollOffsetRef = useRef(chatScrollOffset);
+  const chatMaxScrollOffsetRef = useRef(chatMaxScrollOffset);
   const autoSelectedFailedWorkerRef = useRef(false);
   const userSelectedWorkerRef = useRef(false);
   const attachSelectedWorkerRef = useRef<(worker: WorkerLogRef) => Promise<void>>(attachSelectedWorker);
@@ -177,6 +181,19 @@ export function App({
   useEffect(() => {
     workerMaxScrollOffsetRef.current = workerMaxScrollOffset;
   }, [workerMaxScrollOffset]);
+
+  useEffect(() => {
+    chatScrollOffsetRef.current = chatScrollOffset;
+  }, [chatScrollOffset]);
+
+  useEffect(() => {
+    chatMaxScrollOffsetRef.current = chatMaxScrollOffset;
+  }, [chatMaxScrollOffset]);
+
+  useEffect(() => {
+    chatScrollOffsetRef.current = 0;
+    setChatScrollOffset(0);
+  }, [messages.length]);
 
   useEffect(() => {
     attachSelectedWorkerRef.current = attachSelectedWorker;
@@ -343,6 +360,16 @@ export function App({
           return;
         }
         const wheelDelta = mouseScrollDelta(chunk, 3);
+        const pageDelta = rawPageScrollDelta(chunk, Math.max(1, outputHeight - 1));
+        const historyDelta = wheelDelta + pageDelta;
+        if (historyDelta !== 0 && chatMaxScrollOffsetRef.current > 0) {
+          setChatScrollOffset((current) => {
+            const next = nextScrollOffset(current, historyDelta, chatMaxScrollOffsetRef.current);
+            chatScrollOffsetRef.current = next;
+            return next;
+          });
+          return;
+        }
         if (wheelDelta !== 0 && workersRef.current.length > 0) {
           setView("worker");
           setWorkerScrollOffset((current) => nextScrollOffset(current, wheelDelta, workerMaxScrollOffsetRef.current));
@@ -582,6 +609,8 @@ export function App({
 
     inputRef.current = "";
     setInput("");
+    chatScrollOffsetRef.current = 0;
+    setChatScrollOffset(0);
     busyRef.current = true;
     setBusy(true);
     setLastRoute(null);
@@ -725,6 +754,8 @@ export function App({
           busy={busy}
           canRetry={canRetryTask}
           hasWorkers={workers.length > 0}
+          chatScrollOffset={chatScrollOffset}
+          chatMaxScrollOffset={chatMaxScrollOffset}
           nativeClosed={view === "native" && nativeAttach?.closedCode !== null}
           value={view === "native" ? "" : input}
           terminalWidth={terminalWidth}
@@ -743,6 +774,15 @@ export function App({
             activeTaskId={activeTaskId}
             terminalWidth={terminalWidth}
             viewportHeight={contentHeight}
+            scrollOffset={chatScrollOffset}
+            onViewportChange={({ offset, maxOffset }) => {
+              chatMaxScrollOffsetRef.current = maxOffset;
+              setChatMaxScrollOffset(maxOffset);
+              if (offset !== chatScrollOffsetRef.current) {
+                chatScrollOffsetRef.current = offset;
+                setChatScrollOffset(offset);
+              }
+            }}
           />
         ) : (
           <WorkerOutputView
@@ -769,15 +809,28 @@ export function ChatView({
   cwd,
   activeTaskId,
   terminalWidth = process.stdout.columns || 120,
-  viewportHeight
+  viewportHeight,
+  scrollOffset = 0,
+  onViewportChange
 }: {
   messages: Message[];
   cwd: string;
   activeTaskId: string | null;
   terminalWidth?: number;
   viewportHeight?: number;
+  scrollOffset?: number;
+  onViewportChange?: (viewport: { offset: number; maxOffset: number }) => void;
 }) {
   const height = viewportHeight ? Math.max(1, viewportHeight) : undefined;
+  const viewport = chatMessageViewport(messages, terminalWidth, height ?? 12, scrollOffset);
+
+  useEffect(() => {
+    onViewportChange?.({
+      offset: viewport.clampedOffset,
+      maxOffset: viewport.maxOffset
+    });
+  }, [onViewportChange, viewport.clampedOffset, viewport.maxOffset]);
+
   if (messages.length === 0) {
     const spacerLines = chatViewportSpacerLineCount(1, height);
 
@@ -788,7 +841,7 @@ export function ChatView({
       </Box>
     );
   }
-  const lines = chatMessageDisplayLines(messages, terminalWidth, height ?? 12);
+  const lines = viewport.lines;
   const spacerLines = chatViewportSpacerLineCount(lines.length, height);
 
   return (
@@ -874,9 +927,28 @@ export function chatLineTrailingFillWidth(line: ChatDisplayLine, terminalWidth: 
 }
 
 export function chatMessageDisplayLines(messages: Message[], terminalWidth: number, maxLines = 12): ChatDisplayLine[] {
+  return chatMessageViewport(messages, terminalWidth, maxLines, 0).lines;
+}
+
+export function chatMessageViewport(
+  messages: Message[],
+  terminalWidth: number,
+  maxLines = 12,
+  offsetFromBottom = 0
+): { lines: ChatDisplayLine[]; clampedOffset: number; maxOffset: number } {
   const contentWidth = chatContentWidth(terminalWidth);
   const rendered = messages.flatMap((message) => chatSingleMessageDisplayLines(message, contentWidth));
-  return rendered.slice(-maxLines);
+  const viewportHeight = Math.max(1, maxLines);
+  const maxOffset = Math.max(0, rendered.length - viewportHeight);
+  const clampedOffset = Math.min(Math.max(0, Math.trunc(offsetFromBottom)), maxOffset);
+  const end = rendered.length - clampedOffset;
+  const start = Math.max(0, end - viewportHeight);
+
+  return {
+    lines: rendered.slice(start, end),
+    clampedOffset,
+    maxOffset
+  };
 }
 
 export function chatViewportBlankLineTheme(): ChatViewportBlankLineTheme {

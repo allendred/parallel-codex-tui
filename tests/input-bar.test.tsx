@@ -105,6 +105,27 @@ describe("InputBar", () => {
     expect(frame).toContain("^O attach");
   });
 
+  it("shows chat history navigation without crowding narrow prompts", () => {
+    const scrollable = { hasWorkers: true, maxScrollOffset: 20 } as Parameters<typeof chatPlaceholderDisplayValue>[1];
+    const scrolled = {
+      hasWorkers: true,
+      scrollOffset: 3,
+      maxScrollOffset: 20
+    } as Parameters<typeof chatPlaceholderDisplayValue>[1];
+
+    expect(chatPlaceholderDisplayValue(80, scrollable)).toBe(
+      "message · scroll · ^W logs · Tab · ^O attach"
+    );
+    expect(chatPlaceholderDisplayValue(80, scrolled)).toBe(
+      "message · back 3/20 · PgDn latest"
+    );
+    expect(chatPlaceholderDisplayValue(30, scrolled)).toBe("back 3/20 · PgDn");
+    expect(chatPlaceholderDisplayValue(16, scrolled)).toBe("back 3");
+    expect(chatPlaceholderDisplayValue(30, { maxScrollOffset: 20 } as Parameters<typeof chatPlaceholderDisplayValue>[1])).toBe(
+      "message · scroll"
+    );
+  });
+
   it("keeps ultra-narrow task chat prompt off the terminal edge", () => {
     const eighteen = render(
       <InputBar mode="chat" value="" hasWorkers terminalWidth={18} onChange={() => {}} />

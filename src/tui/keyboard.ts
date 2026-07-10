@@ -28,6 +28,15 @@ export function scrollDelta(input: string, key: KeyboardKey, pageSize: number): 
   return 0;
 }
 
+export function rawPageScrollDelta(input: string, pageSize: number): number {
+  const size = Math.max(1, pageSize);
+  let delta = 0;
+  for (const match of input.matchAll(/\x1b\[(5|6)~/g)) {
+    delta += match[1] === "5" ? size : -size;
+  }
+  return delta;
+}
+
 export function mouseScrollDelta(input: string, linesPerWheel = 3): number {
   let delta = 0;
 

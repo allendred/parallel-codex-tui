@@ -199,6 +199,95 @@ describe("CLI chat Markdown smoke", () => {
       child.kill("SIGTERM");
     }
   }, 10000);
+
+  it("scrolls long chat history without leaving the chat view", async () => {
+    const workspace = await mkdtemp(join(tmpdir(), "pct-cli-chat-scroll-"));
+    const appRoot = await mkdtemp(join(tmpdir(), "pct-cli-chat-scroll-app-"));
+    const mainScript = join(appRoot, "history-main.cjs");
+    const screen = new NativeTerminalScreen({ cols: 80, rows: 12, scrollback: 1000 });
+    let screenWrites = Promise.resolve();
+
+    await mkdir(join(appRoot, ".parallel-codex"), { recursive: true });
+    await writeFile(
+      mainScript,
+      [
+        "let input = '';",
+        "process.stdin.on('data', (chunk) => { input += chunk; });",
+        "process.stdin.on('end', () => {",
+        "  const prefix = input.includes('second-scroll-turn') ? 'second' : 'history';",
+        "  process.stdout.write(Array.from({ length: 30 }, (_, index) => `${prefix} line ${index + 1}`).join('\\n') + '\\n');",
+        "});"
+      ].join("\n")
+    );
+    await writeFile(
+      join(appRoot, ".parallel-codex", "config.toml"),
+      [
+        "[router]",
+        'defaultMode = "simple"',
+        "",
+        "[workers.codex]",
+        `command = "${escapeToml(process.execPath)}"`,
+        `args = ["${escapeToml(mainScript)}"]`,
+        "",
+        "[pairing]",
+        'main = "codex"',
+        'judge = "codex"',
+        'actor = "codex"',
+        'critic = "codex"'
+      ].join("\n") + "\n"
+    );
+
+    const child = spawn(
+      process.execPath,
+      ["./node_modules/.bin/tsx", "src/cli.tsx", "--app-root", appRoot, "--workspace", workspace],
+      {
+        cwd: process.cwd(),
+        cols: 80,
+        rows: 12,
+        name: "xterm-256color",
+        env: {
+          ...process.env,
+          TERM: "xterm-256color"
+        }
+      }
+    );
+
+    child.onData((chunk) => {
+      screenWrites = screenWrites.then(() => screen.write(chunk));
+    });
+
+    try {
+      await waitForScreenText(() => screenWrites, screen, "> | message");
+      child.write("show history\r");
+      await waitForScreenText(() => screenWrites, screen, "history line 30");
+      await waitForScreenText(() => screenWrites, screen, "message · scroll");
+
+      child.write("\x1b[<64;10;5M");
+      await waitForScreenText(() => screenWrites, screen, "back 3/22");
+      expect(screen.snapshot()).toContain("history line 27");
+      expect(screen.snapshot().split("\n")[0]).toContain("chat");
+
+      child.write("\x1b[5~");
+      await waitForScreenText(() => screenWrites, screen, "back 11/22");
+      expect(screen.snapshot()).toContain("history line 11");
+
+      child.write("\x1b[6~");
+      await waitForScreenText(() => screenWrites, screen, "back 3/22");
+      child.write("\x1b[<65;10;5M");
+      await waitForScreenText(() => screenWrites, screen, "history line 30");
+      expect(screen.snapshot()).toContain("message · scroll");
+      expect(screen.snapshot().split("\n")[0]).toContain("chat");
+
+      child.write("\x1b[<64;10;5M");
+      await waitForScreenText(() => screenWrites, screen, "back 3/22");
+      child.write("second-scroll-turn\r");
+      await waitForScreenText(() => screenWrites, screen, "second line 30");
+      expect(screen.snapshot()).not.toContain("back ");
+      expect(screen.snapshot()).toContain("message · scroll");
+    } finally {
+      child.kill("SIGTERM");
+    }
+  }, 10000);
 });
 
 function escapeToml(value: string): string {

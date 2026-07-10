@@ -168,7 +168,9 @@ describe("package metadata", () => {
     expect(readme).toContain("reports the loaded TUI theme, core palette values, ANSI swatch previews, and color override values");
     expect(readme).toContain("including any temporary `--theme` override");
     expect(readme).toContain('OPENAI_API_KEY = "{env:OPENAI_API_KEY}"');
-    expect(readme).toContain("In chat, press `Ctrl+W` to open worker logs");
+    expect(readme).toContain("In chat, scroll long conversation history with the mouse wheel or PageUp/PageDown");
+    expect(readme).toContain("sending a new message returns to the latest reply");
+    expect(readme).toContain("Press `Ctrl+W` to open worker logs");
     expect(readme).toContain("In worker-log views, scroll with the mouse wheel or PageUp/PageDown");
     expect(readme).toContain("In chat or worker-log views, press `Ctrl+O`");
     expect(readme).toContain("Press `Ctrl+]` to return to worker logs");

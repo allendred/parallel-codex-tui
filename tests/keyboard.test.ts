@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { isAttachShortcut, isExitShortcut, isLogsShortcut, mouseScrollDelta, scrollDelta } from "../src/tui/keyboard.js";
+import * as keyboardModule from "../src/tui/keyboard.js";
 
 describe("keyboard shortcuts", () => {
   it("recognizes Ink ctrl-letter input for logs and native attach", () => {
@@ -28,6 +29,20 @@ describe("keyboard shortcuts", () => {
     expect(scrollDelta("u", { ctrl: true }, 12)).toBe(12);
     expect(scrollDelta("d", { ctrl: true }, 12)).toBe(-12);
     expect(scrollDelta("u", { ctrl: false }, 12)).toBe(0);
+  });
+
+  it("maps raw terminal PageUp and PageDown sequences for chat history", () => {
+    const rawPageScrollDelta = (
+      keyboardModule as typeof keyboardModule & {
+        rawPageScrollDelta?: (input: string, pageSize: number) => number;
+      }
+    ).rawPageScrollDelta;
+
+    expect(rawPageScrollDelta).toBeTypeOf("function");
+    expect(rawPageScrollDelta?.("\x1b[5~", 12)).toBe(12);
+    expect(rawPageScrollDelta?.("\x1b[6~", 12)).toBe(-12);
+    expect(rawPageScrollDelta?.("\x1b[5~\x1b[5~\x1b[6~", 12)).toBe(12);
+    expect(rawPageScrollDelta?.("plain text", 12)).toBe(0);
   });
 
   it("maps SGR mouse wheel sequences to scroll deltas", () => {

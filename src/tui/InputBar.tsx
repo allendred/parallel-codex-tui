@@ -8,6 +8,8 @@ export interface InputBarProps {
   busy?: boolean;
   canRetry?: boolean;
   hasWorkers?: boolean;
+  chatScrollOffset?: number;
+  chatMaxScrollOffset?: number;
   nativeClosed?: boolean;
   value: string;
   terminalWidth?: number;
@@ -20,6 +22,8 @@ export function InputBar({
   busy = false,
   canRetry = false,
   hasWorkers = false,
+  chatScrollOffset = 0,
+  chatMaxScrollOffset = 0,
   nativeClosed = false,
   value,
   terminalWidth: providedTerminalWidth,
@@ -81,7 +85,12 @@ export function InputBar({
   const hasLeadingPromptSpace = terminalWidth >= 10;
   const placeholder = chatPlaceholderDisplayText(
     terminalWidth,
-    { hasWorkers, canRetry },
+    {
+      hasWorkers,
+      canRetry,
+      scrollOffset: chatScrollOffset,
+      maxScrollOffset: chatMaxScrollOffset
+    },
     { leadingSpace: hasLeadingPromptSpace }
   );
 
@@ -147,7 +156,7 @@ export function inputRailLayout(
 
 export function chatPlaceholderDisplayText(
   terminalWidth: number,
-  options: { hasWorkers?: boolean; canRetry?: boolean } = {},
+  options: ChatPlaceholderOptions = {},
   display: { leadingSpace?: boolean } = {}
 ): string {
   const placeholder = chatPlaceholderDisplayValue(terminalWidth, options);
@@ -164,7 +173,7 @@ export function chatInputDisplayValue(value: string, terminalWidth: number): str
 
 export function chatPlaceholderDisplayValue(
   terminalWidth: number,
-  options: { hasWorkers?: boolean; canRetry?: boolean } = {}
+  options: ChatPlaceholderOptions = {}
 ): string {
   if (options.canRetry) {
     if (terminalWidth < 14) {
@@ -175,8 +184,16 @@ export function chatPlaceholderDisplayValue(
     }
     return chatInputDisplayValue("message · ^R retry", terminalWidth);
   }
+  const maxScrollOffset = Math.max(0, options.maxScrollOffset ?? 0);
+  const scrollOffset = Math.min(Math.max(0, options.scrollOffset ?? 0), maxScrollOffset);
+  if (scrollOffset > 0) {
+    return chatHistoryPlaceholderDisplayValue(terminalWidth, scrollOffset, maxScrollOffset);
+  }
   if (options.hasWorkers) {
-    return chatTaskPlaceholderDisplayValue(terminalWidth);
+    return chatTaskPlaceholderDisplayValue(terminalWidth, maxScrollOffset > 0);
+  }
+  if (maxScrollOffset > 0 && terminalWidth >= 22) {
+    return chatInputDisplayValue("message · scroll", terminalWidth);
   }
   if (terminalWidth < 14) {
     return "msg";
@@ -187,7 +204,27 @@ export function chatPlaceholderDisplayValue(
   return chatInputDisplayValue("message", terminalWidth);
 }
 
-function chatTaskPlaceholderDisplayValue(terminalWidth: number): string {
+export interface ChatPlaceholderOptions {
+  hasWorkers?: boolean;
+  canRetry?: boolean;
+  scrollOffset?: number;
+  maxScrollOffset?: number;
+}
+
+function chatHistoryPlaceholderDisplayValue(terminalWidth: number, offset: number, maxOffset: number): string {
+  if (terminalWidth < 14) {
+    return "back";
+  }
+  if (terminalWidth < 20) {
+    return `back ${offset}`;
+  }
+  if (terminalWidth < 38) {
+    return chatInputDisplayValue(`back ${offset}/${maxOffset} · PgDn`, terminalWidth);
+  }
+  return chatInputDisplayValue(`message · back ${offset}/${maxOffset} · PgDn latest`, terminalWidth);
+}
+
+function chatTaskPlaceholderDisplayValue(terminalWidth: number, scrollable = false): string {
   if (terminalWidth < 14) {
     return "msg";
   }
@@ -198,9 +235,17 @@ function chatTaskPlaceholderDisplayValue(terminalWidth: number): string {
     return "msg · ^W · ^O";
   }
   if (terminalWidth < 38) {
-    return chatInputDisplayValue("message · ^W · ^O", terminalWidth);
+    return chatInputDisplayValue(scrollable ? "message · Pg · ^W · ^O" : "message · ^W · ^O", terminalWidth);
   }
-  return chatInputDisplayValue("message · ^W logs · Tab · ^O attach", terminalWidth);
+  if (scrollable && terminalWidth < 56) {
+    return chatInputDisplayValue("message · Pg · ^W · ^O", terminalWidth);
+  }
+  return chatInputDisplayValue(
+    scrollable
+      ? "message · scroll · ^W logs · Tab · ^O attach"
+      : "message · ^W logs · Tab · ^O attach",
+    terminalWidth
+  );
 }
 
 export function chatBusyDisplayValue(terminalWidth: number): string {

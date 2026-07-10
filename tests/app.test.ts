@@ -645,4 +645,34 @@ describe("ChatView", () => {
 
     expect(lines.map((line) => line.text)).toEqual(["line 16", "line 17", "line 18", "line 19", "line 20"]);
   });
+
+  it("selects older chat history by offset without flattening semantic spans", () => {
+    const chatMessageViewport = (
+      AppModule as typeof AppModule & {
+        chatMessageViewport?: (
+          messages: Array<{ from: "user" | "system"; text: string }>,
+          terminalWidth: number,
+          maxLines: number,
+          offsetFromBottom: number
+        ) => {
+          lines: Array<{ text: string; spans?: Array<{ text: string; tone: string }> }>;
+          clampedOffset: number;
+          maxOffset: number;
+        };
+      }
+    ).chatMessageViewport;
+
+    expect(chatMessageViewport).toBeTypeOf("function");
+    const viewport = chatMessageViewport?.(
+      [{ from: "system", text: Array.from({ length: 10 }, (_, index) => `**line ${index + 1}**`).join("\n") }],
+      40,
+      3,
+      2
+    );
+
+    expect(viewport?.clampedOffset).toBe(2);
+    expect(viewport?.maxOffset).toBe(7);
+    expect(viewport?.lines.map((line) => line.text)).toEqual(["line 6", "line 7", "line 8"]);
+    expect(viewport?.lines.flatMap((line) => line.spans ?? []).every((span) => span.tone === "strong")).toBe(true);
+  });
 });
