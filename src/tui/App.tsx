@@ -275,7 +275,7 @@ export function App({
   }, [nativeInput]);
 
   useEffect(() => {
-    if (!initialTaskId) {
+    if (!initialTaskId || activeTaskId !== initialTaskId) {
       return;
     }
 
@@ -287,7 +287,7 @@ export function App({
           orchestrator.listTaskWorkers(taskId),
           orchestrator.canRetryTask(taskId)
         ]);
-        if (!active) {
+        if (!active || activeTaskIdRef.current !== taskId) {
           return;
         }
         setCanRetryTask(retryable);
@@ -300,7 +300,7 @@ export function App({
         userSelectedWorkerRef.current = false;
         setSelectedWorkerIndex(0);
       } catch (error) {
-        if (active) {
+        if (active && activeTaskIdRef.current === taskId) {
           setAttachError(error instanceof Error ? error.message : String(error));
         }
       }
@@ -310,7 +310,7 @@ export function App({
     return () => {
       active = false;
     };
-  }, [initialTaskId, orchestrator]);
+  }, [activeTaskId, initialTaskId, orchestrator]);
 
   useEffect(() => {
     if (workers.length === 0 || !status) {
