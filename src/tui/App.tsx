@@ -62,6 +62,7 @@ type ChatLineTheme = Pick<TextProps, "backgroundColor" | "color" | "dimColor">;
 type ChatEmptyStateTheme = Pick<TextProps, "backgroundColor" | "bold" | "color">;
 type ChatViewportBlankLineTheme = Pick<TextProps, "backgroundColor">;
 type NativeAttachStartingTheme = Pick<TextProps, "backgroundColor" | "color" | "dimColor">;
+const NO_WORKERS_ATTACH_MESSAGE = "No workers yet · start a complex task before attaching";
 
 export function App({
   config,
@@ -313,7 +314,7 @@ export function App({
         if (chunk === "\u000f") {
           const worker = workersRef.current[selectedWorkerIndexRef.current];
           if (!worker) {
-            setAttachError("Start a complex task to create workers before attaching.");
+            setAttachError(NO_WORKERS_ATTACH_MESSAGE);
             return;
           }
           void attachSelectedWorkerRef.current(worker);
@@ -428,7 +429,7 @@ export function App({
     if (isAttachShortcut(inputKey, key)) {
       const worker = workers[selectedWorkerIndex];
       if (!worker) {
-        setAttachError("Start a complex task to create workers before attaching.");
+        setAttachError(NO_WORKERS_ATTACH_MESSAGE);
         return;
       }
       void attachSelectedWorker(worker);

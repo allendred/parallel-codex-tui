@@ -92,10 +92,11 @@ describe("CLI worker layout smoke", () => {
     try {
       await waitForScreenText(() => screenWrites, screen, "Type a message");
       child.write("\x0f");
-      await waitForScreenText(() => screenWrites, screen, "Start a complex task");
+      await waitForScreenText(() => screenWrites, screen, "No workers yet");
 
       const snapshot = screen.snapshot();
-      expect(snapshot).toContain("Start a complex task to create workers before attaching.");
+      expect(snapshot).toContain("No workers yet · start a complex task before attaching");
+      expect(snapshot).not.toContain("Start a complex task to create workers before attaching.");
       expect(snapshot).not.toContain("Run a complex task");
     } finally {
       child.kill("SIGTERM");
