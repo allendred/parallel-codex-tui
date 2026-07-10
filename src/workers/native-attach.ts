@@ -125,9 +125,7 @@ async function readWorkerNativeSession(worker: WorkerLogRef): Promise<NativeSess
       await writeJson(nativePath, NativeSessionSchema.parse(recovered));
       return recovered;
     }
-    throw new Error(
-      `No native session recorded for ${worker.label}. Open this worker once, or make sure ${worker.engine} saved a resumable session before attaching.`
-    );
+    throw new Error(`No native session for ${worker.label} · run once before attach`);
   }
   if (record.engine !== worker.engine) {
     throw new Error(`Native session engine mismatch for ${worker.label}: expected ${worker.engine}, got ${record.engine}`);

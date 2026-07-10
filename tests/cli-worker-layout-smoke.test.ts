@@ -360,14 +360,14 @@ describe("CLI worker layout smoke", () => {
       await waitForScreenText(() => screenWrites, screen, "1 worker");
       await waitForScreenText(() => screenWrites, screen, "1 done");
       child.write("\x0f");
-      await waitForScreenText(() => screenWrites, screen, "No native session recorded");
+      await waitForScreenText(() => screenWrites, screen, "No native session for Critic");
 
       const lines = screen.styledSnapshotLines();
       const headerLineText = lines[0]?.chunks.map((chunk) => chunk.text).join("") ?? "";
-      const errorLine = lines.find((line) => line.chunks.map((chunk) => chunk.text).join("").includes("No native session recorded"));
+      const errorLine = lines.find((line) => line.chunks.map((chunk) => chunk.text).join("").includes("No native session for Critic"));
       const errorLineText = errorLine?.chunks.map((chunk) => chunk.text).join("") ?? "";
 
-      expect(errorLineText).toContain("No native session recorded");
+      expect(errorLineText).toContain("No native session for Critic (mock) · run once before attach");
       expect(displayWidth(errorLineText)).toBe(displayWidth(headerLineText));
       expect(errorLine?.chunks.every((chunk) => chunk.style.backgroundColor === TUI_THEME_PRESETS.codex.dangerSurface)).toBe(true);
     } finally {

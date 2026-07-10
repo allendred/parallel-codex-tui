@@ -2,7 +2,7 @@ import React from "react";
 import { Text } from "ink";
 import { render } from "ink-testing-library";
 import { afterEach, describe, expect, it } from "vitest";
-import { AppShell, appShellErrorLineTheme } from "../src/tui/AppShell.js";
+import { AppShell, appShellErrorLineTheme, appShellErrorRow } from "../src/tui/AppShell.js";
 import { displayWidth } from "../src/tui/display-width.js";
 import { configureTuiTheme, resetTuiTheme, TUI_THEME_PRESETS } from "../src/tui/theme.js";
 
@@ -29,7 +29,7 @@ describe("AppShell", () => {
         statusText="workers 1"
         terminalWidth={80}
         input={<TextLine text="> | message · ^W logs · Tab · ^O attach" />}
-        error="No native session recorded for Critic (mock). Open this worker once, or make sure mock saved a resumable session before attaching."
+        error="No native session for Critic (mock) · run once before attach"
       >
         <TextLine text="ready" />
       </AppShell>
@@ -38,10 +38,12 @@ describe("AppShell", () => {
     const frame = lastFrame() ?? "";
     const errorLine = frame
       .split("\n")
-      .find((line) => line.includes("No native session recorded")) ?? "";
+      .find((line) => line.includes("No native session for Critic")) ?? "";
 
-    expect(errorLine).toContain("error · No native session recorded");
-    expect(displayWidth(errorLine)).toBe(79);
+    const errorRow = appShellErrorRow("No native session for Critic (mock) · run once before attach", 80);
+
+    expect(errorLine).toContain("error · No native session for Critic (mock) · run once before attach");
+    expect(displayWidth(errorRow.text) + errorRow.trailingWidth + 1).toBe(79);
     expect(Math.max(...frame.split("\n").map((line) => displayWidth(line)))).toBeLessThanOrEqual(79);
   });
 

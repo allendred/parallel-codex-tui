@@ -81,8 +81,7 @@ export function AppShell({
       {errorRow ? (
         <Box>
           <Text {...errorTheme}> </Text>
-          <Text {...errorTheme}>{errorRow.text}</Text>
-          <Text {...errorTheme}>{" ".repeat(errorRow.trailingWidth)}</Text>
+          <Text {...errorTheme}>{errorRow.text}{" ".repeat(errorRow.trailingWidth)}</Text>
         </Box>
       ) : null}
     </Box>
@@ -149,7 +148,7 @@ export function appShellContentGutterText(contentHeight: number, gutterWidth: nu
   return Array.from({ length: height }, () => " ".repeat(width)).join("\n");
 }
 
-function appShellErrorRow(error: string, terminalWidth: number): { text: string; trailingWidth: number } {
+export function appShellErrorRow(error: string, terminalWidth: number): { text: string; trailingWidth: number } {
   const renderWidth = typeof process.stdout.columns === "number"
     ? Math.max(1, Math.min(terminalWidth, process.stdout.columns))
     : terminalWidth;

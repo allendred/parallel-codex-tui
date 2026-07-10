@@ -27,11 +27,11 @@ describe("TUI theme", () => {
     expect(TUI_THEME_NAMES.every((name) => Object.isFrozen(TUI_THEME_PRESETS[name]))).toBe(true);
     expect(Object.keys(TUI_THEME_PRESETS)).toEqual(["codex", "graphite", "paper", "aurora", "studio"]);
     expect(resolveTuiTheme({ theme: "codex" })).toMatchObject({
-      chrome: "ansi256(234)",
-      surface: "ansi256(235)",
-      rail: "ansi256(237)",
-      text: "ansi256(255)",
-      muted: "ansi256(250)",
+      chrome: "ansi256(233)",
+      surface: "ansi256(234)",
+      rail: "ansi256(236)",
+      text: "ansi256(253)",
+      muted: "ansi256(245)",
       accent: "ansi256(81)"
     });
     expect(resolveTuiTheme({ theme: "graphite" })).toMatchObject({
@@ -72,9 +72,9 @@ describe("TUI theme", () => {
     expect(resolveTuiTheme({ theme: "codex" })).toMatchObject({
       successSurface: "ansi256(22)",
       dangerSurface: "ansi256(52)",
-      warning: "ansi256(222)",
-      success: "ansi256(120)",
-      danger: "ansi256(210)"
+      warning: "ansi256(179)",
+      success: "ansi256(114)",
+      danger: "ansi256(203)"
     });
     expect(resolveTuiTheme({ theme: "graphite" })).toMatchObject({
       successSurface: "ansi256(22)",

@@ -79,9 +79,7 @@ describe("buildNativeAttachLaunch", () => {
           statusPath: join(workerDir, "status.json")
         }
       })
-    ).rejects.toThrow(
-      "No native session recorded for Critic (claude). Open this worker once, or make sure claude saved a resumable session before attaching."
-    );
+    ).rejects.toThrow("No native session for Critic (claude) · run once before attach");
   });
 
   it("recovers a Codex native session from the worker output log when the worker file is missing", async () => {
@@ -148,7 +146,7 @@ describe("buildNativeAttachLaunch", () => {
           statusPath: join(workerDir, "status.json")
         }
       })
-    ).rejects.toThrow("No native session recorded");
+    ).rejects.toThrow("No native session for Actor (codex) · run once before attach");
   });
 
   it("rejects native session records from another worker", async () => {
@@ -338,7 +336,7 @@ describe("buildNativeAttachLaunch", () => {
           statusPath: join(workerDir, "status.json")
         }
       })
-    ).rejects.toThrow("No native session recorded");
+    ).rejects.toThrow("No native session for Critic (claude) · run once before attach");
   });
 
   it("starts an embedded native process with writable input and captured output", async () => {

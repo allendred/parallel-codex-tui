@@ -67,7 +67,7 @@ describe("CLI doctor", () => {
     expect(result.stdout).toContain("workspace: ok");
     expect(result.stdout).toContain("config: ok");
     expect(result.stdout).toContain("theme: ok (codex; no color overrides)");
-    expect(result.stdout).toContain("palette: chrome=ansi256(234), surface=ansi256(235), rail=ansi256(237), accent=ansi256(81)");
+    expect(result.stdout).toContain("palette: chrome=ansi256(233), surface=ansi256(234), rail=ansi256(236), accent=ansi256(81)");
     expect(result.stdout).toContain("preview:");
     expect(result.stdout).toContain("semantic:");
     expect(result.stdout).toContain("\u001b[48;5;234m");
