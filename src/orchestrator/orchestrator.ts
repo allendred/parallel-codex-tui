@@ -106,6 +106,8 @@ export interface WorkerLogRef {
   statusPath: string;
 }
 
+export type RouterConfigLoader = () => Promise<AppConfig["router"]>;
+
 interface FeatureActorRun {
   definition: FeatureDefinition;
   channel: FeatureChannel;
@@ -133,7 +135,8 @@ export class Orchestrator {
     private readonly sessions: SessionManager,
     private readonly workers: WorkerRegistry,
     private readonly routeRunner?: CodexRouteRunner,
-    private readonly routerCwd = routerRuntimeDir(config.projectRoot, config.dataDir)
+    private readonly routerCwd = routerRuntimeDir(config.projectRoot, config.dataDir),
+    private readonly routerConfigLoader?: RouterConfigLoader
   ) {}
 
   async handleRequest(input: HandleRequestInput): Promise<HandleRequestResult> {
@@ -1010,19 +1013,26 @@ export class Orchestrator {
     signal?: AbortSignal,
     scope: "initial" | "follow-up" = "initial"
   ): Promise<RouteDecision> {
+    const router = this.routerConfigLoader
+      ? await this.routerConfigLoader()
+      : this.config.router;
+    const currentConfig: AppConfig = {
+      ...this.config,
+      router
+    };
     const routeConfig: AppConfig = scope === "follow-up"
       ? {
-          ...this.config,
+          ...currentConfig,
           router: {
-            ...this.config.router,
+            ...router,
             codex: {
-              ...this.config.router.codex,
-              timeoutMs: this.config.router.codex.followUpTimeoutMs,
+              ...router.codex,
+              timeoutMs: router.codex.followUpTimeoutMs,
               fallback: "simple"
             }
           }
         }
-      : this.config;
+      : currentConfig;
     const route = await routeRequestWithCodex(request, routeConfig, this.routeRunner, this.routerCwd, signal);
     await appendJsonLine(join(this.routerCwd, "routes.jsonl"), {
       time: new Date().toISOString(),

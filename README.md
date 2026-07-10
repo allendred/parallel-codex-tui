@@ -196,6 +196,8 @@ fallback = "simple"
 
 Set `defaultMode = "simple"` / `defaultMode = "complex"` to force one path. In `auto` mode, routing is semantic through an ephemeral, low-reasoning Codex run. If initial routing fails or returns invalid JSON, `fallback = "simple"` or `fallback = "complex"` decides the path; the safe default is `simple` and there is no keyword-only router. Active-task follow-ups use `followUpTimeoutMs` and always fail safely to the persistent Main session instead of accidentally starting Actor/Critic workers.
 
+Valid `[router]` changes are reloaded before the next classification without restarting the TUI, so mode, Codex command arguments, timeouts, fallback, and proxy environment updates take effect on the next request. Worker, pairing, role, orchestration, data-directory, and UI changes still require a restart because those runtime components are constructed at startup.
+
 ### Proxy Environment
 
 Some CLI runtimes do not inherit the macOS System Settings proxy. Configure the router explicitly when direct OpenAI connections are blocked:

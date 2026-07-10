@@ -35,7 +35,14 @@ export async function createRuntime(appRoot: string, workspaceRoot = appRoot): P
     index
   });
   const workers = createWorkerRegistry(config);
-  const orchestrator = new Orchestrator(config, sessions, workers, undefined, routerCwd);
+  const orchestrator = new Orchestrator(
+    config,
+    sessions,
+    workers,
+    undefined,
+    routerCwd,
+    async () => (await loadConfig(appRoot)).router
+  );
 
   return {
     config,

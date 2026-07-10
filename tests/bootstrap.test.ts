@@ -87,4 +87,33 @@ describe("createRuntime", () => {
 
     expect(latest?.id).toBe(task.id);
   });
+
+  it("reloads router settings for the next request without rebuilding the worker runtime", async () => {
+    const appRoot = await mkdtemp(join(tmpdir(), "pct-router-reload-app-"));
+    const workspaceRoot = await mkdtemp(join(tmpdir(), "pct-router-reload-workspace-"));
+    const writeRouterMode = (mode: "simple" | "complex") => writeText(
+      join(appRoot, ".parallel-codex", "config.toml"),
+      [
+        "[router]",
+        `defaultMode = "${mode}"`,
+        "",
+        "[pairing]",
+        'main = "mock"',
+        'judge = "mock"',
+        'actor = "mock"',
+        'critic = "mock"'
+      ].join("\n")
+    );
+    await writeRouterMode("simple");
+    const runtime = await createRuntime(appRoot, workspaceRoot);
+
+    const first = await runtime.orchestrator.handleRequest({ request: "你好", cwd: workspaceRoot });
+    expect(first.mode).toBe("simple");
+
+    await writeRouterMode("complex");
+    const second = await runtime.orchestrator.handleRequest({ request: "实现热加载", cwd: workspaceRoot });
+
+    expect(second.mode).toBe("complex");
+    expect(second.taskId).toEqual(expect.stringMatching(/^task-/));
+  });
 });

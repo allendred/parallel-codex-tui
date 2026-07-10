@@ -164,6 +164,8 @@ describe("package metadata", () => {
     expect(readme).toContain("If `--workspace <path>` points to an existing file");
     expect(readme).toContain("will not use that file path as the default folder to create");
     expect(readme).toContain("Router classification only receives the user request");
+    expect(readme).toContain("Valid `[router]` changes are reloaded before the next classification without restarting the TUI");
+    expect(readme).toContain("Worker, pairing, role, orchestration, data-directory, and UI changes still require a restart");
     expect(readme).toContain("`.parallel-codex/sessions/main/chat.jsonl`");
     expect(readme).toContain("startup restores the latest 200 valid messages");
     expect(readme).toContain("Chat drafts support Unicode-safe Left/Right, Home/End, Backspace, and Delete editing");
