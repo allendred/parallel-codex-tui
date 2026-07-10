@@ -67,8 +67,7 @@ describe("WorkerOutputView", () => {
 
     expect(workerOutputEmptyFallbackTheme()).toEqual({
       backgroundColor: TUI_THEME_PRESETS.paper.surface,
-      color: TUI_THEME_PRESETS.paper.muted,
-      dimColor: true
+      color: TUI_THEME_PRESETS.paper.muted
     });
   });
 
@@ -82,8 +81,7 @@ describe("WorkerOutputView", () => {
 
     expect(workerOutputLineTheme("placeholder")).toEqual({
       backgroundColor: TUI_THEME_PRESETS.paper.surface,
-      color: TUI_THEME_PRESETS.paper.muted,
-      dimColor: true
+      color: TUI_THEME_PRESETS.paper.muted
     });
     expect(workerOutputLineFillTheme("placeholder")).toBe(TUI_THEME_PRESETS.paper.surface);
 
@@ -3263,12 +3261,12 @@ describe("WorkerOutputView", () => {
     expect(workerOutputLineTheme("code").backgroundColor).toBe(theme.rail);
     expect(workerOutputLineTheme("json")).toMatchObject({ backgroundColor: theme.rail, color: theme.accent });
     expect(workerOutputLineTheme("content")).toEqual({ backgroundColor: theme.surface, color: theme.text });
-    expect(workerOutputLineTheme("placeholder")).toEqual({ backgroundColor: theme.surface, color: theme.muted, dimColor: true });
+    expect(workerOutputLineTheme("placeholder")).toEqual({ backgroundColor: theme.surface, color: theme.muted });
     expect(workerOutputLineTheme("list")).toEqual({ backgroundColor: theme.surface, color: theme.text });
     expect(workerOutputLineTheme("list-detail")).toEqual({ backgroundColor: theme.surface, color: theme.text });
     expect(workerOutputLineTheme("ordered-list")).toEqual({ backgroundColor: theme.surface, color: theme.text });
     expect(workerOutputLineTheme("task")).toEqual({ backgroundColor: theme.surface, color: theme.text });
-    expect(workerOutputLineTheme("rule")).toEqual({ backgroundColor: theme.surface, color: theme.muted, dimColor: true });
+    expect(workerOutputLineTheme("rule")).toEqual({ backgroundColor: theme.surface, color: theme.muted });
     expect(workerOutputLineTheme("source-line").backgroundColor).toBe(theme.surface);
     expect(workerOutputLineTheme("blank").backgroundColor).toBe(theme.surface);
     expect(workerOutputLineFillTheme("group")).toBe(theme.chrome);

@@ -9,13 +9,11 @@ describe("StatusBar", () => {
   it("keeps status labels quiet while values carry semantic emphasis", () => {
     expect(statusSegmentLabelTheme("run")).toEqual({
       backgroundColor: TUI_THEME_PRESETS.codex.rail,
-      color: TUI_THEME_PRESETS.codex.muted,
-      dimColor: true
+      color: TUI_THEME_PRESETS.codex.muted
     });
     expect(statusSegmentLabelTheme("fail")).toEqual({
       backgroundColor: TUI_THEME_PRESETS.codex.rail,
-      color: TUI_THEME_PRESETS.codex.muted,
-      dimColor: true
+      color: TUI_THEME_PRESETS.codex.muted
     });
     expect(statusSegmentValueTheme("run")).toEqual({
       backgroundColor: TUI_THEME_PRESETS.codex.rail,

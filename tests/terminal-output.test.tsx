@@ -19,8 +19,7 @@ describe("TerminalOutput theme helpers", () => {
     expect(terminalOutputEmptyText()).toBe("waiting for output");
     expect(terminalOutputEmptyTheme()).toEqual({
       backgroundColor: TUI_THEME_PRESETS.paper.surface,
-      color: TUI_THEME_PRESETS.paper.muted,
-      dimColor: true
+      color: TUI_THEME_PRESETS.paper.muted
     });
     expect(terminalOutputBlankLineTheme()).toEqual({
       backgroundColor: TUI_THEME_PRESETS.paper.surface
@@ -32,11 +31,13 @@ describe("TerminalOutput theme helpers", () => {
     expect(terminalOutputTextProps({
       backgroundColor: "ansi256(4)",
       color: "ansi256(2)",
-      bold: true
+      bold: true,
+      dimColor: true
     })).toMatchObject({
       backgroundColor: "ansi256(4)",
       color: "ansi256(2)",
-      bold: true
+      bold: true,
+      dimColor: true
     });
   });
 

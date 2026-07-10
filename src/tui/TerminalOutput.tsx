@@ -53,8 +53,7 @@ type TerminalOutputTheme = Pick<TextProps, "backgroundColor" | "bold" | "color" 
 export function terminalOutputEmptyTheme(): TerminalOutputTheme {
   return {
     backgroundColor: TUI_THEME.surface,
-    color: TUI_THEME.muted,
-    dimColor: true
+    color: TUI_THEME.muted
   };
 }
 

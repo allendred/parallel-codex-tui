@@ -32,8 +32,7 @@ describe("nativeAttachTitleDisplay", () => {
     expect(nativeAttachStartingText()).toBe("opening native session");
     expect(nativeAttachStartingTheme()).toEqual({
       backgroundColor: TUI_THEME_PRESETS.paper.surface,
-      color: TUI_THEME_PRESETS.paper.muted,
-      dimColor: true
+      color: TUI_THEME_PRESETS.paper.muted
     });
   });
 
@@ -157,8 +156,7 @@ describe("ChatView", () => {
     });
     expect(chatLineTheme({ from: "system", text: "", continuation: false })).toEqual({
       backgroundColor: TUI_THEME_PRESETS.paper.surface,
-      color: TUI_THEME_PRESETS.paper.muted,
-      dimColor: true
+      color: TUI_THEME_PRESETS.paper.muted
     });
   });
 

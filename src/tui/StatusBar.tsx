@@ -17,7 +17,7 @@ interface Segment {
 }
 
 export type StatusTone = "idle" | "run" | "done" | "fail" | "wait";
-type StatusSegmentTheme = Pick<TextProps, "backgroundColor" | "bold" | "color" | "dimColor">;
+type StatusSegmentTheme = Pick<TextProps, "backgroundColor" | "bold" | "color">;
 
 export function StatusBar({ text, terminalWidth: providedTerminalWidth, showTask = false, fillRail: providedFillRail }: StatusBarProps) {
   const terminalWidth = providedTerminalWidth ?? process.stdout.columns ?? 120;
@@ -122,7 +122,7 @@ function StatusSegment({ segment, compact, isLast }: { segment: Segment; compact
           >
             {display.label}
           </Text>
-          <Text backgroundColor={TUI_THEME.rail} color={TUI_THEME.muted} dimColor>{display.separator}</Text>
+          <Text backgroundColor={TUI_THEME.rail} color={TUI_THEME.muted}>{display.separator}</Text>
         </>
       ) : null}
       <Text
@@ -131,7 +131,7 @@ function StatusSegment({ segment, compact, isLast }: { segment: Segment; compact
       >
         {display.value}
       </Text>
-      {!isLast ? <Text backgroundColor={TUI_THEME.rail} color={TUI_THEME.muted} dimColor>{statusSegmentSeparator(compact)}</Text> : null}
+      {!isLast ? <Text backgroundColor={TUI_THEME.rail} color={TUI_THEME.muted}>{statusSegmentSeparator(compact)}</Text> : null}
     </Box>
   );
 }
@@ -437,8 +437,7 @@ function normalizeTone(value: string): StatusTone {
 export function statusSegmentLabelTheme(_tone?: StatusTone): StatusSegmentTheme {
   return {
     backgroundColor: TUI_THEME.rail,
-    color: TUI_THEME.muted,
-    dimColor: true
+    color: TUI_THEME.muted
   };
 }
 

@@ -49,7 +49,7 @@ export type WorkerOutputLineKind =
   | "diff-add"
   | "diff-remove";
 
-type WorkerOutputLineTheme = Pick<TextProps, "backgroundColor" | "bold" | "color" | "dimColor">;
+type WorkerOutputLineTheme = Pick<TextProps, "backgroundColor" | "bold" | "color">;
 
 interface RenderLine {
   kind: WorkerOutputLineKind;
@@ -3858,7 +3858,7 @@ export function workerOutputLineTheme(kind: WorkerOutputLineKind): WorkerOutputL
     return { backgroundColor: TUI_THEME.rail, color: TUI_THEME.text };
   }
   if (kind === "rule") {
-    return { backgroundColor: TUI_THEME.surface, color: TUI_THEME.muted, dimColor: true };
+    return { backgroundColor: TUI_THEME.surface, color: TUI_THEME.muted };
   }
   if (kind === "blank") {
     return { backgroundColor: TUI_THEME.surface };
@@ -3911,8 +3911,7 @@ export function workerOutputLineTheme(kind: WorkerOutputLineKind): WorkerOutputL
 export function workerOutputEmptyFallbackTheme(): WorkerOutputLineTheme {
   return {
     backgroundColor: TUI_THEME.surface,
-    color: TUI_THEME.muted,
-    dimColor: true
+    color: TUI_THEME.muted
   };
 }
 
@@ -4412,7 +4411,7 @@ function WorkerOutputLine({ line, width }: { line: DisplayLine; width: number })
 function WorkerOutputIndent({ backgroundColor }: { backgroundColor: NonNullable<TextProps["backgroundColor"]> | null }) {
   return backgroundColor
     ? <Text backgroundColor={backgroundColor}>  </Text>
-    : <Text color={TUI_THEME.muted} dimColor>  </Text>;
+    : <Text color={TUI_THEME.muted}>  </Text>;
 }
 
 function WorkerOutputBlankLine({ width }: { width: number }) {

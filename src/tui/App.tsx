@@ -58,10 +58,10 @@ export interface ChatDisplayLine {
   continuation: boolean;
 }
 
-type ChatLineTheme = Pick<TextProps, "backgroundColor" | "color" | "dimColor">;
+type ChatLineTheme = Pick<TextProps, "backgroundColor" | "color">;
 type ChatEmptyStateTheme = Pick<TextProps, "backgroundColor" | "bold" | "color">;
 type ChatViewportBlankLineTheme = Pick<TextProps, "backgroundColor">;
-type NativeAttachStartingTheme = Pick<TextProps, "backgroundColor" | "color" | "dimColor">;
+type NativeAttachStartingTheme = Pick<TextProps, "backgroundColor" | "color">;
 const NO_WORKERS_ATTACH_MESSAGE = "No workers yet · start a complex task before attaching";
 
 export function App({
@@ -680,7 +680,7 @@ export function chatLineTheme(line: ChatDisplayLine): ChatLineTheme {
     return { backgroundColor: TUI_THEME.surface, color: TUI_THEME.accent };
   }
   if (!line.text.trim()) {
-    return { backgroundColor: TUI_THEME.surface, color: TUI_THEME.muted, dimColor: true };
+    return { backgroundColor: TUI_THEME.surface, color: TUI_THEME.muted };
   }
   return { backgroundColor: TUI_THEME.surface, color: TUI_THEME.text };
 }
@@ -1038,8 +1038,7 @@ function NativeAttachView({
 export function nativeAttachStartingTheme(): NativeAttachStartingTheme {
   return {
     backgroundColor: TUI_THEME.surface,
-    color: TUI_THEME.muted,
-    dimColor: true
+    color: TUI_THEME.muted
   };
 }
 

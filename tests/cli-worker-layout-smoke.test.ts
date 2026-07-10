@@ -309,13 +309,24 @@ describe("CLI worker layout smoke", () => {
       const workerTitleLine = lines.find((line) => line.chunks.map((chunk) => chunk.text).join("").includes("critic/mock · 1/1"));
       const inputLine = lines.find((line) => line.chunks.map((chunk) => chunk.text).join("").includes("logs · scroll"));
       const statusLine = lines.find((line) => line.chunks.map((chunk) => chunk.text).join("").includes("1 worker"));
+      const statusMutedChunks = statusLine?.chunks.filter((chunk) => chunk.style.color === TUI_THEME_PRESETS.paper.muted) ?? [];
 
       expect(headerLine?.chunks.some((chunk) => chunk.style.backgroundColor === TUI_THEME_PRESETS.paper.chrome)).toBe(true);
       expect(workerTitleLine?.chunks.some((chunk) => chunk.style.backgroundColor === TUI_THEME_PRESETS.paper.chrome)).toBe(true);
       expect(inputLine?.chunks.some((chunk) => chunk.style.backgroundColor === TUI_THEME_PRESETS.paper.rail)).toBe(true);
       expect(statusLine?.chunks.some((chunk) => chunk.style.backgroundColor === TUI_THEME_PRESETS.paper.rail)).toBe(true);
-      expect(headerLine?.chunks.some((chunk) => chunk.text.includes("^C") && chunk.style.color === TUI_THEME_PRESETS.paper.muted)).toBe(true);
-      expect(inputLine?.chunks.some((chunk) => chunk.text.includes("scroll") && chunk.style.color === TUI_THEME_PRESETS.paper.muted)).toBe(true);
+      expect(headerLine?.chunks.some((chunk) =>
+        chunk.text.includes("^C") &&
+        chunk.style.color === TUI_THEME_PRESETS.paper.muted &&
+        chunk.style.dimColor !== true
+      )).toBe(true);
+      expect(inputLine?.chunks.some((chunk) =>
+        chunk.text.includes("scroll") &&
+        chunk.style.color === TUI_THEME_PRESETS.paper.muted &&
+        chunk.style.dimColor !== true
+      )).toBe(true);
+      expect(statusMutedChunks.length).toBeGreaterThan(0);
+      expect(statusMutedChunks.every((chunk) => chunk.style.dimColor !== true)).toBe(true);
       expect(statusLine?.chunks.some((chunk) => chunk.text.includes("1 worker") && chunk.style.color === TUI_THEME_PRESETS.paper.text)).toBe(true);
       expect(headerLine?.chunks.some((chunk) => chunk.style.backgroundColor === TUI_THEME_PRESETS.codex.chrome)).toBe(false);
     } finally {
