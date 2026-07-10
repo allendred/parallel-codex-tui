@@ -6,6 +6,71 @@ import { displayWidth } from "../src/tui/display-width.js";
 import { TUI_THEME_PRESETS } from "../src/tui/theme.js";
 
 describe("StatusBar", () => {
+  it("keeps representative status rows semantic across terminal widths", () => {
+    const states = [
+      ["done", "workers 3 | done 3"],
+      ["mixed", "workers 12 | fail 2 run 3 wait 1 done 6 | critic/claude done"],
+      ["fallback", "workers 3 | done 3 | route complex · fallback · timeout · 120s"],
+      ["checking", "route checking · 30s max"],
+      ["follow-up", "workers 3 | done 3 | route follow-up · 20s max"],
+      ["wave", "wave 2/3 · verification 0/1 | workers 4 | run 1 done 3"],
+      ["roles", "judge done | actor run | critic wait"],
+      ["provider", "workers 1 | fail 1 | actor/super-long-third-party-provider-name fail"]
+    ] as const;
+    const invalid: string[] = [];
+
+    for (const [name, text] of states) {
+      for (let width = 8; width <= 100; width += 1) {
+        const view = render(<StatusBar text={text} terminalWidth={width} />);
+        const frame = view.lastFrame() ?? "";
+        if (frame.split("\n").length !== 1 || displayWidth(frame) > width || frame.includes("...")) {
+          invalid.push(`${name}:${width}:${displayWidth(frame)}:${frame}`);
+        }
+        view.unmount();
+      }
+    }
+
+    expect(invalid).toEqual([]);
+  });
+
+  it("keeps active route evidence visible ahead of stale worker counts at every compact width", () => {
+    const missing: string[] = [];
+
+    for (let width = 8; width < 56; width += 1) {
+      for (const [name, text] of [
+        ["checking", "route checking · 30s max"],
+        ["follow-up", "workers 3 | done 3 | route follow-up · 20s max"]
+      ] as const) {
+        const view = render(<StatusBar text={text} terminalWidth={width} />);
+        const frame = view.lastFrame() ?? "";
+        if (!frame.includes("r:")) {
+          missing.push(`${name}:${width}:${frame}`);
+        }
+        view.unmount();
+      }
+    }
+
+    expect(missing).toEqual([]);
+  });
+
+  it("uses intentional route abbreviations and atomic worker identities in nano terminals", () => {
+    const frame = (text: string, terminalWidth: number): string => {
+      const view = render(<StatusBar text={text} terminalWidth={terminalWidth} />);
+      const value = view.lastFrame() ?? "";
+      view.unmount();
+      return value;
+    };
+
+    expect(frame("route checking · 30s max", 8)).toContain("r:30s");
+    expect(frame("route checking · 30s max", 13)).toContain("r:check 30s");
+    expect(frame("workers 3 | done 3 | route follow-up · 20s max", 8)).toContain("r:20s");
+    expect(frame("workers 3 | done 3 | route complex · fallback · timeout · 120s", 8)).toContain("r:time");
+
+    const selected = frame("workers 12 | fail 2 run 3 wait 1 done 6 | critic/claude done", 24);
+    expect(selected).not.toContain("@");
+    expect(selected).not.toContain("...");
+  });
+
   it("keeps status labels quiet while values carry semantic emphasis", () => {
     expect(statusSegmentLabelTheme("run")).toEqual({
       backgroundColor: TUI_THEME_PRESETS.codex.rail,

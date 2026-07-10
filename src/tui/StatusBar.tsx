@@ -138,19 +138,28 @@ function StatusSegment({ segment, compact, isLast }: { segment: Segment; compact
 
 function fitStatusSegments(segments: Segment[], terminalWidth: number, compact: boolean): Segment[] {
   const contentWidth = Math.max(1, terminalWidth - 2);
-  if (statusSegmentsWidth(segments, compact) <= contentWidth) {
-    return segments;
+  const semanticSegments = segments.map((segment) => fitAtomicStatusSegment(segment, contentWidth, compact));
+  if (statusSegmentsWidth(semanticSegments, compact) <= contentWidth) {
+    return semanticSegments;
   }
 
-  const displays = segments.map((segment) => statusSegmentDisplay(segment, compact));
+  const displays = semanticSegments.map((segment) => statusSegmentDisplay(segment, compact));
   const totalWidth = statusSegmentsDisplayWidth(displays, compact);
-  const currentIndex = segments.map((segment) => segment.label.toLowerCase()).lastIndexOf("current");
+  const currentIndex = semanticSegments.map((segment) => segment.label.toLowerCase()).lastIndexOf("current");
   if (currentIndex >= 0) {
     const currentDisplay = displays[currentIndex];
     if (currentDisplay) {
       const overflow = totalWidth - contentWidth;
       const nextValueWidth = Math.max(1, displayWidth(currentDisplay.value) - overflow);
-      const fitted = segments.map((segment, index) =>
+      const currentRole = workerIdentityRole(semanticSegments[currentIndex]?.value ?? "");
+      if (currentRole && displayWidth(currentRole) > nextValueWidth) {
+        return selectStatusSegmentsThatFit(
+          semanticSegments.filter((_, index) => index !== currentIndex),
+          contentWidth,
+          compact
+        );
+      }
+      const fitted = semanticSegments.map((segment, index) =>
         index === currentIndex
           ? { ...segment, value: compactCurrentStatusValue(segment.value, nextValueWidth) }
           : segment
@@ -162,7 +171,22 @@ function fitStatusSegments(segments: Segment[], terminalWidth: number, compact: 
     }
   }
 
-  return selectStatusSegmentsThatFit(segments, contentWidth, compact);
+  return selectStatusSegmentsThatFit(semanticSegments, contentWidth, compact);
+}
+
+function fitAtomicStatusSegment(segment: Segment, contentWidth: number, compact: boolean): Segment {
+  if (segment.label.toLowerCase() !== "route" || segment.tone !== "wait") {
+    return segment;
+  }
+  const display = statusSegmentDisplay(segment, compact);
+  const valueWidth = Math.max(1, contentWidth - displayWidth(`${display.label}${display.separator}`));
+  if (displayWidth(display.value) <= valueWidth) {
+    return segment;
+  }
+  return {
+    ...segment,
+    value: compactRouteStatusValueToWidth(segment.value, valueWidth)
+  };
 }
 
 function statusSegmentsDisplayWidth(displays: Array<{ label: string; separator: string; value: string }>, compact: boolean): number {
@@ -318,6 +342,48 @@ function compactRouteStatusValue(value: string, compact: boolean): string {
       return cause.toLowerCase() === "invalid output" ? "invalid" : cause.toLowerCase();
     }
     return "fallback";
+  }
+  return value;
+}
+
+function compactRouteStatusValueToWidth(value: string, maxWidth: number): string {
+  const compact = compactRouteStatusValue(value, true);
+  const parts = value.split(/\s+·\s+/).map((part) => part.trim()).filter(Boolean);
+  const duration = parts.find((part) => /^\d+(?:\.\d+)?(?:ms|s|m)(?:\s+max)?$/i.test(part))
+    ?.replace(/\s+max$/i, "");
+  const first = parts[0]?.toLowerCase() ?? "";
+  let candidates: string[];
+
+  if (first === "checking") {
+    candidates = [compact, duration ? `check ${duration}` : "check", duration ?? "wait", "wait"];
+  } else if (first === "follow-up") {
+    candidates = [compact, duration ? `follow ${duration}` : "follow", duration ?? "wait", "wait"];
+  } else if (/(?:^|\s·\s)fallback(?:\s·\s|$)/i.test(value)) {
+    candidates = [compact, compactRouteFailureAlias(compact), "wait"];
+  } else {
+    candidates = [compact, first, "route"];
+  }
+
+  return candidates.find((candidate) => displayWidth(candidate) <= maxWidth)
+    ?? candidates.at(-1)
+    ?? "route";
+}
+
+function compactRouteFailureAlias(value: string): string {
+  if (value === "timeout") {
+    return "time";
+  }
+  if (value === "network") {
+    return "net";
+  }
+  if (value === "unavailable") {
+    return "down";
+  }
+  if (value === "invalid") {
+    return "bad";
+  }
+  if (value === "fallback") {
+    return "fall";
   }
   return value;
 }
