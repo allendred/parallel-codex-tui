@@ -124,6 +124,81 @@ describe("CLI chat Markdown smoke", () => {
       child.kill("SIGTERM");
     }
   }, 10000);
+
+  it("shows the Router timeout cause after a real fallback reaches Main", async () => {
+    const workspace = await mkdtemp(join(tmpdir(), "pct-cli-router-timeout-"));
+    const appRoot = await mkdtemp(join(tmpdir(), "pct-cli-router-timeout-app-"));
+    const routerScript = join(appRoot, "stalled-router.cjs");
+    const mainScript = join(appRoot, "fake-main.cjs");
+    const screen = new NativeTerminalScreen({ cols: 100, rows: 12, scrollback: 1000 });
+    let screenWrites = Promise.resolve();
+
+    await mkdir(join(appRoot, ".parallel-codex"), { recursive: true });
+    await writeFile(routerScript, "setInterval(() => {}, 1000);\n");
+    await writeFile(
+      mainScript,
+      [
+        "process.stdin.resume();",
+        "process.stdin.on('end', () => process.stdout.write('Fallback chat response\\n'));"
+      ].join("\n")
+    );
+    await writeFile(
+      join(appRoot, ".parallel-codex", "config.toml"),
+      [
+        "[router]",
+        'defaultMode = "auto"',
+        "",
+        "[router.codex]",
+        `command = "${escapeToml(process.execPath)}"`,
+        `args = ["${escapeToml(routerScript)}"]`,
+        "timeoutMs = 25",
+        'fallback = "simple"',
+        "",
+        "[workers.codex]",
+        `command = "${escapeToml(process.execPath)}"`,
+        `args = ["${escapeToml(mainScript)}"]`,
+        "",
+        "[pairing]",
+        'main = "codex"',
+        'judge = "codex"',
+        'actor = "codex"',
+        'critic = "codex"'
+      ].join("\n") + "\n"
+    );
+
+    const child = spawn(
+      process.execPath,
+      ["./node_modules/.bin/tsx", "src/cli.tsx", "--app-root", appRoot, "--workspace", workspace],
+      {
+        cwd: process.cwd(),
+        cols: 100,
+        rows: 12,
+        name: "xterm-256color",
+        env: {
+          ...process.env,
+          TERM: "xterm-256color"
+        }
+      }
+    );
+
+    child.onData((chunk) => {
+      screenWrites = screenWrites.then(() => screen.write(chunk));
+    });
+
+    try {
+      await waitForScreenText(() => screenWrites, screen, "> | message");
+      child.write("hello\r");
+      await waitForScreenText(() => screenWrites, screen, "Fallback chat response");
+      await waitForScreenText(() => screenWrites, screen, "route simple · fallback · timeout");
+
+      const snapshot = screen.snapshot();
+      expect(snapshot).toContain("route simple · fallback · timeout");
+      expect(snapshot).not.toContain("Codex router failed:");
+      expect(snapshot).not.toContain(routerScript);
+    } finally {
+      child.kill("SIGTERM");
+    }
+  }, 10000);
 });
 
 function escapeToml(value: string): string {

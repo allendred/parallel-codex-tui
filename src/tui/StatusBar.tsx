@@ -311,6 +311,12 @@ function statusSegmentDisplay(segment: Segment, compact: boolean): { label: stri
 
 function compactRouteStatusValue(value: string, compact: boolean): string {
   if (compact && /(?:^|\s·\s)fallback(?:\s·\s|$)/i.test(value)) {
+    const cause = value
+      .split(/\s+·\s+/)
+      .find((part) => /^(?:network|timeout|unavailable|invalid output|exit)$/i.test(part));
+    if (cause) {
+      return cause.toLowerCase() === "invalid output" ? "invalid" : cause.toLowerCase();
+    }
     return "fallback";
   }
   return value;

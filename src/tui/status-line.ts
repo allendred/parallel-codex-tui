@@ -71,10 +71,35 @@ export function formatRouteStatus(route: RouteDecision | null): string {
   if (route.source === "forced" || route.source === "fallback") {
     details.push(route.source);
   }
+  if (route.source === "fallback") {
+    const cause = formatRouteFailureCause(route.reason);
+    if (cause) {
+      details.push(cause);
+    }
+  }
   if (typeof route.duration_ms === "number") {
     details.push(formatRouteDuration(route.duration_ms));
   }
   return `route ${details.join(" · ")}`;
+}
+
+function formatRouteFailureCause(reason: string): string | null {
+  if (/\b(?:ECONNREFUSED|ECONNRESET|ENETUNREACH|EHOSTUNREACH|ETIMEDOUT)\b|\b(?:network|proxy|websocket|https transport|fetch failed)\b/i.test(reason)) {
+    return "network";
+  }
+  if (/\b(?:timed out|timeout)\b/i.test(reason)) {
+    return "timeout";
+  }
+  if (/\b(?:ENOENT|command not found|spawn error)\b/i.test(reason)) {
+    return "unavailable";
+  }
+  if (/\b(?:no json object|invalid json|failed to parse json|unexpected token)\b/i.test(reason)) {
+    return "invalid output";
+  }
+  if (/\b(?:exited with (?:code|signal)|process exited)\b/i.test(reason)) {
+    return "exit";
+  }
+  return null;
 }
 
 export function formatSelectedWorkerStatus(state: StatusLineState | null, selectedIndex: number): string {

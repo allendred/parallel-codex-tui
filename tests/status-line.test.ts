@@ -42,8 +42,36 @@ describe("formatStatusLine", () => {
 
     expect(formatRouteStatus).toBeTypeOf("function");
     expect(formatRouteStatus?.({ mode: "simple", source: "codex", duration_ms: 42 })).toBe("route simple · 42ms");
-    expect(formatRouteStatus?.({ mode: "complex", source: "fallback", duration_ms: 120000 })).toBe(
-      "route complex · fallback · 120s"
+    expect(formatRouteStatus?.({
+      mode: "complex",
+      source: "fallback",
+      reason: "Codex router failed: Codex router timed out after 120000ms. Codex router fallback forced complex.",
+      duration_ms: 120000
+    })).toBe(
+      "route complex · fallback · timeout · 120s"
+    );
+    expect(formatRouteStatus?.({
+      mode: "complex",
+      source: "fallback",
+      reason: "Codex router failed: connect ECONNREFUSED 127.0.0.1:7890. Codex router fallback forced complex."
+    })).toBe("route complex · fallback · network");
+    expect(formatRouteStatus?.({
+      mode: "complex",
+      source: "fallback",
+      reason: "Codex router failed: Codex router exited with code 2. Codex router fallback forced complex."
+    })).toBe("route complex · fallback · exit");
+    expect(formatRouteStatus?.({
+      mode: "simple",
+      source: "fallback",
+      reason: "Codex router failed: No JSON object in Codex router output. Codex router fallback forced simple."
+    })).toBe("route simple · fallback · invalid output");
+    expect(formatRouteStatus?.({
+      mode: "complex",
+      source: "forced",
+      reason: "Forced complex mode after a timeout.",
+      duration_ms: 120000
+    })).toBe(
+      "route complex · forced · 120s"
     );
     expect(formatRouteStatus?.(null)).toBe("");
   });

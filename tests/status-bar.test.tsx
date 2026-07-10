@@ -303,14 +303,15 @@ describe("StatusBar", () => {
   it("keeps fallback route evidence visible by compacting its details in narrow terminals", () => {
     const { lastFrame } = render(
       <StatusBar
-        text="093326-1980 | workers 4 | fail 1 done 3 | route complex · fallback · 120s | actor/codex fail"
+        text="093326-1980 | workers 4 | fail 1 done 3 | route complex · fallback · timeout · 120s | actor/codex fail"
         terminalWidth={24}
       />
     );
 
     const frame = lastFrame() ?? "";
     expect(frame).toContain("f1");
-    expect(frame).toContain("r:fallback");
+    expect(frame).toContain("r:timeout");
+    expect(frame).not.toContain("fallback");
     expect(frame).not.toContain("120s");
     expect(displayWidth(frame)).toBeLessThanOrEqual(24);
   });
