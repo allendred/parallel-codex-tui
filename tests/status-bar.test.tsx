@@ -11,6 +11,10 @@ describe("StatusBar", () => {
       ["done", "workers 3 | done 3"],
       ["mixed", "workers 12 | fail 2 run 3 wait 1 done 6 | critic/claude done"],
       ["fallback", "workers 3 | done 3 | route complex · fallback · timeout · 120s"],
+      ["proxy-timeout", "workers 3 | done 3 | route simple · fallback · proxy timeout · 30s"],
+      ["proxy", "workers 3 | done 3 | route simple · fallback · proxy"],
+      ["auth", "workers 3 | done 3 | route simple · fallback · auth"],
+      ["rate-limit", "workers 3 | done 3 | route simple · fallback · rate limit"],
       ["checking", "route checking · 30s max"],
       ["follow-up", "workers 3 | done 3 | route follow-up · 20s max"],
       ["wave", "wave 2/3 · verification 0/1 | workers 4 | run 1 done 3"],
@@ -65,6 +69,10 @@ describe("StatusBar", () => {
     expect(frame("route checking · 30s max", 13)).toContain("r:check 30s");
     expect(frame("workers 3 | done 3 | route follow-up · 20s max", 8)).toContain("r:20s");
     expect(frame("workers 3 | done 3 | route complex · fallback · timeout · 120s", 8)).toContain("r:time");
+    expect(frame("workers 3 | done 3 | route simple · fallback · proxy timeout · 30s", 8)).toContain("r:p:to");
+    expect(frame("workers 3 | done 3 | route simple · fallback · proxy", 8)).toContain("r:pxy");
+    expect(frame("workers 3 | done 3 | route simple · fallback · auth", 8)).toContain("r:auth");
+    expect(frame("workers 3 | done 3 | route simple · fallback · rate limit", 8)).toContain("r:rate");
 
     const selected = frame("workers 12 | fail 2 run 3 wait 1 done 6 | critic/claude done", 24);
     expect(selected).not.toContain("@");

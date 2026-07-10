@@ -337,7 +337,7 @@ function compactRouteStatusValue(value: string, compact: boolean): string {
   if (compact && /(?:^|\s·\s)fallback(?:\s·\s|$)/i.test(value)) {
     const cause = value
       .split(/\s+·\s+/)
-      .find((part) => /^(?:network|timeout|unavailable|invalid output|exit)$/i.test(part));
+      .find((part) => /^(?:proxy timeout|proxy|auth|rate limit|network|timeout|unavailable|invalid output|exit)$/i.test(part));
     if (cause) {
       return cause.toLowerCase() === "invalid output" ? "invalid" : cause.toLowerCase();
     }
@@ -359,7 +359,7 @@ function compactRouteStatusValueToWidth(value: string, maxWidth: number): string
   } else if (first === "follow-up") {
     candidates = [compact, duration ? `follow ${duration}` : "follow", duration ?? "wait", "wait"];
   } else if (/(?:^|\s·\s)fallback(?:\s·\s|$)/i.test(value)) {
-    candidates = [compact, compactRouteFailureAlias(compact), "wait"];
+    candidates = [compact, ...compactRouteFailureAliases(compact), "wait"];
   } else {
     candidates = [compact, first, "route"];
   }
@@ -369,23 +369,32 @@ function compactRouteStatusValueToWidth(value: string, maxWidth: number): string
     ?? "route";
 }
 
-function compactRouteFailureAlias(value: string): string {
+function compactRouteFailureAliases(value: string): string[] {
+  if (value === "proxy timeout") {
+    return ["proxy", "p:to"];
+  }
+  if (value === "proxy") {
+    return ["pxy"];
+  }
+  if (value === "rate limit") {
+    return ["rate"];
+  }
   if (value === "timeout") {
-    return "time";
+    return ["time"];
   }
   if (value === "network") {
-    return "net";
+    return ["net"];
   }
   if (value === "unavailable") {
-    return "down";
+    return ["down"];
   }
   if (value === "invalid") {
-    return "bad";
+    return ["bad"];
   }
   if (value === "fallback") {
-    return "fall";
+    return ["fall"];
   }
-  return value;
+  return [value];
 }
 
 function compactWaveStatusValue(value: string): string {

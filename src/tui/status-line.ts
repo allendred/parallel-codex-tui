@@ -96,10 +96,24 @@ export function formatRoutePendingStatus(state: RouteStartInfo | null): string {
 }
 
 function formatRouteFailureCause(reason: string): string | null {
-  if (/\b(?:ECONNREFUSED|ECONNRESET|ENETUNREACH|EHOSTUNREACH|ETIMEDOUT)\b|\b(?:network|proxy|websocket|https transport|fetch failed)\b/i.test(reason)) {
+  const timedOut = /\b(?:timed out|timeout|ETIMEDOUT)\b/i.test(reason);
+  const proxy = /\bproxy\b|代理/i.test(reason);
+  if (proxy && timedOut) {
+    return "proxy timeout";
+  }
+  if (/\b(?:401|403)\b|\b(?:unauthori[sz]ed|forbidden|authentication|api[-_\s]?key|login required|not logged in|sign in)\b/i.test(reason)) {
+    return "auth";
+  }
+  if (/\b429\b|\b(?:rate[ -]?limit|too many requests|quota (?:exceeded|exhausted)|usage limit)\b/i.test(reason)) {
+    return "rate limit";
+  }
+  if (proxy) {
+    return "proxy";
+  }
+  if (/\b(?:ECONNREFUSED|ECONNRESET|ENETUNREACH|EHOSTUNREACH|ENOTFOUND|EAI_AGAIN)\b|\b(?:network|websocket|https transport|fetch failed|certificate|tls|ssl)\b/i.test(reason)) {
     return "network";
   }
-  if (/\b(?:timed out|timeout)\b/i.test(reason)) {
+  if (timedOut) {
     return "timeout";
   }
   if (/\b(?:ENOENT|command not found|spawn error)\b/i.test(reason)) {

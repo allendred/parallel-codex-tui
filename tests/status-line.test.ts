@@ -56,6 +56,27 @@ describe("formatStatusLine", () => {
       reason: "Codex router failed: connect ECONNREFUSED 127.0.0.1:7890. Codex router fallback forced complex."
     })).toBe("route complex · fallback · network");
     expect(formatRouteStatus?.({
+      mode: "simple",
+      source: "fallback",
+      reason: "Codex router failed: Codex router timed out after 30000ms: Connecting through proxy http://***@127.0.0.1:7890. Codex router fallback forced simple.",
+      duration_ms: 30000
+    })).toBe("route simple · fallback · proxy timeout · 30s");
+    expect(formatRouteStatus?.({
+      mode: "simple",
+      source: "fallback",
+      reason: "Codex router failed: proxy connection refused. Codex router fallback forced simple."
+    })).toBe("route simple · fallback · proxy");
+    expect(formatRouteStatus?.({
+      mode: "simple",
+      source: "fallback",
+      reason: "Codex router exited with code 1: HTTP 401 Unauthorized; please sign in."
+    })).toBe("route simple · fallback · auth");
+    expect(formatRouteStatus?.({
+      mode: "simple",
+      source: "fallback",
+      reason: "Codex router exited with code 1: HTTP 429 Too Many Requests; rate limit exceeded."
+    })).toBe("route simple · fallback · rate limit");
+    expect(formatRouteStatus?.({
       mode: "complex",
       source: "fallback",
       reason: "Codex router failed: Codex router exited with code 2. Codex router fallback forced complex."

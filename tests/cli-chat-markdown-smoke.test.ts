@@ -135,7 +135,10 @@ describe("CLI chat Markdown smoke", () => {
     let screenWrites = Promise.resolve();
 
     await mkdir(join(appRoot, ".parallel-codex"), { recursive: true });
-    await writeFile(routerScript, "setInterval(() => {}, 1000);\n");
+    await writeFile(
+      routerScript,
+      "process.stderr.write('Connecting through proxy http://user:secret@127.0.0.1:7890\\n'); setInterval(() => {}, 1000);\n"
+    );
     await writeFile(
       mainScript,
       [
@@ -191,12 +194,15 @@ describe("CLI chat Markdown smoke", () => {
       child.write("hello\r");
       await waitForScreenText(() => screenWrites, screen, "route checking · 600ms max");
       await waitForScreenText(() => screenWrites, screen, "Fallback chat response");
-      await waitForScreenText(() => screenWrites, screen, "route simple · fallback · timeout");
+      await waitForScreenText(() => screenWrites, screen, "route simple · fallback · proxy timeout");
 
       const snapshot = screen.snapshot();
-      expect(snapshot).toContain("route simple · fallback · timeout");
+      const routes = await readTextIfExists(join(appRoot, ".parallel-codex", "router", "routes.jsonl"));
+      expect(snapshot).toContain("route simple · fallback · proxy timeout");
       expect(snapshot).not.toContain("Codex router failed:");
       expect(snapshot).not.toContain(routerScript);
+      expect(routes).toContain("Connecting through proxy http://***@127.0.0.1:7890");
+      expect(routes).not.toContain("user:secret");
     } finally {
       child.kill("SIGTERM");
     }
