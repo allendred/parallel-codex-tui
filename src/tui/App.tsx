@@ -14,6 +14,7 @@ import {
   type StatusLineState
 } from "./status-line.js";
 import { applyChatInputChunk } from "./chat-input.js";
+import { chatRequestHistory, navigateChatDraftHistory, type ChatDraftHistoryState } from "./chat-history.js";
 import { AppShell } from "./AppShell.js";
 import { InputBar } from "./InputBar.js";
 import { applyNativeInputChunk } from "./native-input.js";
@@ -23,7 +24,7 @@ import { TerminalOutput } from "./TerminalOutput.js";
 import { NativeTerminalScreen } from "./terminal-screen.js";
 import { WorkerOutputView } from "./WorkerOutputView.js";
 import { compactEndByDisplayWidth, displayWidth, wrapByDisplayWidth } from "./display-width.js";
-import { isAttachShortcut, isExitShortcut, isLogsShortcut, isNewTaskShortcut, mouseScrollDelta, rawPageScrollDelta, scrollDelta } from "./keyboard.js";
+import { isAttachShortcut, isExitShortcut, isLogsShortcut, isNewTaskShortcut, mouseScrollDelta, rawHistoryDelta, rawPageScrollDelta, scrollDelta } from "./keyboard.js";
 import { createRawInputDecoder } from "./raw-input-decoder.js";
 import { decodeHtmlEntities } from "./markdown-text.js";
 import { configureTuiTheme, TUI_THEME } from "./theme.js";
@@ -129,6 +130,7 @@ export function App({
   const { exit } = useApp();
   const { setRawMode, internal_eventEmitter: stdinEvents } = useStdin();
   const nativeAttachRef = useRef(nativeAttach);
+  const messagesRef = useRef<Message[]>([...initialMessages]);
   const activeRunControllerRef = useRef<AbortController | null>(null);
   const activeTaskIdRef = useRef<string | null>(initialTaskId);
   const nativeInputRef = useRef(nativeInput);
@@ -149,6 +151,10 @@ export function App({
   const newTaskRef = useRef<() => Promise<void>>(startNewTask);
   const exitRef = useRef(exit);
   const rawInputDecoderRef = useRef(createRawInputDecoder());
+  const chatDraftHistoryRef = useRef<ChatDraftHistoryState>({
+    offset: 0,
+    draft: { value: "", cursor: 0 }
+  });
 
   const contentHeight = appContentHeight(process.stdout.rows || 30, Boolean(attachError), config.ui.showStatusBar);
   const outputHeight = Math.max(1, contentHeight);
@@ -164,6 +170,10 @@ export function App({
   useEffect(() => {
     inputCursorRef.current = inputCursor;
   }, [inputCursor]);
+
+  useEffect(() => {
+    messagesRef.current = messages;
+  }, [messages]);
 
   useEffect(() => {
     activeTaskIdRef.current = activeTaskId;
@@ -423,7 +433,28 @@ export function App({
           return;
         }
 
-        const update = applyChatInputChunk(inputRef.current, chunk, inputCursorRef.current);
+        const draftHistoryDelta = rawHistoryDelta(chunk);
+        if (draftHistoryDelta !== 0) {
+          if (busyRef.current) {
+            return;
+          }
+          const update = navigateChatDraftHistory(
+            chatRequestHistory(messagesRef.current),
+            { value: inputRef.current, cursor: inputCursorRef.current },
+            chatDraftHistoryRef.current,
+            draftHistoryDelta
+          );
+          chatDraftHistoryRef.current = update.state;
+          inputRef.current = update.value;
+          inputCursorRef.current = update.cursor;
+          setInput(update.value);
+          setInputCursor(update.cursor);
+          return;
+        }
+
+        const previousValue = inputRef.current;
+        const previousCursor = inputCursorRef.current;
+        const update = applyChatInputChunk(previousValue, chunk, previousCursor);
         if (update.exit) {
           activeRunControllerRef.current?.abort();
           exitRef.current();
@@ -436,6 +467,12 @@ export function App({
         inputCursorRef.current = update.cursor;
         setInput(update.value);
         setInputCursor(update.cursor);
+        if (update.value !== previousValue || update.cursor !== previousCursor || update.submit !== null) {
+          chatDraftHistoryRef.current = {
+            offset: 0,
+            draft: { value: update.value, cursor: update.cursor }
+          };
+        }
         if (update.submit !== null) {
           void submitRef.current(update.submit);
         }
@@ -629,7 +666,11 @@ export function App({
   }
 
   async function appendVisibleMessage(message: Message, taskId?: string): Promise<void> {
-    setMessages((current) => [...current, message]);
+    setMessages((current) => {
+      const next = [...current, message];
+      messagesRef.current = next;
+      return next;
+    });
     if (!persistChatMessage) {
       return;
     }
@@ -649,6 +690,10 @@ export function App({
 
     inputRef.current = "";
     inputCursorRef.current = 0;
+    chatDraftHistoryRef.current = {
+      offset: 0,
+      draft: { value: "", cursor: 0 }
+    };
     setInput("");
     setInputCursor(0);
     chatScrollOffsetRef.current = 0;
@@ -804,6 +849,10 @@ export function App({
     userSelectedWorkerRef.current = false;
     setAttachError(null);
     setView("chat");
+    chatDraftHistoryRef.current = {
+      offset: 0,
+      draft: { value: inputRef.current, cursor: inputCursorRef.current }
+    };
     await appendVisibleMessage({ from: "system", text: "new task · ready" });
   }
 

@@ -58,6 +58,23 @@ describe("keyboard shortcuts", () => {
     expect(rawPageScrollDelta?.("plain text", 12)).toBe(0);
   });
 
+  it("maps raw terminal Up and Down sequences for draft history", () => {
+    const rawHistoryDelta = (
+      keyboardModule as typeof keyboardModule & {
+        rawHistoryDelta?: (input: string) => number;
+      }
+    ).rawHistoryDelta;
+
+    expect(rawHistoryDelta).toBeTypeOf("function");
+    expect(rawHistoryDelta?.("\x1b[A")).toBe(1);
+    expect(rawHistoryDelta?.("\x1bOA")).toBe(1);
+    expect(rawHistoryDelta?.("\x1b[B")).toBe(-1);
+    expect(rawHistoryDelta?.("\x1bOB")).toBe(-1);
+    expect(rawHistoryDelta?.("\x1b[A\x1b[A\x1b[B")).toBe(1);
+    expect(rawHistoryDelta?.("plain text")).toBe(0);
+    expect(rawHistoryDelta?.("\x1b[C\x1b[D")).toBe(0);
+  });
+
   it("maps SGR mouse wheel sequences to scroll deltas", () => {
     expect(mouseScrollDelta("\x1b[<64;10;5M", 3)).toBe(3);
     expect(mouseScrollDelta("\x1b[<65;10;5M", 3)).toBe(-3);

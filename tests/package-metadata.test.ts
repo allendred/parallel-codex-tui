@@ -167,6 +167,7 @@ describe("package metadata", () => {
     expect(readme).toContain("`.parallel-codex/sessions/main/chat.jsonl`");
     expect(readme).toContain("startup restores the latest 200 valid messages");
     expect(readme).toContain("Chat drafts support Unicode-safe Left/Right, Home/End, Backspace, and Delete editing");
+    expect(readme).toContain("Up/Down recalls persisted user requests and returns to the exact unsent draft");
     expect(readme).toContain('`--doctor` checks the configured commands and any `{env:NAME}` references');
     expect(readme).toContain("reports the loaded TUI theme, core palette values, ANSI swatch previews, and color override values");
     expect(readme).toContain("including any temporary `--theme` override");

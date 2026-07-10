@@ -1,4 +1,4 @@
-import { mkdtemp } from "node:fs/promises";
+import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -113,6 +113,65 @@ describe("CLI input smoke", () => {
       await waitForScreenText(() => screenWrites, screen, "> 好世界|");
 
       expect(screen.snapshot().split("\n").filter((line) => line.includes("好世界|"))).toHaveLength(1);
+    } finally {
+      child.kill("SIGTERM");
+    }
+  }, 10000);
+
+  it("recalls persisted user requests and restores the unsent draft with Up and Down", async () => {
+    const workspace = await mkdtemp(join(tmpdir(), "pct-cli-input-history-"));
+    const chatDir = join(workspace, ".parallel-codex", "sessions", "main");
+    await mkdir(chatDir, { recursive: true });
+    await writeFile(
+      join(chatDir, "chat.jsonl"),
+      [
+        JSON.stringify({ time: "2026-07-10T00:00:00.000Z", from: "user", text: "第一条" }),
+        JSON.stringify({ time: "2026-07-10T00:00:01.000Z", from: "system", text: "第一条完成" }),
+        JSON.stringify({ time: "2026-07-10T00:00:02.000Z", from: "user", text: "第二条" })
+      ].join("\n") + "\n",
+      "utf8"
+    );
+
+    const screen = new NativeTerminalScreen({ cols: 60, rows: 18, scrollback: 1000 });
+    let screenWrites = Promise.resolve();
+    const child = spawn(process.execPath, ["./node_modules/.bin/tsx", "src/cli.tsx", "--workspace", workspace], {
+      cwd: process.cwd(),
+      cols: 60,
+      rows: 18,
+      name: "xterm-256color",
+      env: {
+        ...process.env,
+        TERM: "xterm-256color"
+      }
+    });
+
+    child.onData((chunk) => {
+      screenWrites = screenWrites.then(() => screen.write(chunk));
+    });
+    try {
+      await waitForScreenText(() => screenWrites, screen, "> | message");
+      child.write("草稿");
+      await waitForScreenText(() => screenWrites, screen, "> 草稿|");
+
+      child.write("\x1b[A");
+      await waitForScreenText(() => screenWrites, screen, "> 第二条|");
+      child.write("\x1b[A");
+      await waitForScreenText(() => screenWrites, screen, "> 第一条|");
+      child.write("\x1b[B");
+      await waitForScreenText(() => screenWrites, screen, "> 第二条|");
+      child.write("\x1b[B");
+      await waitForScreenText(() => screenWrites, screen, "> 草稿|");
+
+      child.write("\x1b[A");
+      await waitForScreenText(() => screenWrites, screen, "> 第二条|");
+      child.write("改");
+      await waitForScreenText(() => screenWrites, screen, "> 第二条改|");
+      child.write("\x1b[B");
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      await screenWrites;
+
+      expect(screen.snapshot()).toContain("> 第二条改|");
+      expect(screen.snapshot()).not.toContain("> 草稿|");
     } finally {
       child.kill("SIGTERM");
     }
