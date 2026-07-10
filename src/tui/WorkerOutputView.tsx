@@ -1666,6 +1666,12 @@ function sanitizeProcessOutput(text: string, options: ProcessOutputSanitizeOptio
         index = skipProcessCommandOutputBlock(rawLines, execCommand.nextIndex);
         continue;
       }
+      const chainedRead = collectChainedReadCommandBlock(rawLines, execCommand.command, execCommand.nextIndex);
+      if (chainedRead) {
+        kept.push(chainedRead.summary);
+        index = chainedRead.nextIndex;
+        continue;
+      }
       kept.push(execCommand.commandLine);
       index = execCommand.nextIndex;
       continue;
@@ -1848,6 +1854,100 @@ function collectProcessExecCommand(
     cwd: parseShellExecCwd(trimmed),
     nextIndex: startIndex + 1
   };
+}
+
+function collectChainedReadCommandBlock(
+  rawLines: string[],
+  command: string,
+  statusIndex: number
+): { summary: string; nextIndex: number } | null {
+  const targets = chainedSedReadTargets(command);
+  if (!targets) {
+    return null;
+  }
+
+  const status = normalizedProcessLine(rawLines[statusIndex] ?? "").trim();
+  if (!/^succeeded\s+in\s+\d+(?:ms|s|m)?:?$/i.test(status)) {
+    return null;
+  }
+
+  const outputStart = statusIndex + 1;
+  let nextIndex = outputStart;
+  while (nextIndex < rawLines.length) {
+    const trimmed = normalizedProcessLine(rawLines[nextIndex] ?? "").trim();
+    if (isChainedReadOutputBoundary(trimmed)) {
+      break;
+    }
+    nextIndex += 1;
+  }
+
+  const outputLines = rawLines
+    .slice(outputStart, nextIndex)
+    .filter((line) => {
+      const normalized = normalizedProcessLine(line);
+      return !shouldDropNoisyProcessLine(normalized.trim(), normalized);
+    });
+  while (outputLines.length > 0 && !normalizedProcessLine(outputLines[0] ?? "").trim()) {
+    outputLines.shift();
+  }
+  while (outputLines.length > 0 && !normalizedProcessLine(outputLines[outputLines.length - 1] ?? "").trim()) {
+    outputLines.pop();
+  }
+  const contentLineCount = outputLines.filter((line) => normalizedProcessLine(line).trim()).length;
+  if (contentLineCount < CODE_OUTPUT_COLLAPSE_MIN_LINES) {
+    return null;
+  }
+
+  const displayTargets = compactReadSummaryTargets(targets.map(formatReadTarget));
+  return {
+    summary: `Collapsed read summaries: ${targets.length} chunks, ${outputLines.length} lines (${displayTargets})`,
+    nextIndex
+  };
+}
+
+function chainedSedReadTargets(command: string): string[] | null {
+  const segments = command.split(/\s+&&\s+/);
+  if (segments.length < 2) {
+    return null;
+  }
+
+  const targets: string[] = [];
+  for (const segment of segments) {
+    const match = segment.trim().match(/^sed\s+-n\s+(\S+)\s+(.+)$/);
+    const range = match ? singleShellTokenValue(match[1] ?? "") : null;
+    const target = match ? singleShellTokenValue(match[2] ?? "") : null;
+    if (!range || !/^\d+,\d+p$/.test(range) || !target) {
+      return null;
+    }
+    targets.push(target);
+  }
+  return targets;
+}
+
+function singleShellTokenValue(text: string): string | null {
+  const trimmed = text.trim();
+  if (!trimmed) {
+    return null;
+  }
+  if (trimmed[0] === "\"" || trimmed[0] === "'") {
+    const segment = readQuotedShellSegment(trimmed, 0);
+    return segment?.endIndex === trimmed.length ? segment.value : null;
+  }
+  return /^[^\s;&|]+$/.test(trimmed) ? trimmed : null;
+}
+
+function isChainedReadOutputBoundary(trimmed: string): boolean {
+  return (
+    trimmed === "exec" ||
+    trimmed.startsWith("$ ") ||
+    parseShellExecCommand(trimmed) !== null ||
+    isAssistantNarrativeMarker(trimmed) ||
+    /^tokens used$/i.test(trimmed) ||
+    isRolePromptTranscriptStart(trimmed) ||
+    isDiffStartLine(trimmed) ||
+    /^apply patch$/i.test(trimmed) ||
+    /^patch:\s+(?:completed|failed)\b/i.test(trimmed)
+  );
 }
 
 function parseShellExecCwd(line: string): string | null {
