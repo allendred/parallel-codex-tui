@@ -1677,6 +1677,7 @@ function sanitizeProcessOutput(text: string, options: ProcessOutputSanitizeOptio
     index += 1;
   }
 
+  const compactedNetworkOutput = compactRecoveredNetworkEvents(kept);
   return collapseProcessOutputLines(
     compactReadSummaryRuns(
       compactNoMatchSearchCommandBlocks(
@@ -1684,7 +1685,9 @@ function sanitizeProcessOutput(text: string, options: ProcessOutputSanitizeOptio
           compactNodeTestOutputBlocks(
             compactBuildOutputBlocks(
               compactDevServerFallbackBlocks(
-                compactCollapsedCommandBlocks(dropSuccessfulInternalLaunchCommands(collapseVerboseProcessOutput(kept)))
+                compactCollapsedCommandBlocks(
+                  dropSuccessfulInternalLaunchCommands(collapseVerboseProcessOutput(compactedNetworkOutput))
+                )
               )
             )
           )
@@ -1692,6 +1695,127 @@ function sanitizeProcessOutput(text: string, options: ProcessOutputSanitizeOptio
       )
     )
   ).join("\n").trimEnd();
+}
+
+interface RecoveredNetworkEvent {
+  reconnectAttempts: string[];
+  httpsFallbacks: number;
+  nextIndex: number;
+}
+
+function compactRecoveredNetworkEvents(lines: string[]): string[] {
+  const compacted: string[] = [];
+  const reconnectAttempts: string[] = [];
+  let httpsFallbacks = 0;
+  let summaryIndex: number | null = null;
+
+  for (let index = 0; index < lines.length;) {
+    const event = collectRecoveredNetworkEvent(lines, index);
+    if (!event) {
+      compacted.push(lines[index] ?? "");
+      index += 1;
+      continue;
+    }
+
+    summaryIndex ??= compacted.length;
+    reconnectAttempts.push(...event.reconnectAttempts);
+    httpsFallbacks += event.httpsFallbacks;
+    index = event.nextIndex;
+  }
+
+  if (summaryIndex !== null) {
+    compacted.splice(summaryIndex, 0, formatRecoveredNetworkSummary(reconnectAttempts, httpsFallbacks));
+  }
+  return compacted;
+}
+
+function collectRecoveredNetworkEvent(lines: string[], startIndex: number): RecoveredNetworkEvent | null {
+  const first = normalizedProcessLine(lines[startIndex] ?? "").trim();
+  if (!isNetworkRetryDiagnostic(first) && !reconnectAttempt(first)) {
+    return null;
+  }
+
+  const reconnectAttempts: string[] = [];
+  let httpsFallbacks = 0;
+  let index = startIndex;
+  let sawNetworkLine = false;
+
+  while (index < lines.length) {
+    const trimmed = normalizedProcessLine(lines[index] ?? "").trim();
+    const attempt = reconnectAttempt(trimmed);
+    if (isNetworkRetryDiagnostic(trimmed)) {
+      sawNetworkLine = true;
+      index += 1;
+      continue;
+    }
+    if (attempt) {
+      sawNetworkLine = true;
+      reconnectAttempts.push(attempt);
+      index += 1;
+      continue;
+    }
+    if (isHttpsFallbackLine(trimmed)) {
+      sawNetworkLine = true;
+      httpsFallbacks += 1;
+      index += 1;
+      continue;
+    }
+    if (sawNetworkLine && (!trimmed || /^context compacted$/i.test(trimmed))) {
+      index += 1;
+      continue;
+    }
+    break;
+  }
+
+  if (reconnectAttempts.length === 0) {
+    return null;
+  }
+  const nextLine = nextSignificantProcessText(lines, index);
+  if (!nextLine || isTerminalNetworkFailureLine(nextLine)) {
+    return null;
+  }
+  return { reconnectAttempts, httpsFallbacks, nextIndex: index };
+}
+
+function nextSignificantProcessText(lines: string[], startIndex: number): string | null {
+  for (let index = startIndex; index < lines.length; index += 1) {
+    const trimmed = normalizedProcessLine(lines[index] ?? "").trim();
+    if (trimmed) {
+      return trimmed;
+    }
+  }
+  return null;
+}
+
+function isNetworkRetryDiagnostic(line: string): boolean {
+  return /codex_core::responses_retry:.*retrying sampling request/i.test(line);
+}
+
+function reconnectAttempt(line: string): string | null {
+  return line.match(/^(?:ERROR:\s*)?Reconnecting\.\.\.\s+(\d+\/\d+)/i)?.[1] ?? null;
+}
+
+function isHttpsFallbackLine(line: string): boolean {
+  return /Falling back from WebSockets to HTTPS transport/i.test(line);
+}
+
+function isTerminalNetworkFailureLine(line: string): boolean {
+  return (
+    /^(?:ERROR|FATAL)\b/i.test(line) ||
+    /\b(?:request|process|router|worker)\b.*\b(?:timed out|timeout|failed)\b/i.test(line)
+  );
+}
+
+function formatRecoveredNetworkSummary(reconnectAttempts: string[], httpsFallbacks: number): string {
+  const reconnect = reconnectAttempts.length === 1
+    ? `reconnect ${reconnectAttempts[0] ?? ""}`.trim()
+    : `${reconnectAttempts.length} reconnects`;
+  const fallback = httpsFallbacks === 1
+    ? " via HTTPS fallback"
+    : httpsFallbacks > 1
+      ? ` with ${httpsFallbacks} HTTPS fallbacks`
+      : "";
+  return `Network recovered after ${reconnect}${fallback}`;
 }
 
 function collectProcessExecCommand(
@@ -2500,6 +2624,23 @@ function isBuildOutputSummaryLine(line: string): boolean {
 
 function isNoMatchesSummaryLine(line: string): boolean {
   return /^No matches in \d+(?:ms|s|m)?(?:\s+\(\$ .+\))?$/i.test(line);
+}
+
+function isNetworkRecoverySummaryLine(line: string): boolean {
+  return networkRecoverySummaryParts(line) !== null;
+}
+
+function networkRecoverySummaryParts(line: string): { reconnect: string; fallback: string } | null {
+  const match = line.match(
+    /^Network recovered after (reconnect \d+\/\d+|\d+ reconnects?)(?: (via HTTPS fallback|with \d+ HTTPS fallbacks))?$/i
+  );
+  if (!match) {
+    return null;
+  }
+  return {
+    reconnect: match[1] ?? "",
+    fallback: match[2]?.replace(/^via\s+/i, "").replace(/^with\s+/i, "") ?? ""
+  };
 }
 
 function isCollapsedOutputSummaryLine(line: string): boolean {
@@ -3494,6 +3635,10 @@ function classifyRenderedLine(section: WorkerOutputSection, line: string): Rende
     return { kind: "summary", text: trimmed };
   }
 
+  if (isNetworkRecoverySummaryLine(trimmed)) {
+    return { kind: "summary", text: trimmed };
+  }
+
   if (
     (isProcessSection || isExplicitErrorLine(trimmed)) &&
     isErrorProcessLine(trimmed) &&
@@ -4121,6 +4266,15 @@ function isTurnScopedWorkerArtifact(file: string): boolean {
 }
 
 function formatSummaryDisplayText(text: string): string {
+  const networkRecovery = networkRecoverySummaryParts(text);
+  if (networkRecovery) {
+    return [
+      "network recovered",
+      networkRecovery.reconnect,
+      networkRecovery.fallback
+    ].filter(Boolean).join(" · ");
+  }
+
   const readRun = text.match(/^Collapsed read summaries: (\d+) chunks, (\d+) lines(?: \((.+)\))?$/i);
   if (readRun) {
     return [

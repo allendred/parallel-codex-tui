@@ -2619,7 +2619,7 @@ describe("WorkerOutputView", () => {
     }
   });
 
-  it("hides Codex plugin and telemetry diagnostics without hiding network recovery", async () => {
+  it("compacts recovered Codex network diagnostics without hiding the recovery evidence", async () => {
     const root = await mkdtemp(join(tmpdir(), "pct-worker-output-codex-diagnostics-"));
     const workerDir = join(root, "critic-codex");
 
@@ -2652,13 +2652,83 @@ describe("WorkerOutputView", () => {
 
       const frame = lastFrame() ?? "";
       expect(frame).toContain("before diagnostics");
-      expect(frame).toContain("Reconnecting... 1/5");
-      expect(frame).toContain("Falling back from WebSockets to HTTPS transport");
+      expect(frame).toContain("· network recovered · reconnect 1/5 · HTTPS fallback");
       expect(frame).toContain("after network recovery");
+      expect(frame).not.toContain("Reconnecting... 1/5");
+      expect(frame).not.toContain("Falling back from WebSockets to HTTPS transport");
       expect(frame).not.toContain("codexcoreplugins::manifest");
       expect(frame).not.toContain("supported path=");
       expect(frame).not.toContain("codex_otel::events::session_telemetry");
       expect(frame).not.toContain("tag value contains invalid characters");
+    } finally {
+      unmount();
+    }
+  });
+
+  it("keeps an unresolved reconnect as an error at the end of the worker log", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pct-worker-output-unresolved-reconnect-"));
+    const workerDir = join(root, "critic-codex");
+
+    await mkdir(workerDir, { recursive: true });
+    await writeFile(
+      join(workerDir, "output.log"),
+      ["before unresolved reconnect", "ERROR: Reconnecting... 2/5"].join("\n")
+    );
+
+    const { lastFrame, unmount } = render(
+      <WorkerOutputView
+        title="Critic (codex) output"
+        role="critic"
+        logPath={join(workerDir, "output.log")}
+        height={12}
+      />
+    );
+
+    try {
+      await waitForFrame(lastFrame, "Reconnecting... 2/5");
+
+      const frame = lastFrame() ?? "";
+      expect(frame).toContain("Reconnecting... 2/5");
+      expect(frame).not.toContain("network recovered");
+    } finally {
+      unmount();
+    }
+  });
+
+  it("aggregates multiple recovered reconnects into one worker log summary", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pct-worker-output-reconnect-summary-"));
+    const workerDir = join(root, "critic-codex");
+
+    await mkdir(workerDir, { recursive: true });
+    await writeFile(
+      join(workerDir, "output.log"),
+      [
+        "before reconnects",
+        "ERROR: Reconnecting... 1/5",
+        "warning: Falling back from WebSockets to HTTPS transport: request timed out",
+        "after first recovery",
+        "ERROR: Reconnecting... 2/5",
+        "after second recovery"
+      ].join("\n")
+    );
+
+    const { lastFrame, unmount } = render(
+      <WorkerOutputView
+        title="Critic (codex) output"
+        role="critic"
+        logPath={join(workerDir, "output.log")}
+        height={16}
+      />
+    );
+
+    try {
+      await waitForFrame(lastFrame, "after second recovery");
+
+      const frame = lastFrame() ?? "";
+      expect(frame.match(/· network recovered · 2 reconnects · HTTPS fallback/g)).toHaveLength(1);
+      expect(frame).toContain("after first recovery");
+      expect(frame).toContain("after second recovery");
+      expect(frame).not.toContain("Reconnecting...");
     } finally {
       unmount();
     }
