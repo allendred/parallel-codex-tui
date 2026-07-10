@@ -43,6 +43,7 @@ export interface FeatureWorkspaceWave {
   conflictDir: string;
   featureIds: string[];
   featureDirs: ReadonlyMap<string, string>;
+  reviewDirs: ReadonlyMap<string, string>;
 }
 
 export interface WorkspaceIntegrationResult {
@@ -157,6 +158,7 @@ export class ParallelWorkspaceManager {
     const verificationDir = join(rootDir, "verification");
     const conflictDir = join(rootDir, "conflicts");
     const featureDirs = new Map<string, string>();
+    const reviewDirs = new Map<string, string>();
 
     await rm(rootDir, { recursive: true, force: true });
     await cloneTree(this.workspaceRoot, baselineDir, (path) => this.excludeFromSource(path));
@@ -166,6 +168,7 @@ export class ParallelWorkspaceManager {
       const featureDir = join(rootDir, "features", featureId);
       await cloneTree(baselineDir, featureDir);
       featureDirs.set(featureId, featureDir);
+      reviewDirs.set(featureId, join(rootDir, "reviews", featureId));
     }
 
     const wave: FeatureWorkspaceWave = {
@@ -178,7 +181,8 @@ export class ParallelWorkspaceManager {
       verificationDir,
       conflictDir,
       featureIds: [...input.featureIds],
-      featureDirs
+      featureDirs,
+      reviewDirs
     };
     await writeJson(join(rootDir, "workspace.json"), {
       version: 1,
@@ -189,7 +193,8 @@ export class ParallelWorkspaceManager {
       staging: stagingDir,
       integration: integrationDir,
       verification: verificationDir,
-      features: Object.fromEntries(featureDirs)
+      features: Object.fromEntries(featureDirs),
+      reviews: Object.fromEntries(reviewDirs)
     });
     return wave;
   }
@@ -239,6 +244,17 @@ export class ParallelWorkspaceManager {
     await rm(wave.verificationDir, { recursive: true, force: true });
     await cloneTree(wave.integrationDir, wave.verificationDir);
     return wave.verificationDir;
+  }
+
+  async prepareFeatureReviewWorkspace(wave: FeatureWorkspaceWave, featureId: string): Promise<string> {
+    const featureDir = wave.featureDirs.get(featureId);
+    const reviewDir = wave.reviewDirs.get(featureId);
+    if (!featureDir || !reviewDir) {
+      throw new Error(`Feature review workspace missing for ${featureId}`);
+    }
+    await rm(reviewDir, { recursive: true, force: true });
+    await cloneTree(featureDir, reviewDir);
+    return reviewDir;
   }
 
   async commitWave(wave: FeatureWorkspaceWave): Promise<WorkspaceIntegrationResult> {

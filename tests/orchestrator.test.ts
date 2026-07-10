@@ -275,15 +275,19 @@ describe("Orchestrator", () => {
     });
 
     expect(adapter.actorCwd).not.toBe(root);
-    expect(adapter.criticCwd).toBe(adapter.actorCwd);
+    expect(adapter.criticCwd).not.toBe(adapter.actorCwd);
+    expect(adapter.criticCwd).toContain(join("reviews", "0001"));
     expect(adapter.actorIsolation).toBe(true);
     expect(adapter.criticIsolation).toBe(true);
+    expect(adapter.criticSawActorChange).toBe(true);
     expect(adapter.liveWasUntouchedDuringCritic).toBe(true);
     expect(await readTextIfExists(join(root, "approved.txt"))).toBe("approved\n");
+    expect(await pathExists(join(root, "critic-only.txt"))).toBe(false);
     expect(progress).toContainEqual({ wave: 1, waves: 1, phase: "integration", completed: 0, total: 1 });
     expect(progress).toContainEqual({ wave: 1, waves: 1, phase: "integration", completed: 1, total: 1 });
     const taskDir = join(root, ".parallel-codex", "sessions", result.taskId ?? "");
     expect(JSON.parse(await readTextIfExists(join(taskDir, "actor-mock", "native-session.json"))).cwd).toBe(adapter.actorCwd);
+    expect(JSON.parse(await readTextIfExists(join(taskDir, "critic-mock", "native-session.json"))).cwd).toBe(adapter.criticCwd);
   });
 
   it("runs independent feature pairs concurrently and waits for dependency waves", async () => {
@@ -308,12 +312,19 @@ describe("Orchestrator", () => {
     expect(adapter.actorCwds.get("0001-ui")).not.toBe(root);
     expect(adapter.actorCwds.get("0001-engine")).not.toBe(root);
     expect(adapter.actorCwds.get("0001-ui")).not.toBe(adapter.actorCwds.get("0001-engine"));
-    expect(adapter.criticCwds.get("0001-ui")).toBe(adapter.actorCwds.get("0001-ui"));
-    expect(adapter.criticCwds.get("0001-engine")).toBe(adapter.actorCwds.get("0001-engine"));
+    expect(adapter.criticCwds.get("0001-ui")).not.toBe(adapter.actorCwds.get("0001-ui"));
+    expect(adapter.criticCwds.get("0001-engine")).not.toBe(adapter.actorCwds.get("0001-engine"));
+    expect(adapter.criticCwds.get("0001-ui")).toContain(join("reviews", "0001-ui"));
+    expect(adapter.criticCwds.get("0001-engine")).toContain(join("reviews", "0001-engine"));
+    expect(adapter.criticSawActorChanges.get("0001-ui")).toBe(true);
+    expect(adapter.criticSawActorChanges.get("0001-engine")).toBe(true);
     expect(adapter.integrationSawDependencies).toBe(true);
     expect(await readTextIfExists(join(root, "src", "0001-ui.txt"))).toContain("0001-ui");
     expect(await readTextIfExists(join(root, "src", "0001-engine.txt"))).toContain("0001-engine");
     expect(await readTextIfExists(join(root, "src", "0001-integration.txt"))).toContain("0001-integration");
+    expect(await pathExists(join(root, "src", "critic-only-0001-ui.txt"))).toBe(false);
+    expect(await pathExists(join(root, "src", "critic-only-0001-engine.txt"))).toBe(false);
+    expect(await pathExists(join(root, "src", "critic-only-0001-integration.txt"))).toBe(false);
     expect(adapter.events.indexOf("actor:start:0001-integration")).toBeGreaterThan(
       adapter.events.indexOf("critic:end:0001-ui")
     );
@@ -719,8 +730,9 @@ describe("Orchestrator", () => {
       "judge-mock"
     ));
     expect(workerCwds[1]).not.toBe(workspaceRoot);
-    expect(workerCwds[2]).toBe(workerCwds[1]);
+    expect(workerCwds[2]).not.toBe(workerCwds[1]);
     expect(workerCwds[1]).toContain(join("workspaces", "turn-0001", "wave-0001", "features", "0001"));
+    expect(workerCwds[2]).toContain(join("workspaces", "turn-0001", "wave-0001", "reviews", "0001"));
   });
 
   it("records simple decisions in one shared router audit across workspaces", async () => {
@@ -884,7 +896,8 @@ describe("Orchestrator", () => {
     expect(judgeRun?.cwd).toBe(join(taskDir, "judge-mock"));
     expect(judgeRun?.enforceWorkspaceIsolation).toBe(true);
     expect(actorRun?.cwd).not.toBe(root);
-    expect(criticRun?.cwd).toBe(actorRun?.cwd);
+    expect(criticRun?.cwd).not.toBe(actorRun?.cwd);
+    expect(criticRun?.cwd).toContain(join("reviews", "0002"));
     expect(actorRun?.prompt).toContain("- 0001: FIRST_TURN_MEMORY status rail completed");
     expect(criticRun?.prompt).toContain("- 0001: FIRST_TURN_MEMORY status rail completed");
     expect(actorRun?.prompt).not.toContain("Previous turn summaries:\n- (none)");
@@ -975,6 +988,13 @@ describe("Orchestrator", () => {
     expect(await readTextIfExists(join(featureDir, "critic-findings.jsonl"))).toContain('"id":"C-001"');
     expect(await readTextIfExists(join(featureDir, "actor-replies.jsonl"))).toContain('"finding_id":"C-001"');
     expect(await readTextIfExists(join(featureDir, "status.json"))).toContain('"state": "approved"');
+    expect(adapter.criticCwds).toHaveLength(2);
+    expect(adapter.criticCwds[1]).toBe(adapter.criticCwds[0]);
+    expect(adapter.criticNativeSessions).toEqual([null, "mock-critic-mock"]);
+    expect(adapter.secondCriticSawActorFix).toBe(true);
+    expect(adapter.secondCriticSawCleanReviewClone).toBe(true);
+    expect(await readTextIfExists(join(root, "fixed.txt"))).toBe("fixed\n");
+    expect(await pathExists(join(root, "critic-only.txt"))).toBe(false);
   });
 
   it("uses current feature worklog in supervisor summaries instead of stale actor worker artifacts", async () => {
@@ -1795,6 +1815,7 @@ class SingleIsolationAdapter extends MockWorkerAdapter {
   criticCwd = "";
   actorIsolation = false;
   criticIsolation = false;
+  criticSawActorChange = false;
   liveWasUntouchedDuringCritic = false;
 
   constructor(private readonly liveRoot: string) {
@@ -1810,7 +1831,9 @@ class SingleIsolationAdapter extends MockWorkerAdapter {
     if (spec.role === "critic") {
       this.criticCwd = spec.cwd;
       this.criticIsolation = spec.enforceWorkspaceIsolation === true;
+      this.criticSawActorChange = await readTextIfExists(join(spec.cwd, "approved.txt")) === "approved\n";
       this.liveWasUntouchedDuringCritic = !(await pathExists(join(this.liveRoot, "approved.txt")));
+      await writeText(join(spec.cwd, "critic-only.txt"), "must not be integrated\n");
     }
     return super.run(spec);
   }
@@ -1855,6 +1878,7 @@ class MultiFeatureAdapter extends MockWorkerAdapter {
   readonly events: string[] = [];
   readonly actorCwds = new Map<string, string>();
   readonly criticCwds = new Map<string, string>();
+  readonly criticSawActorChanges = new Map<string, boolean>();
   maxConcurrentActors = 0;
   integrationSawDependencies = false;
   private activeActors = 0;
@@ -1897,6 +1921,11 @@ class MultiFeatureAdapter extends MockWorkerAdapter {
 
     if (spec.role === "critic") {
       this.criticCwds.set(featureId, spec.cwd);
+      this.criticSawActorChanges.set(
+        featureId,
+        await pathExists(join(spec.cwd, "src", `${featureId}.txt`))
+      );
+      await writeText(join(spec.cwd, "src", `critic-only-${featureId}.txt`), "must not be integrated\n");
       this.events.push(`critic:start:${featureId}`);
       await new Promise((resolve) => setTimeout(resolve, 30));
       const result = await super.run(spec);
@@ -2236,6 +2265,10 @@ class CapturingAdapter extends MockWorkerAdapter {
 
 class RevisionFindingAdapter extends MockWorkerAdapter {
   readonly runs: WorkerRunSpec[] = [];
+  readonly criticCwds: string[] = [];
+  readonly criticNativeSessions: Array<string | null> = [];
+  secondCriticSawActorFix = false;
+  secondCriticSawCleanReviewClone = false;
   private criticRuns = 0;
 
   async run(spec: WorkerRunSpec): Promise<WorkerResult> {
@@ -2243,7 +2276,10 @@ class RevisionFindingAdapter extends MockWorkerAdapter {
     const result = await super.run(spec);
     if (spec.role === "critic") {
       this.criticRuns += 1;
+      this.criticCwds.push(spec.cwd);
+      this.criticNativeSessions.push(spec.nativeSession?.session_id ?? null);
       if (this.criticRuns === 1) {
+        await writeText(join(spec.cwd, "critic-only.txt"), "discard before recheck\n");
         const featureDir = featureDirFromPrompt(spec.prompt);
         await writeText(join(featureDir, "critic-findings.jsonl"), "");
         await appendJsonLine(join(featureDir, "critic-findings.jsonl"), {
@@ -2252,9 +2288,13 @@ class RevisionFindingAdapter extends MockWorkerAdapter {
           summary: "Keyboard handling is incomplete"
         });
         await writeText(join(spec.filesDir, "review.md"), "# **REVISION_REQUIRED**\n\nSee critic-findings.jsonl.\n");
+      } else {
+        this.secondCriticSawActorFix = await readTextIfExists(join(spec.cwd, "fixed.txt")) === "fixed\n";
+        this.secondCriticSawCleanReviewClone = !(await pathExists(join(spec.cwd, "critic-only.txt")));
       }
     }
     if (spec.role === "actor" && spec.prompt.includes("Revision request:")) {
+      await writeText(join(spec.cwd, "fixed.txt"), "fixed\n");
       const featureDir = featureDirFromPrompt(spec.prompt);
       await appendJsonLine(join(featureDir, "actor-replies.jsonl"), {
         finding_id: "C-001",

@@ -176,9 +176,10 @@ export function buildCriticPrompt(input: RolePromptInput): string {
     `Judge directory: ${input.judgeDir}`,
     `Actor directory: ${input.actorDir ?? ""}`,
     ...(input.workspaceDir ? [
-      `Feature workspace: ${input.workspaceDir}`,
-      "Treat this feature workspace as the logical project root for review.",
-      "Review the implementation in this feature workspace. Do not modify the live workspace."
+      `Review workspace: ${input.workspaceDir}`,
+      "This is a disposable review copy of the Actor feature workspace and is the logical project root for review.",
+      "Do not modify implementation files. Any implementation changes made in this review copy are discarded.",
+      "Do not modify the Actor feature workspace or live workspace."
     ] : []),
     ...turnLines(input.turn),
     ...featureLines(input.feature),

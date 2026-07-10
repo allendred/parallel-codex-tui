@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   buildActorPrompt,
+  buildCriticPrompt,
   buildJudgePrompt,
   buildWaveActorPrompt,
   buildWaveCriticPrompt
@@ -24,6 +25,20 @@ describe("role prompts", () => {
     expect(prompt).toContain("- Always update worklog.md.");
     expect(prompt).toContain("logical project root for this run");
     expect(prompt).toContain("Never write implementation files to the shared live workspace");
+  });
+
+  it("describes the Critic workspace as a disposable review copy", () => {
+    const prompt = buildCriticPrompt({
+      request: "审查功能",
+      taskDir: "/tmp/task",
+      judgeDir: "/tmp/task/turn",
+      actorDir: "/tmp/task/actor",
+      workspaceDir: "/tmp/task/workspaces/reviews/ui"
+    });
+
+    expect(prompt).toContain("Review workspace: /tmp/task/workspaces/reviews/ui");
+    expect(prompt).toContain("disposable review copy");
+    expect(prompt).toContain("discarded");
   });
 
   it("asks Judge for a bounded dependency-aware feature manifest", () => {

@@ -566,6 +566,10 @@ export class Orchestrator {
       let criticCompleted = 0;
       reportProgress("critic", criticCompleted, actorRuns.length, "done", "running");
       const pairRuns = await mapWithConcurrency(actorRuns, concurrency, async (actorRun): Promise<FeaturePairRun> => {
+        const reviewWorkspace = await workspaceManager.prepareFeatureReviewWorkspace(
+          workspaceWave,
+          actorRun.channel.id
+        );
         const critic = await this.runCritic(
           input,
           task,
@@ -576,7 +580,7 @@ export class Orchestrator {
           turn,
           actorRun.channel,
           true,
-          requiredFeatureWorkspace(workspaceWave.featureDirs, actorRun.channel)
+          reviewWorkspace
         );
         criticCompleted += 1;
         reportProgress("critic", criticCompleted, actorRuns.length, "done", "running");
@@ -632,6 +636,10 @@ export class Orchestrator {
         let recheckCompleted = 0;
         reportProgress("critic", recheckCompleted, revisedActors.length, "done", "rerunning");
         const revisedPairs = await mapWithConcurrency(revisedActors, concurrency, async (pair): Promise<FeaturePairRun> => {
+          const reviewWorkspace = await workspaceManager.prepareFeatureReviewWorkspace(
+            workspaceWave,
+            pair.channel.id
+          );
           const critic = await this.runCritic(
             input,
             task,
@@ -642,7 +650,7 @@ export class Orchestrator {
             turn,
             pair.channel,
             true,
-            requiredFeatureWorkspace(workspaceWave.featureDirs, pair.channel)
+            reviewWorkspace
           );
           recheckCompleted += 1;
           reportProgress("critic", recheckCompleted, revisedActors.length, "done", "rerunning");
@@ -854,6 +862,7 @@ export class Orchestrator {
     );
     throwIfCancelled(input.signal);
 
+    let reviewWorkspace = await workspaceManager.prepareFeatureReviewWorkspace(workspaceWave, feature.id);
     await this.sessions.updateTaskStatus(task, "critic_running");
     await updateFeatureStatus(feature, "critic_running");
     input.onStatus?.({ taskId: task.id, judge: "done", actor: "done", critic: "running" });
@@ -867,7 +876,7 @@ export class Orchestrator {
       turn,
       feature,
       false,
-      workspaceDir,
+      reviewWorkspace,
       true
     );
     throwIfCancelled(input.signal);
@@ -899,6 +908,7 @@ export class Orchestrator {
         true
       );
       throwIfCancelled(input.signal);
+      reviewWorkspace = await workspaceManager.prepareFeatureReviewWorkspace(workspaceWave, feature.id);
       await this.sessions.updateTaskStatus(task, "critic_running");
       await updateFeatureStatus(feature, "critic_running");
       input.onStatus?.({ taskId: task.id, judge: "done", actor: "done", critic: "rerunning" });
@@ -912,7 +922,7 @@ export class Orchestrator {
         turn,
         feature,
         false,
-        workspaceDir,
+        reviewWorkspace,
         true
       );
       throwIfCancelled(input.signal);

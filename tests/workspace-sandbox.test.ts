@@ -50,6 +50,31 @@ describe("ParallelWorkspaceManager", () => {
     expect(await pathExists(join(workspaceRoot, ".parallel-codex", "injected.txt"))).toBe(false);
   });
 
+  it("refreshes disposable feature review workspaces without merging Critic writes", async () => {
+    const workspaceRoot = await mkdtemp(join(tmpdir(), "pct-workspace-review-"));
+    const taskDir = join(workspaceRoot, ".parallel-codex", "sessions", "task-review");
+    await writeText(join(workspaceRoot, "base.txt"), "base\n");
+    const manager = new ParallelWorkspaceManager({ workspaceRoot, taskDir, dataDir: ".parallel-codex" });
+    const wave = await manager.prepareWave({ turnId: "0001", wave: 1, featureIds: ["0001-ui"] });
+    const featureRoot = wave.featureDirs.get("0001-ui") ?? "";
+    await writeText(join(featureRoot, "actor.txt"), "first\n");
+
+    const firstReview = await manager.prepareFeatureReviewWorkspace(wave, "0001-ui");
+    expect(firstReview).toContain(join("reviews", "0001-ui"));
+    expect(await readTextIfExists(join(firstReview, "actor.txt"))).toBe("first\n");
+    await writeText(join(firstReview, "critic-only.txt"), "must be discarded\n");
+    await writeText(join(featureRoot, "actor.txt"), "revised\n");
+
+    const refreshedReview = await manager.prepareFeatureReviewWorkspace(wave, "0001-ui");
+    expect(refreshedReview).toBe(firstReview);
+    expect(await readTextIfExists(join(refreshedReview, "actor.txt"))).toBe("revised\n");
+    expect(await pathExists(join(refreshedReview, "critic-only.txt"))).toBe(false);
+
+    await manager.integrateWave(wave);
+    expect(await readTextIfExists(join(workspaceRoot, "actor.txt"))).toBe("revised\n");
+    expect(await pathExists(join(workspaceRoot, "critic-only.txt"))).toBe(false);
+  });
+
   it("merges independent feature edits through staging before updating the live workspace", async () => {
     const workspaceRoot = await mkdtemp(join(tmpdir(), "pct-workspace-merge-"));
     const taskDir = join(workspaceRoot, ".parallel-codex", "sessions", "task-two");
