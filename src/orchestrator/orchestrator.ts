@@ -15,7 +15,7 @@ import {
   updateFeatureStatus,
   writeFeatureDecision
 } from "./collaboration-channel.js";
-import { buildActorPrompt, buildCriticPrompt, buildJudgePrompt } from "./prompts.js";
+import { buildActorPrompt, buildCriticPrompt, buildJudgePrompt, buildMainPrompt } from "./prompts.js";
 import { buildSupervisorSummary } from "./supervisor-summary.js";
 
 const PREVIOUS_TURN_SUMMARY_LIMIT = 5;
@@ -341,9 +341,13 @@ export class Orchestrator {
     const promptPath = join(filesDir, "prompt.md");
     const outputLogPath = join(filesDir, "output.log");
     const statusPath = join(filesDir, "status.json");
+    const prompt = buildMainPrompt({
+      request: input.request,
+      role: this.config.roles.main
+    });
 
     await ensureDir(filesDir);
-    await writeText(promptPath, input.request);
+    await writeText(promptPath, prompt);
     await writeText(outputLogPath, "");
     await writeJson(statusPath, {
       worker_id: workerId,
@@ -373,7 +377,7 @@ export class Orchestrator {
       promptPath,
       outputLogPath,
       statusPath,
-      prompt: input.request
+      prompt
     }, "main");
 
     return readTextIfExists(outputLogPath);

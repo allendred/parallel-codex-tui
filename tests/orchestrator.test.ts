@@ -73,6 +73,33 @@ describe("Orchestrator", () => {
     expect(result.summary).not.toContain("Forced simple mode");
   });
 
+  it("passes configured main role instructions into simple chat prompts", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pct-orch-main-role-"));
+    const config = mockConfig(root);
+    config.router.defaultMode = "simple";
+    config.roles.main = {
+      title: "Guide",
+      instructions: ["Answer in concise Chinese.", "Keep prior context."]
+    };
+    const manager = new SessionManager({
+      projectRoot: root,
+      dataDir: config.dataDir
+    });
+    const adapter = new CapturingAdapter();
+    const orchestrator = new Orchestrator(config, manager, new Map([["mock", adapter]]));
+
+    const result = await orchestrator.handleRequest({
+      request: "解释 actor critic",
+      cwd: root
+    });
+
+    expect(adapter.runs[0]?.prompt).toContain("# Role: Guide");
+    expect(adapter.runs[0]?.prompt).toContain("- Answer in concise Chinese.");
+    expect(adapter.runs[0]?.prompt).toContain("- Keep prior context.");
+    expect(adapter.runs[0]?.prompt).toContain("User request:\n解释 actor critic");
+    expect(result.summary).toBe("Mock simple response for: 解释 actor critic");
+  });
+
   it("reuses the main native session across simple chat turns and restarts", async () => {
     const root = await mkdtemp(join(tmpdir(), "pct-orch-main-session-"));
     const config = mockConfig(root);

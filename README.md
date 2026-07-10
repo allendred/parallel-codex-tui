@@ -205,6 +205,18 @@ command = "claude"
 args = ["--resume", "{sessionId}"]
 ```
 
+Customize each role independently; the main role is applied to simple chat, while Judge, Actor, and Critic receive their configured instructions during complex work:
+
+```toml
+[roles.main]
+title = "Guide"
+instructions = ["Answer directly and keep prior context."]
+
+[roles.actor]
+title = "Builder"
+instructions = ["Implement small verified changes.", "Record decisions in worklog.md."]
+```
+
 Keep `[router.codex]` on `workspace-write`; routing only classifies requests and does not need host-level access. If a trusted local project needs Docker, OrbStack, or other host services, opt into broader worker permissions in your private `.parallel-codex/config.toml` rather than committing them.
 
 The process adapter sends each role prompt to stdin and records stdout/stderr in `output.log`.

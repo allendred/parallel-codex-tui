@@ -1,3 +1,8 @@
+export interface MainPromptInput {
+  request: string;
+  role?: RolePromptConfig;
+}
+
 export interface JudgePromptInput {
   request: string;
   taskDir: string;
@@ -36,6 +41,21 @@ export interface PromptFeatureContext {
   actorRepliesPath: string;
   criticFindingsPath: string;
   decisionsPath: string;
+}
+
+export function buildMainPrompt(input: MainPromptInput): string {
+  const role = roleConfig(input.role, "Main", [
+    "Answer the user directly for simple chat and explanation requests."
+  ]);
+  return [
+    `# Role: ${role.title}`,
+    "",
+    ...instructionLines(role.instructions),
+    "",
+    "User request:",
+    input.request,
+    ""
+  ].join("\n");
 }
 
 export function buildJudgePrompt(input: JudgePromptInput): string {

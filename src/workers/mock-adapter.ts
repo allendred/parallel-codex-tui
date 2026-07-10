@@ -41,7 +41,7 @@ export class MockWorkerAdapter implements WorkerAdapter {
     }
 
     if (spec.role === "main") {
-      await appendText(spec.outputLogPath, `Mock simple response for: ${spec.prompt.trim()}\n`);
+      await appendText(spec.outputLogPath, `Mock simple response for: ${mainRequestFromPrompt(spec.prompt)}\n`);
     }
 
     await appendText(spec.outputLogPath, `[mock:${spec.role}] done\n`);
@@ -53,6 +53,12 @@ export class MockWorkerAdapter implements WorkerAdapter {
       signal: null
     };
   }
+}
+
+function mainRequestFromPrompt(prompt: string): string {
+  const marker = "\nUser request:\n";
+  const markerIndex = prompt.indexOf(marker);
+  return markerIndex >= 0 ? prompt.slice(markerIndex + marker.length).trim() : prompt.trim();
 }
 
 function featureDirFromPrompt(prompt: string): string | null {
