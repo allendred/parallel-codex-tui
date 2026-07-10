@@ -393,13 +393,105 @@ describe("ProcessWorkerAdapter", () => {
     });
   }, 5000);
 
+  it("keeps a total timeout failed when the worker exits zero on SIGTERM", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pct-process-timeout-zero-"));
+    const filesDir = join(root, "actor-mock");
+    const promptPath = join(filesDir, "prompt.md");
+    const outputLogPath = join(filesDir, "output.log");
+    const statusPath = join(filesDir, "status.json");
+    const script = "process.on('SIGTERM',()=>process.exit(0));setInterval(()=>{},1000)";
+
+    await writeText(promptPath, "time out cleanly");
+    const adapter = new ProcessWorkerAdapter(process.execPath, ["-e", script]);
+    const result = await adapter.run({
+      workerId: "actor-timeout-zero",
+      role: "actor",
+      engine: "mock",
+      cwd: root,
+      filesDir,
+      promptPath,
+      outputLogPath,
+      statusPath,
+      prompt: "time out cleanly",
+      timeoutMs: 200
+    });
+
+    expect(result.exitCode).toBe(0);
+    expect(await readTextIfExists(outputLogPath)).toContain("Process timed out after 200ms");
+    await expect(readJson(statusPath, WorkerStatusSchema)).resolves.toMatchObject({
+      state: "failed",
+      phase: "process-timeout"
+    });
+  });
+
+  it("force kills a timed-out worker that ignores SIGTERM", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pct-process-force-timeout-"));
+    const filesDir = join(root, "actor-mock");
+    const promptPath = join(filesDir, "prompt.md");
+    const outputLogPath = join(filesDir, "output.log");
+    const statusPath = join(filesDir, "status.json");
+    const script = "process.on('SIGTERM',()=>{});setInterval(()=>{},1000)";
+
+    await writeText(promptPath, "force timeout");
+    const adapter = new ProcessWorkerAdapter(process.execPath, ["-e", script]);
+    const result = await adapter.run({
+      workerId: "actor-force-timeout",
+      role: "actor",
+      engine: "mock",
+      cwd: root,
+      filesDir,
+      promptPath,
+      outputLogPath,
+      statusPath,
+      prompt: "force timeout",
+      timeoutMs: 200
+    });
+
+    expect(result.signal).toBe("SIGKILL");
+    await expect(readJson(statusPath, WorkerStatusSchema)).resolves.toMatchObject({
+      state: "failed",
+      phase: "process-timeout"
+    });
+  }, 5000);
+
+  it("fails cleanly when a worker closes stdin before receiving the prompt", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pct-process-input-error-"));
+    const filesDir = join(root, "actor-mock");
+    const promptPath = join(filesDir, "prompt.md");
+    const outputLogPath = join(filesDir, "output.log");
+    const statusPath = join(filesDir, "status.json");
+    const prompt = "x".repeat(4 * 1024 * 1024);
+    const script = "require('node:fs').closeSync(0);setInterval(()=>{},1000)";
+
+    await writeText(promptPath, prompt);
+    const adapter = new ProcessWorkerAdapter(process.execPath, ["-e", script]);
+    await adapter.run({
+      workerId: "actor-input-error",
+      role: "actor",
+      engine: "mock",
+      cwd: root,
+      filesDir,
+      promptPath,
+      outputLogPath,
+      statusPath,
+      prompt,
+      timeoutMs: 2000
+    });
+
+    expect(await readTextIfExists(outputLogPath)).toContain("Process input failed");
+    await expect(readJson(statusPath, WorkerStatusSchema)).resolves.toMatchObject({
+      state: "failed",
+      phase: "process-input-error"
+    });
+  }, 5000);
+
   it("fails workers that stop producing output for the idle timeout", async () => {
     const root = await mkdtemp(join(tmpdir(), "pct-process-idle-"));
     const filesDir = join(root, "actor-mock");
     const promptPath = join(filesDir, "prompt.md");
     const outputLogPath = join(filesDir, "output.log");
     const statusPath = join(filesDir, "status.json");
-    const script = "setInterval(() => {}, 1000)";
+    const script = "process.on('SIGTERM',()=>process.exit(0));setInterval(() => {}, 1000)";
 
     await writeText(promptPath, "hello process");
 
@@ -414,11 +506,11 @@ describe("ProcessWorkerAdapter", () => {
       outputLogPath,
       statusPath,
       prompt: "hello process",
-      idleTimeoutMs: 25
+      idleTimeoutMs: 200
     });
 
-    expect(result.exitCode).not.toBe(0);
-    expect(await readTextIfExists(outputLogPath)).toContain("Process idle timed out after 25ms");
+    expect(result.exitCode).toBe(0);
+    expect(await readTextIfExists(outputLogPath)).toContain("Process idle timed out after 200ms");
 
     const status = await readJson(statusPath, WorkerStatusSchema);
     expect(status.state).toBe("failed");
@@ -431,7 +523,7 @@ describe("ProcessWorkerAdapter", () => {
     const promptPath = join(filesDir, "prompt.md");
     const outputLogPath = join(filesDir, "output.log");
     const statusPath = join(filesDir, "status.json");
-    const script = "setInterval(() => {}, 1000)";
+    const script = "process.on('SIGTERM',()=>process.exit(0));setInterval(() => {}, 1000)";
 
     await writeText(promptPath, "review this");
 
@@ -446,12 +538,12 @@ describe("ProcessWorkerAdapter", () => {
       outputLogPath,
       statusPath,
       prompt: "review this",
-      firstOutputTimeoutMs: 25,
+      firstOutputTimeoutMs: 200,
       idleTimeoutMs: 500
     });
 
-    expect(result.exitCode).not.toBe(0);
-    expect(await readTextIfExists(outputLogPath)).toContain("Process produced no first output after 25ms");
+    expect(result.exitCode).toBe(0);
+    expect(await readTextIfExists(outputLogPath)).toContain("Process produced no first output after 200ms");
 
     const status = await readJson(statusPath, WorkerStatusSchema);
     expect(status.state).toBe("failed");

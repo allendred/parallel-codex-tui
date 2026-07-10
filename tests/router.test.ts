@@ -212,6 +212,23 @@ describe("routeRequestWithCodex", () => {
     expect(route.duration_ms).toBeLessThan(1000);
   });
 
+  it("fails safely when the router closes stdin before receiving the prompt", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pct-router-input-error-"));
+    const config = defaultConfig(root);
+    config.router.codex.command = process.execPath;
+    config.router.codex.args = ["-e", "require('node:fs').closeSync(0);setInterval(()=>{},1000)"];
+    config.router.codex.timeoutMs = 2000;
+
+    const route = await routeRequestWithCodex("x".repeat(4 * 1024 * 1024), config, undefined, root);
+
+    expect(route).toMatchObject({
+      mode: "simple",
+      source: "fallback"
+    });
+    expect(route.reason).toContain("Codex router input failed");
+    expect(route.duration_ms).toBeLessThan(1500);
+  }, 5000);
+
   it("passes configured environment variables to the router process", async () => {
     const root = await mkdtemp(join(tmpdir(), "pct-router-env-"));
     const config = defaultConfig(root);

@@ -144,8 +144,12 @@ export async function runCodexRouterProcess(
       );
     });
 
-    child.stdin.write(prompt);
-    child.stdin.end();
+    child.stdin.once("error", (error) => {
+      terminate();
+      finish(new Error(`Codex router input failed: ${error.message}`));
+    });
+
+    child.stdin.end(prompt);
   });
 }
 

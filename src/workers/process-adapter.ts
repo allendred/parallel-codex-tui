@@ -145,23 +145,54 @@ export class ProcessWorkerAdapter implements WorkerAdapter {
       let sawOutput = false;
       const outputChunks: string[] = [];
 
+      const clearRunTimers = (): void => {
+        if (timeout) {
+          clearTimeout(timeout);
+          timeout = undefined;
+        }
+        if (idleTimeout) {
+          clearTimeout(idleTimeout);
+          idleTimeout = undefined;
+        }
+        if (firstOutputTimeout) {
+          clearTimeout(firstOutputTimeout);
+          firstOutputTimeout = undefined;
+        }
+        if (abortKillTimeout) {
+          clearTimeout(abortKillTimeout);
+          abortKillTimeout = undefined;
+        }
+      };
+
+      const terminateWithFallback = (): void => {
+        child.kill("SIGTERM");
+        abortKillTimeout = setTimeout(() => {
+          if (!settled) {
+            child.kill("SIGKILL");
+          }
+        }, 1500);
+        abortKillTimeout.unref();
+      };
+
+      const failAndTerminate = (phase: string, summary: string, logLine: string): void => {
+        if (settled || terminalState) {
+          return;
+        }
+        terminalState = "failed";
+        terminalPhase = phase;
+        terminalSummary = summary;
+        clearRunTimers();
+        outputWrites = outputWrites.then(() => appendText(runSpec.outputLogPath, logLine));
+        void setStatus(runSpec, "failed", phase, summary, detectedNativeSessionId);
+        terminateWithFallback();
+      };
+
       const finish = async (result: WorkerResult): Promise<void> => {
         if (settled) {
           return;
         }
         settled = true;
-        if (timeout) {
-          clearTimeout(timeout);
-        }
-        if (idleTimeout) {
-          clearTimeout(idleTimeout);
-        }
-        if (firstOutputTimeout) {
-          clearTimeout(firstOutputTimeout);
-        }
-        if (abortKillTimeout) {
-          clearTimeout(abortKillTimeout);
-        }
+        clearRunTimers();
         if (abortListener) {
           runSpec.signal?.removeEventListener("abort", abortListener);
         }
@@ -191,7 +222,7 @@ export class ProcessWorkerAdapter implements WorkerAdapter {
       };
 
       const resetIdleTimeout = (): void => {
-        if (!runSpec.idleTimeoutMs || runSpec.idleTimeoutMs <= 0 || settled || terminalState === "cancelled") {
+        if (!runSpec.idleTimeoutMs || runSpec.idleTimeoutMs <= 0 || settled || terminalState) {
           return;
         }
 
@@ -200,11 +231,11 @@ export class ProcessWorkerAdapter implements WorkerAdapter {
         }
 
         idleTimeout = setTimeout(() => {
-          terminalPhase = "process-idle-timeout";
-          terminalSummary = `${this.command} produced no output for ${runSpec.idleTimeoutMs}ms`;
-          void appendText(runSpec.outputLogPath, `\nProcess idle timed out after ${runSpec.idleTimeoutMs}ms\n`);
-          void setStatus(runSpec, "failed", terminalPhase, terminalSummary);
-          child.kill("SIGTERM");
+          failAndTerminate(
+            "process-idle-timeout",
+            `${this.command} produced no output for ${runSpec.idleTimeoutMs}ms`,
+            `\nProcess idle timed out after ${runSpec.idleTimeoutMs}ms\n`
+          );
         }, runSpec.idleTimeoutMs);
       };
 
@@ -229,7 +260,7 @@ export class ProcessWorkerAdapter implements WorkerAdapter {
               sessionDetectionTail = detectionText.slice(-512);
             }
           }
-          if (!settled && terminalState !== "cancelled") {
+          if (!settled && !terminalState) {
             await setStatus(runSpec, "running", "process-output", summarizeOutput(text), detectedNativeSessionId);
           }
         });
@@ -248,6 +279,15 @@ export class ProcessWorkerAdapter implements WorkerAdapter {
         if (settled) {
           return;
         }
+        if (terminalState) {
+          void finish({
+            workerId: runSpec.workerId,
+            exitCode: terminalState === "cancelled" ? 130 : 1,
+            signal: null,
+            ...(terminalState === "cancelled" ? { cancelled: true } : {})
+          });
+          return;
+        }
         if (runSpec.signal?.aborted) {
           terminalState = "cancelled";
           terminalPhase = "process-cancelled";
@@ -261,18 +301,7 @@ export class ProcessWorkerAdapter implements WorkerAdapter {
           return;
         }
         settled = true;
-        if (timeout) {
-          clearTimeout(timeout);
-        }
-        if (idleTimeout) {
-          clearTimeout(idleTimeout);
-        }
-        if (firstOutputTimeout) {
-          clearTimeout(firstOutputTimeout);
-        }
-        if (abortKillTimeout) {
-          clearTimeout(abortKillTimeout);
-        }
+        clearRunTimers();
         if (abortListener) {
           runSpec.signal?.removeEventListener("abort", abortListener);
         }
@@ -287,41 +316,35 @@ export class ProcessWorkerAdapter implements WorkerAdapter {
         });
       });
 
+      child.stdin.once("error", (error) => {
+        failAndTerminate(
+          "process-input-error",
+          `${this.command} input failed: ${error.message}`,
+          `\nProcess input failed: ${error.message}\n`
+        );
+      });
+
       abortListener = () => {
-        if (settled || terminalState === "cancelled") {
+        if (settled || terminalState) {
           return;
         }
         terminalState = "cancelled";
         terminalPhase = "process-cancelled";
         terminalSummary = `${this.command} cancelled by user`;
-        if (timeout) {
-          clearTimeout(timeout);
-        }
-        if (idleTimeout) {
-          clearTimeout(idleTimeout);
-        }
-        if (firstOutputTimeout) {
-          clearTimeout(firstOutputTimeout);
-        }
+        clearRunTimers();
         outputWrites = outputWrites.then(() => appendText(runSpec.outputLogPath, "\nProcess cancelled by user\n"));
         void setStatus(runSpec, "cancelled", terminalPhase, terminalSummary, detectedNativeSessionId);
-        child.kill("SIGTERM");
-        abortKillTimeout = setTimeout(() => {
-          if (!settled) {
-            child.kill("SIGKILL");
-          }
-        }, 1500);
-        abortKillTimeout.unref();
+        terminateWithFallback();
       };
       runSpec.signal?.addEventListener("abort", abortListener, { once: true });
 
       if (runSpec.timeoutMs && runSpec.timeoutMs > 0) {
         timeout = setTimeout(() => {
-          terminalPhase = "process-timeout";
-          terminalSummary = `${this.command} exceeded ${runSpec.timeoutMs}ms`;
-          void setStatus(runSpec, "failed", terminalPhase, terminalSummary, detectedNativeSessionId);
-          child.kill("SIGTERM");
-          void appendText(runSpec.outputLogPath, `\nProcess timed out after ${runSpec.timeoutMs}ms\n`);
+          failAndTerminate(
+            "process-timeout",
+            `${this.command} exceeded ${runSpec.timeoutMs}ms`,
+            `\nProcess timed out after ${runSpec.timeoutMs}ms\n`
+          );
         }, runSpec.timeoutMs);
       }
 
@@ -330,11 +353,11 @@ export class ProcessWorkerAdapter implements WorkerAdapter {
           if (sawOutput || settled) {
             return;
           }
-          terminalPhase = "process-first-output-timeout";
-          terminalSummary = `${this.command} produced no first output for ${runSpec.firstOutputTimeoutMs}ms`;
-          void setStatus(runSpec, "failed", terminalPhase, terminalSummary, detectedNativeSessionId);
-          child.kill("SIGTERM");
-          void appendText(runSpec.outputLogPath, `\nProcess produced no first output after ${runSpec.firstOutputTimeoutMs}ms\n`);
+          failAndTerminate(
+            "process-first-output-timeout",
+            `${this.command} produced no first output for ${runSpec.firstOutputTimeoutMs}ms`,
+            `\nProcess produced no first output after ${runSpec.firstOutputTimeoutMs}ms\n`
+          );
         }, runSpec.firstOutputTimeoutMs);
       }
 
@@ -343,8 +366,7 @@ export class ProcessWorkerAdapter implements WorkerAdapter {
       if (runSpec.signal?.aborted) {
         abortListener();
       } else {
-        child.stdin.write(runSpec.prompt);
-        child.stdin.end();
+        child.stdin.end(runSpec.prompt);
       }
     });
   }
