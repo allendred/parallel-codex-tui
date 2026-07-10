@@ -29,6 +29,19 @@ describe("InputBar", () => {
     expect(lastFrame()).toContain("> | message · ^R retry");
   });
 
+  it("offers retry or a new task after an active task fails", () => {
+    const roomy = render(
+      <InputBar mode="chat" canRetry hasActiveTask value="" terminalWidth={40} onChange={() => {}} />
+    );
+    expect(roomy.lastFrame()).toContain("> | message · ^R retry · ^N new");
+
+    const narrow = render(
+      <InputBar mode="chat" canRetry hasActiveTask value="" terminalWidth={28} onChange={() => {}} />
+    );
+    expect(narrow.lastFrame()).toContain("> | ^R retry · ^N");
+    expect(displayWidth(narrow.lastFrame() ?? "")).toBeLessThanOrEqual(28);
+  });
+
   it("keeps long chat input to one visible tail row", () => {
     const value = "请帮我继续优化这个并行编码终端界面让它在窄屏下也保持专业稳定不要换行乱掉";
     const { lastFrame } = render(
@@ -103,6 +116,39 @@ describe("InputBar", () => {
     expect(frame).toContain("^W logs");
     expect(frame).toContain("Tab");
     expect(frame).toContain("^O attach");
+  });
+
+  it("shows the new-task shortcut only while a complex task is active", () => {
+    const roomy = render(
+      <InputBar mode="chat" value="" hasWorkers hasActiveTask terminalWidth={80} onChange={() => {}} />
+    );
+    try {
+      expect(roomy.lastFrame()).toContain("message · ^N new · ^W logs · Tab · ^O attach");
+    } finally {
+      roomy.unmount();
+    }
+
+    const narrow = render(
+      <InputBar mode="chat" value="" hasWorkers hasActiveTask terminalWidth={42} onChange={() => {}} />
+    );
+    try {
+      expect(narrow.lastFrame()).toContain("message · ^W logs · Tab · ^O attach");
+      expect(narrow.lastFrame()).not.toContain("^N");
+      expect(displayWidth(narrow.lastFrame() ?? "")).toBeLessThanOrEqual(42);
+    } finally {
+      narrow.unmount();
+    }
+
+    const noTask = render(
+      <InputBar mode="chat" value="" hasWorkers terminalWidth={80} onChange={() => {}} />
+    );
+    expect(noTask.lastFrame()).not.toContain("^N");
+
+    const loadingWorkers = render(
+      <InputBar mode="chat" value="" hasActiveTask terminalWidth={40} onChange={() => {}} />
+    );
+    expect(loadingWorkers.lastFrame()).toContain("message · ^N new");
+    expect(loadingWorkers.lastFrame()).not.toContain("^W");
   });
 
   it("shows chat history navigation without crowding narrow prompts", () => {

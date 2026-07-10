@@ -8,6 +8,7 @@ export interface InputBarProps {
   busy?: boolean;
   canRetry?: boolean;
   hasWorkers?: boolean;
+  hasActiveTask?: boolean;
   chatScrollOffset?: number;
   chatMaxScrollOffset?: number;
   nativeClosed?: boolean;
@@ -22,6 +23,7 @@ export function InputBar({
   busy = false,
   canRetry = false,
   hasWorkers = false,
+  hasActiveTask = false,
   chatScrollOffset = 0,
   chatMaxScrollOffset = 0,
   nativeClosed = false,
@@ -87,6 +89,7 @@ export function InputBar({
     terminalWidth,
     {
       hasWorkers,
+      hasActiveTask,
       canRetry,
       scrollOffset: chatScrollOffset,
       maxScrollOffset: chatMaxScrollOffset
@@ -182,6 +185,12 @@ export function chatPlaceholderDisplayValue(
     if (terminalWidth < 22) {
       return "^R retry";
     }
+    if (options.hasActiveTask) {
+      if (terminalWidth < 34) {
+        return chatInputDisplayValue("^R retry · ^N", terminalWidth);
+      }
+      return chatInputDisplayValue("message · ^R retry · ^N new", terminalWidth);
+    }
     return chatInputDisplayValue("message · ^R retry", terminalWidth);
   }
   const maxScrollOffset = Math.max(0, options.maxScrollOffset ?? 0);
@@ -189,8 +198,17 @@ export function chatPlaceholderDisplayValue(
   if (scrollOffset > 0) {
     return chatHistoryPlaceholderDisplayValue(terminalWidth, scrollOffset, maxScrollOffset);
   }
+  if (options.hasActiveTask && !options.hasWorkers) {
+    if (terminalWidth < 14) {
+      return "msg";
+    }
+    if (terminalWidth < 24) {
+      return "msg · ^N";
+    }
+    return chatInputDisplayValue("message · ^N new", terminalWidth);
+  }
   if (options.hasWorkers) {
-    return chatTaskPlaceholderDisplayValue(terminalWidth, maxScrollOffset > 0);
+    return chatTaskPlaceholderDisplayValue(terminalWidth, maxScrollOffset > 0, options.hasActiveTask);
   }
   if (maxScrollOffset > 0 && terminalWidth >= 22) {
     return chatInputDisplayValue("message · scroll", terminalWidth);
@@ -206,6 +224,7 @@ export function chatPlaceholderDisplayValue(
 
 export interface ChatPlaceholderOptions {
   hasWorkers?: boolean;
+  hasActiveTask?: boolean;
   canRetry?: boolean;
   scrollOffset?: number;
   maxScrollOffset?: number;
@@ -224,7 +243,15 @@ function chatHistoryPlaceholderDisplayValue(terminalWidth: number, offset: numbe
   return chatInputDisplayValue(`message · back ${offset}/${maxOffset} · PgDn latest`, terminalWidth);
 }
 
-function chatTaskPlaceholderDisplayValue(terminalWidth: number, scrollable = false): string {
+function chatTaskPlaceholderDisplayValue(terminalWidth: number, scrollable = false, activeTask = false): string {
+  if (activeTask && terminalWidth >= 72) {
+    return chatInputDisplayValue(
+      scrollable
+        ? "message · scroll · ^N new · ^W logs · Tab · ^O attach"
+        : "message · ^N new · ^W logs · Tab · ^O attach",
+      terminalWidth
+    );
+  }
   if (terminalWidth < 14) {
     return "msg";
   }

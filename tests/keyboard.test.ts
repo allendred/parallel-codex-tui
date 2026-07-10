@@ -18,6 +18,19 @@ describe("keyboard shortcuts", () => {
     expect(isExitShortcut("\u0003", { ctrl: false })).toBe(true);
   });
 
+  it("recognizes ctrl-n as the new-task shortcut", () => {
+    const isNewTaskShortcut = (
+      keyboardModule as typeof keyboardModule & {
+        isNewTaskShortcut?: (input: string, key: { ctrl?: boolean }) => boolean;
+      }
+    ).isNewTaskShortcut;
+
+    expect(isNewTaskShortcut).toBeTypeOf("function");
+    expect(isNewTaskShortcut?.("n", { ctrl: true })).toBe(true);
+    expect(isNewTaskShortcut?.("\u000e", { ctrl: false })).toBe(true);
+    expect(isNewTaskShortcut?.("n", { ctrl: false })).toBe(false);
+  });
+
   it("does not treat plain letters as shortcuts", () => {
     expect(isLogsShortcut("w", { ctrl: false })).toBe(false);
     expect(isAttachShortcut("o", { ctrl: false })).toBe(false);

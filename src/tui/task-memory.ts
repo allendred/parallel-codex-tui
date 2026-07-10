@@ -8,6 +8,13 @@ export interface SubmitResultMemory {
   taskId: string | null;
 }
 
+export function newTaskMemoryState(): SubmitMemoryState {
+  return {
+    activeTaskId: null,
+    activeMode: null
+  };
+}
+
 export type SubmitTarget =
   | {
       kind: "new-request";

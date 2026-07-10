@@ -18,6 +18,10 @@ export function isExitShortcut(input: string, key: KeyboardKey): boolean {
   return (key.ctrl === true && input.toLowerCase() === "c") || input === "\u0003";
 }
 
+export function isNewTaskShortcut(input: string, key: KeyboardKey): boolean {
+  return (key.ctrl === true && input.toLowerCase() === "n") || input === "\u000e";
+}
+
 export function scrollDelta(input: string, key: KeyboardKey, pageSize: number): number {
   if (key.pageUp || (key.ctrl === true && input.toLowerCase() === "u")) {
     return pageSize;

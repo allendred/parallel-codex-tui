@@ -18,12 +18,12 @@ import { AppShell } from "./AppShell.js";
 import { InputBar } from "./InputBar.js";
 import { applyNativeInputChunk } from "./native-input.js";
 import { nextScrollOffset } from "./scrolling.js";
-import { chooseSubmitTarget, nextSubmitMemoryState, shouldClearWorkersForSubmit } from "./task-memory.js";
+import { chooseSubmitTarget, newTaskMemoryState, nextSubmitMemoryState, shouldClearWorkersForSubmit } from "./task-memory.js";
 import { TerminalOutput } from "./TerminalOutput.js";
 import { NativeTerminalScreen } from "./terminal-screen.js";
 import { WorkerOutputView } from "./WorkerOutputView.js";
 import { compactEndByDisplayWidth, displayWidth, wrapByDisplayWidth } from "./display-width.js";
-import { isAttachShortcut, isExitShortcut, isLogsShortcut, mouseScrollDelta, rawPageScrollDelta, scrollDelta } from "./keyboard.js";
+import { isAttachShortcut, isExitShortcut, isLogsShortcut, isNewTaskShortcut, mouseScrollDelta, rawPageScrollDelta, scrollDelta } from "./keyboard.js";
 import { createRawInputDecoder } from "./raw-input-decoder.js";
 import { decodeHtmlEntities } from "./markdown-text.js";
 import { configureTuiTheme, TUI_THEME } from "./theme.js";
@@ -144,6 +144,7 @@ export function App({
   const attachSelectedWorkerRef = useRef<(worker: WorkerLogRef) => Promise<void>>(attachSelectedWorker);
   const submitRef = useRef<(value: string) => Promise<void>>(submit);
   const retryRef = useRef<() => Promise<void>>(retryActiveTask);
+  const newTaskRef = useRef<() => Promise<void>>(startNewTask);
   const exitRef = useRef(exit);
   const rawInputDecoderRef = useRef(createRawInputDecoder());
 
@@ -203,6 +204,7 @@ export function App({
     attachSelectedWorkerRef.current = attachSelectedWorker;
     submitRef.current = submit;
     retryRef.current = retryActiveTask;
+    newTaskRef.current = startNewTask;
   });
 
   useEffect(() => {
@@ -341,6 +343,10 @@ export function App({
           exitRef.current();
           return;
         }
+        if (isNewTaskShortcut(chunk, {}) && !busyRef.current) {
+          void newTaskRef.current();
+          return;
+        }
         if (chunk === "\x1b") {
           userSelectedWorkerRef.current = true;
           setView("chat");
@@ -354,6 +360,10 @@ export function App({
       }
 
       if (currentView === "chat") {
+        if (isNewTaskShortcut(chunk, {}) && !busyRef.current) {
+          void newTaskRef.current();
+          return;
+        }
         if (chunk === "\x1b") {
           if (busyRef.current) {
             activeRunControllerRef.current?.abort();
@@ -485,6 +495,10 @@ export function App({
       if (isExitShortcut(inputKey, key)) {
         activeRunControllerRef.current?.abort();
         exitRef.current();
+        return;
+      }
+      if (isNewTaskShortcut(inputKey, key) && !busy) {
+        void startNewTask();
         return;
       }
       const delta = scrollDelta(inputKey, key, outputHeight - 1);
@@ -757,6 +771,31 @@ export function App({
     }
   }
 
+  async function startNewTask(): Promise<void> {
+    if (busyRef.current || !activeTaskIdRef.current) {
+      return;
+    }
+
+    const nextMemory = newTaskMemoryState();
+    activeTaskIdRef.current = nextMemory.activeTaskId;
+    setActiveTaskId(nextMemory.activeTaskId);
+    setActiveMode(nextMemory.activeMode);
+    setCanRetryTask(false);
+    setStatus(null);
+    setLastRoute(null);
+    setWorkers([]);
+    workersRef.current = [];
+    selectedWorkerIndexRef.current = 0;
+    setSelectedWorkerIndex(0);
+    setWorkerScrollOffset(0);
+    setWorkerMaxScrollOffset(0);
+    autoSelectedFailedWorkerRef.current = false;
+    userSelectedWorkerRef.current = false;
+    setAttachError(null);
+    setView("chat");
+    await appendVisibleMessage({ from: "system", text: "new task · ready" });
+  }
+
   return (
     <AppShell
       view={view}
@@ -771,6 +810,7 @@ export function App({
           busy={busy}
           canRetry={canRetryTask}
           hasWorkers={workers.length > 0}
+          hasActiveTask={Boolean(activeTaskId)}
           chatScrollOffset={chatScrollOffset}
           chatMaxScrollOffset={chatMaxScrollOffset}
           nativeClosed={view === "native" && nativeAttach?.closedCode !== null}

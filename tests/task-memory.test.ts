@@ -1,7 +1,18 @@
 import { describe, expect, it } from "vitest";
 import { chooseSubmitTarget, nextSubmitMemoryState, shouldClearWorkersForSubmit } from "../src/tui/task-memory.js";
+import * as taskMemoryModule from "../src/tui/task-memory.js";
 
 describe("chooseSubmitTarget", () => {
+  it("clears the active complex context when starting a new task", () => {
+    const newTaskMemoryState = (
+      taskMemoryModule as typeof taskMemoryModule & {
+        newTaskMemoryState?: () => { activeTaskId: null; activeMode: null };
+      }
+    ).newTaskMemoryState;
+
+    expect(newTaskMemoryState).toBeTypeOf("function");
+    expect(newTaskMemoryState?.()).toEqual({ activeTaskId: null, activeMode: null });
+  });
   it("continues the active complex task for follow-up input", () => {
     expect(
       chooseSubmitTarget({
