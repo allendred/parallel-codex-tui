@@ -332,6 +332,11 @@ describe("Orchestrator", () => {
       request: "实现 parallel coding worker 状态栏",
       cwd: root
     });
+    const taskDir = join(root, ".parallel-codex", "sessions", first.taskId ?? "");
+    await writeText(
+      join(taskDir, "turns", "0001", "supervisor-summary.md"),
+      "FIRST_TURN_MEMORY\nstatus rail completed\n"
+    );
 
     capturing.runs.length = 0;
     const followUp = await orchestrator.handleTaskTurn({
@@ -342,7 +347,11 @@ describe("Orchestrator", () => {
 
     expect(followUp.mode).toBe("complex");
     expect(capturing.runs.map((run) => run.role)).toEqual(["actor", "critic"]);
-    const taskDir = join(root, ".parallel-codex", "sessions", first.taskId ?? "");
+    const actorRun = capturing.runs.find((run) => run.role === "actor");
+    const criticRun = capturing.runs.find((run) => run.role === "critic");
+    expect(actorRun?.prompt).toContain("- 0001: FIRST_TURN_MEMORY status rail completed");
+    expect(criticRun?.prompt).toContain("- 0001: FIRST_TURN_MEMORY status rail completed");
+    expect(actorRun?.prompt).not.toContain("Previous turn summaries:\n- (none)");
     expect(await readTextIfExists(join(taskDir, "turns", "0002", "user.md"))).toContain("继续改状态栏");
     expect(await readTextIfExists(join(taskDir, "actor-mock", "prompt.md"))).toContain("Current turn: 0002");
     expect(await readTextIfExists(join(taskDir, "actor-mock", "prompt.md"))).toContain(

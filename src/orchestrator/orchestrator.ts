@@ -18,6 +18,9 @@ import {
 import { buildActorPrompt, buildCriticPrompt, buildJudgePrompt } from "./prompts.js";
 import { buildSupervisorSummary } from "./supervisor-summary.js";
 
+const PREVIOUS_TURN_SUMMARY_LIMIT = 5;
+const PREVIOUS_TURN_SUMMARY_LENGTH = 600;
+
 export interface HandleRequestInput {
   request: string;
   cwd: string;
@@ -393,7 +396,7 @@ export class Orchestrator {
         request: input.request,
         taskDir: task.dir,
         workerDir: judgeFiles.dir,
-        turn: this.promptTurnContext(turn),
+        turn: await this.promptTurnContext(task, turn),
         role: this.config.roles.judge
       })
     });
@@ -441,7 +444,7 @@ export class Orchestrator {
         request: input.request,
         taskDir: task.dir,
         judgeDir,
-        turn: this.promptTurnContext(turn),
+        turn: await this.promptTurnContext(task, turn),
         feature: featurePromptContext(feature),
         revision,
         role: this.config.roles.actor
@@ -498,7 +501,7 @@ export class Orchestrator {
         taskDir: task.dir,
         judgeDir,
         actorDir,
-        turn: this.promptTurnContext(turn),
+        turn: await this.promptTurnContext(task, turn),
         feature: featurePromptContext(feature),
         role: this.config.roles.critic
       })
@@ -597,12 +600,40 @@ export class Orchestrator {
     };
   }
 
-  private promptTurnContext(turn: TaskTurn) {
+  private async promptTurnContext(task: TaskSession, turn: TaskTurn) {
     return {
       turnId: turn.turnId,
       turnDir: turn.dir,
-      previousSummaries: []
+      previousSummaries: await this.previousTurnSummaries(task, turn.turnId)
     };
+  }
+
+  private async previousTurnSummaries(task: TaskSession, currentTurnId: string): Promise<string[]> {
+    const turnsDir = join(task.dir, "turns");
+    if (!(await pathExists(turnsDir))) {
+      return [];
+    }
+
+    const currentTurnNumber = Number(currentTurnId);
+    const entries = await readdir(turnsDir, { withFileTypes: true });
+    const previousTurnIds = entries
+      .filter((entry) => entry.isDirectory() && /^\d{4,}$/.test(entry.name))
+      .map((entry) => entry.name)
+      .filter((turnId) => Number(turnId) < currentTurnNumber)
+      .sort((left, right) => Number(left) - Number(right))
+      .slice(-PREVIOUS_TURN_SUMMARY_LIMIT);
+    const summaries: string[] = [];
+
+    for (const turnId of previousTurnIds) {
+      const summary = compactPreviousTurnSummary(
+        await readTextIfExists(join(turnsDir, turnId, "supervisor-summary.md"))
+      );
+      if (summary) {
+        summaries.push(`${turnId}: ${summary}`);
+      }
+    }
+
+    return summaries;
   }
 
   private async readLatestWorkerQuestionSummary(
@@ -625,6 +656,14 @@ export class Orchestrator {
     }
     return null;
   }
+}
+
+function compactPreviousTurnSummary(summary: string): string {
+  const compact = summary.replace(/\s+/g, " ").trim();
+  if (compact.length <= PREVIOUS_TURN_SUMMARY_LENGTH) {
+    return compact;
+  }
+  return `${compact.slice(0, PREVIOUS_TURN_SUMMARY_LENGTH - 3)}...`;
 }
 
 function ensureWorkerSuccess(workerId: string, exitCode: number): void {
