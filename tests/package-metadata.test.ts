@@ -186,6 +186,8 @@ describe("package metadata", () => {
     expect(readme).toContain("authoritative integrated changed paths, Critic review, verification evidence, and findings");
     expect(readme).toContain("Changed files come from the workspace integration result rather than an Actor claim");
     expect(readme).toContain("Multi-feature delivery uses the same result protocol");
+    expect(readme).toContain("Concurrent text and JSONL appends inside one TUI are serialized per resolved file path");
+    expect(readme).toContain("one failed append does not poison later writes");
     expect(readme).toContain("Feature revision mailboxes are a checked protocol rather than prompt-only convention");
     expect(readme).toContain("Missing, malformed, unacknowledged, or contradictory findings stop the task before live integration");
     expect(readme).toContain("snapshots pending, inconsistent, and approved fixed/open state in `finding-resolution.json`");

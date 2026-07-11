@@ -1,6 +1,8 @@
 import { mkdir, readFile, rename, stat, unlink, writeFile } from "node:fs/promises";
-import { basename, dirname, join } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import type { output, ZodTypeAny } from "zod";
+
+const appendQueues = new Map<string, Promise<void>>();
 
 export async function ensureDir(path: string): Promise<void> {
   await mkdir(path, { recursive: true });
@@ -44,8 +46,7 @@ export async function readJson<TSchema extends ZodTypeAny>(path: string, schema:
 }
 
 export async function appendJsonLine(path: string, value: unknown): Promise<void> {
-  await ensureDir(dirname(path));
-  await writeFile(path, `${JSON.stringify(value)}\n`, { encoding: "utf8", flag: "a" });
+  await appendFile(path, `${JSON.stringify(value)}\n`);
 }
 
 export async function writeText(path: string, value: string): Promise<void> {
@@ -54,8 +55,24 @@ export async function writeText(path: string, value: string): Promise<void> {
 }
 
 export async function appendText(path: string, value: string): Promise<void> {
-  await ensureDir(dirname(path));
-  await writeFile(path, value, { encoding: "utf8", flag: "a" });
+  await appendFile(path, value);
+}
+
+async function appendFile(path: string, value: string): Promise<void> {
+  const key = resolve(path);
+  const previous = appendQueues.get(key) ?? Promise.resolve();
+  const operation = previous.catch(() => undefined).then(async () => {
+    await ensureDir(dirname(path));
+    await writeFile(path, value, { encoding: "utf8", flag: "a" });
+  });
+  appendQueues.set(key, operation);
+  try {
+    await operation;
+  } finally {
+    if (appendQueues.get(key) === operation) {
+      appendQueues.delete(key);
+    }
+  }
 }
 
 export async function readTextIfExists(path: string): Promise<string> {

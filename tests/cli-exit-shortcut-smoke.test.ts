@@ -1,9 +1,9 @@
-import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { spawn } from "node-pty";
-import { pathExists, writeJson } from "../src/core/file-store.js";
+import { pathExists, readJson, writeJson } from "../src/core/file-store.js";
 import { TaskMetaSchema, WorkerStatusSchema } from "../src/domain/schemas.js";
 import { NativeTerminalScreen } from "../src/tui/terminal-screen.js";
 
@@ -72,6 +72,7 @@ describe("CLI exit shortcuts", () => {
       await waitForText(chunks, "message");
       child.write("run until interrupted\r");
       await waitForPath(workerPidPath);
+      const taskDir = await waitForTaskDir(workspace);
       child.kill("SIGINT");
       await waitForExit(exits);
       await waitForPath(terminatedPath);
@@ -79,6 +80,14 @@ describe("CLI exit shortcuts", () => {
 
       expect(exits[0]).toBe(0);
       expect(await pathExists(survivedPath)).toBe(false);
+      await expect(readJson(join(taskDir, "meta.json"), TaskMetaSchema)).resolves.toMatchObject({
+        status: "cancelled"
+      });
+      await expect(readJson(join(taskDir, "judge-codex", "status.json"), WorkerStatusSchema)).resolves.toMatchObject({
+        state: "cancelled"
+      });
+      expect(await pathExists(join(taskDir, "run-owner.json"))).toBe(false);
+      expect(await pathExists(join(taskDir, "judge-codex", "process.json"))).toBe(false);
     } finally {
       if (exits.length === 0) {
         child.kill("SIGTERM");
@@ -238,6 +247,19 @@ async function waitForPath(path: string): Promise<void> {
     await new Promise((resolve) => setTimeout(resolve, 50));
   }
   throw new Error(`Timed out waiting for ${path}`);
+}
+
+async function waitForTaskDir(workspace: string): Promise<string> {
+  const sessions = join(workspace, ".parallel-codex", "sessions");
+  for (let attempt = 0; attempt < 160; attempt += 1) {
+    const task = (await readdir(sessions).catch(() => []))
+      .find((entry) => entry.startsWith("task-"));
+    if (task) {
+      return join(sessions, task);
+    }
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+  throw new Error("Timed out waiting for task session");
 }
 
 function escapeToml(value: string): string {
