@@ -163,6 +163,10 @@ describe("package metadata", () => {
     expect(readme).toContain("shows remembered projects from `.parallel-codex/workspaces.json`");
     expect(readme).toContain("If `--workspace <path>` points to an existing file");
     expect(readme).toContain("will not use that file path as the default folder to create");
+    expect(readme).toContain("press `Ctrl+P` to open the same project picker without exiting");
+    expect(readme).toContain("`Esc` returns with the unsent draft intact");
+    expect(readme).toContain("rebuilds the runtime in place and restores that workspace's latest task, route, workers, and chat");
+    expect(readme).toContain("Router configuration and `router/routes.jsonl` remain shared under the app root");
     expect(readme).toContain("Router classification only receives the user request");
     expect(readme).toContain("Valid `[router]` changes are reloaded before the next classification without restarting the TUI");
     expect(readme).toContain("Worker, pairing, role, orchestration, data-directory, and UI changes still require a restart");

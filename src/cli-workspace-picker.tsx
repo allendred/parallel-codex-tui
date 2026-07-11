@@ -17,7 +17,7 @@ export interface WorkspacePickerInput {
   stdout: NodeJS.WriteStream;
 }
 
-interface WorkspacePickerProps extends Omit<WorkspacePickerInput, "stdin" | "stdout"> {
+export interface WorkspacePickerProps extends Omit<WorkspacePickerInput, "stdin" | "stdout"> {
   terminalHeight: number;
   terminalWidth: number;
   onCancel: () => void;
@@ -105,6 +105,11 @@ export function WorkspacePicker({
   const width = Math.max(1, terminalWidth - 1);
   const visibleRows = Math.max(1, Math.min(9, terminalHeight - (invalidExplicitWorkspace ? 7 : 6)));
   const visible = workspacePickerWindow(options, selectedIndex, visibleRows);
+  const contentRows = 1
+    + (invalidExplicitWorkspace ? 1 : 0)
+    + 1
+    + (mode === "list" ? visible.items.length + 1 : 2);
+  const trailingRows = Math.max(0, terminalHeight - contentRows);
 
   useEffect(() => () => {
     if (shortcutTimerRef.current) {
@@ -313,6 +318,15 @@ export function WorkspacePicker({
           <WorkspacePickerFooter text={choices.length > 0 ? `${choices.length} recent` : "new workspace"} width={width} />
         </>
       )}
+      {Array.from({ length: trailingRows }, (_, index) => (
+        <FilledText
+          key={`workspace-fill-${index}`}
+          text=""
+          width={width}
+          backgroundColor={TUI_THEME.surface}
+          color={TUI_THEME.text}
+        />
+      ))}
     </Box>
   );
 }

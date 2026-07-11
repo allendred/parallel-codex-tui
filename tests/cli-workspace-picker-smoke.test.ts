@@ -89,10 +89,14 @@ describe("CLI workspace picker smoke", () => {
 
     try {
       await waitForScreenText(() => screenWrites, screen, "Open project");
-      const pickerLines = screen.styledSnapshotLines();
+      const pickerLines = await waitForThemedPickerFill(() => screenWrites, screen, 18);
       const pickerHeader = pickerLines.find((line) => lineText(line).includes("parallel-codex-tui"));
       const initiallySelected = await waitForSelectedProject(() => screenWrites, screen, "second-project");
 
+      expect(pickerLines).toHaveLength(18);
+      expect(pickerLines.at(-1)?.chunks.some((chunk) => (
+        chunk.style.backgroundColor === TUI_THEME_PRESETS.paper.surface
+      ))).toBe(true);
       expect(lineText(pickerHeader)).toContain("workspace");
       expect(pickerHeader?.chunks.some((chunk) => (
         chunk.text.includes("parallel-codex-tui") &&
@@ -257,6 +261,25 @@ async function waitForSelectedProject(
     await new Promise((resolve) => setTimeout(resolve, 50));
   }
   throw new Error(`Timed out waiting for selected project ${projectName}\nSnapshot:\n${screen.snapshot()}`);
+}
+
+async function waitForThemedPickerFill(
+  screenWritesRef: () => Promise<void>,
+  screen: NativeTerminalScreen,
+  rows: number
+): Promise<ReturnType<NativeTerminalScreen["styledSnapshotLines"]>> {
+  for (let attempt = 0; attempt < 120; attempt += 1) {
+    await screenWritesRef();
+    const lines = screen.styledSnapshotLines();
+    if (
+      lines.length === rows
+      && lines.at(-1)?.chunks.some((chunk) => chunk.style.backgroundColor === TUI_THEME_PRESETS.paper.surface)
+    ) {
+      return lines;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+  throw new Error(`Timed out waiting for themed picker fill\nSnapshot:\n${screen.snapshot()}`);
 }
 
 async function waitForExit(exits: number[]): Promise<void> {

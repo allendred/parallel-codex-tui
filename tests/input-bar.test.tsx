@@ -175,6 +175,13 @@ describe("InputBar", () => {
     expect(displayWidth(frame)).toBeLessThanOrEqual(12);
   });
 
+  it("exposes the workspace switcher when the input rail has room", () => {
+    expect(chatPlaceholderDisplayValue(40)).toBe("message · ^P project");
+    expect(chatPlaceholderDisplayValue(40, { hasActiveTask: true })).toBe(
+      "message · ^N new · ^P project"
+    );
+  });
+
   it("fills short chat input rows to the reserved rail width without stdout columns", () => {
     const { lastFrame } = render(
       <InputBar mode="chat" value="" terminalWidth={40} onChange={() => {}} />

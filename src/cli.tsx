@@ -6,10 +6,12 @@ import { parseCliArgs, validateCliArgs } from "./cli-args.js";
 import { selectWorkspaceForCli } from "./cli-workspace.js";
 import { WorkspaceSelectionCancelledError } from "./cli-workspace-picker.js";
 import { createRuntime } from "./bootstrap.js";
+import type { AppRuntime } from "./bootstrap.js";
 import { prepareAppRoot } from "./core/app-root.js";
 import { formatConfigErrorMessage } from "./core/config-errors.js";
 import { configPath, loadConfig, withUiThemeOverride, writeDefaultConfig } from "./core/config.js";
 import { pathExists } from "./core/file-store.js";
+import { listWorkspaceChoices } from "./core/workspace.js";
 import { runDoctor } from "./doctor.js";
 import { helpText } from "./cli-help.js";
 import { App } from "./tui/App.js";
@@ -77,42 +79,94 @@ async function main(): Promise<void> {
       cwd: process.cwd(),
       explicitWorkspace: cliArgs.explicitWorkspace
     });
-    const runtime = await createRuntime(cliArgs.appRoot, workspaceRoot);
-    if (cliArgs.taskId && !(await runtime.sessions.hasTask(cliArgs.taskId))) {
-      throw new Error(`Task session not found in workspace ${runtime.workspaceRoot}: ${cliArgs.taskId}`);
-    }
+    let current = await loadInteractiveWorkspace(cliArgs.appRoot, workspaceRoot, cliArgs.taskId);
     if (!canRenderInteractiveTui()) {
+      current.runtime.index.close();
       throw new Error("parallel-codex-tui requires an interactive terminal. Use --help, --version, --init, or --doctor for non-interactive command modes.");
     }
+    let instance: ReturnType<typeof render> | null = null;
+
+    const appElement = (state: InteractiveWorkspaceState) => (
+      <App
+        key={state.runtime.workspaceRoot}
+        config={withUiThemeOverride(state.runtime.config, cliArgs.theme)}
+        orchestrator={state.runtime.orchestrator}
+        cwd={state.runtime.workspaceRoot}
+        initialTaskId={state.initialTaskId}
+        initialRoute={state.initialRoute}
+        initialWorkers={state.initialWorkers}
+        initialCanRetryTask={state.initialCanRetryTask}
+        initialMessages={state.initialMessages}
+        workspaceChoices={state.workspaceChoices}
+        switchWorkspace={async (workspace) => {
+          if (workspace === current.runtime.workspaceRoot) {
+            return;
+          }
+          const next = await loadInteractiveWorkspace(cliArgs.appRoot, workspace, null);
+          if (!instance) {
+            next.runtime.index.close();
+            throw new Error("Interactive TUI is not ready to switch workspaces.");
+          }
+          const previous = current;
+          instance.rerender(appElement(next));
+          current = next;
+          previous.runtime.index.close();
+        }}
+        persistChatMessage={(message, taskId) => state.runtime.sessions.appendChatMessage({
+          ...message,
+          taskId
+        })}
+      />
+    );
+
+    instance = render(appElement(current), { exitOnCtrlC: false });
+  }
+}
+
+interface InteractiveWorkspaceState {
+  runtime: AppRuntime;
+  initialTaskId: string | null;
+  initialRoute: Awaited<ReturnType<AppRuntime["sessions"]["readLatestRoute"]>>;
+  initialWorkers: Awaited<ReturnType<AppRuntime["orchestrator"]["listTaskWorkers"]>>;
+  initialCanRetryTask: boolean;
+  initialMessages: Array<{ from: "user" | "system"; text: string }>;
+  workspaceChoices: Awaited<ReturnType<typeof listWorkspaceChoices>>;
+}
+
+async function loadInteractiveWorkspace(
+  appRoot: string,
+  workspaceRoot: string,
+  requestedTaskId: string | null
+): Promise<InteractiveWorkspaceState> {
+  const runtime = await createRuntime(appRoot, workspaceRoot);
+  try {
+    if (requestedTaskId && !(await runtime.sessions.hasTask(requestedTaskId))) {
+      throw new Error(`Task session not found in workspace ${runtime.workspaceRoot}: ${requestedTaskId}`);
+    }
     const latestTask = await runtime.sessions.latestTask();
-    const initialTaskId = cliArgs.taskId ?? latestTask?.id ?? null;
-    const [initialRoute, initialWorkers, initialCanRetryTask, initialHistory] = await Promise.all([
+    const initialTaskId = requestedTaskId ?? latestTask?.id ?? null;
+    const [initialRoute, initialWorkers, initialCanRetryTask, initialHistory, workspaceChoices] = await Promise.all([
       initialTaskId
         ? runtime.sessions.readLatestRoute(runtime.sessions.taskFromId(initialTaskId))
         : null,
       initialTaskId ? runtime.orchestrator.listTaskWorkers(initialTaskId) : [],
       initialTaskId ? runtime.orchestrator.canRetryTask(initialTaskId) : false,
-      runtime.sessions.readChatHistory()
+      runtime.sessions.readChatHistory(),
+      listWorkspaceChoices(appRoot)
     ]);
-    const initialMessages = initialHistory.map(({ from, text }) => ({ from, text }));
 
-    render(
-      <App
-        config={withUiThemeOverride(runtime.config, cliArgs.theme)}
-        orchestrator={runtime.orchestrator}
-        cwd={runtime.workspaceRoot}
-        initialTaskId={initialTaskId}
-        initialRoute={initialRoute}
-        initialWorkers={initialWorkers}
-        initialCanRetryTask={initialCanRetryTask}
-        initialMessages={initialMessages}
-        persistChatMessage={(message, taskId) => runtime.sessions.appendChatMessage({
-          ...message,
-          taskId
-        })}
-      />,
-      { exitOnCtrlC: false }
-    );
+    return {
+      runtime,
+      initialTaskId,
+      initialRoute,
+      initialWorkers,
+      initialCanRetryTask,
+      initialMessages: initialHistory.map(({ from, text }) => ({ from, text })),
+      workspaceChoices
+    };
+  } catch (error) {
+    runtime.index.close();
+    throw error;
   }
 }
 

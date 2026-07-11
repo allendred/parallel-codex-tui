@@ -4,6 +4,7 @@ import { Box, Text, useApp, useInput, useStdin, type TextProps } from "ink";
 import { Lexer, type Token, type Tokens } from "marked";
 import type { AppConfig } from "../core/config.js";
 import { readJson } from "../core/file-store.js";
+import type { WorkspaceChoice } from "../core/workspace.js";
 import { WorkerStatusSchema, type RouteDecision } from "../domain/schemas.js";
 import type { Orchestrator, RouteStartInfo, WorkerLogRef, WorkerRunStatus } from "../orchestrator/orchestrator.js";
 import {
@@ -27,10 +28,11 @@ import { TerminalOutput } from "./TerminalOutput.js";
 import { NativeTerminalScreen } from "./terminal-screen.js";
 import { WorkerOutputView } from "./WorkerOutputView.js";
 import { compactEndByDisplayWidth, displayWidth, wrapByDisplayWidth } from "./display-width.js";
-import { isAttachShortcut, isExitShortcut, isLogsShortcut, isNewTaskShortcut, mouseScrollDelta, rawHistoryDelta, rawPageScrollDelta, scrollDelta } from "./keyboard.js";
+import { isAttachShortcut, isExitShortcut, isLogsShortcut, isNewTaskShortcut, isWorkspaceShortcut, mouseScrollDelta, rawHistoryDelta, rawPageScrollDelta, scrollDelta } from "./keyboard.js";
 import { createRawInputDecoder } from "./raw-input-decoder.js";
 import { decodeHtmlEntities } from "./markdown-text.js";
 import { configureTuiTheme, TUI_THEME } from "./theme.js";
+import { WorkspacePicker } from "../cli-workspace-picker.js";
 import {
   buildNativeAttachLaunch,
   startNativeAttachProcess,
@@ -48,6 +50,8 @@ export interface AppProps {
   initialCanRetryTask?: boolean;
   initialMessages?: Message[];
   persistChatMessage?: (message: Message, taskId?: string) => Promise<void>;
+  workspaceChoices?: WorkspaceChoice[];
+  switchWorkspace?: (workspace: string) => Promise<void>;
   prepareNativeAttach?: (worker: WorkerLogRef) => Promise<NativeAttachLaunch>;
   startNativeAttach?: (
     launch: NativeAttachLaunch,
@@ -104,6 +108,8 @@ export function App({
   initialCanRetryTask = false,
   initialMessages = [],
   persistChatMessage,
+  workspaceChoices = [],
+  switchWorkspace,
   prepareNativeAttach,
   startNativeAttach
 }: AppProps) {
@@ -121,7 +127,7 @@ export function App({
   const [lastRoute, setLastRoute] = useState<RouteDecision | null>(initialRoute);
   const [routePending, setRoutePending] = useState<PendingRouteInfo | null>(null);
   const [routeElapsedMs, setRouteElapsedMs] = useState(0);
-  const [view, setView] = useState<"chat" | "worker" | "native">("chat");
+  const [view, setView] = useState<"chat" | "worker" | "native" | "workspace">("chat");
   const [workers, setWorkers] = useState<WorkerLogRef[]>(() => [...(initialWorkers ?? [])]);
   const [selectedWorkerIndex, setSelectedWorkerIndex] = useState(0);
   const [activeTaskId, setActiveTaskId] = useState<string | null>(initialTaskId);
@@ -163,6 +169,8 @@ export function App({
   const submitRef = useRef<(value: string) => Promise<void>>(submit);
   const retryRef = useRef<() => Promise<void>>(retryActiveTask);
   const newTaskRef = useRef<() => Promise<void>>(startNewTask);
+  const openWorkspacePickerRef = useRef<() => void>(openWorkspacePicker);
+  const workspaceReturnViewRef = useRef<"chat" | "worker">("chat");
   const exitRef = useRef(exit);
   const rawInputDecoderRef = useRef(createRawInputDecoder());
   const chatPasteDecoderRef = useRef(createChatPasteDecoder());
@@ -255,6 +263,7 @@ export function App({
     submitRef.current = submit;
     retryRef.current = retryActiveTask;
     newTaskRef.current = startNewTask;
+    openWorkspacePickerRef.current = openWorkspacePicker;
   });
 
   useEffect(() => {
@@ -451,6 +460,9 @@ export function App({
         return;
       }
       const currentView = viewRef.current;
+      if (currentView === "workspace") {
+        return;
+      }
       if (currentView === "worker") {
         if (isExitShortcut(chunk, {})) {
           activeRunControllerRef.current?.abort();
@@ -459,6 +471,10 @@ export function App({
         }
         if (isNewTaskShortcut(chunk, {}) && !busyRef.current) {
           void newTaskRef.current();
+          return;
+        }
+        if (isWorkspaceShortcut(chunk, {}) && !busyRef.current) {
+          openWorkspacePickerRef.current();
           return;
         }
         if (chunk === "\x1b") {
@@ -475,6 +491,10 @@ export function App({
       }
 
       if (currentView === "chat") {
+        if (isWorkspaceShortcut(chunk, {}) && !busyRef.current) {
+          openWorkspacePickerRef.current();
+          return;
+        }
         const paste = chatPasteDecoderRef.current.write(chunk);
         if (paste.intercepted) {
           if (busyRef.current) {
@@ -684,7 +704,7 @@ export function App({
       }
       void attachSelectedWorker(worker);
     }
-  }, { isActive: view !== "native" && view !== "chat" });
+  }, { isActive: view === "worker" });
 
   async function attachSelectedWorker(worker: WorkerLogRef) {
     setAttachError(null);
@@ -977,6 +997,49 @@ export function App({
       draft: { value: inputRef.current, cursor: inputCursorRef.current }
     };
     await appendVisibleMessage({ from: "system", text: "new task · ready" });
+  }
+
+  function openWorkspacePicker(): void {
+    const currentView = viewRef.current;
+    if (busyRef.current || !switchWorkspace || currentView === "native" || currentView === "workspace") {
+      return;
+    }
+    workspaceReturnViewRef.current = currentView === "worker" ? "worker" : "chat";
+    setAttachError(null);
+    setView("workspace");
+  }
+
+  function closeWorkspacePicker(): void {
+    setAttachError(null);
+    setView(workspaceReturnViewRef.current);
+  }
+
+  async function selectWorkspace(workspace: string): Promise<void> {
+    if (!switchWorkspace || workspace === cwd) {
+      closeWorkspacePicker();
+      return;
+    }
+    try {
+      await switchWorkspace(workspace);
+    } catch (error) {
+      setAttachError(error instanceof Error ? error.message : String(error));
+      setView(workspaceReturnViewRef.current);
+    }
+  }
+
+  if (view === "workspace") {
+    return (
+      <Box flexDirection="column" height={Math.max(1, process.stdout.rows || 30)}>
+        <WorkspacePicker
+          cwd={cwd}
+          choices={workspaceChoices}
+          terminalHeight={process.stdout.rows || 30}
+          terminalWidth={terminalWidth}
+          onCancel={closeWorkspacePicker}
+          onSelect={(workspace) => void selectWorkspace(workspace)}
+        />
+      </Box>
+    );
   }
 
   return (

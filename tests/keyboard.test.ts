@@ -31,6 +31,19 @@ describe("keyboard shortcuts", () => {
     expect(isNewTaskShortcut?.("n", { ctrl: false })).toBe(false);
   });
 
+  it("recognizes ctrl-p as the workspace switcher shortcut", () => {
+    const isWorkspaceShortcut = (
+      keyboardModule as typeof keyboardModule & {
+        isWorkspaceShortcut?: (input: string, key: { ctrl?: boolean }) => boolean;
+      }
+    ).isWorkspaceShortcut;
+
+    expect(isWorkspaceShortcut).toBeTypeOf("function");
+    expect(isWorkspaceShortcut?.("p", { ctrl: true })).toBe(true);
+    expect(isWorkspaceShortcut?.("\u0010", { ctrl: false })).toBe(true);
+    expect(isWorkspaceShortcut?.("p", { ctrl: false })).toBe(false);
+  });
+
   it("does not treat plain letters as shortcuts", () => {
     expect(isLogsShortcut("w", { ctrl: false })).toBe(false);
     expect(isAttachShortcut("o", { ctrl: false })).toBe(false);

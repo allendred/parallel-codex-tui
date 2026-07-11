@@ -279,7 +279,12 @@ export function chatPlaceholderDisplayValue(
     return chatHistoryPlaceholderDisplayValue(terminalWidth, scrollOffset, maxScrollOffset);
   }
   if (options.hasActiveTask && !options.hasWorkers) {
-    return selectChatPlaceholder(terminalWidth, ["message · ^N new", "msg · ^N", "msg"]);
+    return selectChatPlaceholder(terminalWidth, [
+      "message · ^N new · ^P project",
+      "message · ^N new",
+      "msg · ^N",
+      "msg"
+    ]);
   }
   if (options.hasWorkers) {
     return chatTaskPlaceholderDisplayValue(terminalWidth, maxScrollOffset > 0, options.hasActiveTask);
@@ -287,7 +292,7 @@ export function chatPlaceholderDisplayValue(
   if (maxScrollOffset > 0 && terminalWidth >= 22) {
     return selectChatPlaceholder(terminalWidth, ["message · scroll", "message", "msg"]);
   }
-  return selectChatPlaceholder(terminalWidth, ["message", "msg"]);
+  return selectChatPlaceholder(terminalWidth, ["message · ^P project", "message", "msg"]);
 }
 
 export interface ChatPlaceholderOptions {
