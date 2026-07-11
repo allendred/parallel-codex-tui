@@ -224,6 +224,41 @@ describe("CLI workspace picker smoke", () => {
       }
     }
   }, 10000);
+
+  it("exits cleanly when the terminal delivers SIGINT during workspace selection", async () => {
+    const appRoot = await mkdtemp(join(tmpdir(), "pct-cli-workspace-picker-sigint-"));
+    const screen = new NativeTerminalScreen({ cols: 80, rows: 18, scrollback: 1000 });
+    const exits: number[] = [];
+    let screenWrites = Promise.resolve();
+    const child = spawn(
+      process.execPath,
+      ["./node_modules/.bin/tsx", "src/cli.tsx", "--app-root", appRoot],
+      {
+        cwd: process.cwd(),
+        cols: 80,
+        rows: 18,
+        name: "xterm-256color",
+        env: { ...process.env, TERM: "xterm-256color" }
+      }
+    );
+
+    child.onData((chunk) => {
+      screenWrites = screenWrites.then(() => screen.write(chunk));
+    });
+    child.onExit(({ exitCode }) => exits.push(exitCode));
+
+    try {
+      await waitForScreenText(() => screenWrites, screen, "Workspace path");
+      child.kill("SIGINT");
+      await waitForExit(exits);
+
+      expect(exits[0]).toBe(0);
+    } finally {
+      if (exits.length === 0) {
+        child.kill("SIGTERM");
+      }
+    }
+  }, 10000);
 });
 
 function lineText(line: ReturnType<NativeTerminalScreen["styledSnapshotLines"]>[number] | undefined): string {

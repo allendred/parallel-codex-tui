@@ -47,6 +47,7 @@ export async function promptForWorkspaceTui(input: WorkspacePickerInput): Promis
     resolveSelection = resolve;
     rejectSelection = reject;
   });
+  const cancelSelection = () => rejectSelection(new WorkspaceSelectionCancelledError());
   const instance = render(
     <WorkspacePicker
       cwd={input.cwd}
@@ -54,7 +55,7 @@ export async function promptForWorkspaceTui(input: WorkspacePickerInput): Promis
       invalidExplicitWorkspace={input.invalidExplicitWorkspace}
       terminalHeight={input.stdout.rows ?? 24}
       terminalWidth={input.stdout.columns ?? 80}
-      onCancel={() => rejectSelection(new WorkspaceSelectionCancelledError())}
+      onCancel={cancelSelection}
       onSelect={resolveSelection}
     />,
     {
@@ -68,10 +69,12 @@ export async function promptForWorkspaceTui(input: WorkspacePickerInput): Promis
   void instance.waitUntilExit().catch((error: unknown) => {
     rejectSelection(error instanceof Error ? error : new Error(String(error)));
   });
+  process.on("SIGINT", cancelSelection);
 
   try {
     return await selection;
   } finally {
+    process.off("SIGINT", cancelSelection);
     instance.clear();
     instance.unmount();
   }
