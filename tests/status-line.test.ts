@@ -4,7 +4,8 @@ import {
   formatFooterHelp,
   formatSelectedWorkerStatus,
   formatStatusLine,
-  formatWorkerRuntimeStatus
+  formatWorkerRuntimeStatus,
+  selectedWorkerStatusIsRedundant
 } from "../src/tui/status-line.js";
 import { displayWidth } from "../src/tui/display-width.js";
 
@@ -141,6 +142,24 @@ describe("formatStatusLine", () => {
 
     expect(formatStatusLine(state)).toBe("a1b2 | workers 3 | fail 1 run 1 done 1");
     expect(formatSelectedWorkerStatus(state, 1)).toBe("critic/claude done");
+  });
+
+  it("identifies a selected worker footer as redundant only for a uniform worker state", () => {
+    expect(selectedWorkerStatusIsRedundant({
+      taskId: "task-uniform",
+      workers: [
+        { label: "Judge (codex)", status: "done/process-exited" },
+        { label: "Actor (codex)", status: "done/process-exited" }
+      ]
+    })).toBe(true);
+    expect(selectedWorkerStatusIsRedundant({
+      taskId: "task-mixed",
+      workers: [
+        { label: "Judge (codex)", status: "done/process-exited" },
+        { label: "Actor (codex)", status: "failed/process-exited" }
+      ]
+    })).toBe(false);
+    expect(selectedWorkerStatusIsRedundant(null)).toBe(false);
   });
 
   it("keeps feature wave progress alongside worker counts", () => {

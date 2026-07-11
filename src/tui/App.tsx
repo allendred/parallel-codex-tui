@@ -12,6 +12,7 @@ import {
   formatRouteStatus,
   formatStatusLine,
   formatWorkerRuntimeStatus,
+  selectedWorkerStatusIsRedundant,
   type StatusLineState
 } from "./status-line.js";
 import { applyChatInputChunk, insertChatPaste } from "./chat-input.js";
@@ -167,7 +168,9 @@ export function App({
   const outputHeight = Math.max(1, contentHeight);
   const terminalWidth = process.stdout.columns || 120;
   const selectedWorkerStatus = formatSelectedWorkerStatus(status, selectedWorkerIndex);
-  const visibleWorkerStatus = view === "chat" ? "" : selectedWorkerStatus;
+  const visibleWorkerStatus = view === "chat" || selectedWorkerStatusIsRedundant(status)
+    ? ""
+    : selectedWorkerStatus;
   const visibleRouteStatus = routePending
     ? formatRoutePendingStatus(routePending)
     : formatRouteStatus(lastRoute);

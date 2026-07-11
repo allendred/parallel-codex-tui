@@ -137,6 +137,15 @@ export function formatSelectedWorkerStatus(state: StatusLineState | null, select
   return `${compactWorkerLabel(worker.label)} ${compactStatus(worker.status)}`;
 }
 
+export function selectedWorkerStatusIsRedundant(state: StatusLineState | null): boolean {
+  const workers = state?.workers;
+  if (!workers?.length) {
+    return false;
+  }
+  const first = compactStatus(workers[0]?.status ?? "");
+  return workers.every((worker) => compactStatus(worker.status) === first);
+}
+
 export function formatWorkerRuntimeStatus(status: RuntimeWorkerStatus): string {
   const detail = [
     status.state.trim() || "idle",

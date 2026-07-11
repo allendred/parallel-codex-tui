@@ -67,7 +67,7 @@ describe("StatusBar", () => {
     );
     const frame = view.lastFrame() ?? "";
 
-    expect(frame.trim()).toBe("3 workers · 3 done · simple · 13s");
+    expect(frame.trim()).toBe("3 workers · done · simple · 13s");
     expect(displayWidth(frame)).toBeLessThanOrEqual(40);
     view.unmount();
   });
@@ -207,10 +207,10 @@ describe("StatusBar", () => {
     );
 
     const frame = lastFrame() ?? "";
-    const layout = statusRailLayout(40, displayWidth("w1 d1"));
-    expect(frame).toContain("w1 d1");
-    expect(layout).toEqual({ leadingWidth: 1, trailingWidth: 33 });
-    expect(layout.leadingWidth + displayWidth("w1 d1") + layout.trailingWidth).toBe(39);
+    const layout = statusRailLayout(40, displayWidth("1 worker · done"));
+    expect(frame).toContain("1 worker · done");
+    expect(layout).toEqual({ leadingWidth: 1, trailingWidth: 23 });
+    expect(layout.leadingWidth + displayWidth("1 worker · done") + layout.trailingWidth).toBe(39);
   });
 
   it("keeps status segments compact in narrow terminals", () => {

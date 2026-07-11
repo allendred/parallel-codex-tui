@@ -29,7 +29,7 @@ export function StatusBar({ text, terminalWidth: providedTerminalWidth, showTask
   }
 
   const segments = omitTinyCurrentSegment(
-    readableCompletedRouteSegments(parsedSegments, terminalWidth),
+    readableCompletedSegments(parsedSegments, terminalWidth),
     terminalWidth
   );
   const compact = !segments.some((segment) => segment.hideLabel)
@@ -108,24 +108,32 @@ function shouldUseCompactStatus(segments: Segment[], terminalWidth: number): boo
   return statusSegmentsDisplayWidth(roomyDisplays, false) > Math.max(1, terminalWidth - 2);
 }
 
-function readableCompletedRouteSegments(segments: Segment[], terminalWidth: number): Segment[] {
+function readableCompletedSegments(segments: Segment[], terminalWidth: number): Segment[] {
   if (terminalWidth < 35 || terminalWidth >= 56) {
     return segments;
   }
+  const workersIndex = segments.findIndex((segment) => segment.label.toLowerCase() === "workers");
+  const doneIndex = segments.findIndex((segment) => (
+    segment.label.toLowerCase() === "done" && segment.tone === "done"
+  ));
   const routeIndex = segments.findIndex((segment) => (
     segment.label.toLowerCase() === "route"
     && !segment.tone
     && /^(?:simple|complex)(?:\s+·\s+|$)/i.test(segment.value)
   ));
-  const completed = segments.some((segment) => segment.label.toLowerCase() === "workers")
-    && segments.some((segment) => segment.tone === "done")
+  const completed = workersIndex >= 0
+    && doneIndex >= 0
     && !segments.some((segment) => segment.tone === "run" || segment.tone === "fail" || segment.tone === "wait");
-  if (!completed || routeIndex < 0) {
+  if (!completed) {
     return segments;
   }
 
   const readable = segments.map((segment, index) => (
-    index === routeIndex ? { ...segment, hideLabel: true } : segment
+    index === doneIndex
+      ? { ...segment, value: "done", hideLabel: true }
+      : index === routeIndex
+        ? { ...segment, hideLabel: true }
+        : segment
   ));
   return statusSegmentsWidth(readable, false) <= Math.max(1, terminalWidth - 2)
     ? readable

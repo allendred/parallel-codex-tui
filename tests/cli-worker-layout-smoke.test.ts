@@ -201,7 +201,7 @@ describe("CLI worker layout smoke", () => {
       expect(displayWidth(inputLineText)).toBe(139);
       expect(snapshot).toContain("1 worker");
       expect(snapshot).toContain("1 done");
-      expect(snapshot).toContain("@ critic/mock");
+      expect(snapshot).not.toContain("@ critic/mock");
       expect(statusLine?.chunks.some((chunk) => chunk.style.backgroundColor === TUI_THEME_PRESETS.codex.rail)).toBe(true);
       const successStatusText = statusLine?.chunks
         .filter((chunk) => chunk.style.color === TUI_THEME_PRESETS.codex.success)
@@ -209,7 +209,7 @@ describe("CLI worker layout smoke", () => {
         .join("") ?? "";
       expect(successStatusText).toContain("done");
       expect(successStatusText).toContain("1");
-      expect(successStatusText).toContain("critic/mock");
+      expect(successStatusText).not.toContain("critic/mock");
       expect(displayWidth(statusLineText)).toBe(139);
       expect(snapshot).not.toContain("Type a message");
 
@@ -658,16 +658,17 @@ describe("CLI worker layout smoke", () => {
 
     try {
       await waitForText(chunks, "ready");
-      await waitForScreenText(() => screenWrites, screen, "w1");
+      await waitForScreenText(() => screenWrites, screen, "1 worker · done");
       child.write("\x17");
       await waitForScreenText(() => screenWrites, screen, "logs · scroll · Tab · ^O · Esc");
 
       const snapshot = screen.snapshot();
       expect(snapshot).toContain("logs · scroll · Tab · ^O · Esc");
       expect(snapshot).not.toContain("logs · wheel/Pg");
-      expect(snapshot).toContain("w1");
-      expect(snapshot).toContain("d1");
-      expect(snapshot).toContain("@ critic");
+      expect(snapshot).toContain("1 worker · done");
+      expect(snapshot).not.toContain("w1");
+      expect(snapshot).not.toContain("d1");
+      expect(snapshot).not.toContain("@ critic");
       expect(snapshot).not.toContain("@ critic/mock");
       expect(snapshot).not.toContain("s readscroll");
       expect(snapshot).not.toContain("workers 1");
