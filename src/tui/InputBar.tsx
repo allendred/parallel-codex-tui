@@ -4,7 +4,7 @@ import { compactEndByDisplayWidth, compactTailByDisplayWidth, displayWidth } fro
 import { TUI_THEME } from "./theme.js";
 
 export interface InputBarProps {
-  mode: "chat" | "worker" | "workers" | "native" | "router";
+  mode: "chat" | "worker" | "workers" | "native" | "router" | "sessions";
   ready?: boolean;
   busy?: boolean;
   canRetry?: boolean;
@@ -38,6 +38,16 @@ export function InputBar({
 }: InputBarProps) {
   const terminalWidth = providedTerminalWidth ?? process.stdout.columns ?? 120;
   const fillRail = providedTerminalWidth !== undefined || typeof process.stdout.columns === "number";
+
+  if (mode === "sessions") {
+    const hints = taskSessionsInputHints(terminalWidth);
+    return (
+      <InputRail terminalWidth={terminalWidth} textWidth={displayWidth(`${hints.label}${hints.detail}`)} fill={fillRail}>
+        <Text backgroundColor={TUI_THEME.rail} color={TUI_THEME.accent} bold>{hints.label}</Text>
+        {hints.detail ? <Text backgroundColor={TUI_THEME.rail} color={TUI_THEME.muted}>{hints.detail}</Text> : null}
+      </InputRail>
+    );
+  }
 
   if (mode === "workers") {
     const hints = workerOverviewInputHints(terminalWidth);
@@ -300,6 +310,7 @@ export function chatPlaceholderDisplayValue(
   }
   if (options.hasActiveTask && !options.hasWorkers) {
     return selectChatPlaceholder(terminalWidth, [
+      "message · ^N new · ^P project · ^T tasks · ^G routes",
       "message · ^N new · ^P project · ^G routes",
       "message · ^N new · ^P project",
       "message · ^N new",
@@ -314,6 +325,7 @@ export function chatPlaceholderDisplayValue(
     return selectChatPlaceholder(terminalWidth, ["message · scroll", "message", "msg"]);
   }
   return selectChatPlaceholder(terminalWidth, [
+    "message · ^P project · ^T tasks · ^G routes",
     "message · ^P project · ^G routes",
     "message · ^P project",
     "message",
@@ -356,10 +368,17 @@ function chatHistoryPlaceholderDisplayValue(terminalWidth: number, offset: numbe
 
 function chatTaskPlaceholderDisplayValue(terminalWidth: number, scrollable = false, activeTask = false): string {
   if (activeTask && terminalWidth >= 72) {
-    const active = scrollable
-      ? "message · scroll · ^N new · ^W logs · ^B workers · Tab · ^O attach · ^G routes"
-      : "message · ^N new · ^W logs · ^B workers · Tab · ^O attach · ^G routes";
-    if (displayWidth(active) <= chatPlaceholderValueWidth(terminalWidth)) {
+    const activeCandidates = scrollable
+      ? [
+          "message · scroll · ^N new · ^W logs · ^B workers · ^T tasks · Tab · ^O attach · ^G routes",
+          "message · scroll · ^N new · ^W logs · ^B workers · Tab · ^O attach · ^G routes"
+        ]
+      : [
+          "message · ^N new · ^W logs · ^B workers · ^T tasks · Tab · ^O attach · ^G routes",
+          "message · ^N new · ^W logs · ^B workers · Tab · ^O attach · ^G routes"
+        ];
+    const active = activeCandidates.find((candidate) => displayWidth(candidate) <= chatPlaceholderValueWidth(terminalWidth));
+    if (active) {
       return active;
     }
   }
@@ -367,6 +386,7 @@ function chatTaskPlaceholderDisplayValue(terminalWidth: number, scrollable = fal
     terminalWidth,
     scrollable
       ? [
+          "message · scroll · ^W logs · ^B workers · ^T tasks · Tab · ^O attach · ^G routes",
           "message · scroll · ^W logs · ^B workers · Tab · ^O attach · ^G routes",
           "message · scroll · ^W logs · Tab · ^O attach · ^G routes",
           "message · scroll · ^W logs · Tab · ^O attach",
@@ -379,6 +399,7 @@ function chatTaskPlaceholderDisplayValue(terminalWidth: number, scrollable = fal
           "msg"
         ]
       : [
+          "message · ^W logs · ^B workers · ^T tasks · Tab · ^O attach · ^G routes",
           "message · ^W logs · ^B workers · Tab · ^O attach · ^G routes",
           "message · ^W logs · Tab · ^O attach · ^G routes",
           "message · ^W logs · Tab · ^O attach",
@@ -466,6 +487,25 @@ function workerOverviewInputHints(width: number): { label: string; detail: strin
     return { label: "workers", detail: " · Up/Dn · Enter logs · ^O · Esc" };
   }
   return { label: "workers", detail: " · Up/Dn select · Enter logs · ^O attach · Esc back" };
+}
+
+function taskSessionsInputHints(width: number): { label: string; detail: string } {
+  if (width < 12) {
+    return { label: "ses", detail: "" };
+  }
+  if (width < 18) {
+    return { label: "sessions", detail: " · Esc" };
+  }
+  if (width < 28) {
+    return { label: "sessions", detail: " · Up/Dn · Esc" };
+  }
+  if (width < 42) {
+    return { label: "sessions", detail: " · Up/Dn · Enter · Esc" };
+  }
+  if (width < 62) {
+    return { label: "sessions", detail: " · Up/Dn · Enter restore · ^N · Esc" };
+  }
+  return { label: "sessions", detail: " · Up/Dn select · Enter restore · ^N new · Esc back" };
 }
 
 function nativeInputHints(width: number, closed = false): { label: string; detail: string } {

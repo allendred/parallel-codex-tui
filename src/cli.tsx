@@ -111,6 +111,24 @@ async function main(): Promise<void> {
             policy: routerDiagnosticsPolicy(latestConfig.router)
           };
         }}
+        loadTaskSessions={() => state.runtime.index.listTasks(100)}
+        activateTaskSession={async (taskId) => {
+          if (!taskId) {
+            await state.runtime.index.setActiveTaskId(null);
+            return null;
+          }
+          if (!(await state.runtime.sessions.hasTask(taskId))) {
+            throw new Error(`Task session not found in workspace ${state.runtime.workspaceRoot}: ${taskId}`);
+          }
+          const task = state.runtime.sessions.taskFromId(taskId);
+          const [route, workers, canRetry] = await Promise.all([
+            state.runtime.sessions.readLatestRoute(task),
+            state.runtime.orchestrator.listTaskWorkers(taskId),
+            state.runtime.orchestrator.canRetryTask(taskId)
+          ]);
+          await state.runtime.index.setActiveTaskId(taskId);
+          return { taskId, route, workers, canRetry };
+        }}
         switchWorkspace={async (workspace) => {
           if (workspace === current.runtime.workspaceRoot) {
             return;
@@ -156,8 +174,25 @@ async function loadInteractiveWorkspace(
     if (requestedTaskId && !(await runtime.sessions.hasTask(requestedTaskId))) {
       throw new Error(`Task session not found in workspace ${runtime.workspaceRoot}: ${requestedTaskId}`);
     }
-    const latestTask = await runtime.sessions.latestTask();
-    const initialTaskId = requestedTaskId ?? latestTask?.id ?? null;
+    const [latestTask, rememberedTaskId] = await Promise.all([
+      runtime.sessions.latestTask(),
+      runtime.index.activeTaskId()
+    ]);
+    let initialTaskId: string | null;
+    if (requestedTaskId) {
+      initialTaskId = requestedTaskId;
+    } else if (rememberedTaskId === null) {
+      initialTaskId = null;
+    } else if (rememberedTaskId && (await runtime.sessions.hasTask(rememberedTaskId))) {
+      initialTaskId = rememberedTaskId;
+    } else {
+      initialTaskId = latestTask?.id ?? null;
+    }
+    if (initialTaskId && initialTaskId !== rememberedTaskId) {
+      await runtime.index.setActiveTaskId(initialTaskId);
+    } else if (!initialTaskId && typeof rememberedTaskId === "string") {
+      await runtime.index.setActiveTaskId(null);
+    }
     const [initialRoute, initialWorkers, initialCanRetryTask, initialHistory, workspaceChoices] = await Promise.all([
       initialTaskId
         ? runtime.sessions.readLatestRoute(runtime.sessions.taskFromId(initialTaskId))

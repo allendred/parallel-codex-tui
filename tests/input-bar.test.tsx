@@ -177,8 +177,12 @@ describe("InputBar", () => {
 
   it("exposes the workspace switcher when the input rail has room", () => {
     expect(chatPlaceholderDisplayValue(40)).toBe("message · ^P project · ^G routes");
+    expect(chatPlaceholderDisplayValue(80)).toBe("message · ^P project · ^T tasks · ^G routes");
     expect(chatPlaceholderDisplayValue(40, { hasActiveTask: true })).toBe(
       "message · ^N new · ^P project"
+    );
+    expect(chatPlaceholderDisplayValue(80, { hasActiveTask: true })).toBe(
+      "message · ^N new · ^P project · ^T tasks · ^G routes"
     );
   });
 
@@ -206,7 +210,7 @@ describe("InputBar", () => {
   });
 
   it("shows task shortcuts in the empty chat prompt once workers exist", () => {
-    expect(chatPlaceholderDisplayValue(80, { hasWorkers: true })).toBe("message · ^W logs · ^B workers · Tab · ^O attach · ^G routes");
+    expect(chatPlaceholderDisplayValue(80, { hasWorkers: true })).toBe("message · ^W logs · ^B workers · ^T tasks · Tab · ^O attach · ^G routes");
     expect(chatPlaceholderDisplayValue(42, { hasWorkers: true })).toBe("message · ^W logs · Tab · ^O attach");
     expect(chatPlaceholderDisplayValue(41, { hasWorkers: true })).toBe("message · ^W logs · Tab · ^O attach");
     expect(chatPlaceholderDisplayValue(40, { hasWorkers: true })).toBe("message · ^W · ^O");
@@ -227,6 +231,7 @@ describe("InputBar", () => {
     expect(frame).toContain("Tab");
     expect(frame).toContain("^O attach");
     expect(frame).toContain("^B workers");
+    expect(frame).toContain("^T tasks");
     expect(frame).toContain("^G routes");
   });
 
@@ -436,6 +441,27 @@ describe("InputBar", () => {
     );
     const narrowFrame = narrow.lastFrame() ?? "";
     expect(narrowFrame).toContain("workers · Up/Dn · Esc");
+    expect(narrowFrame.split("\n")).toHaveLength(1);
+    expect(displayWidth(narrowFrame)).toBeLessThanOrEqual(24);
+    narrow.unmount();
+  });
+
+  it("shows Task session restore and new-task guidance", () => {
+    const roomy = render(
+      <InputBar mode="sessions" value="ignored" terminalWidth={80} onChange={() => {}} />
+    );
+    const roomyFrame = roomy.lastFrame() ?? "";
+    expect(roomyFrame).toContain("sessions · Up/Dn select · Enter restore · ^N new · Esc back");
+    expect(roomyFrame).not.toContain("ignored");
+    expect(roomyFrame.split("\n")).toHaveLength(1);
+    expect(displayWidth(roomyFrame)).toBeLessThanOrEqual(80);
+    roomy.unmount();
+
+    const narrow = render(
+      <InputBar mode="sessions" value="" terminalWidth={24} onChange={() => {}} />
+    );
+    const narrowFrame = narrow.lastFrame() ?? "";
+    expect(narrowFrame).toContain("sessions · Up/Dn · Esc");
     expect(narrowFrame.split("\n")).toHaveLength(1);
     expect(displayWidth(narrowFrame)).toBeLessThanOrEqual(24);
     narrow.unmount();

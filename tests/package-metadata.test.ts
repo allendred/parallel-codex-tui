@@ -197,6 +197,11 @@ describe("package metadata", () => {
     expect(readme).toContain("`Ctrl+B` opens a live Worker overview without replacing the `Ctrl+W` log shortcut");
     expect(readme).toContain("Up/Down, PageUp/PageDown, the mouse wheel, or `Tab` changes the selected worker");
     expect(readme).toContain("Enter or `Ctrl+W` opens its rendered log");
+    expect(readme).toContain("`Ctrl+T` opens the workspace's persisted Task sessions");
+    expect(readme).toContain("turn, worker, and native-session counts");
+    expect(readme).toContain("The selected active task is stored in `session-index.sqlite`");
+    expect(readme).toContain("Restoring a task reloads its route, workers, retry state, and recorded native session ids");
+    expect(readme).toContain("`Ctrl+N` persists an intentionally empty active-task context");
     expect(readme).toContain("In worker-log views, scroll with the mouse wheel or PageUp/PageDown");
     expect(readme).toContain("In chat or worker-log views, press `Ctrl+O`");
     expect(readme).toContain("Native attach follows outer terminal resize");

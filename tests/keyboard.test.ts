@@ -70,6 +70,19 @@ describe("keyboard shortcuts", () => {
     expect(isWorkerOverviewShortcut?.("b", { ctrl: false })).toBe(false);
   });
 
+  it("recognizes ctrl-t as the Task sessions shortcut", () => {
+    const isTaskSessionsShortcut = (
+      keyboardModule as typeof keyboardModule & {
+        isTaskSessionsShortcut?: (input: string, key: { ctrl?: boolean }) => boolean;
+      }
+    ).isTaskSessionsShortcut;
+
+    expect(isTaskSessionsShortcut).toBeTypeOf("function");
+    expect(isTaskSessionsShortcut?.("t", { ctrl: true })).toBe(true);
+    expect(isTaskSessionsShortcut?.("\u0014", { ctrl: false })).toBe(true);
+    expect(isTaskSessionsShortcut?.("t", { ctrl: false })).toBe(false);
+  });
+
   it("does not treat plain letters as shortcuts", () => {
     expect(isLogsShortcut("w", { ctrl: false })).toBe(false);
     expect(isAttachShortcut("o", { ctrl: false })).toBe(false);

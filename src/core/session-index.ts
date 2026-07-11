@@ -20,6 +20,12 @@ export interface WorkerIndexPaths {
   outputLogPath: string;
 }
 
+export interface TaskIndexSummary extends TaskMeta {
+  turnCount: number;
+  workerCount: number;
+  nativeSessionCount: number;
+}
+
 export class SessionIndex {
   private constructor(
     private readonly db: DatabaseSync,
@@ -79,6 +85,11 @@ export class SessionIndex {
         last_used_at TEXT NOT NULL,
         source TEXT NOT NULL,
         PRIMARY KEY (task_id, worker_id)
+      );
+
+      CREATE TABLE IF NOT EXISTS workspace_state (
+        key TEXT PRIMARY KEY,
+        value TEXT NOT NULL
       );
     `);
   }
@@ -179,6 +190,69 @@ export class SessionIndex {
   async countRows(table: "tasks" | "turns" | "workers" | "native_sessions"): Promise<number> {
     const row = this.db.prepare(`SELECT COUNT(*) AS count FROM ${table}`).get() as { count: number };
     return row.count;
+  }
+
+  async listTasks(limit = 50): Promise<TaskIndexSummary[]> {
+    const boundedLimit = Number.isFinite(limit)
+      ? Math.min(500, Math.max(0, Math.trunc(limit)))
+      : 50;
+    if (boundedLimit === 0) {
+      return [];
+    }
+    const rows = this.db.prepare(
+      `SELECT
+         tasks.id,
+         tasks.title,
+         tasks.created_at,
+         tasks.cwd,
+         tasks.mode,
+         tasks.status,
+         (SELECT COUNT(*) FROM turns WHERE turns.task_id = tasks.id) AS turn_count,
+         (SELECT COUNT(*) FROM workers WHERE workers.task_id = tasks.id) AS worker_count,
+         (SELECT COUNT(*) FROM native_sessions WHERE native_sessions.task_id = tasks.id) AS native_session_count
+       FROM tasks
+       ORDER BY tasks.created_at DESC, tasks.id DESC
+       LIMIT ?`
+    ).all(boundedLimit) as Array<Record<string, unknown>>;
+
+    return rows.flatMap((row) => {
+      const task = TaskMetaSchema.safeParse({
+        id: row.id,
+        title: row.title,
+        created_at: row.created_at,
+        cwd: row.cwd,
+        mode: row.mode,
+        status: row.status
+      });
+      if (!task.success) {
+        return [];
+      }
+      return [{
+        ...task.data,
+        turnCount: Number(row.turn_count) || 0,
+        workerCount: Number(row.worker_count) || 0,
+        nativeSessionCount: Number(row.native_session_count) || 0
+      }];
+    });
+  }
+
+  async activeTaskId(): Promise<string | null | undefined> {
+    const row = this.db
+      .prepare("SELECT value FROM workspace_state WHERE key = 'active_task_id'")
+      .get() as { value: string } | undefined;
+    if (!row) {
+      return undefined;
+    }
+    return row.value.trim() || null;
+  }
+
+  async setActiveTaskId(taskId: string | null): Promise<void> {
+    const value = taskId?.trim() ?? "";
+    this.db.prepare(
+      `INSERT INTO workspace_state (key, value)
+       VALUES ('active_task_id', ?)
+       ON CONFLICT(key) DO UPDATE SET value = excluded.value`
+    ).run(value);
   }
 
   async workerNativeSessionId(taskId: string, workerId: string): Promise<string | null> {

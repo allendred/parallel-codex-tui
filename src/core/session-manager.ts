@@ -126,6 +126,7 @@ export class SessionManager {
     await writeJson(join(dir, "route.json"), RouteDecisionSchema.parse(input.route));
     await this.writeTurn({ id, dir }, "0001", input.request, input.route, createdAt);
     await this.appendEvent({ id, dir }, "task.created", "Task session created");
+    await this.index?.setActiveTaskId(id);
 
     return {
       id,

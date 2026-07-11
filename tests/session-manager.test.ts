@@ -265,6 +265,7 @@ describe("SessionManager", () => {
       cwd: root,
       route
     });
+    await expect(index.activeTaskId()).resolves.toBe(task.id);
     await writeText(task.metaPath, "{");
 
     const turn = await manager.appendTurn(task, {

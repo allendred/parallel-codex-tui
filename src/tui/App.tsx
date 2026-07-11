@@ -5,6 +5,7 @@ import { Lexer, type Token, type Tokens } from "marked";
 import type { AppConfig } from "../core/config.js";
 import { readJson } from "../core/file-store.js";
 import type { RouterAuditRecord } from "../core/router-audit.js";
+import type { TaskIndexSummary } from "../core/session-index.js";
 import type { WorkspaceChoice } from "../core/workspace.js";
 import { WorkerStatusSchema, type RouteDecision } from "../domain/schemas.js";
 import type { Orchestrator, RouteStartInfo, WorkerLogRef, WorkerRunStatus } from "../orchestrator/orchestrator.js";
@@ -29,7 +30,7 @@ import { TerminalOutput } from "./TerminalOutput.js";
 import { NativeTerminalScreen } from "./terminal-screen.js";
 import { WorkerOutputView } from "./WorkerOutputView.js";
 import { compactEndByDisplayWidth, displayWidth, wrapByDisplayWidth } from "./display-width.js";
-import { isAttachShortcut, isExitShortcut, isLogsShortcut, isNewTaskShortcut, isRouterDiagnosticsShortcut, isWorkerOverviewShortcut, isWorkspaceShortcut, mouseScrollDelta, rawHistoryDelta, rawPageScrollDelta, scrollDelta } from "./keyboard.js";
+import { isAttachShortcut, isExitShortcut, isLogsShortcut, isNewTaskShortcut, isRouterDiagnosticsShortcut, isTaskSessionsShortcut, isWorkerOverviewShortcut, isWorkspaceShortcut, mouseScrollDelta, rawHistoryDelta, rawPageScrollDelta, scrollDelta } from "./keyboard.js";
 import { createRawInputDecoder } from "./raw-input-decoder.js";
 import { decodeHtmlEntities } from "./markdown-text.js";
 import { configureTuiTheme, TUI_THEME } from "./theme.js";
@@ -40,6 +41,7 @@ import {
   type RouterDiagnosticsPolicy
 } from "./RouterDiagnosticsView.js";
 import { moveWorkerSelection, WorkerOverviewView } from "./WorkerOverviewView.js";
+import { moveTaskSessionSelection, TaskSessionsView } from "./TaskSessionsView.js";
 import {
   buildNativeAttachLaunch,
   startNativeAttachProcess,
@@ -63,6 +65,8 @@ export interface AppProps {
     records: RouterAuditRecord[];
     policy: RouterDiagnosticsPolicy;
   }>;
+  loadTaskSessions?: () => Promise<TaskIndexSummary[]>;
+  activateTaskSession?: (taskId: string | null) => Promise<ActivatedTaskSession | null>;
   prepareNativeAttach?: (worker: WorkerLogRef) => Promise<NativeAttachLaunch>;
   startNativeAttach?: (
     launch: NativeAttachLaunch,
@@ -72,6 +76,13 @@ export interface AppProps {
       onError: (error: Error) => void;
     }
   ) => NativeAttachProcessRef;
+}
+
+export interface ActivatedTaskSession {
+  taskId: string;
+  route: RouteDecision | null;
+  workers: WorkerLogRef[];
+  canRetry: boolean;
 }
 
 export interface Message {
@@ -123,6 +134,8 @@ export function App({
   workspaceChoices = [],
   switchWorkspace,
   loadRouterDiagnostics,
+  loadTaskSessions,
+  activateTaskSession,
   prepareNativeAttach,
   startNativeAttach
 }: AppProps) {
@@ -158,6 +171,10 @@ export function App({
   const [routerError, setRouterError] = useState<string | null>(null);
   const [routerScrollOffset, setRouterScrollOffset] = useState(0);
   const [routerMaxScrollOffset, setRouterMaxScrollOffset] = useState(0);
+  const [taskSessions, setTaskSessions] = useState<TaskIndexSummary[]>([]);
+  const [selectedTaskSessionIndex, setSelectedTaskSessionIndex] = useState(0);
+  const [taskSessionsLoading, setTaskSessionsLoading] = useState(false);
+  const [taskSessionsError, setTaskSessionsError] = useState<string | null>(null);
   const [nativeAttach, setNativeAttach] = useState<{
     hasOutput: boolean;
     launch: NativeAttachLaunch;
@@ -183,6 +200,9 @@ export function App({
   const chatScrollOffsetRef = useRef(chatScrollOffset);
   const chatMaxScrollOffsetRef = useRef(chatMaxScrollOffset);
   const routerMaxScrollOffsetRef = useRef(routerMaxScrollOffset);
+  const taskSessionsRef = useRef(taskSessions);
+  const selectedTaskSessionIndexRef = useRef(selectedTaskSessionIndex);
+  const taskSessionsLoadingRef = useRef(taskSessionsLoading);
   const autoSelectedFailedWorkerRef = useRef(false);
   const userSelectedWorkerRef = useRef(false);
   const attachSelectedWorkerRef = useRef<(worker: WorkerLogRef) => Promise<void>>(attachSelectedWorker);
@@ -192,10 +212,14 @@ export function App({
   const openWorkspacePickerRef = useRef<() => void>(openWorkspacePicker);
   const openRouterDiagnosticsRef = useRef<() => Promise<void>>(openRouterDiagnostics);
   const openWorkerOverviewRef = useRef<() => void>(openWorkerOverview);
-  const workspaceReturnViewRef = useRef<"chat" | "worker" | "workers">("chat");
-  const routerReturnViewRef = useRef<"chat" | "worker" | "workers">("chat");
+  const openTaskSessionsRef = useRef<() => Promise<void>>(openTaskSessions);
+  const activateSelectedTaskSessionRef = useRef<() => Promise<void>>(activateSelectedTaskSession);
+  const workspaceReturnViewRef = useRef<"chat" | "worker" | "workers" | "sessions">("chat");
+  const routerReturnViewRef = useRef<"chat" | "worker" | "workers" | "sessions">("chat");
   const workerOverviewReturnViewRef = useRef<"chat" | "worker">("chat");
+  const taskSessionsReturnViewRef = useRef<"chat" | "worker" | "workers" | "router">("chat");
   const routerLoadSequenceRef = useRef(0);
+  const taskSessionsLoadSequenceRef = useRef(0);
   const exitRef = useRef(exit);
   const rawInputDecoderRef = useRef(createRawInputDecoder());
   const chatPasteDecoderRef = useRef(createChatPasteDecoder());
@@ -208,7 +232,7 @@ export function App({
   const outputHeight = Math.max(1, contentHeight);
   const terminalWidth = process.stdout.columns || 120;
   const selectedWorkerStatus = formatSelectedWorkerStatus(status, selectedWorkerIndex);
-  const visibleWorkerStatus = view === "chat" || view === "router" || selectedWorkerStatusIsRedundant(status)
+  const visibleWorkerStatus = view === "chat" || view === "router" || view === "sessions" || selectedWorkerStatusIsRedundant(status)
     ? ""
     : selectedWorkerStatus;
   const visibleRouteStatus = routePending
@@ -270,6 +294,18 @@ export function App({
   }, [routerMaxScrollOffset]);
 
   useEffect(() => {
+    taskSessionsRef.current = taskSessions;
+  }, [taskSessions]);
+
+  useEffect(() => {
+    selectedTaskSessionIndexRef.current = selectedTaskSessionIndex;
+  }, [selectedTaskSessionIndex]);
+
+  useEffect(() => {
+    taskSessionsLoadingRef.current = taskSessionsLoading;
+  }, [taskSessionsLoading]);
+
+  useEffect(() => {
     chatScrollOffsetRef.current = 0;
     setChatScrollOffset(0);
   }, [messages.length]);
@@ -296,6 +332,8 @@ export function App({
     openWorkspacePickerRef.current = openWorkspacePicker;
     openRouterDiagnosticsRef.current = openRouterDiagnostics;
     openWorkerOverviewRef.current = openWorkerOverview;
+    openTaskSessionsRef.current = openTaskSessions;
+    activateSelectedTaskSessionRef.current = activateSelectedTaskSession;
   });
 
   useEffect(() => {
@@ -459,6 +497,7 @@ export function App({
         if (
           viewRef.current !== "native" &&
           viewRef.current !== "router" &&
+          viewRef.current !== "sessions" &&
           viewRef.current !== "workers" &&
           viewRef.current !== "workspace"
         ) {
@@ -523,6 +562,17 @@ export function App({
       setSelectedWorkerIndex(nextIndex);
       setWorkerScrollOffset(0);
     };
+    const moveSelectedTaskSession = (delta: number, wrap = false) => {
+      const nextIndex = moveTaskSessionSelection(
+        selectedTaskSessionIndexRef.current,
+        delta,
+        taskSessionsRef.current.length,
+        wrap
+      );
+      selectedTaskSessionIndexRef.current = nextIndex;
+      setTaskSessionsError(null);
+      setSelectedTaskSessionIndex(nextIndex);
+    };
     const handleRawInput = (data: unknown) => {
       const chunk = rawInputDecoderRef.current.write(Buffer.isBuffer(data) ? data : String(data ?? ""));
       if (!chunk) {
@@ -530,6 +580,56 @@ export function App({
       }
       const currentView = viewRef.current;
       if (currentView === "workspace") {
+        return;
+      }
+      if (currentView === "sessions") {
+        if (isExitShortcut(chunk, {})) {
+          activeRunControllerRef.current?.abort();
+          exitRef.current();
+          return;
+        }
+        if (isTaskSessionsShortcut(chunk, {}) || chunk === "\x1b") {
+          setTaskSessionsError(null);
+          viewRef.current = taskSessionsReturnViewRef.current;
+          setView(taskSessionsReturnViewRef.current);
+          return;
+        }
+        if (taskSessionsLoadingRef.current) {
+          return;
+        }
+        if (isRouterDiagnosticsShortcut(chunk, {})) {
+          void openRouterDiagnosticsRef.current();
+          return;
+        }
+        if (isWorkspaceShortcut(chunk, {}) && !busyRef.current) {
+          openWorkspacePickerRef.current();
+          return;
+        }
+        if (isNewTaskShortcut(chunk, {}) && !busyRef.current) {
+          if (activeTaskIdRef.current) {
+            void newTaskRef.current();
+          } else {
+            viewRef.current = "chat";
+            setView("chat");
+          }
+          return;
+        }
+        if (chunk === "\r" || chunk === "\n") {
+          void activateSelectedTaskSessionRef.current();
+          return;
+        }
+        if (chunk === "\t") {
+          moveSelectedTaskSession(1, true);
+          return;
+        }
+        const selectionDelta = -(
+          rawHistoryDelta(chunk)
+          + rawPageScrollDelta(chunk, Math.max(1, outputHeight - 2))
+          + mouseScrollDelta(chunk, 1)
+        );
+        if (selectionDelta !== 0) {
+          moveSelectedTaskSession(selectionDelta);
+        }
         return;
       }
       if (currentView === "workers") {
@@ -546,6 +646,10 @@ export function App({
         }
         if (isRouterDiagnosticsShortcut(chunk, {})) {
           void openRouterDiagnosticsRef.current();
+          return;
+        }
+        if (isTaskSessionsShortcut(chunk, {}) && !busyRef.current) {
+          void openTaskSessionsRef.current();
           return;
         }
         if (isWorkspaceShortcut(chunk, {}) && !busyRef.current) {
@@ -595,6 +699,10 @@ export function App({
           void openRouterDiagnosticsRef.current();
           return;
         }
+        if (isTaskSessionsShortcut(chunk, {}) && !busyRef.current) {
+          void openTaskSessionsRef.current();
+          return;
+        }
         if (chunk === "\x1b") {
           setAttachError(null);
           viewRef.current = routerReturnViewRef.current;
@@ -628,6 +736,10 @@ export function App({
           void openRouterDiagnosticsRef.current();
           return;
         }
+        if (isTaskSessionsShortcut(chunk, {}) && !busyRef.current) {
+          void openTaskSessionsRef.current();
+          return;
+        }
         if (isWorkerOverviewShortcut(chunk, {})) {
           openWorkerOverviewRef.current();
           return;
@@ -652,6 +764,10 @@ export function App({
         }
         if (isRouterDiagnosticsShortcut(chunk, {})) {
           void openRouterDiagnosticsRef.current();
+          return;
+        }
+        if (isTaskSessionsShortcut(chunk, {}) && !busyRef.current) {
+          void openTaskSessionsRef.current();
           return;
         }
         if (isWorkerOverviewShortcut(chunk, {})) {
@@ -824,6 +940,7 @@ export function App({
   useEffect(() => () => {
     activeRunControllerRef.current?.abort();
     routerLoadSequenceRef.current += 1;
+    taskSessionsLoadSequenceRef.current += 1;
   }, []);
 
   useInput((inputKey, key) => {
@@ -1138,6 +1255,13 @@ export function App({
       return;
     }
 
+    try {
+      await activateTaskSession?.(null);
+    } catch (error) {
+      setAttachError(error instanceof Error ? error.message : String(error));
+      return;
+    }
+
     const nextMemory = newTaskMemoryState();
     activeTaskIdRef.current = nextMemory.activeTaskId;
     setActiveTaskId(nextMemory.activeTaskId);
@@ -1155,6 +1279,7 @@ export function App({
     autoSelectedFailedWorkerRef.current = false;
     userSelectedWorkerRef.current = false;
     setAttachError(null);
+    viewRef.current = "chat";
     setView("chat");
     chatDraftHistoryRef.current = {
       offset: 0,
@@ -1169,7 +1294,7 @@ export function App({
       return;
     }
     if (currentView !== "router") {
-      routerReturnViewRef.current = currentView === "worker" || currentView === "workers"
+      routerReturnViewRef.current = currentView === "worker" || currentView === "workers" || currentView === "sessions"
         ? currentView
         : "chat";
     }
@@ -1206,6 +1331,110 @@ export function App({
     }
   }
 
+  async function openTaskSessions(): Promise<void> {
+    const currentView = viewRef.current;
+    if (
+      busyRef.current ||
+      currentView === "native" ||
+      currentView === "workspace" ||
+      currentView === "sessions"
+    ) {
+      return;
+    }
+    taskSessionsReturnViewRef.current = currentView === "worker" || currentView === "workers" || currentView === "router"
+      ? currentView
+      : "chat";
+    viewRef.current = "sessions";
+    setView("sessions");
+    setAttachError(null);
+    setTaskSessionsError(null);
+    taskSessionsLoadingRef.current = true;
+    setTaskSessionsLoading(true);
+
+    const sequence = taskSessionsLoadSequenceRef.current + 1;
+    taskSessionsLoadSequenceRef.current = sequence;
+    try {
+      if (!loadTaskSessions) {
+        throw new Error("Task sessions are unavailable");
+      }
+      const tasks = await loadTaskSessions();
+      if (taskSessionsLoadSequenceRef.current !== sequence) {
+        return;
+      }
+      taskSessionsRef.current = tasks;
+      setTaskSessions(tasks);
+      const activeIndex = activeTaskIdRef.current
+        ? tasks.findIndex((task) => task.id === activeTaskIdRef.current)
+        : -1;
+      const selectedIndex = activeIndex >= 0 ? activeIndex : 0;
+      selectedTaskSessionIndexRef.current = selectedIndex;
+      setSelectedTaskSessionIndex(selectedIndex);
+    } catch (error) {
+      if (taskSessionsLoadSequenceRef.current === sequence) {
+        setTaskSessionsError(error instanceof Error ? error.message : String(error));
+      }
+    } finally {
+      if (taskSessionsLoadSequenceRef.current === sequence) {
+        taskSessionsLoadingRef.current = false;
+        setTaskSessionsLoading(false);
+      }
+    }
+  }
+
+  async function activateSelectedTaskSession(): Promise<void> {
+    if (busyRef.current || taskSessionsLoadingRef.current) {
+      return;
+    }
+    const selected = taskSessionsRef.current[selectedTaskSessionIndexRef.current];
+    if (!selected) {
+      return;
+    }
+    taskSessionsLoadingRef.current = true;
+    setTaskSessionsLoading(true);
+    setTaskSessionsError(null);
+    const sequence = taskSessionsLoadSequenceRef.current + 1;
+    taskSessionsLoadSequenceRef.current = sequence;
+    try {
+      if (!activateTaskSession) {
+        throw new Error("Task session restore is unavailable");
+      }
+      const restored = await activateTaskSession(selected.id);
+      if (taskSessionsLoadSequenceRef.current !== sequence) {
+        return;
+      }
+      if (!restored) {
+        throw new Error(`Task session not found: ${selected.id}`);
+      }
+      activeTaskIdRef.current = restored.taskId;
+      setActiveTaskId(restored.taskId);
+      setActiveMode("complex");
+      setCanRetryTask(restored.canRetry);
+      setStatus(restoredWorkerStatusLine(restored.taskId, restored.workers));
+      setRoutePending(null);
+      setLastRoute(restored.route);
+      workersRef.current = restored.workers;
+      setWorkers(restored.workers);
+      selectedWorkerIndexRef.current = 0;
+      setSelectedWorkerIndex(0);
+      setWorkerScrollOffset(0);
+      setWorkerMaxScrollOffset(0);
+      autoSelectedFailedWorkerRef.current = false;
+      userSelectedWorkerRef.current = false;
+      setAttachError(null);
+      viewRef.current = "chat";
+      setView("chat");
+    } catch (error) {
+      if (taskSessionsLoadSequenceRef.current === sequence) {
+        setTaskSessionsError(error instanceof Error ? error.message : String(error));
+      }
+    } finally {
+      if (taskSessionsLoadSequenceRef.current === sequence) {
+        taskSessionsLoadingRef.current = false;
+        setTaskSessionsLoading(false);
+      }
+    }
+  }
+
   function openWorkerOverview(): void {
     const currentView = viewRef.current;
     if (currentView !== "chat" && currentView !== "worker") {
@@ -1226,7 +1455,7 @@ export function App({
     if (busyRef.current || !switchWorkspace || currentView === "native" || currentView === "workspace") {
       return;
     }
-    workspaceReturnViewRef.current = currentView === "worker" || currentView === "workers"
+    workspaceReturnViewRef.current = currentView === "worker" || currentView === "workers" || currentView === "sessions"
       ? currentView
       : "chat";
     setAttachError(null);
@@ -1285,7 +1514,7 @@ export function App({
           chatScrollOffset={chatScrollOffset}
           chatMaxScrollOffset={chatMaxScrollOffset}
           nativeClosed={view === "native" && nativeAttach?.closedCode !== null}
-          value={view === "native" || view === "router" || view === "workers" ? "" : input}
+          value={view === "native" || view === "router" || view === "workers" || view === "sessions" ? "" : input}
           cursor={view === "chat" ? inputCursor : undefined}
           terminalWidth={terminalWidth}
           onChange={view === "native" ? setNativeInput : setInput}
@@ -1296,6 +1525,16 @@ export function App({
     >
         {view === "native" ? (
           <NativeAttachView attach={nativeAttach} viewportHeight={contentHeight} />
+        ) : view === "sessions" ? (
+          <TaskSessionsView
+            tasks={taskSessions}
+            activeTaskId={activeTaskId}
+            selectedIndex={selectedTaskSessionIndex}
+            loading={taskSessionsLoading}
+            error={taskSessionsError}
+            height={contentHeight}
+            terminalWidth={terminalWidth}
+          />
         ) : view === "workers" ? (
           <WorkerOverviewView
             workers={workers}

@@ -413,11 +413,12 @@ describe("ProcessWorkerAdapter", () => {
       outputLogPath,
       statusPath,
       prompt: "time out cleanly",
-      timeoutMs: 200
+      // Give the child time to install its SIGTERM handler under parallel CI load.
+      timeoutMs: 1000
     });
 
     expect(result.exitCode).toBe(0);
-    expect(await readTextIfExists(outputLogPath)).toContain("Process timed out after 200ms");
+    expect(await readTextIfExists(outputLogPath)).toContain("Process timed out after 1000ms");
     await expect(readJson(statusPath, WorkerStatusSchema)).resolves.toMatchObject({
       state: "failed",
       phase: "process-timeout"
@@ -445,7 +446,7 @@ describe("ProcessWorkerAdapter", () => {
       statusPath,
       prompt: "force timeout",
       // Give the child time to install its SIGTERM handler under parallel CI load.
-      timeoutMs: 750
+      timeoutMs: 1000
     });
 
     expect(result.signal).toBe("SIGKILL");

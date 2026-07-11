@@ -166,6 +166,25 @@ describe("AppShell", () => {
     expect(header).not.toContain(" · logs · ");
   });
 
+  it("labels the task Session manager independently from chat", () => {
+    const { lastFrame } = render(
+      <AppShell
+        view="sessions"
+        cwd="/tmp/project"
+        taskId="task-1"
+        statusText="task done"
+        terminalWidth={80}
+        input={<TextLine text="sessions · Up/Dn select · Enter restore · Esc back" />}
+      >
+        <TextLine text="Task sessions" />
+      </AppShell>
+    );
+
+    const header = (lastFrame() ?? "").split("\n")[0] ?? "";
+    expect(header).toContain("parallel-codex-tui · sessions");
+    expect(header).not.toContain(" · chat · ");
+  });
+
   it("renders a structured worker interface with header, full-width content, input, and status", () => {
     const { lastFrame } = render(
       <AppShell

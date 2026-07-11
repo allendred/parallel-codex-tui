@@ -8,6 +8,107 @@ import { SessionIndex } from "../src/core/session-index.js";
 import { NativeSessionSchema, RouteDecisionSchema, TaskMetaSchema, TurnMetaSchema, WorkerStatusSchema } from "../src/domain/schemas.js";
 
 describe("SessionIndex", () => {
+  it("lists newest task summaries with counts and persists the active task", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pct-index-catalog-"));
+    const index = await SessionIndex.open(root, ".parallel-codex");
+    const catalog = index as SessionIndex & {
+      listTasks?: (limit?: number) => Promise<Array<{
+        id: string;
+        title: string;
+        turnCount: number;
+        workerCount: number;
+        nativeSessionCount: number;
+      }>>;
+      activeTaskId?: () => Promise<string | null | undefined>;
+      setActiveTaskId?: (taskId: string | null) => Promise<void>;
+    };
+
+    await index.upsertTask({
+      id: "task-old",
+      title: "Older task",
+      created_at: "2026-07-01T01:00:00.000Z",
+      cwd: root,
+      mode: "complex",
+      status: "done"
+    });
+    await index.upsertTask({
+      id: "task-new",
+      title: "Newest task",
+      created_at: "2026-07-02T01:00:00.000Z",
+      cwd: root,
+      mode: "complex",
+      status: "failed"
+    });
+    for (const turnId of ["0001", "0002"]) {
+      await index.upsertTurn("task-new", {
+        task_id: "task-new",
+        turn_id: turnId,
+        created_at: `2026-07-02T01:0${Number(turnId)}:00.000Z`,
+        request_path: `turns/${turnId}/user.md`
+      });
+    }
+    await index.upsertWorker("task-new", {
+      worker_id: "actor-codex",
+      role: "actor",
+      engine: "codex",
+      state: "failed",
+      phase: "review",
+      last_event_at: "2026-07-02T01:03:00.000Z",
+      summary: "Needs work",
+      native_session_id: "native-new"
+    }, {
+      dir: join(root, "actor-codex"),
+      statusPath: join(root, "actor-codex", "status.json"),
+      outputLogPath: join(root, "actor-codex", "output.log")
+    });
+    await index.upsertNativeSession("task-new", {
+      engine: "codex",
+      role: "actor",
+      worker_id: "actor-codex",
+      session_id: "native-new",
+      scope: "task",
+      cwd: root,
+      created_at: "2026-07-02T01:00:00.000Z",
+      last_used_at: "2026-07-02T01:03:00.000Z",
+      source: "manual"
+    });
+
+    expect(catalog.listTasks).toBeTypeOf("function");
+    await expect(catalog.listTasks?.(10)).resolves.toEqual([
+      expect.objectContaining({
+        id: "task-new",
+        title: "Newest task",
+        turnCount: 2,
+        workerCount: 1,
+        nativeSessionCount: 1
+      }),
+      expect.objectContaining({
+        id: "task-old",
+        title: "Older task",
+        turnCount: 0,
+        workerCount: 0,
+        nativeSessionCount: 0
+      })
+    ]);
+
+    expect(catalog.setActiveTaskId).toBeTypeOf("function");
+    expect(catalog.activeTaskId).toBeTypeOf("function");
+    await expect(catalog.activeTaskId?.()).resolves.toBeUndefined();
+    await catalog.setActiveTaskId?.("task-new");
+    await expect(catalog.activeTaskId?.()).resolves.toBe("task-new");
+    index.close();
+
+    const reopened = await SessionIndex.open(root, ".parallel-codex");
+    const reopenedCatalog = reopened as SessionIndex & {
+      activeTaskId?: () => Promise<string | null | undefined>;
+      setActiveTaskId?: (taskId: string | null) => Promise<void>;
+    };
+    await expect(reopenedCatalog.activeTaskId?.()).resolves.toBe("task-new");
+    await reopenedCatalog.setActiveTaskId?.(null);
+    await expect(reopenedCatalog.activeTaskId?.()).resolves.toBeNull();
+    reopened.close();
+  });
+
   it("indexes task, turn, worker, and native session rows", async () => {
     const root = await mkdtemp(join(tmpdir(), "pct-index-"));
     const index = await SessionIndex.open(root, ".parallel-codex");

@@ -34,6 +34,10 @@ export function isWorkerOverviewShortcut(input: string, key: KeyboardKey): boole
   return (key.ctrl === true && input.toLowerCase() === "b") || input === "\u0002";
 }
 
+export function isTaskSessionsShortcut(input: string, key: KeyboardKey): boolean {
+  return (key.ctrl === true && input.toLowerCase() === "t") || input === "\u0014";
+}
+
 export function scrollDelta(input: string, key: KeyboardKey, pageSize: number): number {
   if (key.pageUp || (key.ctrl === true && input.toLowerCase() === "u")) {
     return pageSize;
