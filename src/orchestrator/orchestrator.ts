@@ -1351,25 +1351,44 @@ export class Orchestrator {
     const featureCancellation = error instanceof FeatureRunCancelledError ? error : null;
     const cancelled = Boolean(featureCancellation) || isCancellation(error, input.signal);
     const state = cancelled ? "cancelled" : "failed";
-    await Promise.all(features.map(async (feature) => {
+    const convergenceErrors: unknown[] = [];
+    const featureUpdates = await Promise.allSettled(features.map(async (feature) => {
       if (!(await featureIsApproved(feature))) {
-        await updateFeatureStatus(
-          feature,
-          featureCancellation
-            ? feature.id === featureCancellation.featureId ? "cancelled" : "failed"
-            : state
-        );
+        const featureState = featureCancellation
+          ? feature.id === featureCancellation.featureId ? "cancelled" : "failed"
+          : state;
+        await updateFeatureStatus(feature, featureState);
       }
     }));
-    await this.sessions.updateTaskStatus(task, state);
+    for (const result of featureUpdates) {
+      if (result.status === "rejected") {
+        convergenceErrors.push(result.reason);
+      }
+    }
+    try {
+      await this.sessions.updateTaskStatus(task, state);
+    } catch (statusError) {
+      convergenceErrors.push(statusError);
+    }
     if (featureCancellation) {
-      await this.sessions.appendEvent(
-        task,
-        "feature.cancelled",
-        `Cancelled ${featureCancellation.featureId}; task stopped before integration`
-      );
+      try {
+        await this.sessions.appendEvent(
+          task,
+          "feature.cancelled",
+          `Cancelled ${featureCancellation.featureId}; task stopped before integration`
+        );
+      } catch (eventError) {
+        convergenceErrors.push(eventError);
+      }
     }
     input.onStatus?.({ taskId: task.id });
+    if (convergenceErrors.length > 0) {
+      const details = convergenceErrors.map(errorMessage).join("; ");
+      throw new Error(
+        `${errorMessage(error)}; task ${task.id} ${state} state convergence failed: ${details}`,
+        { cause: new AggregateError([error, ...convergenceErrors]) }
+      );
+    }
     if (featureCancellation) {
       throw featureCancellation;
     }

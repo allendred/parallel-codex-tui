@@ -1,4 +1,4 @@
-import { mkdtemp } from "node:fs/promises";
+import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -6,7 +6,7 @@ import { defaultConfig } from "../src/core/config.js";
 import { appendJsonLine, appendText, pathExists, readJson, readTextIfExists, writeJson, writeText } from "../src/core/file-store.js";
 import { SessionIndex } from "../src/core/session-index.js";
 import { SessionManager, type TaskSession } from "../src/core/session-manager.js";
-import { claimTaskRunLease } from "../src/core/process-ownership.js";
+import { claimTaskRunLease, taskRunOwnerPath } from "../src/core/process-ownership.js";
 import { NativeSessionSchema, RouteDecisionSchema, TaskMetaSchema, WorkerStatusSchema, type RouteDecision, type TaskState } from "../src/domain/schemas.js";
 import { Orchestrator, type FeatureRunProgress } from "../src/orchestrator/orchestrator.js";
 import { MockWorkerAdapter } from "../src/workers/mock-adapter.js";
@@ -2389,6 +2389,42 @@ describe("Orchestrator", () => {
     await expect(orchestrator.canRetryTask("task-20260630-033000-logical-failure")).resolves.toBe(true);
   }, 5000);
 
+  it("converges the task and releases its lease when feature failure persistence also fails", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pct-orch-failure-convergence-"));
+    const config = mockConfig(root);
+    const manager = new SessionManager({
+      projectRoot: root,
+      dataDir: config.dataDir,
+      now: () => new Date("2026-06-30T03:30:30.000Z"),
+      randomId: () => "failure-convergence"
+    });
+    const adapter = new RejectingParallelActorWithBrokenFeatureStatusAdapter();
+    const orchestrator = new Orchestrator(config, manager, new Map([["mock", adapter]]));
+    const taskId = "task-20260630-033030-failure-convergence";
+    const taskDir = join(root, ".parallel-codex", "sessions", taskId);
+
+    const failure = await orchestrator.handleRequest({
+      request: "实现故障后仍可恢复的功能",
+      cwd: root
+    }).then(() => null, (error: unknown) => error);
+
+    expect(failure).toBeInstanceOf(Error);
+    expect((failure as Error).message).toContain("actor adapter finalization failed");
+    expect((failure as Error).message).toContain("state convergence failed");
+    expect((failure as Error).message).toContain("EISDIR");
+    expect((failure as Error).cause).toBeInstanceOf(AggregateError);
+    expect(((failure as Error).cause as AggregateError).errors).toHaveLength(2);
+
+    await expect(readJson(join(taskDir, "meta.json"), TaskMetaSchema)).resolves.toMatchObject({
+      status: "failed"
+    });
+    await expect(orchestrator.canRetryTask(taskId)).resolves.toBe(true);
+    expect(JSON.parse(await readTextIfExists(
+      join(taskDir, "features", "0001-healthy", "status.json")
+    ))).toMatchObject({ state: "failed" });
+    expect(await pathExists(taskRunOwnerPath(taskDir))).toBe(false);
+  });
+
   it("retries a failed task in the same task and turn with its native worker session", async () => {
     const root = await mkdtemp(join(tmpdir(), "pct-orch-retry-"));
     const config = mockConfig(root);
@@ -3005,6 +3041,30 @@ class FailingJudgeAdapter implements WorkerAdapter {
       };
     }
     return new MockWorkerAdapter().run(spec);
+  }
+}
+
+class RejectingParallelActorWithBrokenFeatureStatusAdapter extends MockWorkerAdapter {
+  async run(spec: WorkerRunSpec): Promise<WorkerResult> {
+    if (spec.role === "judge") {
+      const result = await super.run(spec);
+      await writeJson(join(spec.filesDir, "features.json"), {
+        version: 1,
+        features: [
+          { id: "broken", title: "Broken persistence", description: "Trigger persistence failure", depends_on: [] },
+          { id: "healthy", title: "Healthy peer", description: "Finish alongside the failed Actor", depends_on: [] }
+        ]
+      });
+      return result;
+    }
+    if (spec.role !== "actor" || spec.featureId !== "0001-broken") {
+      return super.run(spec);
+    }
+
+    const featureStatusPath = join(spec.filesDir, "..", "features", spec.featureId, "status.json");
+    await rm(featureStatusPath, { force: true });
+    await mkdir(featureStatusPath);
+    throw new Error("actor adapter finalization failed");
   }
 }
 

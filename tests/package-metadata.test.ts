@@ -280,6 +280,8 @@ describe("package metadata", () => {
     expect(readme).toContain("A `process-cleanup-error` or `process-ownership-error` always blocks native-session fallback");
     expect(readme).toContain("Final log, status, native-session callback, or ownership-removal failures settle exactly once");
     expect(readme).toContain("best-effort `process-finalization-error` status");
+    expect(readme).toContain("Task failure convergence attempts every Feature status and the task status independently");
+    expect(readme).toContain("surfaced alongside the original Worker error");
     expect(readme).toContain("A reused PID with a different start fingerprint is never signalled");
     expect(readme).toContain("Recovery commits cancellation only after every recorded process group is confirmed stopped");
     expect(readme).toContain("An unverifiable or still-running process blocks startup");
