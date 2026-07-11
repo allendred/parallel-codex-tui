@@ -156,6 +156,8 @@ export class ProcessWorkerAdapter implements WorkerAdapter {
       let terminalSummary: string | undefined;
       let terminalState: WorkerStatus["state"] | undefined;
       let outputWrites = Promise.resolve();
+      let persistenceError: unknown;
+      let hasPersistenceError = false;
       let detectedNativeSessionId = options.initialNativeSessionId ?? runSpec.nativeSession?.session_id;
       let sessionDetectionTail = "";
       let sawOutput = false;
@@ -198,6 +200,34 @@ export class ProcessWorkerAdapter implements WorkerAdapter {
         void finish(terminalFallbackResult(), error);
       };
 
+      const failForPersistence = (error: unknown): void => {
+        if (!hasPersistenceError) {
+          hasPersistenceError = true;
+          persistenceError = error;
+        }
+        if (settled || terminalState) {
+          return;
+        }
+        terminalState = "failed";
+        terminalPhase = "process-finalization-error";
+        terminalSummary = `${this.command} persistence failed: ${errorMessage(error)}`;
+        clearRunTimers();
+        void ensureProcessTreeStopped().catch(finishAfterCleanupFailure);
+      };
+
+      const queuePersistence = (operation: () => Promise<void>): void => {
+        outputWrites = outputWrites.then(async () => {
+          if (hasPersistenceError) {
+            return;
+          }
+          try {
+            await operation();
+          } catch (error) {
+            failForPersistence(error);
+          }
+        });
+      };
+
       const failAndTerminate = (phase: string, summary: string, logLine: string): void => {
         if (settled || terminalState) {
           return;
@@ -206,7 +236,7 @@ export class ProcessWorkerAdapter implements WorkerAdapter {
         terminalPhase = phase;
         terminalSummary = summary;
         clearRunTimers();
-        outputWrites = outputWrites.then(async () => {
+        queuePersistence(async () => {
           await appendText(runSpec.outputLogPath, logLine);
           await setStatus(
             runSpec,
@@ -233,74 +263,99 @@ export class ProcessWorkerAdapter implements WorkerAdapter {
         );
       };
 
+      const rejectForFinalization = async (error: unknown): Promise<void> => {
+        settled = true;
+        const detail = errorMessage(error);
+        const phase = "process-finalization-error";
+        const summary = `${this.command} worker finalization failed: ${detail}`;
+        try {
+          await appendText(runSpec.outputLogPath, `\nWorker finalization failed: ${detail}\n`);
+        } catch {
+          // Preserve the original finalization error.
+        }
+        try {
+          await setStatus(runSpec, "failed", phase, summary, detectedNativeSessionId);
+        } catch {
+          // The ownership record remains the recovery authority when status cannot be written.
+        }
+        reject(new Error(summary, { cause: error }));
+      };
+
       const finish = async (result: WorkerResult, knownCleanupError?: unknown): Promise<void> => {
         if (settled || finishing) {
           return;
         }
         finishing = true;
-        clearRunTimers();
-        if (abortListener) {
-          runSpec.signal?.removeEventListener("abort", abortListener);
-          abortListener = undefined;
-        }
-        await processRecordReady;
-        failForProcessOwnership();
-        let cleanupError = knownCleanupError;
-        if (!cleanupError) {
-          try {
-            await ensureProcessTreeStopped();
-          } catch (error) {
-            cleanupError = error;
+        try {
+          clearRunTimers();
+          if (abortListener) {
+            runSpec.signal?.removeEventListener("abort", abortListener);
+            abortListener = undefined;
           }
-        }
-        settled = true;
-        await outputWrites;
-        if (cleanupError) {
-          const detail = cleanupError instanceof Error ? cleanupError.message : String(cleanupError);
-          const phase = "process-cleanup-error";
-          const summary = `${this.command} process tree cleanup failed: ${detail}`;
-          await appendText(runSpec.outputLogPath, `\nProcess tree cleanup failed: ${detail}\n`);
-          await setStatus(runSpec, "failed", phase, summary, detectedNativeSessionId);
+          await processRecordReady;
+          failForProcessOwnership();
+          let cleanupError = knownCleanupError;
+          if (!cleanupError) {
+            try {
+              await ensureProcessTreeStopped();
+            } catch (error) {
+              cleanupError = error;
+            }
+          }
+          settled = true;
+          await outputWrites;
+          if (cleanupError) {
+            const detail = errorMessage(cleanupError);
+            const phase = "process-cleanup-error";
+            const summary = `${this.command} process tree cleanup failed: ${detail}`;
+            await appendText(runSpec.outputLogPath, `\nProcess tree cleanup failed: ${detail}\n`);
+            await setStatus(runSpec, "failed", phase, summary, detectedNativeSessionId);
+            resolve({
+              result: {
+                workerId: runSpec.workerId,
+                exitCode: result.exitCode || 1,
+                signal: result.signal,
+                failure: { phase, summary }
+              },
+              output: outputChunks.join(""),
+              launch
+            });
+            return;
+          }
+          if (hasPersistenceError) {
+            throw persistenceError;
+          }
+          const phase = terminalPhase ?? (launch.isResume && result.exitCode !== 0 ? "native-resume-failed" : "process-exited");
+          const summary =
+            terminalSummary ??
+            (launch.isResume && result.exitCode !== 0
+              ? `${this.command} native resume exited with code ${result.exitCode}`
+              : `${this.command} exited with code ${result.exitCode}`);
+          await setStatus(
+            runSpec,
+            terminalState ?? (result.exitCode === 0 ? "done" : "failed"),
+            phase,
+            summary,
+            detectedNativeSessionId
+          );
+          if (!processRecordError) {
+            await clearWorkerProcessRecord(runSpec.filesDir);
+          }
+          const finalResult: WorkerResult = {
+            ...result,
+            ...(terminalState === "cancelled" ? { cancelled: true } : {}),
+            ...(terminalState === "failed"
+              ? { failure: { phase, summary } }
+              : {})
+          };
           resolve({
-            result: {
-              workerId: runSpec.workerId,
-              exitCode: result.exitCode || 1,
-              signal: result.signal,
-              failure: { phase, summary }
-            },
+            result: finalResult,
             output: outputChunks.join(""),
             launch
           });
-          return;
+        } catch (error) {
+          await rejectForFinalization(error);
         }
-        const phase = terminalPhase ?? (launch.isResume && result.exitCode !== 0 ? "native-resume-failed" : "process-exited");
-        const summary =
-          terminalSummary ??
-          (launch.isResume && result.exitCode !== 0
-            ? `${this.command} native resume exited with code ${result.exitCode}`
-            : `${this.command} exited with code ${result.exitCode}`);
-        await setStatus(
-          runSpec,
-          terminalState ?? (result.exitCode === 0 ? "done" : "failed"),
-          phase,
-          summary,
-          detectedNativeSessionId
-        );
-        if (!processRecordError) {
-          await clearWorkerProcessRecord(runSpec.filesDir);
-        }
-        const finalResult: WorkerResult = {
-          ...result,
-          ...(terminalState === "cancelled" ? { cancelled: true } : {}),
-          ...(terminalState === "failed"
-            ? { failure: { phase, summary } }
-            : {})
-        };
-        resolve({
-          result: finalResult,
-          output: outputChunks.join(""),
-          launch
-        });
       };
 
       const resetIdleTimeout = (): void => {
@@ -342,7 +397,7 @@ export class ProcessWorkerAdapter implements WorkerAdapter {
         }
         const text = chunk.toString("utf8");
         outputChunks.push(text);
-        outputWrites = outputWrites.then(async () => {
+        queuePersistence(async () => {
           await appendText(runSpec.outputLogPath, text);
           if (!detectedNativeSessionId && runSpec.nativeSessionConfig?.detectSessionId !== false) {
             const detectionText = `${sessionDetectionTail}${text}`;
@@ -400,12 +455,19 @@ export class ProcessWorkerAdapter implements WorkerAdapter {
         if (abortListener) {
           runSpec.signal?.removeEventListener("abort", abortListener);
         }
-        void setStatus(runSpec, "failed", "process-error", error.message, detectedNativeSessionId)
-          .then(async () => {
+        void (async () => {
+          try {
             await processRecordReady;
-            await clearWorkerProcessRecord(runSpec.filesDir);
-          })
-          .finally(() => reject(error));
+            await ensureProcessTreeStopped();
+            await setStatus(runSpec, "failed", "process-error", error.message, detectedNativeSessionId);
+            if (!processRecordError) {
+              await clearWorkerProcessRecord(runSpec.filesDir);
+            }
+            reject(error);
+          } catch (finalizationError) {
+            await rejectForFinalization(finalizationError);
+          }
+        })();
       });
 
       child.on("close", (code, signal) => {
@@ -432,7 +494,7 @@ export class ProcessWorkerAdapter implements WorkerAdapter {
         terminalPhase = "process-cancelled";
         terminalSummary = `${this.command} cancelled by user`;
         clearRunTimers();
-        outputWrites = outputWrites.then(async () => {
+        queuePersistence(async () => {
           await appendText(runSpec.outputLogPath, "\nProcess cancelled by user\n");
           await setStatus(
             runSpec,
@@ -725,6 +787,10 @@ function summarizeOutput(text: string): string {
     .filter(Boolean);
   const summary = lines.at(-1) ?? "Worker produced output";
   return summary.length > 160 ? `${summary.slice(0, 157)}...` : summary;
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }
 
 async function setStatus(

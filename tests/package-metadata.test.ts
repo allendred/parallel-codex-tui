@@ -278,6 +278,8 @@ describe("package metadata", () => {
     expect(readme).toContain("normal parent exit also terminates any remaining descendants");
     expect(readme).toContain("`process-cleanup-error` and keeps `process.json`");
     expect(readme).toContain("A `process-cleanup-error` or `process-ownership-error` always blocks native-session fallback");
+    expect(readme).toContain("Final log, status, native-session callback, or ownership-removal failures settle exactly once");
+    expect(readme).toContain("best-effort `process-finalization-error` status");
     expect(readme).toContain("A reused PID with a different start fingerprint is never signalled");
     expect(readme).toContain("Recovery commits cancellation only after every recorded process group is confirmed stopped");
     expect(readme).toContain("An unverifiable or still-running process blocks startup");
