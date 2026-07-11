@@ -1990,6 +1990,97 @@ describe("Orchestrator", () => {
     expect(await pathExists(join(taskDir, "turns", "0003"))).toBe(false);
   });
 
+  it("cancels only the selected active feature worker and leaves the live workspace untouched", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pct-orch-cancel-feature-"));
+    const config = mockConfig(root);
+    config.orchestration.maxParallelFeatures = 2;
+    const manager = new SessionManager({
+      projectRoot: root,
+      dataDir: config.dataDir,
+      now: () => new Date("2026-06-30T03:32:05.000Z"),
+      randomId: () => "feature-cancel"
+    });
+    const script = [
+      "const fs = require('node:fs');",
+      "const path = require('node:path');",
+      "const role = process.env.PARALLEL_CODEX_ROLE;",
+      "const workerId = process.env.PARALLEL_CODEX_WORKER_ID;",
+      "const filesDir = process.env.PARALLEL_CODEX_FILES_DIR;",
+      "if (role === 'judge') {",
+      "  for (const file of ['requirements.md','plan.md','acceptance.md','actor-brief.md','critic-brief.md']) fs.writeFileSync(path.join(filesDir, file), file + '\\n');",
+      "  fs.writeFileSync(path.join(filesDir, 'features.json'), JSON.stringify({version:1,features:[",
+      "    {id:'alpha',title:'Alpha',description:'Implement alpha',depends_on:[]},",
+      "    {id:'beta',title:'Beta',description:'Implement beta',depends_on:[]}",
+      "  ]}));",
+      "  process.exit(0);",
+      "}",
+      "if (role === 'actor') {",
+      "  console.log(workerId + ' started');",
+      "  if (workerId.endsWith('-alpha')) setInterval(() => {}, 1000);",
+      "  else setTimeout(() => { fs.writeFileSync(path.join(filesDir, 'worklog.md'), 'beta complete\\n'); process.exit(0); }, 180);",
+      "}",
+      "if (role === 'critic') { fs.writeFileSync(path.join(filesDir, 'review.md'), 'APPROVED\\n'); process.exit(0); }"
+    ].join("");
+    const adapter = new ProcessWorkerAdapter(process.execPath, ["-e", script]);
+    const orchestrator = new Orchestrator(config, manager, new Map([["mock", adapter]]));
+    const controllable = orchestrator as Orchestrator & {
+      cancelFeature?: (taskId: string, featureId: string) => Promise<{
+        requested: boolean;
+        featureId: string;
+        role?: string;
+      }>;
+    };
+    const taskId = "task-20260630-033205-feature-cancel";
+    let cancellation: Promise<{ requested: boolean; featureId: string; role?: string }> | null = null;
+
+    expect(controllable.cancelFeature).toBeTypeOf("function");
+    const run = orchestrator.handleRequest({
+      request: "并行实现 alpha 与 beta",
+      cwd: root,
+      onWorker: (worker) => {
+        if (worker.id === "actor-mock-0001-alpha" && !cancellation) {
+          cancellation = new Promise((resolve, reject) => {
+            setTimeout(() => {
+              controllable.cancelFeature?.(taskId, "0001-alpha").then(resolve, reject);
+            }, 80);
+          });
+        }
+      }
+    });
+
+    await expect(run).rejects.toThrow("Feature 0001-alpha was cancelled before integration");
+    await expect(cancellation).resolves.toEqual({
+      requested: true,
+      featureId: "0001-alpha",
+      role: "actor"
+    });
+
+    const taskDir = join(root, ".parallel-codex", "sessions", taskId);
+    const meta = await readJson(join(taskDir, "meta.json"), TaskMetaSchema);
+    const alphaWorker = await readJson(join(taskDir, "actor-mock-0001-alpha", "status.json"), WorkerStatusSchema);
+    const betaWorker = await readJson(join(taskDir, "actor-mock-0001-beta", "status.json"), WorkerStatusSchema);
+    const alphaFeature = JSON.parse(await readTextIfExists(join(taskDir, "features", "0001-alpha", "status.json"))) as { state: string };
+    const betaFeature = JSON.parse(await readTextIfExists(join(taskDir, "features", "0001-beta", "status.json"))) as { state: string };
+    const events = await readTextIfExists(join(taskDir, "events.jsonl"));
+
+    expect(meta.status).toBe("cancelled");
+    expect(alphaWorker.state).toBe("cancelled");
+    expect(betaWorker.state).toBe("done");
+    expect(alphaFeature.state).toBe("cancelled");
+    expect(betaFeature.state).toBe("failed");
+    expect(events).toContain("feature.cancel_requested");
+    expect(events).toContain("feature.cancelled");
+    expect(await pathExists(join(taskDir, "critic-mock-0001-alpha"))).toBe(false);
+    expect(await pathExists(join(taskDir, "critic-mock-0001-beta"))).toBe(false);
+    expect(await pathExists(join(root, "alpha.txt"))).toBe(false);
+    expect(await pathExists(join(root, "beta.txt"))).toBe(false);
+    await expect(orchestrator.canRetryTask(taskId)).resolves.toBe(true);
+    await expect(orchestrator.cancelFeature(taskId, "0001-alpha")).resolves.toEqual({
+      requested: false,
+      featureId: "0001-alpha"
+    });
+  });
+
   it("marks an interrupted task cancelled and does not start the next worker", async () => {
     const root = await mkdtemp(join(tmpdir(), "pct-orch-cancel-"));
     const config = mockConfig(root);

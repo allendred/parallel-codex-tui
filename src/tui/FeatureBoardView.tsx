@@ -21,6 +21,7 @@ export interface FeatureBoardViewProps {
   selectedIndex: number;
   loading?: boolean;
   error?: string | null;
+  notice?: string | null;
   height?: number;
   terminalWidth?: number;
 }
@@ -30,6 +31,7 @@ export function FeatureBoardView({
   selectedIndex,
   loading = false,
   error = null,
+  notice = null,
   height = 20,
   terminalWidth = process.stdout.columns || 120
 }: FeatureBoardViewProps) {
@@ -37,7 +39,8 @@ export function FeatureBoardView({
   const width = featureBoardContentWidth(terminalWidth);
   const lines = featureBoardDisplayLines(timeline, selectedIndex, viewportHeight, terminalWidth, {
     loading,
-    error
+    error,
+    notice
   });
   const blankRows = Math.max(0, viewportHeight - lines.length);
 
@@ -60,7 +63,7 @@ export function featureBoardDisplayLines(
   selectedIndex: number,
   height: number,
   terminalWidth: number,
-  state: { loading?: boolean; error?: string | null } = {}
+  state: { loading?: boolean; error?: string | null; notice?: string | null } = {}
 ): FeatureBoardLine[] {
   const viewportHeight = Math.max(1, Math.trunc(height));
   const width = featureBoardContentWidth(terminalWidth);
@@ -70,7 +73,7 @@ export function featureBoardDisplayLines(
   if (viewportHeight >= 3) {
     lines.push({ text: featureBoardSummary(timeline, width), tone: "muted" });
   }
-  const slots = Math.max(0, viewportHeight - lines.length);
+  let slots = Math.max(0, viewportHeight - lines.length);
   if (slots === 0) {
     return lines;
   }
@@ -88,6 +91,17 @@ export function featureBoardDisplayLines(
   }
   if (timeline.features.length === 0) {
     lines.push({ text: fitFeatureBoardText("no planned features", width), tone: "muted" });
+    return lines;
+  }
+
+  if (state.notice && lines.length < viewportHeight) {
+    lines.push({
+      text: fitFeatureBoardText(safeFeatureBoardText(state.notice), width),
+      tone: "warning"
+    });
+    slots = Math.max(0, viewportHeight - lines.length);
+  }
+  if (slots === 0) {
     return lines;
   }
 

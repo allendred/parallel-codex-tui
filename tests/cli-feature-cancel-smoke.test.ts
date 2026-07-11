@@ -1,0 +1,219 @@
+import { mkdir, mkdtemp, readdir, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { describe, expect, it } from "vitest";
+import { spawn } from "node-pty";
+import { pathExists, readJson, readTextIfExists } from "../src/core/file-store.js";
+import { TaskMetaSchema, WorkerStatusSchema } from "../src/domain/schemas.js";
+import { NativeTerminalScreen } from "../src/tui/terminal-screen.js";
+
+describe("CLI Feature cancel smoke", () => {
+  it("confirms and cancels only the selected active Feature from the board", async () => {
+    const workspace = await mkdtemp(join(tmpdir(), "pct-cli-feature-cancel-workspace-"));
+    const appRoot = await mkdtemp(join(tmpdir(), "pct-cli-feature-cancel-app-"));
+    const agentScript = join(appRoot, "feature-cancel-agent.cjs");
+    const screen = new NativeTerminalScreen({ cols: 100, rows: 20, scrollback: 1000 });
+    const exits: number[] = [];
+    let screenWrites = Promise.resolve();
+
+    await mkdir(join(appRoot, ".parallel-codex"), { recursive: true });
+    await writeFile(agentScript, featureCancelAgentSource());
+    await writeFile(
+      join(appRoot, ".parallel-codex", "config.toml"),
+      [
+        "[router]",
+        'defaultMode = "complex"',
+        "",
+        "[orchestration]",
+        "maxParallelFeatures = 2",
+        "",
+        "[workers.codex]",
+        `command = "${escapeToml(process.execPath)}"`,
+        `args = ["${escapeToml(agentScript)}"]`,
+        "timeoutMs = 15000",
+        "idleTimeoutMs = 15000",
+        "firstOutputTimeoutMs = 3000",
+        "",
+        "[workers.codex.nativeSession]",
+        "enabled = false",
+        "",
+        "[pairing]",
+        'main = "codex"',
+        'judge = "codex"',
+        'actor = "codex"',
+        'critic = "codex"'
+      ].join("\n") + "\n"
+    );
+
+    const child = spawn(
+      process.execPath,
+      ["./node_modules/.bin/tsx", "src/cli.tsx", "--app-root", appRoot, "--workspace", workspace],
+      {
+        cwd: process.cwd(),
+        cols: 100,
+        rows: 20,
+        name: "xterm-256color",
+        env: { ...process.env, TERM: "xterm-256color" }
+      }
+    );
+    child.onData((chunk) => {
+      screenWrites = screenWrites.then(() => screen.write(chunk));
+    });
+    child.onExit(({ exitCode }) => exits.push(exitCode));
+
+    try {
+      await waitForScreenText(() => screenWrites, screen, "> | message");
+      child.write("并行实现 alpha 与 beta\r");
+
+      const taskDir = await waitForTaskDir(workspace);
+      const alphaWorkerPath = join(taskDir, "actor-codex-0001-alpha", "status.json");
+      await waitForWorkerPhase(alphaWorkerPath, "process-output");
+
+      child.write("\x02");
+      await waitForScreenText(() => screenWrites, screen, "F features");
+      child.write("f");
+      await waitForScreenText(() => screenWrites, screen, "Feature board");
+      await waitForScreenText(() => screenWrites, screen, "> T0001 · Alpha · actor running");
+      await waitForScreenText(() => screenWrites, screen, "X cancel");
+
+      child.write("x");
+      await waitForScreenText(() => screenWrites, screen, "cancel feature? · X confirm · Esc keep");
+      await waitForScreenText(() => screenWrites, screen, "Cancel Alpha? Active peers will finish; integration stays blocked.");
+      child.write("\x1b");
+      await waitForScreenText(() => screenWrites, screen, "X cancel");
+      expect((await readJson(alphaWorkerPath, WorkerStatusSchema)).state).toBe("running");
+
+      child.write("x");
+      await waitForScreenText(() => screenWrites, screen, "cancel feature? · X confirm · Esc keep");
+      child.write("x");
+      await waitForTaskState(join(taskDir, "meta.json"), "cancelled");
+      await waitForScreenText(() => screenWrites, screen, "Cancellation requested for Alpha");
+      await waitForScreenText(() => screenWrites, screen, "^R retry task");
+      await waitForScreenText(() => screenWrites, screen, "Alpha · cancelled");
+
+      const betaWorker = await readJson(
+        join(taskDir, "actor-codex-0001-beta", "status.json"),
+        WorkerStatusSchema
+      );
+      const events = await readTextIfExists(join(taskDir, "events.jsonl"));
+      expect((await readJson(alphaWorkerPath, WorkerStatusSchema)).state).toBe("cancelled");
+      expect(betaWorker.state).toBe("done");
+      expect(events).toContain("feature.cancel_requested");
+      expect(events).toContain("feature.cancelled");
+      expect(await pathExists(join(taskDir, "critic-codex-0001-alpha"))).toBe(false);
+      expect(await pathExists(join(taskDir, "critic-codex-0001-beta"))).toBe(false);
+      expect(await pathExists(join(workspace, "alpha.txt"))).toBe(false);
+      expect(await pathExists(join(workspace, "beta.txt"))).toBe(false);
+
+      child.write("\x03");
+      await waitForExit(exits);
+      expect(exits[0]).toBe(0);
+    } finally {
+      if (exits.length === 0) {
+        child.kill("SIGTERM");
+      }
+    }
+  }, 20000);
+});
+
+function featureCancelAgentSource(): string {
+  return [
+    "const fs = require('node:fs');",
+    "const path = require('node:path');",
+    "const role = process.env.PARALLEL_CODEX_ROLE;",
+    "const workerId = process.env.PARALLEL_CODEX_WORKER_ID;",
+    "const dir = process.env.PARALLEL_CODEX_FILES_DIR;",
+    "process.stdin.resume();",
+    "process.stdin.on('end', () => {",
+    "  if (role === 'judge') {",
+    "    for (const file of ['requirements.md','plan.md','acceptance.md','actor-brief.md','critic-brief.md']) fs.writeFileSync(path.join(dir, file), file + '\\n');",
+    "    fs.writeFileSync(path.join(dir, 'features.json'), JSON.stringify({version:1,features:[",
+    "      {id:'alpha',title:'Alpha',description:'Implement alpha',depends_on:[]},",
+    "      {id:'beta',title:'Beta',description:'Implement beta',depends_on:[]}",
+    "    ]}));",
+    "    console.log('judge done');",
+    "    return;",
+    "  }",
+    "  if (role === 'actor') {",
+    "    console.log(workerId + ' started');",
+    "    if (workerId.endsWith('-alpha')) setInterval(() => {}, 1000);",
+    "    else setTimeout(() => { fs.writeFileSync(path.join(dir, 'worklog.md'), 'beta complete\\n'); process.exit(0); }, 300);",
+    "    return;",
+    "  }",
+    "  if (role === 'critic') { fs.writeFileSync(path.join(dir, 'review.md'), 'APPROVED\\n'); console.log('critic done'); }",
+    "});"
+  ].join("\n");
+}
+
+function escapeToml(value: string): string {
+  return value.replaceAll("\\", "\\\\").replaceAll('"', '\\"');
+}
+
+async function waitForTaskDir(workspace: string): Promise<string> {
+  const sessionsDir = join(workspace, ".parallel-codex", "sessions");
+  for (let attempt = 0; attempt < 200; attempt += 1) {
+    try {
+      const taskId = (await readdir(sessionsDir)).find((entry) => entry.startsWith("task-"));
+      if (taskId) {
+        return join(sessionsDir, taskId);
+      }
+    } catch {
+      // Task startup has not created the session directory yet.
+    }
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+  throw new Error("Timed out waiting for task directory");
+}
+
+async function waitForWorkerPhase(statusPath: string, phase: string): Promise<void> {
+  for (let attempt = 0; attempt < 200; attempt += 1) {
+    try {
+      if ((await readJson(statusPath, WorkerStatusSchema)).phase === phase) {
+        return;
+      }
+    } catch {
+      // Worker status is not ready yet.
+    }
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+  throw new Error(`Timed out waiting for worker phase ${phase}`);
+}
+
+async function waitForTaskState(metaPath: string, state: string): Promise<void> {
+  for (let attempt = 0; attempt < 200; attempt += 1) {
+    try {
+      if ((await readJson(metaPath, TaskMetaSchema)).status === state) {
+        return;
+      }
+    } catch {
+      // Task metadata is not ready yet.
+    }
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+  throw new Error(`Timed out waiting for task state ${state}`);
+}
+
+async function waitForScreenText(
+  screenWritesRef: () => Promise<void>,
+  screen: NativeTerminalScreen,
+  text: string
+): Promise<void> {
+  for (let attempt = 0; attempt < 200; attempt += 1) {
+    await screenWritesRef();
+    if (screen.snapshot().includes(text)) {
+      return;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+  throw new Error(`Timed out waiting for ${text}\nSnapshot:\n${screen.snapshot()}`);
+}
+
+async function waitForExit(exits: number[]): Promise<void> {
+  for (let attempt = 0; attempt < 120; attempt += 1) {
+    if (exits.length > 0) {
+      return;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+  throw new Error("Timed out waiting for TUI to exit");
+}

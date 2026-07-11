@@ -140,6 +140,11 @@ interface WorkerSearchState {
   cursor: number;
   matchIndex: number;
 }
+interface FeatureCancelPrompt {
+  taskId: string;
+  featureId: string;
+  title: string;
+}
 type NativeAttachStartingTheme = Pick<TextProps, "backgroundColor" | "color">;
 const NO_WORKERS_ATTACH_MESSAGE = "No workers yet · start a complex task before attaching";
 const NO_WORKERS_LOGS_MESSAGE = "No workers yet · start a complex task before opening logs";
@@ -221,6 +226,8 @@ export function App({
   const [taskSessionsError, setTaskSessionsError] = useState<string | null>(null);
   const [collaborationTimeline, setCollaborationTimeline] = useState<CollaborationTimeline | null>(null);
   const [featureBoardSelectedIndex, setFeatureBoardSelectedIndex] = useState(0);
+  const [featureCancelPrompt, setFeatureCancelPrompt] = useState<FeatureCancelPrompt | null>(null);
+  const [featureBoardNotice, setFeatureBoardNotice] = useState<string | null>(null);
   const [collaborationLoading, setCollaborationLoading] = useState(false);
   const [collaborationError, setCollaborationError] = useState<string | null>(null);
   const [collaborationFeatureIndex, setCollaborationFeatureIndex] = useState(-1);
@@ -264,6 +271,7 @@ export function App({
   const taskSessionsLoadingRef = useRef(taskSessionsLoading);
   const collaborationTimelineRef = useRef<CollaborationTimeline | null>(null);
   const featureBoardSelectedIndexRef = useRef(0);
+  const featureCancelPromptRef = useRef<FeatureCancelPrompt | null>(null);
   const collaborationFeatureIndexRef = useRef(-1);
   const collaborationSelectedEventIdRef = useRef<string | null>(null);
   const collaborationDetailOpenRef = useRef(false);
@@ -280,6 +288,7 @@ export function App({
   const openWorkerOverviewRef = useRef<() => void>(openWorkerOverview);
   const openTaskSessionsRef = useRef<() => Promise<void>>(openTaskSessions);
   const openFeatureBoardRef = useRef<() => Promise<void>>(openFeatureBoard);
+  const confirmFeatureCancellationRef = useRef<(prompt: FeatureCancelPrompt) => Promise<void>>(confirmFeatureCancellation);
   const openCollaborationTimelineRef = useRef<(featureIndex?: number) => Promise<void>>(openCollaborationTimeline);
   const refreshCollaborationTimelineRef = useRef<(showLoading?: boolean) => Promise<void>>(refreshCollaborationTimeline);
   const activateSelectedTaskSessionRef = useRef<() => Promise<void>>(activateSelectedTaskSession);
@@ -302,6 +311,11 @@ export function App({
   const contentHeight = appContentHeight(process.stdout.rows || 30, Boolean(attachError), config.ui.showStatusBar);
   const outputHeight = Math.max(1, contentHeight);
   const terminalWidth = process.stdout.columns || 120;
+  const selectedBoardFeature = collaborationTimeline?.features[featureBoardSelectedIndex];
+  const featureCanCancel = busy && (
+    selectedBoardFeature?.state === "actor_running"
+    || selectedBoardFeature?.state === "critic_running"
+  );
   const selectedWorkerStatus = formatSelectedWorkerStatus(status, selectedWorkerIndex);
   const visibleWorkerStatus = view === "chat" || view === "router" || view === "sessions" || view === "features" || view === "collaboration" || selectedWorkerStatusIsRedundant(status)
     ? ""
@@ -381,6 +395,20 @@ export function App({
   }, [featureBoardSelectedIndex]);
 
   useEffect(() => {
+    if (!featureCancelPrompt) {
+      return;
+    }
+    const selected = collaborationTimeline?.features[featureBoardSelectedIndex];
+    const stillActive = busy
+      && selected?.id === featureCancelPrompt.featureId
+      && (selected.state === "actor_running" || selected.state === "critic_running");
+    if (!stillActive) {
+      updateFeatureCancelPrompt(null);
+      setFeatureBoardNotice(null);
+    }
+  }, [busy, collaborationTimeline, featureBoardSelectedIndex, featureCancelPrompt]);
+
+  useEffect(() => {
     collaborationSelectedEventIdRef.current = collaborationSelectedEventId;
   }, [collaborationSelectedEventId]);
 
@@ -421,6 +449,7 @@ export function App({
     openWorkerOverviewRef.current = openWorkerOverview;
     openTaskSessionsRef.current = openTaskSessions;
     openFeatureBoardRef.current = openFeatureBoard;
+    confirmFeatureCancellationRef.current = confirmFeatureCancellation;
     openCollaborationTimelineRef.current = openCollaborationTimeline;
     refreshCollaborationTimelineRef.current = refreshCollaborationTimeline;
     activateSelectedTaskSessionRef.current = activateSelectedTaskSession;
@@ -682,6 +711,8 @@ export function App({
       );
       featureBoardSelectedIndexRef.current = nextIndex;
       setCollaborationError(null);
+      updateFeatureCancelPrompt(null);
+      setFeatureBoardNotice(null);
       setFeatureBoardSelectedIndex(nextIndex);
     };
     const commitWorkerSearch = (next: WorkerSearchState) => {
@@ -805,14 +836,50 @@ export function App({
           exitRef.current();
           return;
         }
+        const pendingCancel = featureCancelPromptRef.current;
+        if (pendingCancel) {
+          for (const featureChunk of featureChunks) {
+            if (featureChunk === "\x1b") {
+              updateFeatureCancelPrompt(null);
+              setFeatureBoardNotice(null);
+              return;
+            }
+            if (featureChunk === "x" || featureChunk === "X") {
+              void confirmFeatureCancellationRef.current(pendingCancel);
+              return;
+            }
+          }
+          return;
+        }
         for (const featureChunk of featureChunks) {
           if (featureChunk === "\x1b" || isWorkerOverviewShortcut(featureChunk, {})) {
             setCollaborationError(null);
+            setFeatureBoardNotice(null);
             viewRef.current = "workers";
             setView("workers");
             return;
           }
+          if (featureChunk === "\u0012" && !busyRef.current) {
+            setFeatureBoardNotice(null);
+            void retryRef.current();
+            return;
+          }
+          if (featureChunk === "x" || featureChunk === "X") {
+            const taskId = activeTaskIdRef.current;
+            const feature = collaborationTimelineRef.current?.features[featureBoardSelectedIndexRef.current];
+            const cancellable = busyRef.current
+              && (feature?.state === "actor_running" || feature?.state === "critic_running");
+            if (!taskId || !feature || !cancellable) {
+              setFeatureBoardNotice("Selected feature has no active Actor/Critic to cancel.");
+              return;
+            }
+            const prompt = { taskId, featureId: feature.id, title: feature.title };
+            updateFeatureCancelPrompt(prompt);
+            setFeatureBoardNotice(`Cancel ${feature.title}? Active peers will finish; integration stays blocked.`);
+            return;
+          }
           if (featureChunk === "r" || featureChunk === "R") {
+            setFeatureBoardNotice(null);
             void refreshCollaborationTimelineRef.current(false);
             continue;
           }
@@ -1849,6 +1916,24 @@ export function App({
     }
   }
 
+  function updateFeatureCancelPrompt(next: FeatureCancelPrompt | null): void {
+    featureCancelPromptRef.current = next;
+    setFeatureCancelPrompt(next);
+  }
+
+  async function confirmFeatureCancellation(prompt: FeatureCancelPrompt): Promise<void> {
+    updateFeatureCancelPrompt(null);
+    setAttachError(null);
+    try {
+      const result = await orchestrator.cancelFeature(prompt.taskId, prompt.featureId);
+      setFeatureBoardNotice(result.requested
+        ? `Cancellation requested for ${prompt.title} · ${result.role ?? "worker"} stopping; active peers will finish.`
+        : `No active Actor/Critic for ${prompt.title}; refresh and try again.`);
+    } catch (error) {
+      setFeatureBoardNotice(`Cancel failed for ${prompt.title}: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
   async function openFeatureBoard(): Promise<void> {
     if (viewRef.current !== "workers") {
       return;
@@ -1861,6 +1946,8 @@ export function App({
     setView("features");
     setAttachError(null);
     setCollaborationError(null);
+    updateFeatureCancelPrompt(null);
+    setFeatureBoardNotice(null);
     collaborationTimelineRef.current = null;
     setCollaborationTimeline(null);
     featureBoardSelectedIndexRef.current = 0;
@@ -1889,6 +1976,8 @@ export function App({
       return;
     }
     collaborationReturnViewRef.current = source;
+    updateFeatureCancelPrompt(null);
+    setFeatureBoardNotice(null);
     viewRef.current = "collaboration";
     setView("collaboration");
     setAttachError(null);
@@ -2087,6 +2176,8 @@ export function App({
           collaborationDetail={collaborationDetailOpen}
           collaborationUnresolved={collaborationUnresolvedOnly}
           collaborationBack={collaborationReturnViewRef.current}
+          featureCanCancel={featureCanCancel}
+          featureCancelConfirm={Boolean(featureCancelPrompt)}
           canRetry={canRetryTask}
           hasWorkers={workers.length > 0}
           hasActiveTask={Boolean(activeTaskId)}
@@ -2126,6 +2217,7 @@ export function App({
             selectedIndex={featureBoardSelectedIndex}
             loading={collaborationLoading}
             error={collaborationError}
+            notice={featureBoardNotice}
             height={contentHeight}
             terminalWidth={terminalWidth}
           />

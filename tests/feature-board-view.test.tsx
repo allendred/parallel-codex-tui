@@ -17,6 +17,7 @@ describe("FeatureBoardView", () => {
     const view = render(React.createElement(FeatureBoardView!, {
       timeline: fixture(),
       selectedIndex: 1,
+      notice: "Cancel Game UI? Active peers will finish; integration stays blocked.",
       height: 10,
       terminalWidth: 100
     }));
@@ -28,6 +29,7 @@ describe("FeatureBoardView", () => {
     expect(frame).toContain("> T0001 · Game UI · actor running · blocked by Game Engine");
     expect(frame).toContain("deps Game Engine");
     expect(frame).toContain("finding · Board collision remains");
+    expect(frame).toContain("Cancel Game UI? Active peers will finish; integration stays blocked.");
     view.unmount();
   });
 
@@ -85,7 +87,9 @@ describe("FeatureBoardView", () => {
 
     expect(displayLines).toBeTypeOf("function");
     for (let width = 8; width <= 100; width += 1) {
-      for (const line of displayLines?.(fixture(), 1, 10, width) ?? []) {
+      for (const line of displayLines?.(fixture(), 1, 10, width, {
+        notice: "Cancel Game UI? Active peers will finish; integration stays blocked."
+      }) ?? []) {
         if (displayWidth(line.text) > Math.max(1, width - 2)) {
           overflow.push(`${width}:${displayWidth(line.text)}:${line.text}`);
         }

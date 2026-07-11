@@ -512,6 +512,64 @@ describe("InputBar", () => {
     expect(overflow).toEqual([]);
   });
 
+  it("shows deliberate Feature cancel confirmation and task retry controls without wrapping", () => {
+    const featureMode = "features" as Parameters<typeof InputBar>[0]["mode"];
+    const active = render(
+      <InputBar
+        mode={featureMode}
+        featureCanCancel
+        value=""
+        terminalWidth={100}
+        onChange={() => {}}
+      />
+    );
+    expect(active.lastFrame()).toContain("X cancel");
+    active.unmount();
+
+    const confirm = render(
+      <InputBar
+        mode={featureMode}
+        featureCancelConfirm
+        value=""
+        terminalWidth={100}
+        onChange={() => {}}
+      />
+    );
+    expect(confirm.lastFrame()).toContain("cancel feature? · X confirm · Esc keep");
+    confirm.unmount();
+
+    const retry = render(
+      <InputBar
+        mode={featureMode}
+        canRetry
+        value=""
+        terminalWidth={100}
+        onChange={() => {}}
+      />
+    );
+    expect(retry.lastFrame()).toContain("^R retry task");
+    retry.unmount();
+
+    const overflow: string[] = [];
+    for (const props of [
+      { featureCanCancel: true },
+      { featureCancelConfirm: true },
+      { canRetry: true }
+    ]) {
+      for (let width = 8; width <= 100; width += 1) {
+        const view = render(
+          <InputBar mode={featureMode} value="" terminalWidth={width} onChange={() => {}} {...props} />
+        );
+        const frame = view.lastFrame() ?? "";
+        if (frame.split("\n").length > 1 || displayWidth(frame) > width) {
+          overflow.push(`${JSON.stringify(props)}:${width}:${displayWidth(frame)}:${frame}`);
+        }
+        view.unmount();
+      }
+    }
+    expect(overflow).toEqual([]);
+  });
+
   it("shows collaboration timeline filtering and refresh guidance", () => {
     const collaborationMode = "collaboration" as Parameters<typeof InputBar>[0]["mode"];
     const roomy = render(

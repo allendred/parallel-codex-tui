@@ -113,6 +113,12 @@ export interface FeatureRunProgress {
   total: number;
 }
 
+export interface FeatureCancellationResult {
+  requested: boolean;
+  featureId: string;
+  role?: "actor" | "critic";
+}
+
 export interface WorkerLogRef {
   id: string;
   featureId?: string;
@@ -147,7 +153,22 @@ interface WaveSummary {
   review: string;
 }
 
+interface ActiveFeatureRun {
+  controller: AbortController;
+  cancelRequested: boolean;
+  role: "actor" | "critic";
+}
+
+class FeatureRunCancelledError extends Error {
+  constructor(readonly featureId: string) {
+    super(`Feature ${featureId} was cancelled before integration. Other active workers were allowed to finish.`);
+    this.name = "FeatureRunCancelledError";
+  }
+}
+
 export class Orchestrator {
+  private readonly activeFeatureRuns = new Map<string, ActiveFeatureRun>();
+
   constructor(
     private readonly config: AppConfig,
     private readonly sessions: SessionManager,
@@ -266,6 +287,31 @@ export class Orchestrator {
   async canRetryTask(taskId: string): Promise<boolean> {
     const meta = await readTaskMetaIfValid(this.sessions.taskFromId(taskId).metaPath);
     return meta?.status === "failed" || meta?.status === "cancelled";
+  }
+
+  async cancelFeature(taskId: string, featureId: string): Promise<FeatureCancellationResult> {
+    const active = this.activeFeatureRuns.get(featureRunKey(taskId, featureId));
+    if (!active) {
+      return { requested: false, featureId };
+    }
+    if (!active.cancelRequested) {
+      active.cancelRequested = true;
+      active.controller.abort();
+      try {
+        await this.sessions.appendEvent(
+          this.sessions.taskFromId(taskId),
+          "feature.cancel_requested",
+          `Cancellation requested for ${featureId} ${active.role}`
+        );
+      } catch {
+        // Cancellation must not wait on optional audit evidence.
+      }
+    }
+    return {
+      requested: true,
+      featureId,
+      role: active.role
+    };
   }
 
   async routeTaskFollowUp(input: HandleTaskQuestionInput): Promise<TaskFollowUpRouteResult> {
@@ -1039,15 +1085,31 @@ export class Orchestrator {
     input: HandleRequestInput,
     error: unknown
   ): Promise<never> {
-    const cancelled = isCancellation(error, input.signal);
+    const featureCancellation = error instanceof FeatureRunCancelledError ? error : null;
+    const cancelled = Boolean(featureCancellation) || isCancellation(error, input.signal);
     const state = cancelled ? "cancelled" : "failed";
     await Promise.all(features.map(async (feature) => {
       if (!(await featureIsApproved(feature))) {
-        await updateFeatureStatus(feature, state);
+        await updateFeatureStatus(
+          feature,
+          featureCancellation
+            ? feature.id === featureCancellation.featureId ? "cancelled" : "failed"
+            : state
+        );
       }
     }));
     await this.sessions.updateTaskStatus(task, state);
+    if (featureCancellation) {
+      await this.sessions.appendEvent(
+        task,
+        "feature.cancelled",
+        `Cancelled ${featureCancellation.featureId}; task stopped before integration`
+      );
+    }
     input.onStatus?.({ taskId: task.id });
+    if (featureCancellation) {
+      throw featureCancellation;
+    }
     throw cancelled ? cancellationError() : error;
   }
 
@@ -1303,7 +1365,7 @@ export class Orchestrator {
       statusPath: actor.statusPath
     });
 
-    const result = await this.runWorkerWithNativeSession(engine, {
+    const result = await this.runFeatureControlledWorker(engine, {
       workerId: actor.workerId,
       ...(featureScoped ? { featureId: feature.id } : {}),
       ...(featureScoped ? { featureTitle: feature.title } : {}),
@@ -1318,7 +1380,7 @@ export class Orchestrator {
       statusPath: actor.statusPath,
       prompt: await readTextIfExists(actor.promptPath),
       signal: input.signal
-    });
+    }, task, feature);
     ensureWorkerSuccess(result);
     await mirrorWorkerFileToFeature(join(actor.dir, "worklog.md"), feature.actorWorklogPath);
     await appendFeatureDialogue(feature, "actor.completed", "actor", "Actor completed feature work.", {
@@ -1373,7 +1435,7 @@ export class Orchestrator {
       statusPath: critic.statusPath
     });
 
-    const result = await this.runWorkerWithNativeSession(engine, {
+    const result = await this.runFeatureControlledWorker(engine, {
       workerId: critic.workerId,
       ...(featureScoped ? { featureId: feature.id } : {}),
       ...(featureScoped ? { featureTitle: feature.title } : {}),
@@ -1388,7 +1450,7 @@ export class Orchestrator {
       statusPath: critic.statusPath,
       prompt: await readTextIfExists(critic.promptPath),
       signal: input.signal
-    });
+    }, task, feature);
     ensureWorkerSuccess(result);
     await appendFeatureDialogue(feature, "critic.completed", "critic", "Critic completed feature review.", {
       review: join(critic.dir, "review.md"),
@@ -1535,6 +1597,54 @@ export class Orchestrator {
       workers.push(worker);
     }
     input.onWorker?.(worker);
+  }
+
+  private async runFeatureControlledWorker(
+    engine: EngineName,
+    spec: WorkerRunSpec,
+    task: TaskSession,
+    feature: FeatureChannel
+  ): Promise<WorkerResult> {
+    const role = spec.role === "critic" ? "critic" : "actor";
+    const key = featureRunKey(task.id, feature.id);
+    if (this.activeFeatureRuns.has(key)) {
+      throw new Error(`Feature worker is already active: ${feature.id}`);
+    }
+
+    const controller = new AbortController();
+    const active: ActiveFeatureRun = {
+      controller,
+      cancelRequested: false,
+      role
+    };
+    const abortFromParent = () => controller.abort();
+    if (spec.signal?.aborted) {
+      controller.abort();
+    } else {
+      spec.signal?.addEventListener("abort", abortFromParent, { once: true });
+    }
+    this.activeFeatureRuns.set(key, active);
+
+    try {
+      const result = await this.runWorkerWithNativeSession(engine, {
+        ...spec,
+        signal: controller.signal
+      });
+      if (active.cancelRequested) {
+        throw new FeatureRunCancelledError(feature.id);
+      }
+      return result;
+    } catch (error) {
+      if (active.cancelRequested && !(error instanceof FeatureRunCancelledError)) {
+        throw new FeatureRunCancelledError(feature.id);
+      }
+      throw error;
+    } finally {
+      spec.signal?.removeEventListener("abort", abortFromParent);
+      if (this.activeFeatureRuns.get(key) === active) {
+        this.activeFeatureRuns.delete(key);
+      }
+    }
   }
 
   private async runWorkerWithNativeSession(
@@ -1864,6 +1974,10 @@ function requiredChannel(
     throw new Error(`Feature channel missing: ${definition.id}`);
   }
   return channel;
+}
+
+function featureRunKey(taskId: string, featureId: string): string {
+  return `${taskId}\u0000${featureId}`;
 }
 
 function requiredFeatureWorkspace(

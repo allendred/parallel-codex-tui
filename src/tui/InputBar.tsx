@@ -11,6 +11,8 @@ export interface InputBarProps {
   collaborationDetail?: boolean;
   collaborationUnresolved?: boolean;
   collaborationBack?: "workers" | "features";
+  featureCanCancel?: boolean;
+  featureCancelConfirm?: boolean;
   canRetry?: boolean;
   hasWorkers?: boolean;
   hasActiveTask?: boolean;
@@ -34,6 +36,8 @@ export function InputBar({
   collaborationDetail = false,
   collaborationUnresolved = false,
   collaborationBack = "workers",
+  featureCanCancel = false,
+  featureCancelConfirm = false,
   canRetry = false,
   hasWorkers = false,
   hasActiveTask = false,
@@ -92,7 +96,11 @@ export function InputBar({
   }
 
   if (mode === "features") {
-    const hints = featureBoardInputHints(terminalWidth);
+    const hints = featureBoardInputHints(terminalWidth, {
+      canCancel: featureCanCancel,
+      confirmCancel: featureCancelConfirm,
+      canRetry
+    });
     return (
       <InputRail terminalWidth={terminalWidth} textWidth={displayWidth(`${hints.label}${hints.detail}`)} fill={fillRail}>
         <Text backgroundColor={TUI_THEME.rail} color={TUI_THEME.accent} bold>{hints.label}</Text>
@@ -585,7 +593,25 @@ function workerOverviewInputHints(width: number): { label: string; detail: strin
   return { label: "workers", detail: " · Up/Dn select · Enter logs · F features · C timeline · ^O attach · Esc back" };
 }
 
-function featureBoardInputHints(width: number): { label: string; detail: string } {
+function featureBoardInputHints(
+  width: number,
+  options: { canCancel: boolean; confirmCancel: boolean; canRetry: boolean }
+): { label: string; detail: string } {
+  if (options.confirmCancel) {
+    if (width < 10) {
+      return { label: "stop?", detail: "" };
+    }
+    if (width < 18) {
+      return { label: "cancel?", detail: "" };
+    }
+    if (width < 28) {
+      return { label: "cancel?", detail: " · X/Esc" };
+    }
+    if (width < 42) {
+      return { label: "cancel?", detail: " · X confirm · Esc" };
+    }
+    return { label: "cancel feature?", detail: " · X confirm · Esc keep" };
+  }
   if (width < 10) {
     return { label: "ft", detail: "" };
   }
@@ -600,6 +626,18 @@ function featureBoardInputHints(width: number): { label: string; detail: string 
   }
   if (width < 46) {
     return { label: "features", detail: " · Up/Dn · Enter · Esc" };
+  }
+  if (options.canCancel) {
+    if (width < 72) {
+      return { label: "features", detail: " · Up/Dn · X cancel · R · Esc" };
+    }
+    return { label: "features", detail: " · Up/Dn · Enter · X cancel · R refresh · Esc" };
+  }
+  if (options.canRetry) {
+    if (width < 72) {
+      return { label: "features", detail: " · Up/Dn · ^R retry · R · Esc" };
+    }
+    return { label: "features", detail: " · Up/Dn · Enter · ^R retry task · R refresh · Esc" };
   }
   if (width < 72) {
     return { label: "features", detail: " · Up/Dn · Enter flow · R · Esc" };
