@@ -19,7 +19,8 @@ import {
   claimTaskRunLease,
   TaskRunLeaseConflictError,
   terminateOwnedWorkerProcess,
-  type TaskRunLease
+  type TaskRunLease,
+  type WorkerProcessTermination
 } from "./process-ownership.js";
 import {
   type ChatRecord,
@@ -106,6 +107,31 @@ export interface InterruptedTaskRecovery {
   workersRecovered: number;
   featuresRecovered: number;
   processesTerminated: number;
+}
+
+type BlockingProcessTermination = Extract<WorkerProcessTermination, "unverifiable" | "still-running">;
+
+export interface InterruptedTaskRecoveryBlock {
+  workerId: string;
+  processPath: string;
+  reason: BlockingProcessTermination;
+}
+
+export class InterruptedTaskRecoveryBlockedError extends Error {
+  constructor(
+    readonly taskId: string,
+    readonly blocks: InterruptedTaskRecoveryBlock[]
+  ) {
+    const details = blocks
+      .map((block) => `${block.workerId} (${block.reason}; ${block.processPath})`)
+      .join(", ");
+    super(
+      `Startup recovery blocked for task ${taskId}: ${details}. `
+      + "Task state and checkpoints were left unchanged to prevent concurrent workers. "
+      + "Verify or stop each recorded process, then restart parallel-codex-tui."
+    );
+    this.name = "InterruptedTaskRecoveryBlockedError";
+  }
 }
 
 const TERMINAL_TASK_STATES = new Set<TaskState>(["done", "failed", "cancelled"]);
@@ -582,17 +608,37 @@ export class SessionManager {
 
   private async reconcileTaskWorkers(task: TaskSession): Promise<{ recovered: number; terminated: number }> {
     const entries = await readdir(task.dir, { withFileTypes: true });
-    let recovered = 0;
+    const workerDirs = entries
+      .filter((entry) => entry.isDirectory())
+      .map((entry) => ({ workerId: entry.name, dir: join(task.dir, entry.name) }));
     let terminated = 0;
-    for (const entry of entries) {
-      if (!entry.isDirectory()) {
-        continue;
-      }
-      const dir = join(task.dir, entry.name);
+    const blocks: InterruptedTaskRecoveryBlock[] = [];
+    for (const worker of workerDirs) {
+      const dir = worker.dir;
       const processResult = await terminateOwnedWorkerProcess(dir);
       if (processResult === "terminated") {
         terminated += 1;
       }
+      if (processResult === "unverifiable" || processResult === "still-running") {
+        blocks.push({
+          workerId: worker.workerId,
+          processPath: join(dir, "process.json"),
+          reason: processResult
+        });
+      }
+    }
+    if (blocks.length > 0) {
+      await this.appendEvent(
+        task,
+        "task.recovery_blocked",
+        `Startup recovery blocked by ${blocks.map((block) => `${block.workerId}:${block.reason}`).join(", ")}; task state left unchanged`
+      );
+      throw new InterruptedTaskRecoveryBlockedError(task.id, blocks);
+    }
+
+    let recovered = 0;
+    for (const worker of workerDirs) {
+      const dir = worker.dir;
       const statusPath = join(dir, "status.json");
       const status = await readWorkerStatusIfValid(statusPath);
       if (!status || !ACTIVE_WORKER_STATES.has(status.state)) {

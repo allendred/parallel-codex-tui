@@ -1,9 +1,11 @@
 import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { createRuntime } from "../src/bootstrap.js";
 import { pathExists, readJson, writeJson, writeText } from "../src/core/file-store.js";
+import { workerProcessRecordPath } from "../src/core/process-ownership.js";
+import { SessionIndex } from "../src/core/session-index.js";
 import { TaskMetaSchema, WorkerStatusSchema } from "../src/domain/schemas.js";
 
 describe("createRuntime", () => {
@@ -139,6 +141,48 @@ describe("createRuntime", () => {
     });
     await expect(restarted.orchestrator.canRetryTask(task.id)).resolves.toBe(true);
     restarted.index.close();
+  });
+
+  it("closes the session index when startup recovery blocks runtime creation", async () => {
+    const appRoot = await mkdtemp(join(tmpdir(), "pct-bootstrap-blocked-app-root-"));
+    const workspaceRoot = await mkdtemp(join(tmpdir(), "pct-bootstrap-blocked-worker-root-"));
+    const firstRuntime = await createRuntime(appRoot, workspaceRoot);
+    const task = await firstRuntime.sessions.createTask({
+      request: "阻止重复 Worker",
+      cwd: workspaceRoot,
+      route: {
+        mode: "complex",
+        reason: "test",
+        suggested_roles: ["judge", "actor", "critic"],
+        judge_engine: "mock",
+        actor_engine: "mock",
+        critic_engine: "mock"
+      }
+    });
+    await firstRuntime.sessions.updateTaskStatus(task, "actor_running");
+    const worker = await firstRuntime.sessions.initializeWorker(task, {
+      workerId: "actor-mock",
+      role: "actor",
+      engine: "mock",
+      prompt: "keep working"
+    });
+    await writeJson(workerProcessRecordPath(worker.dir), {
+      version: 1,
+      worker_id: worker.workerId,
+      pid: process.pid,
+      owner_pid: 2147483647,
+      command: process.execPath,
+      started_at: "2026-07-11T14:31:00.000Z"
+    });
+    firstRuntime.index.close();
+    const closeSpy = vi.spyOn(SessionIndex.prototype, "close");
+
+    try {
+      await expect(createRuntime(appRoot, workspaceRoot)).rejects.toThrow("Startup recovery blocked");
+      expect(closeSpy).toHaveBeenCalledTimes(1);
+    } finally {
+      closeSpy.mockRestore();
+    }
   });
 
   it("reloads router settings for the next request without rebuilding the worker runtime", async () => {

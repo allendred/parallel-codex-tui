@@ -4,6 +4,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { describe, expect, it } from "vitest";
+import { createRuntime } from "../src/bootstrap.js";
+import { pathExists, readJson, writeJson } from "../src/core/file-store.js";
+import { workerProcessRecordPath } from "../src/core/process-ownership.js";
+import { TaskMetaSchema, WorkerStatusSchema } from "../src/domain/schemas.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -163,6 +167,76 @@ describe("CLI startup", () => {
     expect(stderr).toContain("task-20990101-000000-missing");
     expect(stderr).toContain(workspace);
     expect(stderr).not.toContain("at ");
+  });
+
+  it("blocks startup without mutating a task whose orphan process identity is unverifiable", async () => {
+    const appRoot = await mkdtemp(join(tmpdir(), "pct-cli-startup-recovery-blocked-app-"));
+    const workspace = await mkdtemp(join(tmpdir(), "pct-cli-startup-recovery-blocked-workspace-"));
+    const runtime = await createRuntime(appRoot, workspace);
+    const task = await runtime.sessions.createTask({
+      request: "安全恢复旧 Worker",
+      cwd: workspace,
+      route: {
+        mode: "complex",
+        reason: "Project work.",
+        suggested_roles: ["judge", "actor", "critic"],
+        judge_engine: "mock",
+        actor_engine: "mock",
+        critic_engine: "mock"
+      }
+    });
+    await runtime.sessions.updateTaskStatus(task, "actor_running");
+    const worker = await runtime.sessions.initializeWorker(task, {
+      workerId: "actor-mock",
+      role: "actor",
+      engine: "mock",
+      prompt: "keep working"
+    });
+    await writeJson(worker.statusPath, {
+      worker_id: worker.workerId,
+      role: "actor",
+      engine: "mock",
+      state: "running",
+      phase: "process-output",
+      last_event_at: "2026-07-11T14:31:00.000Z",
+      summary: "working"
+    });
+    await writeJson(workerProcessRecordPath(worker.dir), {
+      version: 1,
+      worker_id: worker.workerId,
+      pid: process.pid,
+      owner_pid: 2147483647,
+      command: process.execPath,
+      started_at: "2026-07-11T14:31:00.000Z"
+    });
+    runtime.index.close();
+
+    let stderr = "";
+    await expect(
+      execFileAsync(
+        process.execPath,
+        ["./node_modules/.bin/tsx", "src/cli.tsx", "--app-root", appRoot, "--workspace", workspace],
+        { cwd: process.cwd(), timeout: 5000 }
+      )
+        .catch((error) => {
+          stderr = String((error as { stderr?: string }).stderr ?? "");
+          throw error;
+        })
+    ).rejects.toMatchObject({
+      code: 1,
+      stdout: "",
+      stderr: expect.stringContaining("Startup recovery blocked")
+    });
+
+    expect(stderr).toContain(task.id);
+    expect(stderr).toContain("actor-mock (unverifiable;");
+    expect(stderr).toContain(workerProcessRecordPath(worker.dir));
+    expect(stderr).toContain("prevent concurrent workers");
+    expect(stderr).toContain("Verify or stop each recorded process");
+    expect(stderr).not.toContain("at ");
+    await expect(readJson(task.metaPath, TaskMetaSchema)).resolves.toMatchObject({ status: "actor_running" });
+    await expect(readJson(worker.statusPath, WorkerStatusSchema)).resolves.toMatchObject({ state: "running" });
+    expect(await pathExists(workerProcessRecordPath(worker.dir))).toBe(true);
   });
 
   it("rejects non-interactive TUI startup without an Ink raw-mode stack trace", async () => {

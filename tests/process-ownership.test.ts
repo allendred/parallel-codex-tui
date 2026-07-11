@@ -2,7 +2,7 @@ import { mkdtemp } from "node:fs/promises";
 import { spawn } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { pathExists, writeJson } from "../src/core/file-store.js";
 import {
   claimTaskRunLease,
@@ -116,6 +116,78 @@ describe("process ownership", () => {
       } catch {
         // The process group is expected to be gone.
       }
+    }
+  }, 5000);
+
+  it("terminates an owned process group after its recorded leader already exited", async () => {
+    if (process.platform === "win32") {
+      return;
+    }
+    const workerDir = await mkdtemp(join(tmpdir(), "pct-worker-orphan-group-"));
+    const parent = spawn(process.execPath, [
+      "-e",
+      [
+        "const {spawn}=require('node:child_process');",
+        "const child=spawn(process.execPath,['-e',\"process.on('SIGTERM',()=>{});setInterval(()=>{},1000)\"],{stdio:'ignore'});",
+        "console.log(child.pid);",
+        "setTimeout(()=>process.exit(0),800);"
+      ].join("")
+    ], {
+      detached: true,
+      stdio: ["ignore", "pipe", "ignore"]
+    });
+    const parentPid = parent.pid ?? 0;
+    const childPid = await readFirstPid(parent);
+    await writeWorkerProcessRecord(workerDir, {
+      workerId: "actor-codex",
+      pid: parentPid,
+      processGroupId: parentPid,
+      command: process.execPath
+    });
+
+    try {
+      await waitForStopped(parentPid);
+      expect(processIsAlive(childPid)).toBe(true);
+
+      await expect(terminateOwnedWorkerProcess(workerDir)).resolves.toBe("terminated");
+      await waitForStopped(childPid);
+      expect(await pathExists(workerProcessRecordPath(workerDir))).toBe(false);
+    } finally {
+      try {
+        process.kill(-parentPid, "SIGKILL");
+      } catch {
+        // The process group is expected to be gone.
+      }
+    }
+  }, 6000);
+
+  it("reports a worker that remains alive after both termination signals", async () => {
+    const workerDir = await mkdtemp(join(tmpdir(), "pct-worker-still-running-"));
+    const child = spawn(process.execPath, ["-e", "process.on('SIGTERM',()=>{});setInterval(()=>{},1000)"], {
+      stdio: "ignore"
+    });
+    const childPid = child.pid ?? 0;
+    await writeWorkerProcessRecord(workerDir, {
+      workerId: "actor-codex",
+      pid: childPid,
+      command: process.execPath
+    });
+    const originalKill = process.kill.bind(process);
+    const killSpy = vi.spyOn(process, "kill").mockImplementation((pid, signal) => {
+      if (signal === 0) {
+        return originalKill(pid, 0);
+      }
+      return true;
+    });
+
+    try {
+      await expect(terminateOwnedWorkerProcess(workerDir)).resolves.toBe("still-running");
+      expect(processIsAlive(childPid)).toBe(true);
+      expect(await pathExists(workerProcessRecordPath(workerDir))).toBe(true);
+    } finally {
+      killSpy.mockRestore();
+      child.kill("SIGKILL");
+      await waitForStopped(childPid);
     }
   }, 5000);
 });

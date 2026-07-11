@@ -33,7 +33,13 @@ export type TaskRunLeaseInspection = {
   state: "missing" | "active" | "stale";
   owner: TaskRunOwner | null;
 };
-export type WorkerProcessTermination = "missing" | "not-running" | "identity-mismatch" | "terminated";
+export type WorkerProcessTermination =
+  | "missing"
+  | "not-running"
+  | "identity-mismatch"
+  | "unverifiable"
+  | "still-running"
+  | "terminated";
 
 export interface ClaimTaskRunLeaseOptions {
   ownerId?: string;
@@ -155,18 +161,24 @@ export async function terminateOwnedWorkerProcess(workerDir: string): Promise<Wo
   }
   const record = await readValidJson(path, WorkerProcessRecordSchema);
   if (!record) {
-    return "identity-mismatch";
+    return "unverifiable";
   }
-  if (!processIsAlive(record.pid)) {
+  const leaderIsAlive = processIsAlive(record.pid);
+  if (!ownedProcessIsAlive(record)) {
     await removeIfExists(path);
     return "not-running";
   }
   if (!record.process_start_token) {
-    return "identity-mismatch";
+    return "unverifiable";
   }
-  const currentToken = await readProcessStartToken(record.pid);
-  if (!currentToken || currentToken !== record.process_start_token) {
-    return "identity-mismatch";
+  if (leaderIsAlive) {
+    const currentToken = await readProcessStartToken(record.pid);
+    if (!currentToken) {
+      return "unverifiable";
+    }
+    if (currentToken !== record.process_start_token) {
+      return "identity-mismatch";
+    }
   }
 
   signalOwnedProcess(record, "SIGTERM");
@@ -182,8 +194,9 @@ export async function terminateOwnedWorkerProcess(workerDir: string): Promise<Wo
   }
   if (!ownedProcessIsAlive(record)) {
     await removeIfExists(path);
+    return "terminated";
   }
-  return "terminated";
+  return "still-running";
 }
 
 export function processIsAlive(pid: number): boolean {

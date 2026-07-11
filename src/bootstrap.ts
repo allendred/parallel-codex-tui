@@ -29,31 +29,40 @@ export async function createRuntime(appRoot: string, workspaceRoot = appRoot): P
   await ensureDir(routerCwd);
   const preparedWorkspace = await prepareWorkspace(appRoot, workspaceRoot);
   const index = await SessionIndex.open(preparedWorkspace, config.dataDir);
-  await index.rebuildFromFiles();
-  const sessions = new SessionManager({
-    projectRoot: preparedWorkspace,
-    dataDir: config.dataDir,
-    index
-  });
-  const recoveredTasks = await sessions.reconcileInterruptedTasks();
-  const workers = createWorkerRegistry(config);
-  const orchestrator = new Orchestrator(
-    config,
-    sessions,
-    workers,
-    undefined,
-    routerCwd,
-    async () => (await loadConfig(appRoot)).router
-  );
+  try {
+    await index.rebuildFromFiles();
+    const sessions = new SessionManager({
+      projectRoot: preparedWorkspace,
+      dataDir: config.dataDir,
+      index
+    });
+    const recoveredTasks = await sessions.reconcileInterruptedTasks();
+    const workers = createWorkerRegistry(config);
+    const orchestrator = new Orchestrator(
+      config,
+      sessions,
+      workers,
+      undefined,
+      routerCwd,
+      async () => (await loadConfig(appRoot)).router
+    );
 
-  return {
-    config,
-    workspaceRoot: preparedWorkspace,
-    routerCwd,
-    index,
-    sessions,
-    workers,
-    orchestrator,
-    recoveredTasks
-  };
+    return {
+      config,
+      workspaceRoot: preparedWorkspace,
+      routerCwd,
+      index,
+      sessions,
+      workers,
+      orchestrator,
+      recoveredTasks
+    };
+  } catch (error) {
+    try {
+      index.close();
+    } catch {
+      // Preserve the startup failure that prevented the runtime from being created.
+    }
+    throw error;
+  }
 }

@@ -248,6 +248,8 @@ describe("package metadata", () => {
     expect(readme).toContain("concurrent TUI startups cannot recover one task twice or race a new retry");
     expect(readme).toContain("persist `process.json` with their PID and OS process-start fingerprint");
     expect(readme).toContain("A reused PID with a different start fingerprint is never signalled");
+    expect(readme).toContain("Recovery commits cancellation only after every recorded process group is confirmed stopped");
+    expect(readme).toContain("An unverifiable or still-running process blocks startup");
     expect(readme).toContain("Terminal completion is evidence-guarded");
     expect(readme).toContain("duplicate task and feature state writes are idempotent");
     expect(readme).toContain("every real task transition records its `from` and `to` state");

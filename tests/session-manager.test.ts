@@ -1341,6 +1341,81 @@ describe("SessionManager", () => {
     }
   });
 
+  it("does not commit recovery while a recorded worker process cannot be verified", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pct-reconcile-unverifiable-worker-"));
+    const manager = new SessionManager({
+      projectRoot: root,
+      dataDir: ".parallel-codex",
+      now: () => new Date("2026-07-11T14:31:30.000Z"),
+      randomId: () => "unverifiable"
+    });
+    const task = await manager.createTask({
+      request: "安全恢复无法验证的进程",
+      cwd: root,
+      route: {
+        mode: "complex",
+        reason: "Project work.",
+        suggested_roles: ["judge", "actor", "critic"],
+        judge_engine: "mock",
+        actor_engine: "mock",
+        critic_engine: "mock"
+      }
+    });
+    await manager.updateTaskStatus(task, "actor_running");
+    const worker = await manager.initializeWorker(task, {
+      workerId: "actor-mock",
+      featureId: "0001-safety",
+      role: "actor",
+      engine: "mock",
+      prompt: "keep working"
+    });
+    await writeJson(worker.statusPath, {
+      worker_id: worker.workerId,
+      feature_id: "0001-safety",
+      role: "actor",
+      engine: "mock",
+      state: "running",
+      phase: "process-output",
+      last_event_at: "2026-07-11T14:31:00.000Z",
+      summary: "working"
+    });
+    const featureStatusPath = join(task.dir, "features", "0001-safety", "status.json");
+    await writeJson(featureStatusPath, {
+      feature_id: "0001-safety",
+      task_id: task.id,
+      turn_id: "0001",
+      title: "Recovery safety",
+      description: "Do not overlap workers",
+      depends_on: [],
+      state: "actor_running",
+      updated_at: "2026-07-11T14:31:00.000Z"
+    });
+    await writeJson(workerProcessRecordPath(worker.dir), {
+      version: 1,
+      worker_id: worker.workerId,
+      pid: process.pid,
+      owner_pid: 2147483647,
+      command: process.execPath,
+      started_at: "2026-07-11T14:31:00.000Z"
+    });
+
+    await expect(manager.reconcileInterruptedTasks()).rejects.toThrow(
+      `Startup recovery blocked for task ${task.id}`
+    );
+
+    await expect(readJson(task.metaPath, TaskMetaSchema)).resolves.toMatchObject({ status: "actor_running" });
+    await expect(readJson(worker.statusPath, WorkerStatusSchema)).resolves.toMatchObject({
+      state: "running",
+      phase: "process-output"
+    });
+    expect(JSON.parse(await readTextIfExists(featureStatusPath))).toMatchObject({ state: "actor_running" });
+    expect(await pathExists(workerProcessRecordPath(worker.dir))).toBe(true);
+    expect(await pathExists(taskRunOwnerPath(task.dir))).toBe(false);
+    expect(await readTextIfExists(worker.outputLogPath)).not.toContain("Recovered after previous TUI exit");
+    expect(await readTextIfExists(task.eventsPath)).toContain("task.recovery_blocked");
+    expect(await readTextIfExists(task.eventsPath)).not.toContain("task.cancelled");
+  });
+
   it("terminates a recorded orphan even when its worker status is already terminal", async () => {
     const root = await mkdtemp(join(tmpdir(), "pct-reconcile-terminal-worker-"));
     const manager = new SessionManager({
