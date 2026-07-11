@@ -131,6 +131,9 @@ describe("domain schemas", () => {
 
     expect(result.state).toBe("actor_running");
     expect(result.title).toBe("Game UI");
+    for (const state of ["queued", "actor_done", "critic_done"] as const) {
+      expect(FeatureStatusSchema.parse({ ...result, state }).state).toBe(state);
+    }
   });
 
   it("validates turn metadata", () => {

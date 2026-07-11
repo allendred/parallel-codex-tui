@@ -71,8 +71,11 @@ export const WorkerStateSchema = z.enum([
 
 export const FeatureStateSchema = z.enum([
   "created",
+  "queued",
   "actor_running",
+  "actor_done",
   "critic_running",
+  "critic_done",
   "revision_needed",
   "integrating",
   "verifying",

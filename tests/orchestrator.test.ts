@@ -27,6 +27,31 @@ function mockConfig(root: string) {
   return config;
 }
 
+function deferred(): { promise: Promise<void>; resolve(): void } {
+  let resolvePromise: () => void = () => undefined;
+  const promise = new Promise<void>((resolve) => {
+    resolvePromise = resolve;
+  });
+  return {
+    promise,
+    resolve: resolvePromise
+  };
+}
+
+async function featureStates(taskDir: string, count: number): Promise<string[]> {
+  const states: string[] = [];
+  for (let index = 1; index <= count; index += 1) {
+    const status = JSON.parse(await readTextIfExists(join(
+      taskDir,
+      "features",
+      `0001-module-${index}`,
+      "status.json"
+    ))) as { state?: unknown };
+    states.push(typeof status.state === "string" ? status.state : "missing");
+  }
+  return states;
+}
+
 describe("Orchestrator", () => {
   it("does not create Judge Actor Critic sessions for simple requests", async () => {
     const root = await mkdtemp(join(tmpdir(), "pct-orch-simple-"));
@@ -472,6 +497,54 @@ describe("Orchestrator", () => {
     expect(progress).toContainEqual({ wave: 1, waves: 1, phase: "integration", completed: 1, total: 1 });
     expect(progress).toContainEqual({ wave: 1, waves: 1, phase: "verification", completed: 0, total: 1 });
     expect(progress).toContainEqual({ wave: 1, waves: 1, phase: "verification", completed: 1, total: 1 });
+  });
+
+  it("exposes queued and actor-complete states at the real parallel scheduling boundary", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pct-orch-parallel-state-"));
+    const config = mockConfig(root);
+    config.orchestration.maxParallelFeatures = 2;
+    const manager = new SessionManager({
+      projectRoot: root,
+      dataDir: config.dataDir,
+      now: () => new Date("2026-06-30T03:30:11.000Z"),
+      randomId: () => "queue-state"
+    });
+    const adapter = new QueuedFeatureStateAdapter();
+    const orchestrator = new Orchestrator(config, manager, new Map([["mock", adapter]]));
+    const taskId = "task-20260630-033011-queue-state";
+    const taskDir = join(root, ".parallel-codex", "sessions", taskId);
+    const run = orchestrator.handleRequest({ request: "并行实现三个独立模块", cwd: root });
+    let assertionError: unknown;
+
+    try {
+      await adapter.firstActorBatchStarted;
+      await expect(featureStates(taskDir, 3)).resolves.toEqual([
+        "actor_running",
+        "actor_running",
+        "queued"
+      ]);
+      await expect(orchestrator.cancelFeature(taskId, "0001-module-3")).resolves.toEqual({
+        requested: false,
+        featureId: "0001-module-3"
+      });
+
+      adapter.releaseActors();
+      await adapter.firstCriticBatchStarted;
+      await expect(featureStates(taskDir, 3)).resolves.toEqual([
+        "critic_running",
+        "critic_running",
+        "actor_done"
+      ]);
+    } catch (error) {
+      assertionError = error;
+    } finally {
+      adapter.releaseAll();
+      await run;
+    }
+
+    if (assertionError) {
+      throw assertionError;
+    }
   });
 
   it("runs a combined Wave Critic before committing approved features to the live workspace", async () => {
@@ -3457,6 +3530,62 @@ class LimitedParallelAdapter extends MockWorkerAdapter {
     } finally {
       this.active -= 1;
     }
+  }
+}
+
+class QueuedFeatureStateAdapter extends MockWorkerAdapter {
+  private readonly actorGate = deferred();
+  private readonly criticGate = deferred();
+  private readonly actorBatch = deferred();
+  private readonly criticBatch = deferred();
+  private actorStarts = 0;
+  private criticStarts = 0;
+
+  readonly firstActorBatchStarted = this.actorBatch.promise;
+  readonly firstCriticBatchStarted = this.criticBatch.promise;
+
+  async run(spec: WorkerRunSpec): Promise<WorkerResult> {
+    if (spec.role === "judge") {
+      const result = await super.run(spec);
+      await writeJson(join(spec.filesDir, "features.json"), {
+        version: 1,
+        features: Array.from({ length: 3 }, (_, index) => ({
+          id: `module-${index + 1}`,
+          title: `Module ${index + 1}`,
+          description: `Implement module ${index + 1}`,
+          depends_on: []
+        }))
+      });
+      return result;
+    }
+    if (spec.role === "actor") {
+      this.actorStarts += 1;
+      if (this.actorStarts === 2) {
+        this.actorBatch.resolve();
+      }
+      if (this.actorStarts <= 2) {
+        await this.actorGate.promise;
+      }
+    }
+    if (spec.role === "critic") {
+      this.criticStarts += 1;
+      if (this.criticStarts === 2) {
+        this.criticBatch.resolve();
+      }
+      if (this.criticStarts <= 2) {
+        await this.criticGate.promise;
+      }
+    }
+    return super.run(spec);
+  }
+
+  releaseActors(): void {
+    this.actorGate.resolve();
+  }
+
+  releaseAll(): void {
+    this.actorGate.resolve();
+    this.criticGate.resolve();
   }
 }
 

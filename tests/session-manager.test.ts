@@ -1469,6 +1469,23 @@ describe("SessionManager", () => {
       state: "actor_running",
       updated_at: "2026-07-11T14:29:00.000Z"
     });
+    const passiveFeatureStatuses = [
+      { id: "0001-engine", title: "Game Engine", state: "queued" },
+      { id: "0001-docs", title: "Game Help", state: "actor_done" },
+      { id: "0001-qa", title: "Game QA", state: "critic_done" }
+    ] as const;
+    for (const feature of passiveFeatureStatuses) {
+      await writeJson(join(task.dir, "features", feature.id, "status.json"), {
+        feature_id: feature.id,
+        task_id: task.id,
+        turn_id: "0001",
+        title: feature.title,
+        description: feature.title,
+        depends_on: [],
+        state: feature.state,
+        updated_at: "2026-07-11T14:29:00.000Z"
+      });
+    }
     await writeJson(taskRunOwnerPath(task.dir), {
       version: 1,
       owner_id: "dead-tui",
@@ -1488,7 +1505,7 @@ describe("SessionManager", () => {
       taskId: task.id,
       previousState: "actor_running",
       workersRecovered: 1,
-      featuresRecovered: 1,
+      featuresRecovered: 4,
       processesTerminated: 0
     }]);
     await expect(readJson(task.metaPath, TaskMetaSchema)).resolves.toMatchObject({ status: "cancelled" });
@@ -1501,6 +1518,11 @@ describe("SessionManager", () => {
       state: "cancelled",
       updated_at: "2026-07-11T14:30:00.000Z"
     });
+    for (const feature of passiveFeatureStatuses) {
+      expect(JSON.parse(await readTextIfExists(
+        join(task.dir, "features", feature.id, "status.json")
+      ))).toMatchObject({ state: "cancelled" });
+    }
     expect(await readTextIfExists(worker.outputLogPath)).toContain("Recovered after previous TUI exit");
     expect(await readTextIfExists(task.eventsPath)).toContain("task.recovered_after_restart");
     expect(await pathExists(taskRunOwnerPath(task.dir))).toBe(false);

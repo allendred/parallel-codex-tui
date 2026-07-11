@@ -252,6 +252,9 @@ describe("package metadata", () => {
     expect(readme).toContain("`Esc` returns to the Feature board");
     expect(readme).toContain("press `X` twice to cancel only its active Actor or Critic process");
     expect(readme).toContain("already-running peers finish, queued workers stop, and integration remains blocked");
+    expect(readme).toContain("Queued Feature workers remain `queued` until they acquire a concurrency slot");
+    expect(readme).toContain("`actor_done` or `critic_done`");
+    expect(readme).toContain("only `actor_running` and `critic_running` expose Feature cancellation");
     expect(readme).toContain("`Ctrl+R` retries the cancelled task with persisted worker sessions");
     expect(readme).toContain("an unchanged in-progress wave reuses successful Actor and Critic checkpoints");
     expect(readme).toContain("the stale wave checkpoint is rejected and rebuilt from the current project");

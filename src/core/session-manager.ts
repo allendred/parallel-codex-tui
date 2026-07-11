@@ -148,8 +148,11 @@ export class InterruptedTaskRecoveryBlockedError extends Error {
 const TERMINAL_TASK_STATES = new Set<TaskState>(["done", "failed", "cancelled"]);
 const ACTIVE_WORKER_STATES = new Set<WorkerStatus["state"]>(["idle", "starting", "running", "waiting"]);
 const ACTIVE_FEATURE_STATES = new Set([
+  "queued",
   "actor_running",
+  "actor_done",
   "critic_running",
+  "critic_done",
   "revision_needed",
   "integrating",
   "verifying"

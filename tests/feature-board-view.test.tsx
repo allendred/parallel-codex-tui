@@ -72,6 +72,30 @@ describe("FeatureBoardView", () => {
     expect(visible.some((line) => line.featureIndex === 0)).toBe(false);
   });
 
+  it("distinguishes queued and completed workers from active feature runs", () => {
+    const displayLines = (
+      boardModule as typeof boardModule & {
+        featureBoardDisplayLines?: (
+          timeline: CollaborationTimeline,
+          selectedIndex: number,
+          height: number,
+          terminalWidth: number
+        ) => Array<{ text: string }>;
+      }
+    ).featureBoardDisplayLines;
+    const timeline = fixture();
+    timeline.features[0]!.state = "queued";
+    timeline.features[1]!.state = "actor_done";
+    timeline.features[2]!.state = "critic_running";
+
+    const text = (displayLines?.(timeline, 0, 10, 100) ?? []).map((line) => line.text).join("\n");
+
+    expect(text).toContain("3 features · 1 active");
+    expect(text).toContain("Game Engine · queued");
+    expect(text).toContain("Game UI · actor done");
+    expect(text).toContain("Game Help · critic running");
+  });
+
   it("keeps every rendered row inside narrow terminal widths", () => {
     const displayLines = (
       boardModule as typeof boardModule & {

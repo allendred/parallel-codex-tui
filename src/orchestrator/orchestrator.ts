@@ -738,7 +738,10 @@ export class Orchestrator {
         }
       }
       const pendingActors = wave.filter((definition) => !actorRunById.has(definition.id));
-      await Promise.all(pendingActors.map((definition) => updateFeatureStatus(requiredChannel(channels, definition), "actor_running")));
+      await Promise.all([
+        ...Array.from(actorRunById.values()).map(({ channel }) => updateFeatureStatus(channel, "actor_done")),
+        ...pendingActors.map((definition) => updateFeatureStatus(requiredChannel(channels, definition), "queued"))
+      ]);
       let actorCompleted = actorRunById.size;
       reportProgress("actor", actorCompleted, wave.length, actorCompleted === wave.length ? "done" : "running", "waiting");
       if (actorCompleted > 0) {
@@ -794,7 +797,9 @@ export class Orchestrator {
         }
       }
       const pendingCritics = actorRuns.filter((actorRun) => !pairRunById.has(actorRun.definition.id));
-      await Promise.all(pendingCritics.map(({ channel }) => updateFeatureStatus(channel, "critic_running")));
+      await Promise.all(Array.from(pairRunById.values()).map(({ channel }) => (
+        updateFeatureStatus(channel, "critic_done")
+      )));
       let criticCompleted = pairRunById.size;
       reportProgress("critic", criticCompleted, actorRuns.length, "done", criticCompleted === actorRuns.length ? "done" : "running");
       if (criticCompleted > 0) {
@@ -891,7 +896,6 @@ export class Orchestrator {
         throwIfCancelled(input.signal);
 
         await this.sessions.updateTaskStatus(task, "critic_running");
-        await Promise.all(revisedActors.map(({ channel }) => updateFeatureStatus(channel, "critic_running")));
         let recheckCompleted = 0;
         reportProgress("critic", recheckCompleted, revisedActors.length, "done", "rerunning");
         const revisedPairs = await mapWithConcurrency(revisedActors, concurrency, async (pair): Promise<FeaturePairRun> => {
@@ -1157,9 +1161,7 @@ export class Orchestrator {
     const restoredActor = restoredWave
       ? await this.loadCompletedActor(task, route.actor_engine, feature, false)
       : null;
-    if (!restoredActor) {
-      await updateFeatureStatus(feature, "actor_running");
-    } else {
+    if (restoredActor) {
       await this.sessions.appendEvent(
         task,
         "feature.wave_actor_checkpoints_reused",
@@ -1188,15 +1190,14 @@ export class Orchestrator {
         true
       );
     }
+    await updateFeatureStatus(feature, "actor_done");
     throwIfCancelled(input.signal);
 
     await this.sessions.updateTaskStatus(task, "critic_running");
     const restoredCritic = restoredActor
       ? await this.loadCompletedCritic(task, route.critic_engine, feature, false)
       : null;
-    if (!restoredCritic) {
-      await updateFeatureStatus(feature, "critic_running");
-    } else {
+    if (restoredCritic) {
       await this.sessions.appendEvent(
         task,
         "feature.wave_critic_checkpoints_reused",
@@ -1227,6 +1228,7 @@ export class Orchestrator {
         true
       );
     }
+    await updateFeatureStatus(feature, "critic_done");
     throwIfCancelled(input.signal);
     let review = await readTextIfExists(`${critic.dir}/review.md`);
     let decision = criticReviewDecision(review);
@@ -1257,10 +1259,10 @@ export class Orchestrator {
         true
       );
       await requireActorFindingReplies(feature, findingIds);
+      await updateFeatureStatus(feature, "actor_done");
       throwIfCancelled(input.signal);
       reviewWorkspace = await workspaceManager.prepareFeatureReviewWorkspace(workspaceWave, feature.id);
       await this.sessions.updateTaskStatus(task, "critic_running");
-      await updateFeatureStatus(feature, "critic_running");
       input.onStatus?.({ taskId: task.id, judge: "done", actor: "done", critic: "rerunning" });
       critic = await this.runCritic(
         input,
@@ -1275,6 +1277,7 @@ export class Orchestrator {
         reviewWorkspace,
         true
       );
+      await updateFeatureStatus(feature, "critic_done");
       throwIfCancelled(input.signal);
       review = await readTextIfExists(`${critic.dir}/review.md`);
       decision = criticReviewDecision(review);
@@ -1994,6 +1997,7 @@ export class Orchestrator {
     this.activeFeatureRuns.set(key, active);
 
     try {
+      await updateFeatureStatus(feature, role === "actor" ? "actor_running" : "critic_running");
       const result = await this.runWorkerWithNativeSession(engine, {
         ...spec,
         signal: controller.signal
@@ -2001,6 +2005,8 @@ export class Orchestrator {
       if (active.cancelRequested) {
         throw new FeatureRunCancelledError(feature.id);
       }
+      ensureWorkerSuccess(result);
+      await updateFeatureStatus(feature, role === "actor" ? "actor_done" : "critic_done");
       return result;
     } catch (error) {
       if (active.cancelRequested && !(error instanceof FeatureRunCancelledError)) {
