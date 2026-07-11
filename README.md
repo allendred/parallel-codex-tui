@@ -6,7 +6,7 @@ Built with Codex-assisted development.
 
 ## Requirements
 
-- Node.js 26+.
+- Node.js 24.15+.
 - Codex CLI available as `codex` for Codex routing and Codex workers.
 - Claude CLI available as `claude` only when you configure Claude workers.
 - A project workspace you are comfortable letting configured workers edit.
@@ -289,7 +289,7 @@ If a native resume fails because the underlying CLI reports that its context win
 
 ## Release
 
-GitHub Actions runs CI on pushes and pull requests to `main`.
+GitHub Actions runs CI on Node.js 24.15 and 26 for pushes and pull requests to `main`.
 
 Releases publish to npm through npm Trusted Publishing with GitHub OIDC. Do not configure `NPM_TOKEN` for the release workflow. In npm, configure Trusted Publishing for organization/user `allendred`, repository `parallel-codex-tui`, workflow filename `release.yml`, and allowed action `npm publish`. The package already exists on npm, so future releases can use Trusted Publishing directly. You can also configure the trust relationship from an authenticated npm CLI session:
 

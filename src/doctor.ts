@@ -56,7 +56,7 @@ export async function runDoctor(
     lines.push(`Node.js: ok (${process.versions.node})`);
   } else {
     ok = false;
-    lines.push(`Node.js: unsupported (${process.versions.node}; need 26+)`);
+    lines.push(`Node.js: unsupported (${process.versions.node}; need 24.15+)`);
   }
 
   lines.push(`workspace: ok (${preparedWorkspace})`);
@@ -240,7 +240,7 @@ export function isSupportedNodeVersion(version: string): boolean {
   const major = Number.parseInt(majorRaw, 10);
   const minor = Number.parseInt(minorRaw, 10);
 
-  return major >= 26;
+  return major > 24 || (major === 24 && minor >= 15);
 }
 
 function configuredCommands(config: Awaited<ReturnType<typeof loadConfig>>, includeRouter: boolean): string[] {

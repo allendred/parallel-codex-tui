@@ -77,7 +77,7 @@ describe("package metadata", () => {
       access: "public",
       registry: "https://registry.npmjs.org/"
     });
-    expect(pkg.engines?.node).toBe(">=26.0.0");
+    expect(pkg.engines?.node).toBe(">=24.15.0");
     expect(pkg.keywords).toEqual([
       "codex",
       "claude",
@@ -147,7 +147,7 @@ describe("package metadata", () => {
     const readme = await readFile(join(process.cwd(), "README.md"), "utf8");
 
     expect(readme).toContain("## Requirements");
-    expect(readme).toContain("Node.js 26+");
+    expect(readme).toContain("Node.js 24.15+");
     expect(readme).toContain("Codex CLI");
     expect(readme).toContain("Claude CLI");
     expect(readme).toContain("## Install");
@@ -211,7 +211,7 @@ describe("package metadata", () => {
     expect(readme).toContain(".parallel-codex/workspaces.json");
     expect(readme).toContain(".parallel-codex/sessions/");
     expect(readme).toContain("## Release");
-    expect(readme).toContain("GitHub Actions runs CI on pushes and pull requests to `main`");
+    expect(readme).toContain("GitHub Actions runs CI on Node.js 24.15 and 26 for pushes and pull requests to `main`");
     expect(readme).toContain("npm Trusted Publishing with GitHub OIDC");
     expect(readme).toContain("In npm, configure Trusted Publishing");
     expect(readme).toContain('workflow filename `release.yml`');
@@ -248,7 +248,8 @@ describe("package metadata", () => {
     expect(workflow).toContain("pull_request:");
     expect(workflow).toContain("actions/checkout@v6");
     expect(workflow).toContain("actions/setup-node@v6");
-    expect(workflow).toContain('node-version: "26.x"');
+    expect(workflow).toContain('node-version: ["24.15.x", "26.x"]');
+    expect(workflow).toContain("node-version: ${{ matrix.node-version }}");
     expect(workflow).toContain("npm ci");
     expect(workflow).toContain("npm run typecheck");
     expect(workflow).toContain("npm pack --dry-run --json");

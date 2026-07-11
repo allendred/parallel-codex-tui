@@ -24,7 +24,7 @@
     "agent-orchestration"
   ],
   "engines": {
-    "node": ">=26.0.0"
+    "node": ">=24.15.0"
   },
   "bin": {
     "parallel-codex-tui": "dist/cli.js"
