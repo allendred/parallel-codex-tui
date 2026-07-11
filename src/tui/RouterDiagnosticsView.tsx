@@ -9,7 +9,7 @@ import {
   type RouterFailureKind
 } from "../core/router-audit.js";
 import { routerProxyContext } from "../core/router.js";
-import { displayWidth, wrapByDisplayWidth } from "./display-width.js";
+import { compactEndByDisplayWidth, displayWidth, wrapByDisplayWidth } from "./display-width.js";
 import { formatRouteStatus } from "./status-line.js";
 import { TUI_THEME } from "./theme.js";
 
@@ -188,7 +188,7 @@ export function routerDiagnosticsDisplayLines(
     for (const record of [...visibleRecords].reverse()) {
       const workspace = basename(record.workspace) || record.workspace;
       logical.push({
-        text: `${record.time.slice(11, 19)} · ${safeDiagnosticText(workspace)} · ${record.scope} · ${routerAuditStatus(record)}`,
+        text: routerAuditHeading(record, workspace, width),
         tone: record.source === "fallback" ? "warning" : record.source === "codex" ? "success" : "muted"
       });
       logical.push({ text: `request · ${boundedDiagnosticText(record.request)}`, tone: "text" });
@@ -253,13 +253,28 @@ function routerDiagnosticLineTheme(tone: RouterDiagnosticLineTone): Pick<TextPro
 }
 
 function routerAuditStatus(record: RouterAuditRecord): string {
-  const formatted = formatRouteStatus(record).replace(/^route\s+/, "");
+  const route = record.router_failure_kind || !record.failure_kind
+    ? record
+    : { ...record, router_failure_kind: record.failure_kind };
+  const formatted = formatRouteStatus(route).replace(/^route\s+/, "");
   if (record.source === "codex") {
     const parts = formatted.split(/\s+·\s+/);
     parts.splice(1, 0, "codex");
     return parts.join(" · ");
   }
   return formatted;
+}
+
+function routerAuditHeading(record: RouterAuditRecord, workspace: string, width: number): string {
+  const prefix = `${record.time.slice(11, 19)} · `;
+  const suffix = ` · ${record.scope} · ${routerAuditStatus(record)}`;
+  const safeWorkspace = safeDiagnosticText(workspace);
+  const minimumWorkspaceWidth = Math.min(12, displayWidth(safeWorkspace));
+  const workspaceWidth = Math.max(
+    minimumWorkspaceWidth,
+    width - displayWidth(prefix) - displayWidth(suffix)
+  );
+  return `${prefix}${compactEndByDisplayWidth(safeWorkspace, workspaceWidth)}${suffix}`;
 }
 
 function routerDiagnosticsScopeText(

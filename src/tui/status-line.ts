@@ -93,10 +93,10 @@ export function formatRouteStatus(route: RouteDecision | null): string {
     details.push(`try ${route.router_attempt}`);
   }
   if (route.source === "fallback") {
-    const cause = classifyRouterFailure(route.reason);
-    if (cause) {
-      details.push(routeFailureKindLabel(cause, route));
-    }
+    const cause = route.router_failure_kind && route.router_failure_kind !== "unknown"
+      ? route.router_failure_kind
+      : classifyRouterFailure(route.reason) ?? "unknown";
+    details.push(routeFailureKindLabel(cause, route));
     const proxy = routeProxyStatus(route, cause);
     if (proxy) {
       details.push(proxy);
@@ -181,6 +181,9 @@ function routeFailureKindLabel(
       return `total timeout${stage}`;
     }
     return `timeout${stage}`;
+  }
+  if (kind === "unknown") {
+    return "unknown failure";
   }
   return kind.replaceAll("-", " ");
 }

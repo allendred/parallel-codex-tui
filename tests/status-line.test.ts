@@ -83,6 +83,27 @@ describe("formatStatusLine", () => {
     expect(formatRouteStatus?.({
       mode: "complex",
       source: "fallback",
+      reason: "Configured fallback selected.",
+      duration_ms: 120000,
+      router_failure_kind: "timeout",
+      router_failure_stage: "streaming",
+      router_timeout_kind: "total",
+      router_stdout_bytes: 18
+    })).toBe("route complex · fallback · total timeout after stdout · 120s");
+    expect(formatRouteStatus?.({
+      mode: "simple",
+      source: "fallback",
+      reason: "Configured fallback selected.",
+      router_failure_kind: "auth"
+    })).toBe("route simple · fallback · auth");
+    expect(formatRouteStatus?.({
+      mode: "simple",
+      source: "fallback",
+      reason: "Configured fallback selected."
+    })).toBe("route simple · fallback · unknown failure");
+    expect(formatRouteStatus?.({
+      mode: "complex",
+      source: "fallback",
       reason: "Codex router failed: connect ECONNREFUSED 127.0.0.1:7890. Codex router fallback forced complex."
     })).toBe("route complex · fallback · network");
     expect(formatRouteStatus?.({

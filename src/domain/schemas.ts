@@ -96,6 +96,7 @@ export const RouteDecisionSchema = z.object({
   router_stdout_bytes: z.number().int().nonnegative().optional(),
   router_stderr_bytes: z.number().int().nonnegative().optional(),
   router_failure_stage: RouterFailureStageSchema.optional(),
+  router_failure_kind: RouterFailureKindSchema.optional(),
   router_attempt: z.number().int().positive().optional(),
   router_total_duration_ms: z.number().nonnegative().optional(),
   router_fallback_resolution: RouterFallbackResolutionSchema.optional(),

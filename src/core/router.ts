@@ -1,9 +1,10 @@
 import { spawn } from "node:child_process";
 import { performance } from "node:perf_hooks";
 import type { AppConfig } from "./config.js";
-import type { RouteDecision, RouterFailureStage, RouterProxySource, RouterTimeoutKind } from "../domain/schemas.js";
+import type { RouteDecision, RouterFailureKind, RouterFailureStage, RouterProxySource, RouterTimeoutKind } from "../domain/schemas.js";
 import { RouteDecisionSchema } from "../domain/schemas.js";
 import { ProcessTreeCleanupError, terminateProcessTree } from "./process-tree.js";
+import { classifyRouterFailure } from "./router-audit.js";
 import { sanitizeRouterText } from "./router-redaction.js";
 
 export interface RouterExecutionTelemetry {
@@ -115,16 +116,45 @@ export async function routeRequestWithCodex(
       throw cancellationError();
     }
     const context = routerExecutionErrorContext(error);
+    const failureSummary = summarizeRouterError(error);
     const fallback = annotateRoute(fallbackRoute(config), "fallback", startedAt, mergeRouterTelemetry(context.telemetry, {
       router_dispatch_ms: dispatchMs
     }), proxyContext);
     return {
       ...fallback,
       ...(context.stage ? { router_failure_stage: context.stage } : {}),
+      router_failure_kind: routerFailureKind(failureSummary, context.stage, context.timeoutKind),
       ...(context.timeoutKind ? { router_timeout_kind: context.timeoutKind } : {}),
-      reason: `Codex router failed: ${summarizeRouterError(error)}. ${fallback.reason}`
+      reason: `Codex router failed: ${failureSummary}. ${fallback.reason}`
     };
   }
+}
+
+function routerFailureKind(
+  summary: string,
+  stage: RouterFailureStage | undefined,
+  timeoutKind: RouterTimeoutKind | undefined
+): RouterFailureKind {
+  if (timeoutKind) {
+    return "timeout";
+  }
+  const classified = classifyRouterFailure(summary);
+  if (classified) {
+    return classified;
+  }
+  if (stage === "spawn") {
+    return "unavailable";
+  }
+  if (stage === "input") {
+    return "input";
+  }
+  if (stage === "exit") {
+    return "exit";
+  }
+  if (stage === "response") {
+    return "invalid-output";
+  }
+  return "unknown";
 }
 
 function annotateRoute(

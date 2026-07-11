@@ -43,7 +43,7 @@ describe("CLI route restore smoke", () => {
     }));
     await writeJson(join(taskDir, "latest-route.json"), RouteDecisionSchema.parse({
       mode: "simple",
-      reason: "Codex router timed out after 30000ms with proxy configured.",
+      reason: "Configured fallback selected.",
       source: "fallback",
       duration_ms: 30000,
       router_spawn_ms: 1,
@@ -51,6 +51,9 @@ describe("CLI route restore smoke", () => {
       router_stdout_bytes: 0,
       router_stderr_bytes: 0,
       router_failure_stage: "waiting-output",
+      router_failure_kind: "timeout",
+      router_timeout_kind: "first-output",
+      proxy_configured: true,
       suggested_roles: []
     }));
 
@@ -74,7 +77,7 @@ describe("CLI route restore smoke", () => {
       await waitForScreenText(
         () => screenWrites,
         screen,
-        "route simple · fallback · timeout waiting output · proxy set · 30s"
+        "route simple · fallback · first output timeout · via proxy · 30s"
       );
       const snapshot = screen.snapshot();
       expect(snapshot).not.toContain("route complex · fallback · timeout · 30s");

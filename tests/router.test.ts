@@ -275,6 +275,7 @@ describe("routeRequestWithCodex", () => {
     expect(route).toMatchObject({
       mode: "simple",
       source: "fallback",
+      router_failure_kind: "timeout",
       suggested_roles: []
     });
     expect(route.reason).toContain("timed out after 200ms");
@@ -738,6 +739,7 @@ describe("routeRequestWithCodex", () => {
 
     expect(route).toMatchObject({
       source: "fallback",
+      router_failure_kind: "invalid-output",
       router_failure_stage: "response",
       router_dispatch_ms: expect.any(Number),
       router_spawn_ms: expect.any(Number),
@@ -788,6 +790,7 @@ describe("routeRequestWithCodex", () => {
     expect(route.reason).toContain("Codex router input failed");
     expect(route.duration_ms).toBeLessThan(1500);
     expect(route).toMatchObject({
+      router_failure_kind: "input",
       router_failure_stage: "input",
       router_process_ms: expect.any(Number),
       router_stdout_bytes: 0,

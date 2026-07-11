@@ -1552,7 +1552,7 @@ export class Orchestrator {
             router_max_attempts: routeConfig.router.codex.maxAttempts,
             router_retry_delay_ms: routeConfig.router.codex.retryDelayMs,
             ...(route.source === "fallback"
-              ? { failure_kind: classifyRouterFailure(route.reason) ?? "unknown" }
+              ? { failure_kind: route.router_failure_kind ?? classifyRouterFailure(route.reason) ?? "unknown" }
               : {})
           }
         : {})
@@ -2276,7 +2276,9 @@ function annotateRouterJourney(
     ...(attempt > 1 ? { router_total_duration_ms: totalDurationMs } : {}),
     ...(recovered
       ? {
-          router_recovered_from: classifyRouterFailure(previousFailure.reason) ?? "unknown",
+          router_recovered_from: previousFailure.router_failure_kind
+            ?? classifyRouterFailure(previousFailure.reason)
+            ?? "unknown",
           ...(recoveredVia === "retry" || recoveredVia === "auto-retry"
             ? { router_recovered_via: recoveredVia }
             : {}),

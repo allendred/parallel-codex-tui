@@ -28,6 +28,7 @@ describe("domain schemas", () => {
     const result = RouteDecisionSchema.parse({
       mode: "complex",
       reason: "Requires code changes and review.",
+      router_failure_kind: "timeout",
       router_timeout_kind: "idle",
       router_fallback_resolution: "auto-retry",
       suggested_roles: ["judge", "actor", "critic"],
@@ -37,6 +38,7 @@ describe("domain schemas", () => {
     });
 
     expect(result.mode).toBe("complex");
+    expect(result.router_failure_kind).toBe("timeout");
     expect(result.router_timeout_kind).toBe("idle");
     expect(result.router_fallback_resolution).toBe("auto-retry");
     expect(result.suggested_roles).toEqual(["judge", "actor", "critic"]);

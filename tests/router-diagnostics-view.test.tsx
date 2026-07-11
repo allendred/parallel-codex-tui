@@ -168,6 +168,38 @@ describe("RouterDiagnosticsView", () => {
     }
     expect(overflow).toEqual([]);
   });
+
+  it("compacts long workspace names before wrapping fallback evidence", () => {
+    const displayLines = (
+      diagnosticsModule as typeof diagnosticsModule & {
+        routerDiagnosticsDisplayLines?: (
+          records: RouterAuditRecord[],
+          routerPolicy: ReturnType<typeof policy>,
+          terminalWidth: number
+        ) => Array<{ text: string }>;
+      }
+    ).routerDiagnosticsDisplayLines;
+    const fallback = {
+      ...records()[1]!,
+      workspace: "/tmp/pct-cli-router-workspace-name-that-is-deliberately-long",
+      reason: "Configured fallback selected.",
+      failure_kind: "timeout" as const,
+      proxy_configured: true,
+      proxy_endpoint: undefined,
+      router_fallback_resolution: undefined,
+      router_timeout_kind: undefined,
+      router_failure_stage: undefined,
+      router_stdout_bytes: undefined,
+      router_stderr_bytes: undefined
+    };
+
+    const lines = displayLines?.([fallback], policy(), 100) ?? [];
+    const heading = lines.find((line) => line.text.startsWith("07:01:00"))?.text ?? "";
+
+    expect(heading).toContain("pct-cli-router-");
+    expect(heading).toContain("...");
+    expect(heading).toContain("fallback · timeout · via proxy · 30s");
+  });
 });
 
 function policy() {

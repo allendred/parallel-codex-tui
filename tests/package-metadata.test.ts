@@ -286,6 +286,8 @@ describe("package metadata", () => {
     expect(readme).toContain("`feature.status_recovered`");
     expect(readme).toContain("Actor worklog, replies, or Critic findings");
     expect(readme).toContain("A reused PID with a different start fingerprint is never signalled");
+    expect(readme).toContain("Every new Router fallback persists an authoritative `router_failure_kind`");
+    expect(readme).toContain("shows `unknown failure` instead of omitting the cause");
     expect(readme).toContain("Recovery commits cancellation only after every recorded process group is confirmed stopped");
     expect(readme).toContain("An unverifiable or still-running process blocks startup");
     expect(readme).toContain("A matching `native-session.retired.json` tombstone always wins over a leftover active session file");

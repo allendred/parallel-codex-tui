@@ -97,7 +97,7 @@ export function routerFallbackIsTransient(route: RouteDecision): boolean {
     return true;
   }
 
-  const kind = classifyRouterFailure(route.reason);
+  const kind = route.router_failure_kind ?? classifyRouterFailure(route.reason);
   if (kind === "network" || kind === "proxy") {
     return true;
   }

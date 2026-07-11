@@ -227,6 +227,8 @@ describe("readRouterAudit", () => {
     expect(routerFallbackIsTransient?.(fallback("hard ceiling", { router_timeout_kind: "total" }))).toBe(false);
     expect(routerFallbackIsTransient?.(fallback("fetch failed: ECONNRESET"))).toBe(true);
     expect(routerFallbackIsTransient?.(fallback("proxy connection refused"))).toBe(true);
+    expect(routerFallbackIsTransient?.(fallback("generic", { router_failure_kind: "network" }))).toBe(true);
+    expect(routerFallbackIsTransient?.(fallback("generic", { router_failure_kind: "auth" }))).toBe(false);
     expect(routerFallbackIsTransient?.(fallback("HTTP 401 Unauthorized"))).toBe(false);
     expect(routerFallbackIsTransient?.(fallback("HTTP 429 rate limit"))).toBe(false);
     expect(routerFallbackIsTransient?.(fallback("spawn ENOENT"))).toBe(false);
