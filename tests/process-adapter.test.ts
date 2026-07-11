@@ -245,6 +245,41 @@ describe("ProcessWorkerAdapter", () => {
     expect(status.state).toBe("done");
   });
 
+  it("preserves UTF-8 worker output split across process chunks", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pct-process-split-utf8-"));
+    const filesDir = join(root, "actor-mock");
+    const promptPath = join(filesDir, "prompt.md");
+    const outputLogPath = join(filesDir, "output.log");
+    const statusPath = join(filesDir, "status.json");
+    const output = Buffer.from("进度：开始实现\n", "utf8");
+    const characterOffset = output.indexOf(Buffer.from("开", "utf8"));
+    const first = output.subarray(0, characterOffset + 1).toString("base64");
+    const second = output.subarray(characterOffset + 1).toString("base64");
+    const script = [
+      `process.stdout.write(Buffer.from(${JSON.stringify(first)},'base64'));`,
+      `setTimeout(()=>process.stdout.end(Buffer.from(${JSON.stringify(second)},'base64')),80);`
+    ].join("");
+    await writeText(promptPath, "实现功能");
+
+    const adapter = new ProcessWorkerAdapter(process.execPath, ["-e", script]);
+    const result = await adapter.run({
+      workerId: "actor-split-utf8",
+      role: "actor",
+      engine: "mock",
+      cwd: root,
+      filesDir,
+      promptPath,
+      outputLogPath,
+      statusPath,
+      prompt: "实现功能"
+    });
+
+    const log = await readTextIfExists(outputLogPath);
+    expect(result.exitCode).toBe(0);
+    expect(log).toContain("进度：开始实现\n");
+    expect(log).not.toContain("�");
+  });
+
   it("waits for the full prompt to flush into worker stdin", async () => {
     const root = await mkdtemp(join(tmpdir(), "pct-process-large-prompt-"));
     const filesDir = join(root, "actor-mock");

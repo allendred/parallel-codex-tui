@@ -1,5 +1,6 @@
 import { spawn } from "node:child_process";
 import { performance } from "node:perf_hooks";
+import { StringDecoder } from "node:string_decoder";
 import type { AppConfig } from "./config.js";
 import type { RouteDecision, RouterFailureKind, RouterFailureStage, RouterProxySource, RouterTimeoutKind } from "../domain/schemas.js";
 import { RouteDecisionSchema } from "../domain/schemas.js";
@@ -213,6 +214,8 @@ export async function runCodexRouterProcess(
     });
     let stdout = "";
     let stderr = "";
+    const stdoutDecoder = new StringDecoder("utf8");
+    const stderrDecoder = new StringDecoder("utf8");
     let stdoutBytes = 0;
     let stderrBytes = 0;
     let spawnMs: number | undefined;
@@ -377,7 +380,7 @@ export async function runCodexRouterProcess(
       stdoutBytes += chunk.byteLength;
       firstOutputMs ??= Math.max(0, Date.now() - processStartedAt);
       firstStdoutMs ??= Math.max(0, Date.now() - processStartedAt);
-      stdout += chunk.toString("utf8");
+      stdout += stdoutDecoder.write(chunk);
       recordOutputActivity();
       reportProgress("receiving-response");
     });
@@ -389,7 +392,7 @@ export async function runCodexRouterProcess(
       stderrBytes += chunk.byteLength;
       firstOutputMs ??= Math.max(0, Date.now() - processStartedAt);
       firstStderrMs ??= Math.max(0, Date.now() - processStartedAt);
-      stderr += chunk.toString("utf8");
+      stderr += stderrDecoder.write(chunk);
       recordOutputActivity();
       if (stdoutBytes === 0) {
         reportProgress("receiving-stderr");
@@ -407,6 +410,8 @@ export async function runCodexRouterProcess(
       if (terminating) {
         return;
       }
+      stdout += stdoutDecoder.end();
+      stderr += stderrDecoder.end();
       if (code === 0) {
         finish(null);
         return;

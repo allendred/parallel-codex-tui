@@ -216,6 +216,39 @@ describe("routeRequestWithCodex", () => {
     expect(seenCwd).toBe("/tmp/router-cwd");
   });
 
+  it("preserves UTF-8 route text split across process output chunks", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pct-router-split-utf8-"));
+    const response = Buffer.from(JSON.stringify({
+      mode: "complex",
+      reason: "需要并行实现"
+    }), "utf8");
+    const characterOffset = response.indexOf(Buffer.from("需", "utf8"));
+    const first = response.subarray(0, characterOffset + 1).toString("base64");
+    const second = response.subarray(characterOffset + 1).toString("base64");
+    const config = defaultConfig(root);
+    config.router.codex.command = process.execPath;
+    config.router.codex.args = [
+      "-e",
+      [
+        `process.stdout.write(Buffer.from(${JSON.stringify(first)},'base64'));`,
+        `setTimeout(()=>process.stdout.end(Buffer.from(${JSON.stringify(second)},'base64')),80);`
+      ].join("")
+    ];
+    config.router.codex.timeoutMs = 3000;
+    config.router.codex.firstOutputTimeoutMs = 1000;
+    config.router.codex.idleTimeoutMs = 1000;
+
+    const route = await routeRequestWithCodex("实现功能", config, undefined, root);
+
+    expect(route).toMatchObject({
+      mode: "complex",
+      source: "codex",
+      reason: "需要并行实现",
+      router_stdout_bytes: response.byteLength
+    });
+    expect(route.reason).not.toContain("�");
+  });
+
   it("trusts the Codex route even when old keywords would have matched", async () => {
     const config = defaultConfig("/tmp/project");
     const runner: CodexRouteRunner = async () =>

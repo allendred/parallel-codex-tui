@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { StringDecoder } from "node:string_decoder";
 import { appendText, writeJson } from "../core/file-store.js";
 import { clearWorkerProcessRecord, writeWorkerProcessRecord } from "../core/process-ownership.js";
 import { terminateProcessTree } from "../core/process-tree.js";
@@ -162,6 +163,9 @@ export class ProcessWorkerAdapter implements WorkerAdapter {
       let sessionDetectionTail = "";
       let sawOutput = false;
       const outputChunks: string[] = [];
+      const stdoutDecoder = new StringDecoder("utf8");
+      const stderrDecoder = new StringDecoder("utf8");
+      let outputDecodersEnded = false;
 
       const clearRunTimers = (): void => {
         if (timeout) {
@@ -228,6 +232,39 @@ export class ProcessWorkerAdapter implements WorkerAdapter {
         });
       };
 
+      const recordDecodedOutput = (text: string): void => {
+        if (!text || settled || finishing) {
+          return;
+        }
+        outputChunks.push(text);
+        queuePersistence(async () => {
+          await appendText(runSpec.outputLogPath, text);
+          if (!detectedNativeSessionId && runSpec.nativeSessionConfig?.detectSessionId !== false) {
+            const detectionText = `${sessionDetectionTail}${text}`;
+            const sessionId = detectNativeSessionId(detectionText);
+            if (sessionId) {
+              detectedNativeSessionId = sessionId;
+              sessionDetectionTail = "";
+              await runSpec.onNativeSession?.(sessionId);
+            } else {
+              sessionDetectionTail = detectionText.slice(-512);
+            }
+          }
+          if (!settled && !terminalState) {
+            await setStatus(runSpec, "running", "process-output", summarizeOutput(text), detectedNativeSessionId);
+          }
+        });
+      };
+
+      const endOutputDecoders = (): void => {
+        if (outputDecodersEnded) {
+          return;
+        }
+        outputDecodersEnded = true;
+        recordDecodedOutput(stdoutDecoder.end());
+        recordDecodedOutput(stderrDecoder.end());
+      };
+
       const failAndTerminate = (phase: string, summary: string, logLine: string): void => {
         if (settled || terminalState) {
           return;
@@ -285,6 +322,7 @@ export class ProcessWorkerAdapter implements WorkerAdapter {
         if (settled || finishing) {
           return;
         }
+        endOutputDecoders();
         finishing = true;
         try {
           clearRunTimers();
@@ -386,7 +424,7 @@ export class ProcessWorkerAdapter implements WorkerAdapter {
         }, runSpec.idleTimeoutMs);
       };
 
-      const recordOutput = (chunk: Buffer): void => {
+      const recordOutput = (chunk: Buffer, decoder: StringDecoder): void => {
         if (settled || finishing) {
           return;
         }
@@ -395,34 +433,16 @@ export class ProcessWorkerAdapter implements WorkerAdapter {
           clearTimeout(firstOutputTimeout);
           firstOutputTimeout = undefined;
         }
-        const text = chunk.toString("utf8");
-        outputChunks.push(text);
-        queuePersistence(async () => {
-          await appendText(runSpec.outputLogPath, text);
-          if (!detectedNativeSessionId && runSpec.nativeSessionConfig?.detectSessionId !== false) {
-            const detectionText = `${sessionDetectionTail}${text}`;
-            const sessionId = detectNativeSessionId(detectionText);
-            if (sessionId) {
-              detectedNativeSessionId = sessionId;
-              sessionDetectionTail = "";
-              await runSpec.onNativeSession?.(sessionId);
-            } else {
-              sessionDetectionTail = detectionText.slice(-512);
-            }
-          }
-          if (!settled && !terminalState) {
-            await setStatus(runSpec, "running", "process-output", summarizeOutput(text), detectedNativeSessionId);
-          }
-        });
+        recordDecodedOutput(decoder.write(chunk));
         resetIdleTimeout();
       };
 
       child.stdout.on("data", (chunk: Buffer) => {
-        recordOutput(chunk);
+        recordOutput(chunk, stdoutDecoder);
       });
 
       child.stderr.on("data", (chunk: Buffer) => {
-        recordOutput(chunk);
+        recordOutput(chunk, stderrDecoder);
       });
 
       child.on("error", (error) => {
@@ -450,6 +470,7 @@ export class ProcessWorkerAdapter implements WorkerAdapter {
           });
           return;
         }
+        endOutputDecoders();
         settled = true;
         clearRunTimers();
         if (abortListener) {
