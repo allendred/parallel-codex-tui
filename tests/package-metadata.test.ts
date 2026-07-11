@@ -222,6 +222,9 @@ describe("package metadata", () => {
     expect(readme).toContain("press `X` twice to cancel only its active Actor or Critic process");
     expect(readme).toContain("already-running peers finish, queued workers stop, and integration remains blocked");
     expect(readme).toContain("`Ctrl+R` retries the cancelled task with persisted worker sessions");
+    expect(readme).toContain("an unchanged in-progress wave reuses successful Actor and Critic checkpoints");
+    expect(readme).toContain("the stale wave checkpoint is rejected and rebuilt from the current project");
+    expect(readme).toContain("Checkpoint load, reuse, and recovery events appear in the collaboration timeline");
     expect(readme).toContain("press `C` to open the file-backed Actor/Critic collaboration timeline");
     expect(readme).toContain("`dialogue/actor-critic.jsonl`, feature status, Critic findings, Actor replies, and Wave events");
     expect(readme).toContain("`Tab` cycles all features and each individual feature");

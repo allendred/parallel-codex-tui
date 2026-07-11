@@ -118,6 +118,17 @@ describe("CLI Feature cancel smoke", () => {
       expect(await pathExists(join(workspace, "alpha.txt"))).toBe(false);
       expect(await pathExists(join(workspace, "beta.txt"))).toBe(false);
 
+      child.write("\x12");
+      await waitForTaskState(join(taskDir, "meta.json"), "done");
+      await waitForScreenText(() => screenWrites, screen, "2 features · 2 approved");
+      const resumedEvents = await readTextIfExists(join(taskDir, "events.jsonl"));
+      expect(await readTextIfExists(join(taskDir, "actor-codex-0001-alpha", "run-count.txt"))).toBe("2");
+      expect(await readTextIfExists(join(taskDir, "actor-codex-0001-beta", "run-count.txt"))).toBe("1");
+      expect(await readTextIfExists(join(workspace, "alpha.txt"))).toBe("alpha\n");
+      expect(await readTextIfExists(join(workspace, "beta.txt"))).toBe("beta\n");
+      expect(resumedEvents).toContain("feature.wave_checkpoint_loaded");
+      expect(resumedEvents).toContain("feature.wave_actor_checkpoints_reused");
+
       child.write("\x03");
       await waitForExit(exits);
       expect(exits[0]).toBe(0);
@@ -126,7 +137,7 @@ describe("CLI Feature cancel smoke", () => {
         child.kill("SIGTERM");
       }
     }
-  }, 20000);
+  }, 25000);
 });
 
 function featureCancelAgentSource(): string {
@@ -149,8 +160,16 @@ function featureCancelAgentSource(): string {
     "  }",
     "  if (role === 'actor') {",
     "    console.log(workerId + ' started');",
-    "    if (workerId.endsWith('-alpha')) setInterval(() => {}, 1000);",
-    "    else setTimeout(() => { fs.writeFileSync(path.join(dir, 'worklog.md'), 'beta complete\\n'); process.exit(0); }, 300);",
+    "    const countPath = path.join(dir, 'run-count.txt');",
+    "    const runCount = (fs.existsSync(countPath) ? Number(fs.readFileSync(countPath, 'utf8')) : 0) + 1;",
+    "    fs.writeFileSync(countPath, String(runCount));",
+    "    if (workerId.endsWith('-alpha') && runCount === 1) setInterval(() => {}, 1000);",
+    "    else setTimeout(() => {",
+    "      const name = workerId.endsWith('-alpha') ? 'alpha' : 'beta';",
+    "      fs.writeFileSync(path.join(process.cwd(), name + '.txt'), name + '\\n');",
+    "      fs.writeFileSync(path.join(dir, 'worklog.md'), name + ' complete\\n');",
+    "      process.exit(0);",
+    "    }, workerId.endsWith('-alpha') ? 50 : 300);",
     "    return;",
     "  }",
     "  if (role === 'critic') { fs.writeFileSync(path.join(dir, 'review.md'), 'APPROVED\\n'); console.log('critic done'); }",

@@ -75,6 +75,34 @@ describe("ParallelWorkspaceManager", () => {
     expect(await pathExists(join(workspaceRoot, "critic-only.txt"))).toBe(false);
   });
 
+  it("restores an unchanged wave without deleting completed feature work", async () => {
+    const workspaceRoot = await mkdtemp(join(tmpdir(), "pct-workspace-restore-"));
+    const taskDir = join(workspaceRoot, ".parallel-codex", "sessions", "task-restore");
+    await writeText(join(workspaceRoot, "base.txt"), "base\n");
+    const manager = new ParallelWorkspaceManager({ workspaceRoot, taskDir, dataDir: ".parallel-codex" });
+    const input = { turnId: "0001", wave: 1, featureIds: ["0001-ui", "0001-engine"] };
+    const wave = await manager.prepareWave(input);
+    const completedPath = join(wave.featureDirs.get("0001-engine") ?? "", "engine.txt");
+    await writeText(completedPath, "completed actor output\n");
+
+    const restored = await manager.restoreWave(input);
+
+    expect(restored?.rootDir).toBe(wave.rootDir);
+    expect(await readTextIfExists(completedPath)).toBe("completed actor output\n");
+  });
+
+  it("rejects a wave checkpoint after the live workspace changes", async () => {
+    const workspaceRoot = await mkdtemp(join(tmpdir(), "pct-workspace-stale-checkpoint-"));
+    const taskDir = join(workspaceRoot, ".parallel-codex", "sessions", "task-stale");
+    await writeText(join(workspaceRoot, "base.txt"), "base\n");
+    const manager = new ParallelWorkspaceManager({ workspaceRoot, taskDir, dataDir: ".parallel-codex" });
+    const input = { turnId: "0001", wave: 1, featureIds: ["0001-ui"] };
+    await manager.prepareWave(input);
+    await writeText(join(workspaceRoot, "user-change.txt"), "new live work\n");
+
+    await expect(manager.restoreWave(input)).resolves.toBeNull();
+  });
+
   it("merges independent feature edits through staging before updating the live workspace", async () => {
     const workspaceRoot = await mkdtemp(join(tmpdir(), "pct-workspace-merge-"));
     const taskDir = join(workspaceRoot, ".parallel-codex", "sessions", "task-two");

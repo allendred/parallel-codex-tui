@@ -427,12 +427,19 @@ export class Orchestrator {
   ): Promise<HandleRequestResult> {
     let features: FeatureChannel[] = [];
     try {
-      await this.clearTurnJudgeArtifacts(turn, input.retry);
-      await this.sessions.updateTaskStatus(task, "judging");
-      input.onStatus?.({ taskId: task.id, judge: "running", actor: "waiting", critic: "waiting" });
-      const judgeWorker = await this.runJudge(input, task, route.judge_engine, workers, turn);
+      const reuseJudgeSnapshot = input.retry && await this.hasCompleteJudgeSnapshot(turn);
+      if (!reuseJudgeSnapshot) {
+        await this.clearTurnJudgeArtifacts(turn, input.retry);
+        await this.sessions.updateTaskStatus(task, "judging");
+        input.onStatus?.({ taskId: task.id, judge: "running", actor: "waiting", critic: "waiting" });
+      }
+      const judgeWorker = reuseJudgeSnapshot
+        ? this.workerFiles(task, `judge-${route.judge_engine}`)
+        : await this.runJudge(input, task, route.judge_engine, workers, turn);
       throwIfCancelled(input.signal);
-      const judge = await this.snapshotJudgeArtifacts(judgeWorker, turn);
+      const judge = reuseJudgeSnapshot
+        ? { ...judgeWorker, dir: turn.dir }
+        : await this.snapshotJudgeArtifacts(judgeWorker, turn);
       const featurePlan = await this.loadFeaturePlan(judge, turn);
       if (featurePlan && featurePlan.features.length > 1) {
         features = await Promise.all(featurePlan.features.map((feature) => createFeatureChannel({
@@ -440,7 +447,8 @@ export class Orchestrator {
           turn,
           request: input.request,
           judgeDir: judge.dir,
-          feature
+          feature,
+          resume: input.retry
         })));
         return await this.runFeaturePlan(input, task, route, turn, workers, judge, featurePlan, features);
       }
@@ -449,7 +457,8 @@ export class Orchestrator {
         task,
         turn,
         request: input.request,
-        judgeDir: judge.dir
+        judgeDir: judge.dir,
+        resume: input.retry
       });
       features = [feature];
       return await this.runActorCriticPair(input, task, route, turn, workers, judge, feature);
@@ -485,7 +494,8 @@ export class Orchestrator {
           turn,
           request: input.request,
           judgeDir: judge.dir,
-          feature
+          feature,
+          resume: input.retry
         })));
         return await this.runFeaturePlan(input, task, route, turn, workers, judge, featurePlan, features);
       }
@@ -494,7 +504,8 @@ export class Orchestrator {
         task,
         turn,
         request: input.request,
-        judgeDir: judge.dir
+        judgeDir: judge.dir,
+        resume: input.retry
       });
       features = [feature];
       return await this.runActorCriticPair(input, task, route, turn, workers, judge, feature);
@@ -598,16 +609,8 @@ export class Orchestrator {
     });
 
     for (const [waveIndex, wave] of featureWaves.entries()) {
-      const workspaceWave = await workspaceManager.prepareWave({
-        turnId: turn.turnId,
-        wave: waveIndex + 1,
-        featureIds: wave.map((definition) => requiredChannel(channels, definition).id)
-      });
-      await this.sessions.appendEvent(
-        task,
-        "feature.wave_isolated",
-        `Prepared isolated workspaces for feature wave: ${wave.map((feature) => feature.id).join(", ")}`
-      );
+      const waveNumber = waveIndex + 1;
+      const waveChannels = wave.map((definition) => requiredChannel(channels, definition));
       const reportProgress = (
         phase: FeatureRunProgress["phase"],
         completed: number,
@@ -620,7 +623,7 @@ export class Orchestrator {
         actor,
         critic,
         featureProgress: {
-          wave: waveIndex + 1,
+          wave: waveNumber,
           waves: featureWaves.length,
           phase,
           completed,
@@ -628,13 +631,63 @@ export class Orchestrator {
         }
       });
 
+      const checkpoint = input.retry
+        ? await loadIntegratedWaveCheckpoint(task, turn, waveNumber, wave, waveChannels)
+        : null;
+      if (checkpoint) {
+        summaries.push(...checkpoint.summaries);
+        waveReviews.push({ wave: waveNumber, review: checkpoint.review });
+        await this.sessions.appendEvent(
+          task,
+          checkpoint.recovered ? "feature.wave_checkpoint_recovered" : "feature.wave_checkpoint_reused",
+          `${checkpoint.recovered ? "Recovered" : "Reused"} integrated checkpoint for wave ${waveNumber}/${featureWaves.length}: ${wave.map((feature) => feature.id).join(", ")}`
+        );
+        reportProgress("verification", 1, 1, "done", "done");
+        continue;
+      }
+
+      const workspaceInput = {
+        turnId: turn.turnId,
+        wave: waveNumber,
+        featureIds: waveChannels.map((channel) => channel.id)
+      };
+      const restoredWave = input.retry ? await workspaceManager.restoreWave(workspaceInput) : null;
+      const workspaceWave = restoredWave ?? await workspaceManager.prepareWave(workspaceInput);
+      await this.sessions.appendEvent(
+        task,
+        restoredWave ? "feature.wave_checkpoint_loaded" : "feature.wave_isolated",
+        `${restoredWave ? "Loaded checkpoint workspaces" : "Prepared isolated workspaces"} for feature wave: ${wave.map((feature) => feature.id).join(", ")}`
+      );
+
       throwIfCancelled(input.signal);
       await this.sessions.updateTaskStatus(task, "actor_running");
-      await Promise.all(wave.map((definition) => updateFeatureStatus(requiredChannel(channels, definition), "actor_running")));
-      let actorCompleted = 0;
-      reportProgress("actor", actorCompleted, wave.length, "running", "waiting");
+      const actorRunById = new Map<string, FeatureActorRun>();
+      if (restoredWave) {
+        const restoredActors = await Promise.all(wave.map((definition) => this.loadCompletedFeatureActor(
+          task,
+          route.actor_engine,
+          definition,
+          requiredChannel(channels, definition)
+        )));
+        for (const actorRun of restoredActors) {
+          if (actorRun) {
+            actorRunById.set(actorRun.definition.id, actorRun);
+          }
+        }
+      }
+      const pendingActors = wave.filter((definition) => !actorRunById.has(definition.id));
+      await Promise.all(pendingActors.map((definition) => updateFeatureStatus(requiredChannel(channels, definition), "actor_running")));
+      let actorCompleted = actorRunById.size;
+      reportProgress("actor", actorCompleted, wave.length, actorCompleted === wave.length ? "done" : "running", "waiting");
+      if (actorCompleted > 0) {
+        await this.sessions.appendEvent(
+          task,
+          "feature.wave_actor_checkpoints_reused",
+          `Reused ${actorCompleted}/${wave.length} completed Actor checkpoints in wave ${waveNumber}/${featureWaves.length}`
+        );
+      }
 
-      const actorRuns = await mapWithConcurrency(wave, concurrency, async (definition): Promise<FeatureActorRun> => {
+      const freshActorRuns = await mapWithConcurrency(pendingActors, concurrency, async (definition): Promise<FeatureActorRun> => {
         const channel = requiredChannel(channels, definition);
         const actor = await this.runActor(
           input,
@@ -649,16 +702,47 @@ export class Orchestrator {
           requiredFeatureWorkspace(workspaceWave.featureDirs, channel)
         );
         actorCompleted += 1;
-        reportProgress("actor", actorCompleted, wave.length, "running", "waiting");
+        reportProgress("actor", actorCompleted, wave.length, actorCompleted === wave.length ? "done" : "running", "waiting");
         return { definition, channel, actor };
+      });
+      for (const actorRun of freshActorRuns) {
+        actorRunById.set(actorRun.definition.id, actorRun);
+      }
+      const actorRuns = wave.map((definition) => {
+        const actorRun = actorRunById.get(definition.id);
+        if (!actorRun) {
+          throw new Error(`Actor checkpoint missing after wave execution: ${definition.id}`);
+        }
+        return actorRun;
       });
       throwIfCancelled(input.signal);
 
       await this.sessions.updateTaskStatus(task, "critic_running");
-      await Promise.all(actorRuns.map(({ channel }) => updateFeatureStatus(channel, "critic_running")));
-      let criticCompleted = 0;
-      reportProgress("critic", criticCompleted, actorRuns.length, "done", "running");
-      const pairRuns = await mapWithConcurrency(actorRuns, concurrency, async (actorRun): Promise<FeaturePairRun> => {
+      const pairRunById = new Map<string, FeaturePairRun>();
+      if (restoredWave) {
+        const restoredPairs = await Promise.all(actorRuns.map((actorRun) => this.loadCompletedFeaturePair(
+          task,
+          route.critic_engine,
+          actorRun
+        )));
+        for (const pairRun of restoredPairs) {
+          if (pairRun) {
+            pairRunById.set(pairRun.definition.id, pairRun);
+          }
+        }
+      }
+      const pendingCritics = actorRuns.filter((actorRun) => !pairRunById.has(actorRun.definition.id));
+      await Promise.all(pendingCritics.map(({ channel }) => updateFeatureStatus(channel, "critic_running")));
+      let criticCompleted = pairRunById.size;
+      reportProgress("critic", criticCompleted, actorRuns.length, "done", criticCompleted === actorRuns.length ? "done" : "running");
+      if (criticCompleted > 0) {
+        await this.sessions.appendEvent(
+          task,
+          "feature.wave_critic_checkpoints_reused",
+          `Reused ${criticCompleted}/${actorRuns.length} completed Critic checkpoints in wave ${waveNumber}/${featureWaves.length}`
+        );
+      }
+      const freshPairRuns = await mapWithConcurrency(pendingCritics, concurrency, async (actorRun): Promise<FeaturePairRun> => {
         const reviewWorkspace = await workspaceManager.prepareFeatureReviewWorkspace(
           workspaceWave,
           actorRun.channel.id
@@ -676,8 +760,18 @@ export class Orchestrator {
           reviewWorkspace
         );
         criticCompleted += 1;
-        reportProgress("critic", criticCompleted, actorRuns.length, "done", "running");
+        reportProgress("critic", criticCompleted, actorRuns.length, "done", criticCompleted === actorRuns.length ? "done" : "running");
         return { ...actorRun, critic };
+      });
+      for (const pairRun of freshPairRuns) {
+        pairRunById.set(pairRun.definition.id, pairRun);
+      }
+      const pairRuns = actorRuns.map((actorRun) => {
+        const pairRun = pairRunById.get(actorRun.definition.id);
+        if (!pairRun) {
+          throw new Error(`Critic checkpoint missing after wave execution: ${actorRun.definition.id}`);
+        }
+        return pairRun;
       });
       throwIfCancelled(input.signal);
 
@@ -795,7 +889,7 @@ export class Orchestrator {
         workers,
         turn,
         verificationWorkspace,
-        waveIndex + 1,
+        waveNumber,
         featureWaves.length,
         finalPairs.map(({ channel }) => channel.id)
       );
@@ -807,7 +901,7 @@ export class Orchestrator {
       await this.sessions.appendEvent(
         task,
         "feature.wave_reviewed",
-        `Wave ${waveIndex + 1}/${featureWaves.length} Critic decision: ${waveDecision}`
+        `Wave ${waveNumber}/${featureWaves.length} Critic decision: ${waveDecision}`
       );
       let waveRevised = false;
 
@@ -816,7 +910,7 @@ export class Orchestrator {
         await this.sessions.appendEvent(
           task,
           "feature.wave_revision_requested",
-          `Wave ${waveIndex + 1}/${featureWaves.length} Critic requested combined revision`
+          `Wave ${waveNumber}/${featureWaves.length} Critic requested combined revision`
         );
         await this.sessions.updateTaskStatus(task, "revision_needed");
         await Promise.all(finalPairs.map(({ channel }) => updateFeatureStatus(channel, "revision_needed")));
@@ -830,7 +924,7 @@ export class Orchestrator {
           turn,
           workspaceWave.integrationDir,
           waveReview,
-          waveIndex + 1,
+          waveNumber,
           featureWaves.length,
           finalPairs.map(({ channel }) => channel.id)
         );
@@ -849,7 +943,7 @@ export class Orchestrator {
           workers,
           turn,
           verificationWorkspace,
-          waveIndex + 1,
+          waveNumber,
           featureWaves.length,
           finalPairs.map(({ channel }) => channel.id),
           true
@@ -862,7 +956,7 @@ export class Orchestrator {
         await this.sessions.appendEvent(
           task,
           "feature.wave_reviewed",
-          `Wave ${waveIndex + 1}/${featureWaves.length} Critic recheck decision: ${waveDecision}`
+          `Wave ${waveNumber}/${featureWaves.length} Critic recheck decision: ${waveDecision}`
         );
       }
 
@@ -870,14 +964,14 @@ export class Orchestrator {
         const detail = waveDecision === "revision"
           ? "still requires revision after the Wave Actor pass"
           : "did not include APPROVED or REVISION_REQUIRED";
-        throw new Error(`Wave ${waveIndex + 1}/${featureWaves.length} Critic ${detail}. Live workspace was not changed.`);
+        throw new Error(`Wave ${waveNumber}/${featureWaves.length} Critic ${detail}. Live workspace was not changed.`);
       }
       reportProgress("verification", 1, 1, "done", "done");
       await writeText(join(workspaceWave.rootDir, "verification-review.md"), waveReview);
       await this.sessions.appendEvent(
         task,
         "feature.wave_verified",
-        `Wave ${waveIndex + 1}/${featureWaves.length} combined workspace approved`
+        `Wave ${waveNumber}/${featureWaves.length} combined workspace approved`
       );
 
       await this.sessions.updateTaskStatus(task, "integrating");
@@ -894,7 +988,7 @@ export class Orchestrator {
       });
       await Promise.all(finalPairs.map(({ channel }) => updateFeatureStatus(channel, "approved")));
       summaries.push(...waveSummaries);
-      waveReviews.push({ wave: waveIndex + 1, review: waveReview });
+      waveReviews.push({ wave: waveNumber, review: waveReview });
       await this.sessions.appendEvent(
         task,
         "feature.wave_integrated",
@@ -930,48 +1024,128 @@ export class Orchestrator {
       taskDir: task.dir,
       dataDir: this.config.dataDir
     });
-    const workspaceWave = await workspaceManager.prepareWave({
+    const workspaceInput = {
       turnId: turn.turnId,
       wave: 1,
       featureIds: [feature.id]
-    });
+    };
+    const workspaceRootDir = join(task.dir, "workspaces", `turn-${turn.turnId}`, "wave-0001");
+    const integratedCheckpoint = input.retry && await waveIntegrationCheckpointMatches(
+      workspaceRootDir,
+      turn.turnId,
+      1,
+      [feature.id]
+    );
+    if (integratedCheckpoint) {
+      const recovered = !(await featureIsApproved(feature));
+      await this.sessions.appendEvent(
+        task,
+        recovered ? "feature.wave_checkpoint_recovered" : "feature.wave_checkpoint_reused",
+        `${recovered ? "Recovered" : "Reused"} integrated checkpoint for single feature: ${feature.id}`
+      );
+      input.onStatus?.({
+        taskId: task.id,
+        judge: "done",
+        actor: "done",
+        critic: "done",
+        featureProgress: { wave: 1, waves: 1, phase: "integration", completed: 1, total: 1 }
+      });
+      return this.completeTask(
+        task,
+        turn,
+        judge,
+        this.workerFiles(task, `actor-${route.actor_engine}`),
+        this.workerFiles(task, `critic-${route.critic_engine}`),
+        feature,
+        input,
+        workers
+      );
+    }
+    const restoredWave = input.retry ? await workspaceManager.restoreWave(workspaceInput) : null;
+    const workspaceWave = restoredWave ?? await workspaceManager.prepareWave(workspaceInput);
+    if (restoredWave) {
+      await this.sessions.appendEvent(
+        task,
+        "feature.wave_checkpoint_loaded",
+        `Loaded checkpoint workspace for single feature: ${feature.id}`
+      );
+    }
     const workspaceDir = requiredFeatureWorkspace(workspaceWave.featureDirs, feature);
     throwIfCancelled(input.signal);
     await this.sessions.updateTaskStatus(task, "actor_running");
-    await updateFeatureStatus(feature, "actor_running");
-    input.onStatus?.({ taskId: task.id, judge: "done", actor: "running", critic: "waiting" });
-    let actor = await this.runActor(
-      input,
-      task,
-      route.actor_engine,
-      judge.dir,
-      workers,
-      turn,
-      feature,
-      undefined,
-      false,
-      workspaceDir,
-      true
-    );
+    const restoredActor = restoredWave
+      ? await this.loadCompletedActor(task, route.actor_engine, feature, false)
+      : null;
+    if (!restoredActor) {
+      await updateFeatureStatus(feature, "actor_running");
+    } else {
+      await this.sessions.appendEvent(
+        task,
+        "feature.wave_actor_checkpoints_reused",
+        "Reused 1/1 completed Actor checkpoint in wave 1/1"
+      );
+    }
+    input.onStatus?.({
+      taskId: task.id,
+      judge: "done",
+      actor: restoredActor ? "done" : "running",
+      critic: "waiting"
+    });
+    let actor = restoredActor;
+    if (!actor) {
+      actor = await this.runActor(
+        input,
+        task,
+        route.actor_engine,
+        judge.dir,
+        workers,
+        turn,
+        feature,
+        undefined,
+        false,
+        workspaceDir,
+        true
+      );
+    }
     throwIfCancelled(input.signal);
 
-    let reviewWorkspace = await workspaceManager.prepareFeatureReviewWorkspace(workspaceWave, feature.id);
     await this.sessions.updateTaskStatus(task, "critic_running");
-    await updateFeatureStatus(feature, "critic_running");
-    input.onStatus?.({ taskId: task.id, judge: "done", actor: "done", critic: "running" });
-    let critic = await this.runCritic(
-      input,
-      task,
-      route.critic_engine,
-      judge.dir,
-      actor.dir,
-      workers,
-      turn,
-      feature,
-      false,
-      reviewWorkspace,
-      true
-    );
+    const restoredCritic = restoredActor
+      ? await this.loadCompletedCritic(task, route.critic_engine, feature, false)
+      : null;
+    if (!restoredCritic) {
+      await updateFeatureStatus(feature, "critic_running");
+    } else {
+      await this.sessions.appendEvent(
+        task,
+        "feature.wave_critic_checkpoints_reused",
+        "Reused 1/1 completed Critic checkpoint in wave 1/1"
+      );
+    }
+    input.onStatus?.({
+      taskId: task.id,
+      judge: "done",
+      actor: "done",
+      critic: restoredCritic ? "done" : "running"
+    });
+    let reviewWorkspace = "";
+    let critic = restoredCritic;
+    if (!critic) {
+      reviewWorkspace = await workspaceManager.prepareFeatureReviewWorkspace(workspaceWave, feature.id);
+      critic = await this.runCritic(
+        input,
+        task,
+        route.critic_engine,
+        judge.dir,
+        actor.dir,
+        workers,
+        turn,
+        feature,
+        false,
+        reviewWorkspace,
+        true
+      );
+    }
     throwIfCancelled(input.signal);
     let review = await readTextIfExists(`${critic.dir}/review.md`);
     let decision = criticReviewDecision(review);
@@ -1712,6 +1886,68 @@ export class Orchestrator {
     };
   }
 
+  private async loadCompletedFeatureActor(
+    task: TaskSession,
+    engine: EngineName,
+    definition: FeatureDefinition,
+    channel: FeatureChannel
+  ): Promise<FeatureActorRun | null> {
+    const actor = await this.loadCompletedActor(task, engine, channel, true);
+    if (!actor) {
+      return null;
+    }
+    return { definition, channel, actor };
+  }
+
+  private async loadCompletedFeaturePair(
+    task: TaskSession,
+    engine: EngineName,
+    actorRun: FeatureActorRun
+  ): Promise<FeaturePairRun | null> {
+    const critic = await this.loadCompletedCritic(task, engine, actorRun.channel, true);
+    return critic ? { ...actorRun, critic } : null;
+  }
+
+  private async loadCompletedActor(
+    task: TaskSession,
+    engine: EngineName,
+    channel: FeatureChannel,
+    featureScoped: boolean
+  ): Promise<WorkerFiles | null> {
+    const actor = this.workerFiles(task, featureScoped ? `actor-${engine}-${channel.id}` : `actor-${engine}`);
+    const status = await readWorkerStatusIfValid(actor.statusPath);
+    if (
+      status?.state !== "done"
+      || status.role !== "actor"
+      || status.engine !== engine
+      || (featureScoped ? status.feature_id !== channel.id : Boolean(status.feature_id))
+    ) {
+      return null;
+    }
+    await mirrorWorkerFileToFeature(join(actor.dir, "worklog.md"), channel.actorWorklogPath);
+    return actor;
+  }
+
+  private async loadCompletedCritic(
+    task: TaskSession,
+    engine: EngineName,
+    channel: FeatureChannel,
+    featureScoped: boolean
+  ): Promise<WorkerFiles | null> {
+    const critic = this.workerFiles(task, featureScoped ? `critic-${engine}-${channel.id}` : `critic-${engine}`);
+    const status = await readWorkerStatusIfValid(critic.statusPath);
+    if (
+      status?.state !== "done"
+      || status.role !== "critic"
+      || status.engine !== engine
+      || (featureScoped ? status.feature_id !== channel.id : Boolean(status.feature_id))
+    ) {
+      return null;
+    }
+    const decision = criticReviewDecision(await readTextIfExists(join(critic.dir, "review.md")));
+    return decision === "approved" || decision === "revision" ? critic : null;
+  }
+
   private async promptTurnContext(task: TaskSession, turn: TaskTurn) {
     return {
       turnId: turn.turnId,
@@ -2066,6 +2302,77 @@ function multiFeatureSummary(features: FeatureSummary[], waves: WaveSummary[] = 
       ])
     ] : [])
   ].join("\n").trim();
+}
+
+async function loadIntegratedWaveCheckpoint(
+  task: TaskSession,
+  turn: TaskTurn,
+  wave: number,
+  definitions: FeatureDefinition[],
+  channels: FeatureChannel[]
+): Promise<{ summaries: FeatureSummary[]; review: string; recovered: boolean } | null> {
+  const approved = await Promise.all(channels.map(featureIsApproved));
+  const allApproved = approved.every(Boolean);
+  const rootDir = join(task.dir, "workspaces", `turn-${turn.turnId}`, `wave-${String(wave).padStart(4, "0")}`);
+  const integrated = await waveIntegrationCheckpointMatches(rootDir, turn.turnId, wave, channels.map((channel) => channel.id));
+  if (!allApproved && !integrated) {
+    return null;
+  }
+
+  if (!allApproved) {
+    await Promise.all(channels.map((channel) => updateFeatureStatus(channel, "approved")));
+  }
+  const summaries = await Promise.all(channels.map(async (channel, index): Promise<FeatureSummary> => ({
+    id: channel.id,
+    title: definitions[index]?.title ?? channel.title,
+    summary: await readFeatureDecisionSummary(channel)
+  })));
+  const review = (await readTextIfExists(join(rootDir, "verification-review.md"))).trim()
+    || "APPROVED\n\nRestored from the integrated wave checkpoint.";
+  return { summaries, review, recovered: !allApproved };
+}
+
+async function waveIntegrationCheckpointMatches(
+  rootDir: string,
+  turnId: string,
+  wave: number,
+  featureIds: string[]
+): Promise<boolean> {
+  const [integration, workspace] = await Promise.all([
+    readJsonObjectIfValid(join(rootDir, "integration.json")),
+    readJsonObjectIfValid(join(rootDir, "workspace.json"))
+  ]);
+  if (integration?.state !== "integrated" || workspace?.turn_id !== turnId || workspace?.wave !== wave) {
+    return false;
+  }
+  if (!workspace.features || typeof workspace.features !== "object" || Array.isArray(workspace.features)) {
+    return false;
+  }
+  const checkpointFeatureIds = Object.keys(workspace.features).sort();
+  const expectedFeatureIds = [...featureIds].sort();
+  return checkpointFeatureIds.length === expectedFeatureIds.length
+    && checkpointFeatureIds.every((featureId, index) => featureId === expectedFeatureIds[index]);
+}
+
+async function readFeatureDecisionSummary(feature: FeatureChannel): Promise<string> {
+  const decision = await readTextIfExists(feature.decisionsPath);
+  const marker = "Supervisor summary:";
+  const markerIndex = decision.indexOf(marker);
+  const summary = markerIndex >= 0
+    ? decision.slice(markerIndex + marker.length).trim()
+    : decision.trim();
+  return summary || `Integrated checkpoint restored for ${feature.title}.`;
+}
+
+async function readJsonObjectIfValid(path: string): Promise<Record<string, unknown> | null> {
+  try {
+    const value: unknown = JSON.parse(await readTextIfExists(path));
+    return value !== null && typeof value === "object" && !Array.isArray(value)
+      ? value as Record<string, unknown>
+      : null;
+  } catch {
+    return null;
+  }
 }
 
 async function featureIsApproved(feature: FeatureChannel): Promise<boolean> {

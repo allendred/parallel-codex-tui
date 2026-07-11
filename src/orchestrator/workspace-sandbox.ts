@@ -15,7 +15,7 @@ import {
   writeFile
 } from "node:fs/promises";
 import { basename, dirname, join, relative, resolve, sep } from "node:path";
-import { ensureDir, writeJson } from "../core/file-store.js";
+import { ensureDir, pathIsDirectory, writeJson } from "../core/file-store.js";
 
 const MAX_TEXT_MERGE_BYTES = 10 * 1024 * 1024;
 const FEATURE_ID_PATTERN = /^[a-z0-9][a-z0-9-]{0,63}$/;
@@ -131,6 +131,62 @@ export class ParallelWorkspaceManager {
   }
 
   async prepareWave(input: PrepareWorkspaceWaveInput): Promise<FeatureWorkspaceWave> {
+    const wave = this.describeWave(input);
+
+    await rm(wave.rootDir, { recursive: true, force: true });
+    await cloneTree(this.workspaceRoot, wave.baselineDir, (path) => this.excludeFromSource(path));
+    await cloneTree(wave.baselineDir, wave.stagingDir);
+
+    for (const featureDir of wave.featureDirs.values()) {
+      await cloneTree(wave.baselineDir, featureDir);
+    }
+
+    await writeJson(join(wave.rootDir, "workspace.json"), {
+      version: 1,
+      workspace_root: this.workspaceRoot,
+      turn_id: input.turnId,
+      wave: input.wave,
+      baseline: wave.baselineDir,
+      staging: wave.stagingDir,
+      integration: wave.integrationDir,
+      verification: wave.verificationDir,
+      features: Object.fromEntries(wave.featureDirs),
+      reviews: Object.fromEntries(wave.reviewDirs)
+    });
+    return wave;
+  }
+
+  async restoreWave(input: PrepareWorkspaceWaveInput): Promise<FeatureWorkspaceWave | null> {
+    const wave = this.describeWave(input);
+    const manifest = await readJsonRecord(join(wave.rootDir, "workspace.json"));
+    if (
+      manifest?.version !== 1
+      || manifest.workspace_root !== this.workspaceRoot
+      || manifest.turn_id !== input.turnId
+      || manifest.wave !== input.wave
+      || !recordKeysEqual(manifest.features, input.featureIds)
+      || !(await pathIsDirectory(wave.baselineDir))
+      || !(await pathIsDirectory(wave.stagingDir))
+    ) {
+      return null;
+    }
+    for (const featureDir of wave.featureDirs.values()) {
+      if (!(await pathIsDirectory(featureDir))) {
+        return null;
+      }
+    }
+    try {
+      await this.assertLiveWorkspaceUnchanged(wave);
+      return wave;
+    } catch (error) {
+      if (error instanceof WorkspaceLiveMutationError) {
+        return null;
+      }
+      throw error;
+    }
+  }
+
+  private describeWave(input: PrepareWorkspaceWaveInput): FeatureWorkspaceWave {
     if (!Number.isInteger(input.wave) || input.wave < 1) {
       throw new Error(`Workspace wave must be a positive integer: ${input.wave}`);
     }
@@ -160,13 +216,8 @@ export class ParallelWorkspaceManager {
     const featureDirs = new Map<string, string>();
     const reviewDirs = new Map<string, string>();
 
-    await rm(rootDir, { recursive: true, force: true });
-    await cloneTree(this.workspaceRoot, baselineDir, (path) => this.excludeFromSource(path));
-    await cloneTree(baselineDir, stagingDir);
-
     for (const featureId of input.featureIds) {
       const featureDir = join(rootDir, "features", featureId);
-      await cloneTree(baselineDir, featureDir);
       featureDirs.set(featureId, featureDir);
       reviewDirs.set(featureId, join(rootDir, "reviews", featureId));
     }
@@ -184,18 +235,6 @@ export class ParallelWorkspaceManager {
       featureDirs,
       reviewDirs
     };
-    await writeJson(join(rootDir, "workspace.json"), {
-      version: 1,
-      workspace_root: this.workspaceRoot,
-      turn_id: input.turnId,
-      wave: input.wave,
-      baseline: baselineDir,
-      staging: stagingDir,
-      integration: integrationDir,
-      verification: verificationDir,
-      features: Object.fromEntries(featureDirs),
-      reviews: Object.fromEntries(reviewDirs)
-    });
     return wave;
   }
 
@@ -311,6 +350,27 @@ export class ParallelWorkspaceManager {
       && (path === this.dataRelativePath || path.startsWith(`${this.dataRelativePath}${sep}`))
     );
   }
+}
+
+async function readJsonRecord(path: string): Promise<Record<string, unknown> | null> {
+  try {
+    const value: unknown = JSON.parse(await readFile(path, "utf8"));
+    return value !== null && typeof value === "object" && !Array.isArray(value)
+      ? value as Record<string, unknown>
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+function recordKeysEqual(value: unknown, expected: string[]): boolean {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) {
+    return false;
+  }
+  const actual = Object.keys(value).sort();
+  const wanted = [...expected].sort();
+  return actual.length === wanted.length
+    && actual.every((key, index) => key === wanted[index]);
 }
 
 async function workspaceChangedPaths(

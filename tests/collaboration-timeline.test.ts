@@ -82,6 +82,12 @@ describe("collaboration timeline", () => {
         task_id: task.id
       }),
       JSON.stringify({
+        time: "2026-07-11T07:03:30.000Z",
+        type: "feature.wave_actor_checkpoints_reused",
+        message: "Reused 1/2 completed Actor checkpoints in wave 1/1",
+        task_id: task.id
+      }),
+      JSON.stringify({
         time: "2026-07-11T07:06:00.000Z",
         type: "task.done",
         message: "Task moved to done",
@@ -129,6 +135,7 @@ describe("collaboration timeline", () => {
       "actor.completed",
       "critic.revision_requested",
       "feature.wave_reviewed",
+      "feature.wave_actor_checkpoints_reused",
       "feature.state",
       "feature.state"
     ]);
@@ -143,6 +150,12 @@ describe("collaboration timeline", () => {
     expect(timeline?.events).toContainEqual(expect.objectContaining({
       type: "actor.completed",
       artifactRefs: [{ label: "worklog", path: join(uiDir, "actor-worklog.md") }]
+    }));
+    expect(timeline?.events).toContainEqual(expect.objectContaining({
+      type: "feature.wave_actor_checkpoints_reused",
+      role: "supervisor",
+      action: "wave actor checkpoints reused",
+      message: "Reused 1/2 completed Actor checkpoints in wave 1/1"
     }));
     expect(timeline?.events).toContainEqual(expect.objectContaining({
       type: "feature.state",

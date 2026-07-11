@@ -1877,6 +1877,43 @@ describe("Orchestrator", () => {
     expect(await readTextIfExists(join(taskDir, "events.jsonl"))).toContain("task.retrying");
   });
 
+  it("retries a failed single-feature Critic without rerunning its completed Actor", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pct-orch-retry-single-critic-"));
+    const config = mockConfig(root);
+    const manager = new SessionManager({
+      projectRoot: root,
+      dataDir: config.dataDir,
+      now: () => new Date("2026-06-30T03:31:12.000Z"),
+      randomId: () => "single-critic"
+    });
+    const adapter = new RetryOnceCriticAdapter();
+    const orchestrator = new Orchestrator(config, manager, new Map([["mock", adapter]]));
+    const taskId = "task-20260630-033112-single-critic";
+
+    await expect(orchestrator.handleRequest({
+      request: "实现并审查单个功能",
+      cwd: root
+    })).rejects.toThrow("critic-mock failed with exit code 2");
+
+    const resumedManager = new SessionManager({
+      projectRoot: root,
+      dataDir: config.dataDir,
+      now: () => new Date("2026-06-30T03:31:28.000Z")
+    });
+    const resumedOrchestrator = new Orchestrator(config, resumedManager, new Map([["mock", adapter]]));
+    const result = await resumedOrchestrator.retryTask({ taskId, cwd: root });
+    const taskDir = join(root, ".parallel-codex", "sessions", taskId);
+    const events = await readTextIfExists(join(taskDir, "events.jsonl"));
+
+    expect(adapter.judgeRuns).toBe(1);
+    expect(adapter.actorRuns).toBe(1);
+    expect(adapter.criticRuns).toBe(2);
+    expect(adapter.criticNativeSessions).toEqual([null, "retry-critic-session"]);
+    expect(result.workers.map((worker) => worker.id)).not.toContain("actor-mock");
+    expect(events).toContain("feature.wave_actor_checkpoints_reused");
+    expect((await readJson(join(taskDir, "meta.json"), TaskMetaSchema)).status).toBe("done");
+  });
+
   it("retries a failed feature worker with the persisted plan and native session", async () => {
     const root = await mkdtemp(join(tmpdir(), "pct-orch-retry-feature-"));
     const config = mockConfig(root);
@@ -1900,10 +1937,141 @@ describe("Orchestrator", () => {
 
     expect(result.taskId).toBe(taskId);
     expect(adapter.uiNativeSessions).toEqual([null, "retry-ui-session"]);
+    expect(adapter.events.filter((event) => event === "actor:start:0001-engine")).toHaveLength(1);
     expect(result.workers.map((worker) => worker.id)).toContain("actor-mock-0001-integration");
     expect(await pathExists(join(taskDir, "turns", "0002"))).toBe(false);
     expect(await readTextIfExists(join(taskDir, "actor-mock-0001-ui", "output.log"))).toContain("FIRST_UI_FAILURE");
     expect(await readTextIfExists(join(taskDir, "turns", "0001", "feature-plan.json"))).toContain('"id": "integration"');
+  });
+
+  it("resumes a failed feature plan from its last integrated wave", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pct-orch-resume-checkpoint-"));
+    const config = mockConfig(root);
+    const manager = new SessionManager({
+      projectRoot: root,
+      dataDir: config.dataDir,
+      now: () => new Date("2026-06-30T03:31:18.000Z"),
+      randomId: () => "checkpoint"
+    });
+    const adapter = new RetryCheckpointFeatureAdapter();
+    const orchestrator = new Orchestrator(config, manager, new Map([["mock", adapter]]));
+    const taskId = "task-20260630-033118-checkpoint";
+
+    await expect(orchestrator.handleRequest({
+      request: "依次完成基础层、界面层和最终集成",
+      cwd: root
+    })).rejects.toThrow("actor-mock-0001-ui failed with exit code 2");
+
+    const taskDir = join(root, ".parallel-codex", "sessions", taskId);
+    expect(await readTextIfExists(join(root, "src", "0001-foundation.txt"))).toBe("implemented 0001-foundation\n");
+    expect(JSON.parse(await readTextIfExists(join(
+      taskDir,
+      "features",
+      "0001-foundation",
+      "status.json"
+    )))).toMatchObject({ state: "approved" });
+
+    const resumedManager = new SessionManager({
+      projectRoot: root,
+      dataDir: config.dataDir,
+      now: () => new Date("2026-06-30T03:31:29.000Z")
+    });
+    const resumedOrchestrator = new Orchestrator(config, resumedManager, new Map([["mock", adapter]]));
+    const result = await resumedOrchestrator.retryTask({ taskId, cwd: root });
+    const events = await readTextIfExists(join(taskDir, "events.jsonl"));
+
+    expect(adapter.judgeRuns).toBe(1);
+    expect(adapter.actorRuns.get("0001-foundation")).toBe(1);
+    expect(adapter.actorRuns.get("0001-ui")).toBe(2);
+    expect(adapter.actorRuns.get("0001-integration")).toBe(1);
+    expect(adapter.uiNativeSessions).toEqual([null, "checkpoint-ui-session"]);
+    expect(adapter.waveCriticRuns.get("critic-mock-wave-0001-0001")).toBe(1);
+    expect(adapter.integrationSawDependencies).toBe(true);
+    expect(result.workers.map((worker) => worker.id)).not.toContain("judge-mock");
+    expect(result.workers.map((worker) => worker.id)).not.toContain("actor-mock-0001-foundation");
+    expect(result.summary).toContain("Foundation");
+    expect(result.summary).toContain("Game UI");
+    expect(result.summary).toContain("Integration");
+    expect(events).toContain("feature.wave_checkpoint_reused");
+    expect((await readJson(join(taskDir, "meta.json"), TaskMetaSchema)).status).toBe("done");
+    for (const featureId of ["0001-foundation", "0001-ui", "0001-integration"]) {
+      expect(JSON.parse(await readTextIfExists(join(taskDir, "features", featureId, "status.json"))))
+        .toMatchObject({ state: "approved" });
+    }
+  });
+
+  it("recovers an integrated wave when a crash left feature states unfinished", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pct-orch-recover-integrated-"));
+    const config = mockConfig(root);
+    const manager = new SessionManager({
+      projectRoot: root,
+      dataDir: config.dataDir,
+      now: () => new Date("2026-06-30T03:31:19.000Z"),
+      randomId: () => "recover"
+    });
+    const adapter = new IntegratedCheckpointRecoveryAdapter(root);
+    const orchestrator = new Orchestrator(config, manager, new Map([["mock", adapter]]));
+    const initial = await orchestrator.handleRequest({ request: "并行创建 alpha 和 beta", cwd: root });
+    const taskId = initial.taskId ?? "";
+    const taskDir = join(root, ".parallel-codex", "sessions", taskId);
+
+    const meta = await readJson(join(taskDir, "meta.json"), TaskMetaSchema);
+    await writeJson(join(taskDir, "meta.json"), { ...meta, status: "failed" });
+    for (const featureId of ["0001-alpha", "0001-beta"]) {
+      const statusPath = join(taskDir, "features", featureId, "status.json");
+      const status = JSON.parse(await readTextIfExists(statusPath)) as Record<string, unknown>;
+      await writeJson(statusPath, { ...status, state: "failed" });
+    }
+
+    const result = await orchestrator.retryTask({ taskId, cwd: root });
+    const events = await readTextIfExists(join(taskDir, "events.jsonl"));
+
+    expect(adapter.judgeRuns).toBe(1);
+    expect(adapter.actorRuns).toBe(2);
+    expect(adapter.waveCriticRuns).toBe(1);
+    expect(result.workers).toEqual([]);
+    expect(result.summary).toContain("Alpha");
+    expect(result.summary).toContain("Beta");
+    expect(events).toContain("feature.wave_checkpoint_recovered");
+    expect((await readJson(join(taskDir, "meta.json"), TaskMetaSchema)).status).toBe("done");
+    for (const featureId of ["0001-alpha", "0001-beta"]) {
+      expect(JSON.parse(await readTextIfExists(join(taskDir, "features", featureId, "status.json"))))
+        .toMatchObject({ state: "approved" });
+    }
+  });
+
+  it("recovers an integrated single feature without applying it twice", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pct-orch-recover-single-integrated-"));
+    const config = mockConfig(root);
+    const manager = new SessionManager({
+      projectRoot: root,
+      dataDir: config.dataDir,
+      now: () => new Date("2026-06-30T03:31:19.500Z"),
+      randomId: () => "single-recover"
+    });
+    const adapter = new SingleIsolationAdapter(root);
+    const orchestrator = new Orchestrator(config, manager, new Map([["mock", adapter]]));
+    const initial = await orchestrator.handleRequest({ request: "实现单个安全功能", cwd: root });
+    const taskId = initial.taskId ?? "";
+    const taskDir = join(root, ".parallel-codex", "sessions", taskId);
+    const featureStatusPath = join(taskDir, "features", "0001", "status.json");
+
+    const meta = await readJson(join(taskDir, "meta.json"), TaskMetaSchema);
+    const featureStatus = JSON.parse(await readTextIfExists(featureStatusPath)) as Record<string, unknown>;
+    await writeJson(join(taskDir, "meta.json"), { ...meta, status: "failed" });
+    await writeJson(featureStatusPath, { ...featureStatus, state: "failed" });
+
+    const result = await orchestrator.retryTask({ taskId, cwd: root });
+    const events = await readTextIfExists(join(taskDir, "events.jsonl"));
+
+    expect(adapter.judgeRuns).toBe(1);
+    expect(adapter.actorRuns).toBe(1);
+    expect(adapter.criticRuns).toBe(1);
+    expect(result.workers).toEqual([]);
+    expect(await readTextIfExists(join(root, "approved.txt"))).toBe("approved\n");
+    expect(events).toContain("feature.wave_checkpoint_recovered");
+    expect(JSON.parse(await readTextIfExists(featureStatusPath))).toMatchObject({ state: "approved" });
+    expect((await readJson(join(taskDir, "meta.json"), TaskMetaSchema)).status).toBe("done");
   });
 
   it("retries failed Wave verification with the same Critic native session", async () => {
@@ -1929,6 +2097,8 @@ describe("Orchestrator", () => {
 
     expect(result.taskId).toBe(taskId);
     expect(adapter.waveCriticNativeSessions).toEqual([null, "mock-critic-mock-wave-0001-0001"]);
+    expect(adapter.featureActorRuns).toBe(2);
+    expect(adapter.featureCriticRuns).toBe(2);
     expect(await readTextIfExists(join(root, "alpha.txt"))).toBe("alpha\n");
     expect(await readTextIfExists(join(root, "beta.txt"))).toBe("beta\n");
     expect((await readJson(join(root, ".parallel-codex", "sessions", taskId, "meta.json"), TaskMetaSchema)).status).toBe("done");
@@ -2169,6 +2339,9 @@ class MarkdownApprovalAdapter extends MockWorkerAdapter {
 }
 
 class SingleIsolationAdapter extends MockWorkerAdapter {
+  judgeRuns = 0;
+  actorRuns = 0;
+  criticRuns = 0;
   actorCwd = "";
   criticCwd = "";
   actorIsolation = false;
@@ -2181,12 +2354,17 @@ class SingleIsolationAdapter extends MockWorkerAdapter {
   }
 
   async run(spec: WorkerRunSpec): Promise<WorkerResult> {
+    if (spec.role === "judge") {
+      this.judgeRuns += 1;
+    }
     if (spec.role === "actor") {
+      this.actorRuns += 1;
       this.actorCwd = spec.cwd;
       this.actorIsolation = spec.enforceWorkspaceIsolation === true;
       await writeText(join(spec.cwd, "approved.txt"), "approved\n");
     }
     if (spec.role === "critic") {
+      this.criticRuns += 1;
       this.criticCwd = spec.cwd;
       this.criticIsolation = spec.enforceWorkspaceIsolation === true;
       this.criticSawActorChange = await readTextIfExists(join(spec.cwd, "approved.txt")) === "approved\n";
@@ -2229,6 +2407,46 @@ class RetryOnceActorAdapter extends MockWorkerAdapter {
       exitCode: 2,
       signal: null
     };
+  }
+}
+
+class RetryOnceCriticAdapter extends MockWorkerAdapter {
+  judgeRuns = 0;
+  actorRuns = 0;
+  criticRuns = 0;
+  readonly criticNativeSessions: Array<string | null> = [];
+
+  async run(spec: WorkerRunSpec): Promise<WorkerResult> {
+    if (spec.role === "judge") {
+      this.judgeRuns += 1;
+      return super.run(spec);
+    }
+    if (spec.role === "actor") {
+      this.actorRuns += 1;
+      return super.run(spec);
+    }
+    if (spec.role !== "critic") {
+      return super.run(spec);
+    }
+
+    this.criticRuns += 1;
+    this.criticNativeSessions.push(spec.nativeSession?.session_id ?? null);
+    if (this.criticRuns > 1) {
+      return super.run(spec);
+    }
+    await spec.onNativeSession?.("retry-critic-session");
+    await appendText(spec.outputLogPath, "FIRST_CRITIC_FAILURE\n");
+    await writeJson(spec.statusPath, {
+      worker_id: spec.workerId,
+      role: spec.role,
+      engine: spec.engine,
+      state: "failed",
+      phase: "test-critic-failure",
+      last_event_at: new Date().toISOString(),
+      summary: "Critic failed once",
+      native_session_id: "retry-critic-session"
+    });
+    return { workerId: spec.workerId, exitCode: 2, signal: null };
   }
 }
 
@@ -2343,6 +2561,71 @@ class RetryMultiFeatureAdapter extends MultiFeatureAdapter {
   }
 }
 
+class RetryCheckpointFeatureAdapter extends MockWorkerAdapter {
+  judgeRuns = 0;
+  readonly actorRuns = new Map<string, number>();
+  readonly uiNativeSessions: Array<string | null> = [];
+  readonly waveCriticRuns = new Map<string, number>();
+  integrationSawDependencies = false;
+
+  async run(spec: WorkerRunSpec): Promise<WorkerResult> {
+    if (spec.role === "judge") {
+      this.judgeRuns += 1;
+      const result = await super.run(spec);
+      await writeJson(join(spec.filesDir, "features.json"), {
+        version: 1,
+        features: [
+          { id: "foundation", title: "Foundation", description: "Create the foundation", depends_on: [] },
+          { id: "ui", title: "Game UI", description: "Build on the foundation", depends_on: ["foundation"] },
+          { id: "integration", title: "Integration", description: "Connect all layers", depends_on: ["ui"] }
+        ]
+      });
+      return result;
+    }
+
+    if (spec.role === "critic" && spec.workerId.includes("-wave-")) {
+      this.waveCriticRuns.set(spec.workerId, (this.waveCriticRuns.get(spec.workerId) ?? 0) + 1);
+      return super.run(spec);
+    }
+
+    if (spec.role !== "actor" || !spec.featureId) {
+      return super.run(spec);
+    }
+
+    const runs = (this.actorRuns.get(spec.featureId) ?? 0) + 1;
+    this.actorRuns.set(spec.featureId, runs);
+    if (spec.featureId === "0001-ui") {
+      this.uiNativeSessions.push(spec.nativeSession?.session_id ?? null);
+      if (runs === 1) {
+        await spec.onNativeSession?.("checkpoint-ui-session");
+        await appendText(spec.outputLogPath, "FIRST_UI_FAILURE\n");
+        await writeJson(spec.statusPath, {
+          worker_id: spec.workerId,
+          feature_id: spec.featureId,
+          feature_title: spec.featureTitle,
+          role: spec.role,
+          engine: spec.engine,
+          state: "failed",
+          phase: "test-checkpoint-failure",
+          last_event_at: new Date().toISOString(),
+          summary: "UI actor failed once",
+          native_session_id: "checkpoint-ui-session"
+        });
+        return { workerId: spec.workerId, exitCode: 2, signal: null };
+      }
+    }
+
+    if (spec.featureId === "0001-integration") {
+      this.integrationSawDependencies = (
+        await pathExists(join(spec.cwd, "src", "0001-foundation.txt"))
+        && await pathExists(join(spec.cwd, "src", "0001-ui.txt"))
+      );
+    }
+    await writeText(join(spec.cwd, "src", `${spec.featureId}.txt`), `implemented ${spec.featureId}\n`);
+    return super.run(spec);
+  }
+}
+
 class LimitedParallelAdapter extends MockWorkerAdapter {
   maxConcurrent = 0;
   private active = 0;
@@ -2379,6 +2662,8 @@ class LimitedParallelAdapter extends MockWorkerAdapter {
 
 class CombinedVerificationAdapter extends MockWorkerAdapter {
   waveCriticRuns = 0;
+  featureActorRuns = 0;
+  featureCriticRuns = 0;
   waveCriticSawCombinedWorkspace = false;
   liveWasUntouchedDuringVerification = false;
   waveCriticWritableDirs: string[] = [];
@@ -2400,8 +2685,12 @@ class CombinedVerificationAdapter extends MockWorkerAdapter {
       return result;
     }
     if (spec.role === "actor" && spec.featureId) {
+      this.featureActorRuns += 1;
       const name = spec.featureId.endsWith("alpha") ? "alpha" : "beta";
       await writeText(join(spec.cwd, `${name}.txt`), `${name}\n`);
+    }
+    if (spec.role === "critic" && spec.featureId) {
+      this.featureCriticRuns += 1;
     }
     if (spec.role === "critic" && spec.workerId.includes("-wave-")) {
       this.waveCriticRuns += 1;
@@ -2414,6 +2703,21 @@ class CombinedVerificationAdapter extends MockWorkerAdapter {
         !(await pathExists(join(this.liveRoot, "alpha.txt")))
         && !(await pathExists(join(this.liveRoot, "beta.txt")))
       );
+    }
+    return super.run(spec);
+  }
+}
+
+class IntegratedCheckpointRecoveryAdapter extends CombinedVerificationAdapter {
+  judgeRuns = 0;
+  actorRuns = 0;
+
+  async run(spec: WorkerRunSpec): Promise<WorkerResult> {
+    if (spec.role === "judge") {
+      this.judgeRuns += 1;
+    }
+    if (spec.role === "actor" && spec.featureId) {
+      this.actorRuns += 1;
     }
     return super.run(spec);
   }

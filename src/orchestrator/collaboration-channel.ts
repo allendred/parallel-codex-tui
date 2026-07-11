@@ -1,5 +1,5 @@
 import { join } from "node:path";
-import { appendJsonLine, ensureDir, writeJson, writeText } from "../core/file-store.js";
+import { appendJsonLine, ensureDir, pathExists, writeJson, writeText } from "../core/file-store.js";
 import type { TaskSession, TaskTurn } from "../core/session-manager.js";
 import type { WorkerRole } from "../domain/schemas.js";
 import type { FeatureDefinition } from "./feature-plan.js";
@@ -52,6 +52,7 @@ export interface CreateFeatureChannelInput {
   request: string;
   judgeDir: string;
   feature?: FeatureDefinition;
+  resume?: boolean;
 }
 
 export async function createFeatureChannel(input: CreateFeatureChannelInput): Promise<FeatureChannel> {
@@ -79,6 +80,11 @@ export async function createFeatureChannel(input: CreateFeatureChannelInput): Pr
 
   await ensureDir(dir);
   await ensureDir(join(input.task.dir, "dialogue"));
+  if (input.resume && await pathExists(channel.statusPath)) {
+    await ensureFeatureChannelFiles(input, channel);
+    return channel;
+  }
+
   await writeText(channel.specPath, buildFeatureSpec(input, channel));
   await writeText(channel.actorWorklogPath, "");
   await writeText(channel.actorRepliesPath, "");
@@ -87,6 +93,20 @@ export async function createFeatureChannel(input: CreateFeatureChannelInput): Pr
   await appendFeatureDialogue(channel, "feature.created", "actor", "Feature mailbox created for the current turn.");
 
   return channel;
+}
+
+async function ensureFeatureChannelFiles(input: CreateFeatureChannelInput, channel: FeatureChannel): Promise<void> {
+  const files: Array<[string, string]> = [
+    [channel.specPath, buildFeatureSpec(input, channel)],
+    [channel.actorWorklogPath, ""],
+    [channel.actorRepliesPath, ""],
+    [channel.criticFindingsPath, ""]
+  ];
+  for (const [path, initialContent] of files) {
+    if (!(await pathExists(path))) {
+      await writeText(path, initialContent);
+    }
+  }
 }
 
 export function featurePromptContext(channel: FeatureChannel): FeaturePromptContext {
