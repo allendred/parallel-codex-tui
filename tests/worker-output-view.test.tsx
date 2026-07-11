@@ -4568,6 +4568,14 @@ describe("WorkerOutputView", () => {
       "after writing the static",
       "dist fallback."
     ]);
+    const readableArtifactNames = workerOutputBodyDisplayLines(
+      "content",
+      "Keep actor-worklog.md, actor-replies.jsonl, and critic-findings.jsonl visible.",
+      35
+    ).join("\n");
+    expect(readableArtifactNames).toContain("actor-worklog.md");
+    expect(readableArtifactNames).toContain("actor-replies.jsonl");
+    expect(readableArtifactNames).toContain("critic-findings.jsonl");
     expect(workerOutputBodyDisplayLines("content", "feature; critic-findings.jsonl is empty.", 20)).toEqual([
       "feature; findings is",
       "empty."

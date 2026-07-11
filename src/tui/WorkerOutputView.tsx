@@ -5365,9 +5365,9 @@ function compactNarrowWorkerBody(body: string, width: number): string {
   if (/^Findings:\s*none$/i.test(body)) {
     return width < 24 ? compactFindingsNoneForWidth(width) : body;
   }
-  const findingsLabel = width < 24 ? "findings" : "findings.jsonl";
-  const repliesLabel = width < 24 ? "replies" : "replies.jsonl";
-  const worklogLabel = width < 24 ? "worklog" : "worklog.md";
+  const findingsLabel = width < 24 ? "findings" : width < 32 ? "findings.jsonl" : "critic-findings.jsonl";
+  const repliesLabel = width < 24 ? "replies" : width < 32 ? "replies.jsonl" : "actor-replies.jsonl";
+  const worklogLabel = width < 24 ? "worklog" : width < 32 ? "worklog.md" : "actor-worklog.md";
   return body
     .replace(/^(•\s+)?npm run dev could not bind\b.*$/i, (_match, marker: string | undefined) => `${marker ?? ""}dev fallback.`)
     .replace(/\bcritic-findings\.jsonl\b/g, findingsLabel)

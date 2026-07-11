@@ -55,11 +55,58 @@ export function wrapByDisplayWidth(value: string, maxWidth: number): string[] {
       : breakWidth > Math.floor(maxWidth * 0.3)
         ? breakAt + 1
         : splitAtWidth;
-    chunks.push(rest.slice(0, splitAt).trimEnd());
-    rest = rest.slice(splitAt).trimStart();
+    const balanced = balanceClosingPunctuation(
+      rest.slice(0, splitAt).trimEnd(),
+      rest.slice(splitAt).trimStart(),
+      maxWidth
+    );
+    chunks.push(balanced.line);
+    rest = balanced.rest;
   }
-  chunks.push(rest);
+  if (rest || chunks.length === 0) {
+    chunks.push(rest);
+  }
   return chunks;
+}
+
+const lineStartForbiddenPunctuation = new Set(Array.from(",.!?;:)]}，。！？；：、）》】」』〕〉》〗〙〛）］｝’”»"));
+
+function balanceClosingPunctuation(line: string, rest: string, maxWidth: number): { line: string; rest: string } {
+  let punctuation = "";
+  for (const char of Array.from(rest)) {
+    if (!lineStartForbiddenPunctuation.has(char)) {
+      break;
+    }
+    punctuation += char;
+  }
+  if (!punctuation) {
+    return { line, rest };
+  }
+
+  const split = splitLastDisplayCharacter(line);
+  if (!split || !split.head || displayWidth(`${split.tail}${punctuation}`) > maxWidth) {
+    return { line, rest };
+  }
+  return {
+    line: split.head,
+    rest: `${split.tail}${rest}`
+  };
+}
+
+function splitLastDisplayCharacter(value: string): { head: string; tail: string } | null {
+  const chars = Array.from(value);
+  if (chars.length < 2) {
+    return null;
+  }
+
+  let tailStart = chars.length - 1;
+  while (tailStart > 0 && isCombiningCodePoint(chars[tailStart]?.codePointAt(0) ?? 0)) {
+    tailStart -= 1;
+  }
+  return {
+    head: chars.slice(0, tailStart).join("").trimEnd(),
+    tail: chars.slice(tailStart).join("")
+  };
 }
 
 function takeStartByDisplayWidth(value: string, maxWidth: number): string {

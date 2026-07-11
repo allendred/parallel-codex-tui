@@ -41,4 +41,15 @@ describe("display width helpers", () => {
       "evidence"
     ]);
   });
+
+  it("keeps CJK closing punctuation with the preceding character", () => {
+    const lines = wrapByDisplayWidth("一二三四五六七八九。", 18);
+
+    expect(lines).toEqual([
+      "一二三四五六七八",
+      "九。"
+    ]);
+    expect(lines.every((line) => displayWidth(line) <= 18)).toBe(true);
+    expect(wrapByDisplayWidth("完成 。", 6)).toEqual(["完", "成。"]);
+  });
 });
