@@ -185,6 +185,63 @@ describe("SessionManager", () => {
     });
   });
 
+  it("prefers the latest task route evidence over an older worker turn", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pct-latest-task-route-"));
+    const manager = new SessionManager({
+      projectRoot: root,
+      dataDir: ".parallel-codex",
+      now: () => new Date("2026-07-10T12:00:00.000Z"),
+      randomId: () => "a1b2"
+    });
+    const task = await manager.createTask({
+      request: "Build it.",
+      cwd: root,
+      route: {
+        mode: "complex",
+        reason: "Initial route.",
+        source: "codex",
+        duration_ms: 120,
+        suggested_roles: ["judge", "actor", "critic"],
+        judge_engine: "codex",
+        actor_engine: "codex",
+        critic_engine: "claude"
+      }
+    });
+    await manager.appendTurn(task, {
+      request: "继续",
+      route: {
+        mode: "complex",
+        reason: "Codex router timed out after 120000ms.",
+        source: "fallback",
+        duration_ms: 120000,
+        suggested_roles: ["judge", "actor", "critic"],
+        judge_engine: "codex",
+        actor_engine: "codex",
+        critic_engine: "claude"
+      }
+    });
+    await writeJson(join(task.dir, "latest-route.json"), RouteDecisionSchema.parse({
+      mode: "simple",
+      reason: "A short task question.",
+      source: "codex",
+      duration_ms: 9210,
+      suggested_roles: []
+    }));
+
+    await expect(manager.readLatestRoute(task)).resolves.toMatchObject({
+      mode: "simple",
+      source: "codex",
+      duration_ms: 9210
+    });
+
+    await writeText(join(task.dir, "latest-route.json"), "{");
+    await expect(manager.readLatestRoute(task)).resolves.toMatchObject({
+      mode: "complex",
+      source: "fallback",
+      duration_ms: 120000
+    });
+  });
+
   it("appends follow-up turns when task metadata is corrupt but the active task is known", async () => {
     const root = await mkdtemp(join(tmpdir(), "pct-turns-corrupt-meta-"));
     const index = await SessionIndex.open(root, ".parallel-codex");

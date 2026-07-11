@@ -257,6 +257,10 @@ export class SessionManager {
   }
 
   async readLatestRoute(task: TaskSession): Promise<RouteDecision | null> {
+    const latestTaskRoute = await readRouteDecisionIfValid(join(task.dir, "latest-route.json"));
+    if (latestTaskRoute) {
+      return latestTaskRoute;
+    }
     const latestTurn = await this.latestTurn(task);
     if (latestTurn) {
       const latestRoute = await readRouteDecisionIfValid(latestTurn.routePath);
@@ -265,6 +269,10 @@ export class SessionManager {
       }
     }
     return readRouteDecisionIfValid(task.routePath);
+  }
+
+  async recordLatestRoute(task: Pick<TaskSession, "dir">, route: RouteDecision): Promise<void> {
+    await writeJson(join(task.dir, "latest-route.json"), RouteDecisionSchema.parse(route));
   }
 
   async readMeta(task: TaskSession): Promise<TaskMeta> {

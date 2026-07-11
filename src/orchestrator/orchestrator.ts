@@ -197,6 +197,7 @@ export class Orchestrator {
     if (!input.route) {
       input.onRoute?.(route);
     }
+    await this.sessions.recordLatestRoute(task, route);
     if (route.mode === "simple") {
       return this.answerTaskQuestion(input);
     }
@@ -235,6 +236,7 @@ export class Orchestrator {
     };
     const workers: WorkerLogRef[] = [];
 
+    await this.sessions.recordLatestRoute(task, route);
     await this.sessions.appendEvent(task, "task.retrying", `Retrying turn ${turn.turnId}`);
     input.onRoute?.(route);
     return turn.turnId === "0001"
@@ -248,6 +250,7 @@ export class Orchestrator {
   }
 
   async routeTaskFollowUp(input: HandleTaskQuestionInput): Promise<TaskFollowUpRouteResult> {
+    const task = this.sessions.taskFromId(input.taskId);
     const route = await this.routeRequest(
       input.request,
       input.cwd,
@@ -256,6 +259,7 @@ export class Orchestrator {
       input.onRouteStart
     );
     input.onRoute?.(route);
+    await this.sessions.recordLatestRoute(task, route);
 
     return {
       mode: route.mode,

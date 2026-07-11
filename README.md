@@ -180,7 +180,7 @@ The doctor output includes `preview:` and `semantic:` ANSI swatch rows so you ca
 - Simple follow-up questions run through the persistent Main native session with the active task directory, original request, up to five recent turn summaries, valid worker statuses, and log tails as file-backed context. They do not start another Judge, Actor, or Critic turn.
 - Worker prompts, logs, status, and outputs are written to disk.
 - The bottom status line shows the active task state and feature progress such as `wave 1/2 · actor 2/3`, `wave 1/2 · integration 0/1`, and `wave 1/2 · verification 0/1`. While classification is running, it shows the effective limit such as `route checking · 30s max`, then replaces that wait state with the final route source, duration, or fallback cause.
-- Restarting an existing task restores the latest persisted route evidence in the bottom status line, including fallback cause and duration. A corrupt latest-turn route safely falls back to the task's initial route record.
+- Restarting an existing task restores the latest persisted route evidence in the bottom status line, including fallback cause and duration. Every active-task classification, including a simple question, atomically refreshes `sessions/<task>/latest-route.json`; a corrupt latest-route record safely falls back to the latest worker turn and then the task's initial route record.
 
 ## Router
 

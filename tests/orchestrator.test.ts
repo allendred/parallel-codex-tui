@@ -6,7 +6,7 @@ import { defaultConfig } from "../src/core/config.js";
 import { appendJsonLine, appendText, pathExists, readJson, readTextIfExists, writeJson, writeText } from "../src/core/file-store.js";
 import { SessionIndex } from "../src/core/session-index.js";
 import { SessionManager } from "../src/core/session-manager.js";
-import { NativeSessionSchema, TaskMetaSchema, WorkerStatusSchema } from "../src/domain/schemas.js";
+import { NativeSessionSchema, RouteDecisionSchema, TaskMetaSchema, WorkerStatusSchema } from "../src/domain/schemas.js";
 import { Orchestrator, type FeatureRunProgress } from "../src/orchestrator/orchestrator.js";
 import { MockWorkerAdapter } from "../src/workers/mock-adapter.js";
 import { ProcessWorkerAdapter } from "../src/workers/process-adapter.js";
@@ -1342,6 +1342,10 @@ describe("Orchestrator", () => {
       mode: "simple",
       taskId: null
     });
+    await expect(readJson(join(task.dir, "latest-route.json"), RouteDecisionSchema)).resolves.toMatchObject({
+      mode: "simple",
+      source: "codex"
+    });
     await expect(
       orchestrator.routeTaskFollowUp({
         taskId: task.id,
@@ -1351,6 +1355,10 @@ describe("Orchestrator", () => {
     ).resolves.toMatchObject({
       mode: "complex",
       taskId: task.id
+    });
+    await expect(readJson(join(task.dir, "latest-route.json"), RouteDecisionSchema)).resolves.toMatchObject({
+      mode: "complex",
+      source: "codex"
     });
   });
 
@@ -1600,6 +1608,15 @@ describe("Orchestrator", () => {
       })
     ).rejects.toThrow("actor-mock failed with exit code 2");
 
+    const taskDir = join(root, ".parallel-codex", "sessions", taskId);
+    await writeJson(join(taskDir, "latest-route.json"), RouteDecisionSchema.parse({
+      mode: "simple",
+      reason: "A later task question.",
+      source: "codex",
+      duration_ms: 9000,
+      suggested_roles: []
+    }));
+
     const resumedManager = new SessionManager({
       projectRoot: root,
       dataDir: config.dataDir,
@@ -1607,11 +1624,12 @@ describe("Orchestrator", () => {
     });
     const resumedOrchestrator = new Orchestrator(config, resumedManager, new Map([["mock", adapter]]));
     const result = await resumedOrchestrator.retryTask({ taskId, cwd: root });
-    const taskDir = join(root, ".parallel-codex", "sessions", taskId);
     const meta = await readJson(join(taskDir, "meta.json"), TaskMetaSchema);
+    const latestRoute = await readJson(join(taskDir, "latest-route.json"), RouteDecisionSchema);
 
     expect(result.taskId).toBe(taskId);
     expect(meta.status).toBe("done");
+    expect(latestRoute).toMatchObject({ mode: "complex", source: "forced" });
     expect(adapter.actorRuns).toBe(2);
     expect(adapter.actorNativeSessions).toEqual([null, "retry-actor-session"]);
     expect(await pathExists(join(taskDir, "turns", "0002"))).toBe(false);

@@ -41,6 +41,13 @@ describe("CLI route restore smoke", () => {
       duration_ms: 30000,
       suggested_roles: ["judge", "actor", "critic"]
     }));
+    await writeJson(join(taskDir, "latest-route.json"), RouteDecisionSchema.parse({
+      mode: "simple",
+      reason: "A short task question.",
+      source: "codex",
+      duration_ms: 9200,
+      suggested_roles: []
+    }));
 
     const child = spawn(
       process.execPath,
@@ -59,8 +66,9 @@ describe("CLI route restore smoke", () => {
     child.onExit(({ exitCode }) => exits.push(exitCode));
 
     try {
-      await waitForScreenText(() => screenWrites, screen, "route complex · fallback · timeout · 30s");
+      await waitForScreenText(() => screenWrites, screen, "route simple · 9.2s");
       const snapshot = screen.snapshot();
+      expect(snapshot).not.toContain("route complex · fallback · timeout · 30s");
       expect(snapshot).not.toContain("route complex · 120ms");
       child.write("\x03");
       await waitForExit(exits);
