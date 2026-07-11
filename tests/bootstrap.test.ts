@@ -6,7 +6,7 @@ import { createRuntime } from "../src/bootstrap.js";
 import { pathExists, readJson, writeJson, writeText } from "../src/core/file-store.js";
 import { workerProcessRecordPath } from "../src/core/process-ownership.js";
 import { SessionIndex } from "../src/core/session-index.js";
-import { TaskMetaSchema, WorkerStatusSchema } from "../src/domain/schemas.js";
+import { NativeSessionSchema, TaskMetaSchema, WorkerStatusSchema } from "../src/domain/schemas.js";
 
 describe("createRuntime", () => {
   it("wires config, session manager, workers, and orchestrator", async () => {
@@ -182,6 +182,138 @@ describe("createRuntime", () => {
       expect(closeSpy).toHaveBeenCalledTimes(1);
     } finally {
       closeSpy.mockRestore();
+    }
+  });
+
+  it("finishes a committed native session retirement before restoring workers", async () => {
+    const appRoot = await mkdtemp(join(tmpdir(), "pct-bootstrap-native-retirement-app-"));
+    const workspaceRoot = await mkdtemp(join(tmpdir(), "pct-bootstrap-native-retirement-workspace-"));
+    const firstRuntime = await createRuntime(appRoot, workspaceRoot);
+    const task = await firstRuntime.sessions.createTask({
+      request: "Retire a completed worker session.",
+      cwd: workspaceRoot,
+      route: {
+        mode: "complex",
+        reason: "test",
+        suggested_roles: ["judge", "actor", "critic"],
+        judge_engine: "mock",
+        actor_engine: "mock",
+        critic_engine: "mock"
+      }
+    });
+    const worker = await firstRuntime.sessions.initializeWorker(task, {
+      workerId: "actor-mock",
+      role: "actor",
+      engine: "mock",
+      prompt: "Write code."
+    });
+    const nativeSession = NativeSessionSchema.parse({
+      engine: "mock",
+      role: "actor",
+      worker_id: worker.workerId,
+      session_id: "native-retired-at-startup",
+      scope: "task",
+      cwd: workspaceRoot,
+      created_at: "2026-07-11T14:00:00.000Z",
+      last_used_at: "2026-07-11T14:01:00.000Z",
+      source: "manual"
+    });
+    await firstRuntime.sessions.writeNativeSession(worker, nativeSession);
+    await writeJson(worker.statusPath, WorkerStatusSchema.parse({
+      worker_id: worker.workerId,
+      role: "actor",
+      engine: "mock",
+      state: "done",
+      phase: "process-exited",
+      last_event_at: "2026-07-11T14:01:00.000Z",
+      summary: "done",
+      native_session_id: nativeSession.session_id
+    }));
+    await writeJson(join(worker.dir, "native-session.retired.json"), {
+      ...nativeSession,
+      retired_at: "2026-07-11T14:02:00.000Z",
+      retired_reason: "context window full"
+    });
+    await writeText(join(task.dir, "turns", "0001", "supervisor-summary.md"), "Complex task completed.\n");
+    await firstRuntime.sessions.updateTaskStatus(task, "done");
+    firstRuntime.index.close();
+
+    const restarted = await createRuntime(appRoot, workspaceRoot);
+    try {
+      expect(await pathExists(join(worker.dir, "native-session.json"))).toBe(false);
+      await expect(readJson(worker.statusPath, WorkerStatusSchema)).resolves.not.toHaveProperty("native_session_id");
+      await expect(restarted.index.countRows("native_sessions")).resolves.toBe(0);
+      await expect(restarted.index.workerNativeSessionId(task.id, worker.workerId)).resolves.toBeNull();
+      await expect(restarted.sessions.readNativeSession(worker)).resolves.toBeNull();
+    } finally {
+      restarted.index.close();
+    }
+  });
+
+  it("repairs active and stale native session projections before restoring workers", async () => {
+    const appRoot = await mkdtemp(join(tmpdir(), "pct-bootstrap-native-projection-app-"));
+    const workspaceRoot = await mkdtemp(join(tmpdir(), "pct-bootstrap-native-projection-workspace-"));
+    const firstRuntime = await createRuntime(appRoot, workspaceRoot);
+    const task = await firstRuntime.sessions.createTask({
+      request: "Repair worker session projections.",
+      cwd: workspaceRoot,
+      route: {
+        mode: "complex",
+        reason: "test",
+        suggested_roles: ["judge", "actor", "critic"],
+        judge_engine: "mock",
+        actor_engine: "mock",
+        critic_engine: "mock"
+      }
+    });
+    const actor = await firstRuntime.sessions.initializeWorker(task, {
+      workerId: "actor-mock",
+      role: "actor",
+      engine: "mock",
+      prompt: "Write code."
+    });
+    const critic = await firstRuntime.sessions.initializeWorker(task, {
+      workerId: "critic-mock",
+      role: "critic",
+      engine: "mock",
+      prompt: "Review code."
+    });
+    await writeJson(join(actor.dir, "native-session.json"), NativeSessionSchema.parse({
+      engine: "mock",
+      role: "actor",
+      worker_id: actor.workerId,
+      session_id: "native-active",
+      scope: "task",
+      cwd: workspaceRoot,
+      created_at: "2026-07-11T14:00:00.000Z",
+      last_used_at: "2026-07-11T14:01:00.000Z",
+      source: "manual"
+    }));
+    await writeJson(critic.statusPath, WorkerStatusSchema.parse({
+      worker_id: critic.workerId,
+      role: "critic",
+      engine: "mock",
+      state: "done",
+      phase: "process-exited",
+      last_event_at: "2026-07-11T14:01:00.000Z",
+      summary: "done",
+      native_session_id: "native-missing"
+    }));
+    await writeText(join(task.dir, "turns", "0001", "supervisor-summary.md"), "Complex task completed.\n");
+    await firstRuntime.sessions.updateTaskStatus(task, "done");
+    firstRuntime.index.close();
+
+    const restarted = await createRuntime(appRoot, workspaceRoot);
+    try {
+      await expect(readJson(actor.statusPath, WorkerStatusSchema)).resolves.toMatchObject({
+        native_session_id: "native-active"
+      });
+      await expect(readJson(critic.statusPath, WorkerStatusSchema)).resolves.not.toHaveProperty("native_session_id");
+      await expect(restarted.index.workerNativeSessionId(task.id, actor.workerId)).resolves.toBe("native-active");
+      await expect(restarted.index.workerNativeSessionId(task.id, critic.workerId)).resolves.toBeNull();
+      await expect(restarted.index.countRows("native_sessions")).resolves.toBe(1);
+    } finally {
+      restarted.index.close();
     }
   });
 

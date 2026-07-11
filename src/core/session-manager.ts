@@ -18,6 +18,7 @@ import type { SessionIndex } from "./session-index.js";
 import { loadCollaborationTimeline, type CollaborationTimeline } from "./collaboration-timeline.js";
 import {
   claimTaskRunLease,
+  inspectTaskRunLease,
   TaskRunLeaseConflictError,
   terminateOwnedWorkerProcess,
   type TaskRunLease,
@@ -34,6 +35,7 @@ import {
   NativeSessionSchema,
   type RouteDecision,
   RouteDecisionSchema,
+  RetiredNativeSessionSchema,
   type TaskMeta,
   TaskMetaSchema,
   type TaskState,
@@ -490,22 +492,96 @@ export class SessionManager {
 
   async readNativeSession(worker: Pick<WorkerFiles, "dir">): Promise<NativeSession | null> {
     const path = join(worker.dir, "native-session.json");
+    const retired = await readRetiredNativeSessionIfValid(join(worker.dir, "native-session.retired.json"));
     if (!(await pathExists(path))) {
+      if (retired) {
+        await this.finalizeNativeSessionRetirement(worker, retired.session_id);
+      }
       return null;
     }
+    let active: NativeSession;
     try {
-      return await readJson(path, NativeSessionSchema);
+      active = await readJson(path, NativeSessionSchema);
     } catch {
       await removeIfExists(path);
       await this.clearWorkerStatusNativeSession(worker);
       await this.index?.deleteNativeSession(this.taskIdFromWorkerDir(worker.dir), this.workerIdFromWorkerDir(worker.dir));
       return null;
     }
+    if (retired?.session_id === active.session_id) {
+      await this.finalizeNativeSessionRetirement(worker, active.session_id);
+      return null;
+    }
+    await this.syncNativeSessionProjection(worker, active);
+    return active;
+  }
+
+  async reconcileNativeSessionState(): Promise<number> {
+    const root = sessionsRoot(this.projectRoot, this.dataDir);
+    if (!(await pathExists(root))) {
+      return 0;
+    }
+
+    let reconciled = 0;
+    const sessionEntries = await readdir(root, { withFileTypes: true });
+    for (const sessionEntry of sessionEntries) {
+      if (
+        !sessionEntry.isDirectory()
+        || (sessionEntry.name !== "main" && !sessionEntry.name.startsWith("task-"))
+      ) {
+        continue;
+      }
+      const sessionDir = join(root, sessionEntry.name);
+      if (sessionEntry.name.startsWith("task-")) {
+        const lease = await inspectTaskRunLease(sessionDir);
+        if (lease.state === "active") {
+          continue;
+        }
+      }
+
+      const workerEntries = await readdir(sessionDir, { withFileTypes: true });
+      for (const workerEntry of workerEntries) {
+        if (!workerEntry.isDirectory()) {
+          continue;
+        }
+        const worker = { dir: join(sessionDir, workerEntry.name) };
+        const activePath = join(worker.dir, "native-session.json");
+        const retiredPath = join(worker.dir, "native-session.retired.json");
+        const statusPath = join(worker.dir, "status.json");
+        const [hasActive, hasRetired, hasStatus] = await Promise.all([
+          pathExists(activePath),
+          pathExists(retiredPath),
+          pathExists(statusPath)
+        ]);
+        if (!hasActive && !hasRetired && !hasStatus) {
+          continue;
+        }
+        const retired = await readRetiredNativeSessionIfValid(retiredPath);
+        const active = await readNativeSessionIfValid(activePath);
+        if (retired && (!active || active.session_id === retired.session_id)) {
+          await this.finalizeNativeSessionRetirement(worker, retired.session_id);
+          reconciled += 1;
+          continue;
+        }
+        if (active) {
+          await this.syncNativeSessionProjection(worker, active);
+          continue;
+        }
+        await removeIfExists(activePath);
+        await this.clearWorkerStatusNativeSession(worker);
+        await this.index?.deleteNativeSession(
+          this.taskIdFromWorkerDir(worker.dir),
+          this.workerIdFromWorkerDir(worker.dir)
+        );
+      }
+    }
+    return reconciled;
   }
 
   async writeNativeSession(worker: Pick<WorkerFiles, "dir">, record: NativeSession): Promise<void> {
-    await writeJson(join(worker.dir, "native-session.json"), NativeSessionSchema.parse(record));
-    await this.index?.upsertNativeSession(this.taskIdFromWorkerDir(worker.dir), record);
+    const active = NativeSessionSchema.parse(record);
+    await writeJson(join(worker.dir, "native-session.json"), active);
+    await this.syncNativeSessionProjection(worker, active);
   }
 
   async retireNativeSession(worker: Pick<WorkerFiles, "dir">, reason: string): Promise<void> {
@@ -836,7 +912,49 @@ export class SessionManager {
     return basename(workerDir);
   }
 
-  private async clearWorkerStatusNativeSession(worker: Pick<WorkerFiles, "dir">): Promise<void> {
+  private async finalizeNativeSessionRetirement(
+    worker: Pick<WorkerFiles, "dir">,
+    sessionId: string
+  ): Promise<void> {
+    await removeIfExists(join(worker.dir, "native-session.json"));
+    await this.clearWorkerStatusNativeSession(worker, sessionId);
+    await this.index?.deleteNativeSession(this.taskIdFromWorkerDir(worker.dir), this.workerIdFromWorkerDir(worker.dir));
+  }
+
+  private async syncNativeSessionProjection(
+    worker: Pick<WorkerFiles, "dir">,
+    record: NativeSession
+  ): Promise<void> {
+    await this.setWorkerStatusNativeSession(worker, record.session_id);
+    await this.index?.upsertNativeSession(this.taskIdFromWorkerDir(worker.dir), record);
+  }
+
+  private async setWorkerStatusNativeSession(
+    worker: Pick<WorkerFiles, "dir">,
+    sessionId: string
+  ): Promise<void> {
+    const statusPath = join(worker.dir, "status.json");
+    const status = await readWorkerStatusIfValid(statusPath);
+    if (!status) {
+      return;
+    }
+    const nextStatus = status.native_session_id === sessionId
+      ? status
+      : WorkerStatusSchema.parse({ ...status, native_session_id: sessionId });
+    if (nextStatus !== status) {
+      await writeJson(statusPath, nextStatus);
+    }
+    await this.index?.upsertWorker(this.taskIdFromWorkerDir(worker.dir), nextStatus, {
+      dir: worker.dir,
+      statusPath,
+      outputLogPath: join(worker.dir, "output.log")
+    });
+  }
+
+  private async clearWorkerStatusNativeSession(
+    worker: Pick<WorkerFiles, "dir">,
+    expectedSessionId?: string
+  ): Promise<void> {
     const statusPath = join(worker.dir, "status.json");
     if (!(await pathExists(statusPath))) {
       return;
@@ -847,6 +965,9 @@ export class SessionManager {
       return;
     }
     if (!status.native_session_id) {
+      return;
+    }
+    if (expectedSessionId && status.native_session_id !== expectedSessionId) {
       return;
     }
 
@@ -924,6 +1045,18 @@ async function readNativeSessionIfValid(nativeSessionPath: string): Promise<Nati
 
   try {
     return await readJson(nativeSessionPath, NativeSessionSchema);
+  } catch {
+    return null;
+  }
+}
+
+async function readRetiredNativeSessionIfValid(retiredSessionPath: string) {
+  if (!(await pathExists(retiredSessionPath))) {
+    return null;
+  }
+
+  try {
+    return await readJson(retiredSessionPath, RetiredNativeSessionSchema);
   } catch {
     return null;
   }

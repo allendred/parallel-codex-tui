@@ -4,6 +4,7 @@ import {
   EventRecordSchema,
   FeatureStatusSchema,
   NativeSessionSchema,
+  RetiredNativeSessionSchema,
   RouteDecisionSchema,
   TaskMetaSchema,
   TurnMetaSchema,
@@ -156,6 +157,24 @@ describe("domain schemas", () => {
 
     expect(result.scope).toBe("task");
     expect(result.source).toBe("output-detected");
+  });
+
+  it("validates retired native session tombstones", () => {
+    const result = RetiredNativeSessionSchema.parse({
+      engine: "codex",
+      role: "actor",
+      worker_id: "actor-codex",
+      session_id: "retired-123",
+      scope: "task",
+      cwd: "/tmp/project",
+      created_at: "2026-06-30T03:30:00.000Z",
+      last_used_at: "2026-06-30T03:40:00.000Z",
+      source: "output-detected",
+      retired_at: "2026-06-30T03:41:00.000Z",
+      retired_reason: "context window full"
+    });
+
+    expect(result.retired_reason).toBe("context window full");
   });
 
   it("validates JSONL event records", () => {

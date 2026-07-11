@@ -5,6 +5,7 @@ import type { ZodTypeAny, output } from "zod";
 import {
   NativeSessionSchema,
   type NativeSession,
+  RetiredNativeSessionSchema,
   TaskMetaSchema,
   type TaskMeta,
   TurnMetaSchema,
@@ -336,8 +337,10 @@ export class SessionIndex {
       const workerDir = join(sessionDir, entry.name);
       const statusPath = join(workerDir, "status.json");
       const nativePath = join(workerDir, "native-session.json");
+      const retiredNativePath = join(workerDir, "native-session.retired.json");
+      const nativeSession = await this.readRebuildNativeSession(nativePath, retiredNativePath);
       if (await pathExists(statusPath)) {
-        const status = await this.readRebuildWorkerStatus(statusPath, nativePath);
+        const status = await this.readRebuildWorkerStatus(statusPath, nativeSession);
         if (status) {
           await this.upsertWorker(sessionId, status, {
             dir: workerDir,
@@ -347,26 +350,38 @@ export class SessionIndex {
         }
       }
 
-      if (await pathExists(nativePath)) {
-        const nativeSession = await readJsonIfValid(nativePath, NativeSessionSchema);
-        if (nativeSession) {
-          await this.upsertNativeSession(sessionId, nativeSession);
-        }
+      if (nativeSession) {
+        await this.upsertNativeSession(sessionId, nativeSession);
       }
     }
   }
 
-  private async readRebuildWorkerStatus(statusPath: string, nativePath: string): Promise<WorkerStatus | null> {
+  private async readRebuildWorkerStatus(
+    statusPath: string,
+    nativeSession: NativeSession | null
+  ): Promise<WorkerStatus | null> {
     const status = await readJsonIfValid(statusPath, WorkerStatusSchema);
     if (!status) {
       return null;
     }
-    if (status.native_session_id && !(await readJsonIfValid(nativePath, NativeSessionSchema))) {
+    if (status.native_session_id && status.native_session_id !== nativeSession?.session_id) {
       const nextStatus = { ...status };
       delete nextStatus.native_session_id;
       return WorkerStatusSchema.parse(nextStatus);
     }
     return status;
+  }
+
+  private async readRebuildNativeSession(
+    nativePath: string,
+    retiredNativePath: string
+  ): Promise<NativeSession | null> {
+    const active = await readJsonIfValid(nativePath, NativeSessionSchema);
+    if (!active) {
+      return null;
+    }
+    const retired = await readJsonIfValid(retiredNativePath, RetiredNativeSessionSchema);
+    return retired?.session_id === active.session_id ? null : active;
   }
 }
 

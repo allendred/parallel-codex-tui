@@ -250,6 +250,8 @@ describe("package metadata", () => {
     expect(readme).toContain("A reused PID with a different start fingerprint is never signalled");
     expect(readme).toContain("Recovery commits cancellation only after every recorded process group is confirmed stopped");
     expect(readme).toContain("An unverifiable or still-running process blocks startup");
+    expect(readme).toContain("A matching `native-session.retired.json` tombstone always wins over a leftover active session file");
+    expect(readme).toContain("startup reconciles the active file, Worker status, and both SQLite projections before the first TUI frame");
     expect(readme).toContain("Session index rebuilding publishes either the previous complete snapshot or the new complete snapshot");
     expect(readme).toContain("Terminal completion is evidence-guarded");
     expect(readme).toContain("duplicate task and feature state writes are idempotent");

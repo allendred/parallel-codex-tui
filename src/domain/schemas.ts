@@ -177,6 +177,11 @@ export const NativeSessionSchema = z.object({
   source: NativeSessionSourceSchema
 });
 
+export const RetiredNativeSessionSchema = NativeSessionSchema.extend({
+  retired_at: z.string().datetime(),
+  retired_reason: z.string().min(1)
+});
+
 export const ChatRecordSchema = z.object({
   time: z.string().datetime(),
   from: z.enum(["user", "system"]),
@@ -215,6 +220,7 @@ export type WorkerStatus = z.infer<typeof WorkerStatusSchema>;
 export type FeatureStatus = z.infer<typeof FeatureStatusSchema>;
 export type TurnMeta = z.infer<typeof TurnMetaSchema>;
 export type NativeSession = z.infer<typeof NativeSessionSchema>;
+export type RetiredNativeSession = z.infer<typeof RetiredNativeSessionSchema>;
 export type NativeSessionSource = z.infer<typeof NativeSessionSourceSchema>;
 export type EventRecord = z.infer<typeof EventRecordSchema>;
 export type ChatRecord = z.infer<typeof ChatRecordSchema>;

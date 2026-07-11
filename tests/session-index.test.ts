@@ -388,6 +388,17 @@ describe("SessionIndex", () => {
       summary: "done",
       native_session_id: "retired-1"
     }));
+    await writeJson(join(workerDir, "native-session.json"), NativeSessionSchema.parse({
+      engine: "mock",
+      role: "actor",
+      worker_id: "actor-mock",
+      session_id: "retired-1",
+      scope: "task",
+      cwd: root,
+      created_at: "2026-07-01T01:00:00.000Z",
+      last_used_at: "2026-07-01T01:01:00.000Z",
+      source: "manual"
+    }));
     await writeJson(join(workerDir, "native-session.retired.json"), {
       engine: "mock",
       role: "actor",

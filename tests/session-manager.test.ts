@@ -754,11 +754,13 @@ describe("SessionManager", () => {
 
   it("stores worker native session metadata", async () => {
     const root = await mkdtemp(join(tmpdir(), "pct-native-session-"));
+    const index = await SessionIndex.open(root, ".parallel-codex");
     const manager = new SessionManager({
       projectRoot: root,
       dataDir: ".parallel-codex",
       now: () => new Date("2026-06-30T03:30:00.000Z"),
-      randomId: () => "a1b2"
+      randomId: () => "a1b2",
+      index
     });
 
     const task = await manager.createTask({
@@ -798,6 +800,65 @@ describe("SessionManager", () => {
 
     expect(record?.session_id).toBe("native-123");
     expect(raw.session_id).toBe("native-123");
+    await expect(readJson(worker.statusPath, WorkerStatusSchema)).resolves.toMatchObject({
+      native_session_id: "native-123"
+    });
+    await expect(index.workerNativeSessionId(task.id, worker.workerId)).resolves.toBe("native-123");
+    index.close();
+  });
+
+  it("keeps a valid native session when only its SQLite projection fails", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pct-native-session-projection-failure-"));
+    const initial = new SessionManager({
+      projectRoot: root,
+      dataDir: ".parallel-codex",
+      now: () => new Date("2026-06-30T03:30:00.000Z"),
+      randomId: () => "native-projection-failure"
+    });
+    const task = await initial.createTask({
+      request: "Keep the active session.",
+      cwd: root,
+      route: {
+        mode: "complex",
+        reason: "Requires workers.",
+        suggested_roles: ["judge", "actor", "critic"],
+        judge_engine: "mock",
+        actor_engine: "mock",
+        critic_engine: "mock"
+      }
+    });
+    const worker = await initial.initializeWorker(task, {
+      workerId: "actor-mock",
+      role: "actor",
+      engine: "mock",
+      prompt: "Write code."
+    });
+    await writeJson(join(worker.dir, "native-session.json"), NativeSessionSchema.parse({
+      engine: "mock",
+      role: "actor",
+      worker_id: worker.workerId,
+      session_id: "native-valid",
+      scope: "task",
+      cwd: root,
+      created_at: "2026-06-30T03:30:00.000Z",
+      last_used_at: "2026-06-30T03:31:00.000Z",
+      source: "manual"
+    }));
+    const manager = new SessionManager({
+      projectRoot: root,
+      dataDir: ".parallel-codex",
+      index: {
+        upsertWorker: vi.fn().mockRejectedValue(new Error("worker index unavailable")),
+        upsertNativeSession: vi.fn()
+      } as unknown as SessionIndex
+    });
+
+    await expect(manager.readNativeSession(worker)).rejects.toThrow("worker index unavailable");
+
+    expect(await pathExists(join(worker.dir, "native-session.json"))).toBe(true);
+    await expect(readJson(join(worker.dir, "native-session.json"), NativeSessionSchema)).resolves.toMatchObject({
+      session_id: "native-valid"
+    });
   });
 
   it("retires worker native session metadata without leaving it active", async () => {
@@ -861,6 +922,176 @@ describe("SessionManager", () => {
     }));
     expect(retired.session_id).toBe("native-123");
     expect(retired.retired_reason).toBe("context window full");
+  });
+
+  it("does not revive a native session after its retirement tombstone was committed", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pct-native-session-retirement-tombstone-"));
+    const index = await SessionIndex.open(root, ".parallel-codex");
+    const manager = new SessionManager({
+      projectRoot: root,
+      dataDir: ".parallel-codex",
+      now: () => new Date("2026-06-30T03:32:00.000Z"),
+      randomId: () => "retirement-tombstone",
+      index
+    });
+    const task = await manager.createTask({
+      request: "Retire the old session.",
+      cwd: root,
+      route: {
+        mode: "complex",
+        reason: "Requires workers.",
+        suggested_roles: ["judge", "actor", "critic"],
+        judge_engine: "mock",
+        actor_engine: "mock",
+        critic_engine: "mock"
+      }
+    });
+    const worker = await manager.initializeWorker(task, {
+      workerId: "actor-mock",
+      role: "actor",
+      engine: "mock",
+      prompt: "Write code."
+    });
+    const record = NativeSessionSchema.parse({
+      engine: "mock",
+      role: "actor",
+      worker_id: worker.workerId,
+      session_id: "native-retired",
+      scope: "task",
+      cwd: root,
+      created_at: "2026-06-30T03:30:00.000Z",
+      last_used_at: "2026-06-30T03:31:00.000Z",
+      source: "manual"
+    });
+    await manager.writeNativeSession(worker, record);
+    await writeJson(worker.statusPath, WorkerStatusSchema.parse({
+      worker_id: worker.workerId,
+      role: "actor",
+      engine: "mock",
+      state: "done",
+      phase: "process-exited",
+      last_event_at: "2026-06-30T03:31:00.000Z",
+      summary: "done",
+      native_session_id: record.session_id
+    }));
+    await writeJson(join(worker.dir, "native-session.retired.json"), {
+      ...record,
+      retired_at: "2026-06-30T03:32:00.000Z",
+      retired_reason: "context window full"
+    });
+
+    await expect(manager.readNativeSession(worker)).resolves.toBeNull();
+
+    expect(await pathExists(join(worker.dir, "native-session.json"))).toBe(false);
+    await expect(readJson(worker.statusPath, WorkerStatusSchema)).resolves.not.toHaveProperty("native_session_id");
+    await expect(index.countRows("native_sessions")).resolves.toBe(0);
+    index.close();
+  });
+
+  it("defers retirement cleanup while another TUI owns the task", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pct-native-session-retirement-lease-"));
+    const manager = new SessionManager({
+      projectRoot: root,
+      dataDir: ".parallel-codex",
+      now: () => new Date("2026-06-30T03:32:00.000Z"),
+      randomId: () => "retirement-lease"
+    });
+    const task = await manager.createTask({
+      request: "Keep the live owner safe.",
+      cwd: root,
+      route: {
+        mode: "complex",
+        reason: "Requires workers.",
+        suggested_roles: ["judge", "actor", "critic"],
+        judge_engine: "mock",
+        actor_engine: "mock",
+        critic_engine: "mock"
+      }
+    });
+    const worker = await manager.initializeWorker(task, {
+      workerId: "actor-mock",
+      role: "actor",
+      engine: "mock",
+      prompt: "Write code."
+    });
+    const record = NativeSessionSchema.parse({
+      engine: "mock",
+      role: "actor",
+      worker_id: worker.workerId,
+      session_id: "native-owned",
+      scope: "task",
+      cwd: root,
+      created_at: "2026-06-30T03:30:00.000Z",
+      last_used_at: "2026-06-30T03:31:00.000Z",
+      source: "manual"
+    });
+    await manager.writeNativeSession(worker, record);
+    await writeJson(join(worker.dir, "native-session.retired.json"), {
+      ...record,
+      retired_at: "2026-06-30T03:32:00.000Z",
+      retired_reason: "context window full"
+    });
+    const lease = await claimTaskRunLease(task.dir, { ownerId: "live-owner" });
+
+    try {
+      await expect(manager.reconcileNativeSessionState()).resolves.toBe(0);
+      expect(await pathExists(join(worker.dir, "native-session.json"))).toBe(true);
+    } finally {
+      await lease.release();
+    }
+
+    await expect(manager.reconcileNativeSessionState()).resolves.toBe(1);
+    expect(await pathExists(join(worker.dir, "native-session.json"))).toBe(false);
+  });
+
+  it("keeps a fresh native session when its id differs from the retirement tombstone", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pct-native-session-retirement-new-session-"));
+    const manager = new SessionManager({
+      projectRoot: root,
+      dataDir: ".parallel-codex",
+      now: () => new Date("2026-06-30T03:32:00.000Z"),
+      randomId: () => "retirement-new-session"
+    });
+    const task = await manager.createTask({
+      request: "Keep the replacement session.",
+      cwd: root,
+      route: {
+        mode: "complex",
+        reason: "Requires workers.",
+        suggested_roles: ["judge", "actor", "critic"],
+        judge_engine: "mock",
+        actor_engine: "mock",
+        critic_engine: "mock"
+      }
+    });
+    const worker = await manager.initializeWorker(task, {
+      workerId: "actor-mock",
+      role: "actor",
+      engine: "mock",
+      prompt: "Write code."
+    });
+    const replacement = NativeSessionSchema.parse({
+      engine: "mock",
+      role: "actor",
+      worker_id: worker.workerId,
+      session_id: "native-new",
+      scope: "task",
+      cwd: root,
+      created_at: "2026-06-30T03:32:00.000Z",
+      last_used_at: "2026-06-30T03:32:00.000Z",
+      source: "output-detected"
+    });
+    await manager.writeNativeSession(worker, replacement);
+    await writeJson(join(worker.dir, "native-session.retired.json"), {
+      ...replacement,
+      session_id: "native-old",
+      retired_at: "2026-06-30T03:31:00.000Z",
+      retired_reason: "context window full"
+    });
+
+    await expect(manager.reconcileNativeSessionState()).resolves.toBe(0);
+    await expect(manager.readNativeSession(worker)).resolves.toMatchObject({ session_id: "native-new" });
+    expect(await pathExists(join(worker.dir, "native-session.json"))).toBe(true);
   });
 
   it("clears corrupt native session metadata when retiring it", async () => {
