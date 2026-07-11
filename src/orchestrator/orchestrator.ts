@@ -2,6 +2,7 @@ import { readdir } from "node:fs/promises";
 import { join } from "node:path";
 import type { AppConfig } from "../core/config.js";
 import { appendJsonLine, ensureDir, pathExists, readJson, readTextIfExists, removeIfExists, writeJson, writeText } from "../core/file-store.js";
+import { runWithLeaseFinalization } from "../core/lease-finalization.js";
 import { claimTaskRunLease, TaskRunLeaseConflictError, type TaskRunLease } from "../core/process-ownership.js";
 import { routerRuntimeDir } from "../core/paths.js";
 import { classifyRouterFailure, routerFallbackIsTransient } from "../core/router-audit.js";
@@ -2491,34 +2492,6 @@ function requiredFeatureWorkspace(
 
 function uniquePaths(paths: string[]): string[] {
   return [...new Set(paths.filter(Boolean))];
-}
-
-async function runWithLeaseFinalization<Result>(
-  subject: string,
-  lease: TaskRunLease,
-  run: () => Promise<Result>
-): Promise<Result> {
-  const outcome = await run().then(
-    (value) => ({ ok: true as const, value }),
-    (error: unknown) => ({ ok: false as const, error })
-  );
-
-  try {
-    await lease.release();
-  } catch (releaseError) {
-    const releaseSummary = `${subject} lease release failed: ${errorMessage(releaseError)}`;
-    if (!outcome.ok) {
-      throw new Error(`${errorMessage(outcome.error)}; ${releaseSummary}`, {
-        cause: new AggregateError([outcome.error, releaseError])
-      });
-    }
-    throw new Error(releaseSummary, { cause: releaseError });
-  }
-
-  if (!outcome.ok) {
-    throw outcome.error;
-  }
-  return outcome.value;
 }
 
 async function allOrThrow<T>(promises: Array<Promise<T>>): Promise<T[]> {

@@ -12,6 +12,7 @@ import {
   writeJson,
   writeText
 } from "./file-store.js";
+import { runWithLeaseFinalization } from "./lease-finalization.js";
 import { formatTaskTimestamp, taskDir } from "./paths.js";
 import { sessionsRoot } from "./paths.js";
 import type { SessionIndex } from "./session-index.js";
@@ -52,6 +53,7 @@ export interface SessionManagerOptions {
   now?: () => Date;
   randomId?: () => string;
   index?: SessionIndex;
+  claimTaskRunLease?: (dir: string) => Promise<TaskRunLease>;
 }
 
 export interface CreateTaskInput {
@@ -164,6 +166,7 @@ export class SessionManager {
   private readonly now: () => Date;
   private readonly randomId: () => string;
   private readonly index?: SessionIndex;
+  private readonly claimTaskRunLease: (dir: string) => Promise<TaskRunLease>;
 
   constructor(options: SessionManagerOptions) {
     this.projectRoot = options.projectRoot;
@@ -171,6 +174,7 @@ export class SessionManager {
     this.now = options.now ?? (() => new Date());
     this.randomId = options.randomId ?? (() => Math.random().toString(16).slice(2, 6));
     this.index = options.index;
+    this.claimTaskRunLease = options.claimTaskRunLease ?? claimTaskRunLease;
   }
 
   async createTask(input: CreateTaskInput): Promise<TaskSession> {
@@ -216,7 +220,7 @@ export class SessionManager {
 
     let recoveryLease: TaskRunLease;
     try {
-      recoveryLease = await claimTaskRunLease(main.dir);
+      recoveryLease = await this.claimTaskRunLease(main.dir);
     } catch (error) {
       if (error instanceof TaskRunLeaseConflictError) {
         return null;
@@ -224,7 +228,7 @@ export class SessionManager {
       throw error;
     }
 
-    try {
+    return runWithLeaseFinalization("Main session startup recovery", recoveryLease, async () => {
       const workers = await this.reconcileTaskWorkers(main, "Main session");
       if (workers.recovered === 0 && workers.terminated === 0) {
         return null;
@@ -238,9 +242,7 @@ export class SessionManager {
         workersRecovered: workers.recovered,
         processesTerminated: workers.terminated
       };
-    } finally {
-      await recoveryLease.release();
-    }
+    });
   }
 
   async appendChatMessage(input: AppendChatMessageInput): Promise<void> {
@@ -324,7 +326,7 @@ export class SessionManager {
       }
       let recoveryLease: TaskRunLease;
       try {
-        recoveryLease = await claimTaskRunLease(task.dir);
+        recoveryLease = await this.claimTaskRunLease(task.dir);
       } catch (error) {
         if (error instanceof TaskRunLeaseConflictError) {
           continue;
@@ -332,41 +334,46 @@ export class SessionManager {
         throw error;
       }
 
-      try {
-        const claimedMeta = await readTaskMetaIfValid(task.metaPath);
-        if (!claimedMeta) {
-          continue;
+      const recovery = await runWithLeaseFinalization(
+        `Task ${task.id} startup recovery`,
+        recoveryLease,
+        async (): Promise<InterruptedTaskRecovery | null> => {
+          const claimedMeta = await readTaskMetaIfValid(task.metaPath);
+          if (!claimedMeta) {
+            return null;
+          }
+          const claimedNeedsTaskRecovery = await this.taskNeedsRecovery(task, claimedMeta);
+          const claimedNeedsTransitionRepair = await this.taskStatusTransitionNeedsRepair(task, claimedMeta);
+          if (!claimedNeedsTaskRecovery && !claimedNeedsTransitionRepair) {
+            return null;
+          }
+          if (claimedNeedsTransitionRepair) {
+            await this.syncTaskStatusTransition(task, claimedMeta);
+          }
+          if (!claimedNeedsTaskRecovery) {
+            return null;
+          }
+          const workers = await this.reconcileTaskWorkers(task);
+          const featuresRecovered = await this.reconcileTaskFeatures(task);
+          await this.updateTaskStatus(task, "cancelled");
+          await this.appendEvent(
+            task,
+            claimedMeta.status === "done" ? "task.recovered_incomplete_done" : "task.recovered_after_restart",
+            claimedMeta.status === "done"
+              ? `Recovered incomplete done task; ${workers.recovered} active workers and ${featuresRecovered} active features marked cancelled, checkpoints preserved`
+              : `Recovered interrupted task from ${claimedMeta.status}; ${workers.recovered} active workers and ${featuresRecovered} active features marked cancelled, checkpoints preserved`
+          );
+          return {
+            taskId: task.id,
+            previousState: claimedMeta.status,
+            workersRecovered: workers.recovered,
+            featuresRecovered,
+            processesTerminated: workers.terminated
+          };
         }
-        const claimedNeedsTaskRecovery = await this.taskNeedsRecovery(task, claimedMeta);
-        const claimedNeedsTransitionRepair = await this.taskStatusTransitionNeedsRepair(task, claimedMeta);
-        if (!claimedNeedsTaskRecovery && !claimedNeedsTransitionRepair) {
-          continue;
-        }
-        if (claimedNeedsTransitionRepair) {
-          await this.syncTaskStatusTransition(task, claimedMeta);
-        }
-        if (!claimedNeedsTaskRecovery) {
-          continue;
-        }
-        const workers = await this.reconcileTaskWorkers(task);
-        const featuresRecovered = await this.reconcileTaskFeatures(task);
-        await this.updateTaskStatus(task, "cancelled");
-        await this.appendEvent(
-          task,
-          claimedMeta.status === "done" ? "task.recovered_incomplete_done" : "task.recovered_after_restart",
-          claimedMeta.status === "done"
-            ? `Recovered incomplete done task; ${workers.recovered} active workers and ${featuresRecovered} active features marked cancelled, checkpoints preserved`
-            : `Recovered interrupted task from ${claimedMeta.status}; ${workers.recovered} active workers and ${featuresRecovered} active features marked cancelled, checkpoints preserved`
-        );
-        recovered.push({
-          taskId: task.id,
-          previousState: claimedMeta.status,
-          workersRecovered: workers.recovered,
-          featuresRecovered,
-          processesTerminated: workers.terminated
-        });
-      } finally {
-        await recoveryLease.release();
+      );
+      if (recovery) {
+        recovered.push(recovery);
       }
     }
     return recovered;
