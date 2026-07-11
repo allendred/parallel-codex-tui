@@ -57,7 +57,8 @@ describe("RouterDiagnosticsView", () => {
     expect(frame).toContain("Router diagnostics");
     expect(frame).toContain("scope · all · 2/2 routes · 1 workspace");
     expect(frame).toContain("health · codex 1 · fallback 1 · timeout 1");
-    expect(frame).toContain("latency · p50 9.7s · p95 30s · max 30s");
+    expect(frame).toContain("latency · success p50 9.7s · p95 9.7s · max 9.7s · n 1");
+    expect(frame).toContain("budget · initial learning · 30s / p95 9.7s · n 1 · follow-up no data · 20s");
     expect(frame).toContain("policy · auto · 30s / 20s · fallback simple");
     expect(frame).toContain("proxy · configured now · 1 recorded · context only");
     expect(frame).toContain("tetris · initial · simple · codex · 9.7s · attempt 2");
@@ -101,6 +102,33 @@ describe("RouterDiagnosticsView", () => {
     }).map((line) => line.text).join("\n") ?? "";
     expect(text).toContain("scope · current · tetris · 2/3 routes");
     expect(text).not.toContain("other workspace");
+  });
+
+  it("flags timeout budgets that are far above or below successful p95 latency", () => {
+    const routerDiagnosticsBudget = (
+      diagnosticsModule as typeof diagnosticsModule & {
+        routerDiagnosticsBudget?: (
+          records: RouterAuditRecord[],
+          routerPolicy: ReturnType<typeof policy>
+        ) => { text: string; tone: string };
+      }
+    ).routerDiagnosticsBudget;
+
+    expect(routerDiagnosticsBudget).toBeTypeOf("function");
+    expect(routerDiagnosticsBudget?.(budgetRecords(), {
+      ...policy(),
+      timeoutMs: 120000
+    })).toEqual({
+      text: "budget · initial high · 120s / p95 9.7s · n 3 · consider 20s · follow-up no data · 20s",
+      tone: "warning"
+    });
+    expect(routerDiagnosticsBudget?.(budgetRecords(), {
+      ...policy(),
+      timeoutMs: 5000
+    })).toEqual({
+      text: "budget · initial tight · 5s / p95 9.7s · n 3 · consider 20s · follow-up no data · 20s",
+      tone: "warning"
+    });
   });
 
   it("keeps every rendered diagnostic row within narrow terminal widths", () => {
@@ -181,4 +209,13 @@ function records(): RouterAuditRecord[] {
       router_stderr_bytes: 73
     }
   ];
+}
+
+function budgetRecords(): RouterAuditRecord[] {
+  const successful = records()[0]!;
+  return [8000, 9000, 9700].map((duration, index) => ({
+    ...successful,
+    time: `2026-07-11T07:00:0${index}.000Z`,
+    duration_ms: duration
+  }));
 }

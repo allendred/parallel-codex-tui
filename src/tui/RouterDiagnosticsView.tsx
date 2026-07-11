@@ -123,6 +123,7 @@ export function routerDiagnosticsDisplayLines(
   const timeoutCount = visibleRecords.filter((record) => routerAuditFailureKind(record) === "timeout").length;
   const workspaceCount = new Set(records.map((record) => normalizedWorkspace(record.workspace))).size;
   const proxyRecordCount = visibleRecords.filter(routerAuditHasProxyContext).length;
+  const budget = routerDiagnosticsBudget(visibleRecords, policy);
   const health = [
     `health · codex ${codexCount}`,
     `fallback ${fallbackCount}`,
@@ -137,6 +138,7 @@ export function routerDiagnosticsDisplayLines(
     },
     { text: health, tone: fallbackCount > 0 ? "warning" : "success" },
     { text: routerDiagnosticsLatencyText(visibleRecords), tone: "muted" },
+    budget,
     {
       text: `policy · ${policy.mode} · ${formatDiagnosticDuration(policy.timeoutMs)} / ${formatDiagnosticDuration(policy.followUpTimeoutMs)} · fallback ${policy.fallback}`,
       tone: "muted"
@@ -145,7 +147,6 @@ export function routerDiagnosticsDisplayLines(
       text: `proxy · ${policy.proxyConfigured ? "configured now" : "direct now"} · ${proxyRecordCount} recorded · context only`,
       tone: policy.proxyConfigured || proxyRecordCount > 0 ? "warning" : "muted"
     },
-    { text: "", tone: "text" },
     { text: "Recent routes", tone: "heading" }
   ];
 
@@ -254,18 +255,94 @@ function routerDiagnosticsScopeText(
 }
 
 function routerDiagnosticsLatencyText(records: RouterAuditRecord[]): string {
-  const durations = records
-    .map((record) => record.duration_ms)
-    .filter((duration): duration is number => typeof duration === "number" && Number.isFinite(duration))
-    .sort((left, right) => left - right);
+  const durations = successfulRouterDurations(records);
   if (durations.length === 0) {
-    return "latency · no completed routes";
+    return "latency · no successful Codex routes";
   }
   return [
-    `latency · p50 ${formatDiagnosticDuration(routerDurationPercentile(durations, 0.5))}`,
+    `latency · success p50 ${formatDiagnosticDuration(routerDurationPercentile(durations, 0.5))}`,
     `p95 ${formatDiagnosticDuration(routerDurationPercentile(durations, 0.95))}`,
-    `max ${formatDiagnosticDuration(durations.at(-1) ?? 0)}`
+    `max ${formatDiagnosticDuration(durations.at(-1) ?? 0)}`,
+    `n ${durations.length}`
   ].join(" · ");
+}
+
+export function routerDiagnosticsBudget(
+  records: RouterAuditRecord[],
+  policy: RouterDiagnosticsPolicy
+): RouterDiagnosticLine {
+  const initial = routerBudgetSegment(
+    "initial",
+    policy.timeoutMs,
+    successfulRouterDurations(records, "initial"),
+    20000,
+    60000
+  );
+  const followUp = routerBudgetSegment(
+    "follow-up",
+    policy.followUpTimeoutMs,
+    successfulRouterDurations(records, "follow-up"),
+    15000,
+    45000
+  );
+  const states = [initial.state, followUp.state];
+  return {
+    text: `budget · ${initial.text} · ${followUp.text}`,
+    tone: states.some((state) => state === "tight" || state === "high")
+      ? "warning"
+      : states.every((state) => state === "no-data" || state === "learning")
+        ? "muted"
+        : "success"
+  };
+}
+
+function successfulRouterDurations(
+  records: RouterAuditRecord[],
+  scope?: RouterAuditRecord["scope"]
+): number[] {
+  return records
+    .filter((record) => record.source === "codex" && (!scope || record.scope === scope))
+    .map((record) => record.duration_ms)
+    .filter((duration): duration is number => (
+      typeof duration === "number" && Number.isFinite(duration) && duration > 0
+    ))
+    .sort((left, right) => left - right);
+}
+
+function routerBudgetSegment(
+  label: string,
+  configuredMs: number,
+  durations: number[],
+  minimumMs: number,
+  maximumMs: number
+): { text: string; state: "healthy" | "tight" | "high" | "learning" | "no-data" } {
+  if (durations.length === 0) {
+    return {
+      text: `${label} no data · ${formatDiagnosticDuration(configuredMs)}`,
+      state: "no-data"
+    };
+  }
+  const p95 = routerDurationPercentile(durations, 0.95);
+  const recommendedMs = Math.min(
+    maximumMs,
+    Math.max(minimumMs, Math.ceil((p95 * 2) / 1000) * 1000)
+  );
+  const state = durations.length < 3
+    ? "learning"
+    : configuredMs < p95 * 1.5
+      ? "tight"
+      : configuredMs > recommendedMs * 2
+        ? "high"
+        : "healthy";
+  return {
+    text: [
+      `${label} ${state}`,
+      `${formatDiagnosticDuration(configuredMs)} / p95 ${formatDiagnosticDuration(p95)}`,
+      `n ${durations.length}`,
+      ...(state === "tight" || state === "high" ? [`consider ${formatDiagnosticDuration(recommendedMs)}`] : [])
+    ].join(" · "),
+    state
+  };
 }
 
 function routerDurationPercentile(sortedDurations: number[], percentile: number): number {
