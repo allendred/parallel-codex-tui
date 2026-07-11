@@ -7,7 +7,7 @@ import { appendJsonLine, appendText, pathExists, readJson, readTextIfExists, wri
 import { SessionIndex } from "../src/core/session-index.js";
 import { SessionManager, type TaskSession } from "../src/core/session-manager.js";
 import { claimTaskRunLease } from "../src/core/process-ownership.js";
-import { NativeSessionSchema, RouteDecisionSchema, TaskMetaSchema, WorkerStatusSchema, type TaskState } from "../src/domain/schemas.js";
+import { NativeSessionSchema, RouteDecisionSchema, TaskMetaSchema, WorkerStatusSchema, type RouteDecision, type TaskState } from "../src/domain/schemas.js";
 import { Orchestrator, type FeatureRunProgress } from "../src/orchestrator/orchestrator.js";
 import { MockWorkerAdapter } from "../src/workers/mock-adapter.js";
 import { ProcessWorkerAdapter } from "../src/workers/process-adapter.js";
@@ -1031,9 +1031,10 @@ describe("Orchestrator", () => {
     const config = mockConfig(appRoot);
     config.router.defaultMode = "auto";
     config.router.codex.maxAttempts = 2;
-    config.router.codex.retryDelayMs = 0;
+    config.router.codex.retryDelayMs = 25;
     let routeCalls = 0;
     let prompts = 0;
+    let finalRoute: RouteDecision | null = null;
     const starts: Array<{ phase: string; attempt?: number; maxAttempts?: number }> = [];
     const manager = new SessionManager({ projectRoot: workspaceRoot, dataDir: config.dataDir });
     const orchestrator = new Orchestrator(
@@ -1057,6 +1058,9 @@ describe("Orchestrator", () => {
       request: "你好",
       cwd: workspaceRoot,
       onRouteStart: (state) => starts.push(state),
+      onRoute: (route) => {
+        finalRoute = route;
+      },
       onRouteFallback: async () => {
         prompts += 1;
         return "parallel";
@@ -1070,6 +1074,16 @@ describe("Orchestrator", () => {
     expect(result).toMatchObject({ mode: "simple", taskId: null });
     expect(routeCalls).toBe(2);
     expect(prompts).toBe(0);
+    expect(finalRoute).toMatchObject({
+      source: "codex",
+      router_attempt: 2,
+      router_recovered_from: "timeout",
+      router_recovered_via: "auto-retry",
+      router_recovered_timeout_kind: "idle",
+      router_recovered_failure_stage: "streaming",
+      router_total_duration_ms: expect.any(Number)
+    });
+    expect((finalRoute as RouteDecision | null)?.router_total_duration_ms).toBeGreaterThanOrEqual(20);
     expect(starts).toEqual([
       expect.objectContaining({ phase: "starting", attempt: 1, maxAttempts: 2 }),
       expect.objectContaining({ phase: "retrying", attempt: 2, maxAttempts: 2 }),
@@ -1082,7 +1096,14 @@ describe("Orchestrator", () => {
         router_fallback_resolution: "auto-retry",
         router_timeout_kind: "idle"
       }),
-      expect.objectContaining({ source: "codex", router_attempt: 2 })
+      expect.objectContaining({
+        source: "codex",
+        router_attempt: 2,
+        router_recovered_from: "timeout",
+        router_recovered_via: "auto-retry",
+        router_recovered_timeout_kind: "idle",
+        router_total_duration_ms: expect.any(Number)
+      })
     ]);
   });
 
@@ -1096,6 +1117,7 @@ describe("Orchestrator", () => {
     config.router.codex.retryDelayMs = 0;
     let routeCalls = 0;
     const promptAttempts: number[] = [];
+    let finalRoute: RouteDecision | null = null;
     const manager = new SessionManager({ projectRoot: workspaceRoot, dataDir: config.dataDir });
     const orchestrator = new Orchestrator(
       config,
@@ -1114,6 +1136,9 @@ describe("Orchestrator", () => {
     const result = await orchestrator.handleRequest({
       request: "实现功能",
       cwd: workspaceRoot,
+      onRoute: (route) => {
+        finalRoute = route;
+      },
       onRouteFallback: async ({ attempt }) => {
         promptAttempts.push(attempt);
         return "parallel";
@@ -1127,9 +1152,20 @@ describe("Orchestrator", () => {
     expect(result.mode).toBe("complex");
     expect(routeCalls).toBe(2);
     expect(promptAttempts).toEqual([2]);
+    expect(finalRoute).toMatchObject({
+      source: "fallback",
+      router_attempt: 2,
+      router_total_duration_ms: expect.any(Number),
+      router_fallback_resolution: "parallel"
+    });
+    expect((finalRoute as RouteDecision | null)?.router_recovered_from).toBeUndefined();
     expect(records).toEqual([
       expect.objectContaining({ router_attempt: 1, router_fallback_resolution: "auto-retry" }),
-      expect.objectContaining({ router_attempt: 2, router_fallback_resolution: "parallel" })
+      expect.objectContaining({
+        router_attempt: 2,
+        router_total_duration_ms: expect.any(Number),
+        router_fallback_resolution: "parallel"
+      })
     ]);
   });
 

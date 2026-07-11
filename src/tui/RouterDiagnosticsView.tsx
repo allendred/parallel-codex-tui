@@ -133,6 +133,9 @@ export function routerDiagnosticsDisplayLines(
   const currentWorkspace = state.currentWorkspace ?? "";
   const visibleRecords = filterRouterAuditRecords(records, currentWorkspace, scope);
   const codexCount = visibleRecords.filter((record) => record.source === "codex").length;
+  const recoveredCount = visibleRecords.filter((record) => (
+    record.source === "codex" && Boolean(record.router_recovered_from)
+  )).length;
   const retryCount = visibleRecords.filter((record) => (
     record.source === "fallback" && record.router_fallback_resolution === "auto-retry"
   )).length;
@@ -146,6 +149,7 @@ export function routerDiagnosticsDisplayLines(
   const budget = routerDiagnosticsBudget(visibleRecords, policy);
   const health = [
     `health · codex ${codexCount}`,
+    ...(recoveredCount > 0 ? [`recovered ${recoveredCount}`] : []),
     `fallback ${fallbackCount}`,
     ...(retryCount > 0 ? [`retry ${retryCount}`] : []),
     ...(forcedCount > 0 ? [`forced ${forcedCount}`] : []),
@@ -250,15 +254,12 @@ function routerDiagnosticLineTheme(tone: RouterDiagnosticLineTone): Pick<TextPro
 
 function routerAuditStatus(record: RouterAuditRecord): string {
   const formatted = formatRouteStatus(record).replace(/^route\s+/, "");
-  let status = formatted;
   if (record.source === "codex") {
     const parts = formatted.split(/\s+·\s+/);
     parts.splice(1, 0, "codex");
-    status = parts.join(" · ");
+    return parts.join(" · ");
   }
-  return record.router_attempt && record.router_attempt > 1
-    ? `${status} · attempt ${record.router_attempt}`
-    : status;
+  return formatted;
 }
 
 function routerDiagnosticsScopeText(
@@ -281,7 +282,7 @@ function routerDiagnosticsLatencyText(records: RouterAuditRecord[]): string {
     return "latency · no successful Codex routes";
   }
   return [
-    `latency · success p50 ${formatDiagnosticDuration(routerDurationPercentile(durations, 0.5))}`,
+    `latency · successful attempts p50 ${formatDiagnosticDuration(routerDurationPercentile(durations, 0.5))}`,
     `p95 ${formatDiagnosticDuration(routerDurationPercentile(durations, 0.95))}`,
     `max ${formatDiagnosticDuration(durations.at(-1) ?? 0)}`,
     `n ${durations.length}`
@@ -448,7 +449,14 @@ function routerAuditTraceLines(record: RouterAuditRecord): string[] {
     return [];
   }
   if (typeof record.duration_ms === "number") {
-    stages.push(`total ${formatDiagnosticDuration(record.duration_ms)}`);
+    stages.push(`attempt ${formatDiagnosticDuration(record.duration_ms)}`);
+  }
+  if (
+    typeof record.router_total_duration_ms === "number"
+    && typeof record.router_attempt === "number"
+    && record.router_attempt > 1
+  ) {
+    stages.push(`journey ${formatDiagnosticDuration(record.router_total_duration_ms)}`);
   }
   return [
     ...(stages.length > 0 ? [`trace · ${stages.join(" · ")}`] : []),

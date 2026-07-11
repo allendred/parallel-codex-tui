@@ -1,19 +1,15 @@
 import { z } from "zod";
-import { RouteDecisionSchema, type RouteDecision, type RouterFailureStage, type RouterTimeoutKind } from "../domain/schemas.js";
+import {
+  RouteDecisionSchema,
+  RouterFailureKindSchema,
+  type RouteDecision,
+  type RouterFailureKind,
+  type RouterFailureStage,
+  type RouterTimeoutKind
+} from "../domain/schemas.js";
 import { readTextIfExists } from "./file-store.js";
 
-export const RouterFailureKindSchema = z.enum([
-  "timeout",
-  "auth",
-  "rate-limit",
-  "proxy",
-  "network",
-  "unavailable",
-  "invalid-output",
-  "exit",
-  "input",
-  "unknown"
-]);
+export { RouterFailureKindSchema };
 
 export const RouterAuditRecordSchema = RouteDecisionSchema.extend({
   time: z.string().datetime(),
@@ -30,7 +26,7 @@ export const RouterAuditRecordSchema = RouteDecisionSchema.extend({
 });
 
 export type RouterAuditRecord = z.infer<typeof RouterAuditRecordSchema>;
-export type RouterFailureKind = z.infer<typeof RouterFailureKindSchema>;
+export type { RouterFailureKind };
 
 export interface RouterFailureEvidence {
   reason: string;

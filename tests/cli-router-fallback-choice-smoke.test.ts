@@ -7,6 +7,64 @@ import { pathExists, readTextIfExists } from "../src/core/file-store.js";
 import { NativeTerminalScreen } from "../src/tui/terminal-screen.js";
 
 describe("CLI Router fallback choice", () => {
+  it("shows an automatic recovery journey without opening the fallback prompt", async () => {
+    const workspace = await mkdtemp(join(tmpdir(), "pct-cli-router-auto-recovery-workspace-"));
+    const appRoot = await mkdtemp(join(tmpdir(), "pct-cli-router-auto-recovery-app-"));
+    const routerScript = join(appRoot, "auto-recovery-router.cjs");
+    const countPath = join(appRoot, "router-count.txt");
+    await writeFile(routerScript, [
+      "const fs = require('node:fs');",
+      `const countPath = ${JSON.stringify(countPath)};`,
+      "const count = Number(fs.existsSync(countPath) ? fs.readFileSync(countPath, 'utf8') : '0') + 1;",
+      "fs.writeFileSync(countPath, String(count));",
+      "process.stdin.resume();",
+      "process.stdin.on('end', () => {",
+      "  if (count === 1) {",
+      "    process.stderr.write('first attempt activity\\n');",
+      "    setInterval(() => {}, 1000);",
+      "    return;",
+      "  }",
+      "  process.stdout.write(JSON.stringify({ mode: 'simple', reason: 'automatic recovery succeeded' }));",
+      "});"
+    ].join("\n"));
+    await writeConfig(appRoot, routerScript, 2000, {
+      firstOutputTimeoutMs: 1000,
+      idleTimeoutMs: 300,
+      retryDelayMs: 50
+    });
+
+    const session = startCli(appRoot, workspace);
+    try {
+      await waitForScreenText(session, "> | message");
+      session.child.write("你好\r");
+      await waitForScreenText(session, "Mock simple response for: 你好");
+      await waitForScreenText(session, "route simple · auto recovered idle timeout · try 2");
+
+      const snapshot = session.screen.snapshot();
+      const records = await readRouteAudit(appRoot);
+      expect(snapshot).not.toContain("route failed · 1 Main");
+      expect(records).toEqual([
+        expect.objectContaining({
+          source: "fallback",
+          router_attempt: 1,
+          router_timeout_kind: "idle",
+          router_fallback_resolution: "auto-retry"
+        }),
+        expect.objectContaining({
+          source: "codex",
+          router_attempt: 2,
+          router_recovered_from: "timeout",
+          router_recovered_via: "auto-retry",
+          router_recovered_timeout_kind: "idle",
+          router_total_duration_ms: expect.any(Number)
+        })
+      ]);
+      await stopCli(session);
+    } finally {
+      session.dispose();
+    }
+  }, 15000);
+
   it("retries Codex routing and records both attempts before following the decision", async () => {
     const workspace = await mkdtemp(join(tmpdir(), "pct-cli-router-choice-retry-workspace-"));
     const appRoot = await mkdtemp(join(tmpdir(), "pct-cli-router-choice-retry-app-"));
@@ -36,6 +94,7 @@ describe("CLI Router fallback choice", () => {
       await waitForScreenText(session, "route failed · 1 Main · 2 Parallel · R retry · Esc cancel");
       session.child.write("r");
       await waitForScreenText(session, "Mock simple response for: 你好");
+      await waitForScreenText(session, "route simple · recovered total timeout · try 2");
 
       const records = await readRouteAudit(appRoot);
       expect(records).toEqual([
@@ -47,7 +106,11 @@ describe("CLI Router fallback choice", () => {
         expect.objectContaining({
           source: "codex",
           mode: "simple",
-          router_attempt: 2
+          router_attempt: 2,
+          router_recovered_from: "timeout",
+          router_recovered_via: "retry",
+          router_recovered_timeout_kind: "total",
+          router_total_duration_ms: expect.any(Number)
         })
       ]);
       expect(await readTextIfExists(countPath)).toBe("2");
@@ -165,7 +228,16 @@ function startCli(appRoot: string, workspace: string): CliSession {
   };
 }
 
-async function writeConfig(appRoot: string, routerScript: string, timeoutMs: number): Promise<void> {
+async function writeConfig(
+  appRoot: string,
+  routerScript: string,
+  timeoutMs: number,
+  watchdogs: {
+    firstOutputTimeoutMs?: number;
+    idleTimeoutMs?: number;
+    retryDelayMs?: number;
+  } = {}
+): Promise<void> {
   await mkdir(join(appRoot, ".parallel-codex"), { recursive: true });
   await writeFile(join(appRoot, ".parallel-codex", "config.toml"), [
     "[router]",
@@ -175,6 +247,9 @@ async function writeConfig(appRoot: string, routerScript: string, timeoutMs: num
     `command = "${escapeToml(process.execPath)}"`,
     `args = ["${escapeToml(routerScript)}"]`,
     `timeoutMs = ${timeoutMs}`,
+    ...(watchdogs.firstOutputTimeoutMs ? [`firstOutputTimeoutMs = ${watchdogs.firstOutputTimeoutMs}`] : []),
+    ...(watchdogs.idleTimeoutMs ? [`idleTimeoutMs = ${watchdogs.idleTimeoutMs}`] : []),
+    ...(watchdogs.retryDelayMs !== undefined ? [`retryDelayMs = ${watchdogs.retryDelayMs}`] : []),
     'fallback = "simple"',
     "",
     "[pairing]",

@@ -335,13 +335,25 @@ describe("SessionManager", () => {
       reason: "A short task question.",
       source: "codex",
       duration_ms: 9210,
+      router_attempt: 2,
+      router_total_duration_ms: 39710,
+      router_recovered_from: "timeout",
+      router_recovered_via: "auto-retry",
+      router_recovered_timeout_kind: "idle",
+      router_recovered_failure_stage: "streaming",
       suggested_roles: []
     }));
 
     await expect(manager.readLatestRoute(task)).resolves.toMatchObject({
       mode: "simple",
       source: "codex",
-      duration_ms: 9210
+      duration_ms: 9210,
+      router_attempt: 2,
+      router_total_duration_ms: 39710,
+      router_recovered_from: "timeout",
+      router_recovered_via: "auto-retry",
+      router_recovered_timeout_kind: "idle",
+      router_recovered_failure_stage: "streaming"
     });
 
     await writeText(join(task.dir, "latest-route.json"), "{");

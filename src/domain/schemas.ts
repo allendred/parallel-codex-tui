@@ -19,8 +19,21 @@ export const RouterFallbackResolutionSchema = z.enum([
   "cancelled",
   "configured"
 ]);
+export const RouterFailureKindSchema = z.enum([
+  "timeout",
+  "auth",
+  "rate-limit",
+  "proxy",
+  "network",
+  "unavailable",
+  "invalid-output",
+  "exit",
+  "input",
+  "unknown"
+]);
 export const RouterProxySourceSchema = z.enum(["router-config", "environment"]);
 export const RouterTimeoutKindSchema = z.enum(["first-output", "idle", "total"]);
+export const RouterRecoveryTriggerSchema = z.enum(["retry", "auto-retry"]);
 
 export const TaskStateSchema = z.enum([
   "created",
@@ -75,8 +88,13 @@ export const RouteDecisionSchema = z.object({
   router_stderr_bytes: z.number().int().nonnegative().optional(),
   router_failure_stage: RouterFailureStageSchema.optional(),
   router_attempt: z.number().int().positive().optional(),
+  router_total_duration_ms: z.number().nonnegative().optional(),
   router_fallback_resolution: RouterFallbackResolutionSchema.optional(),
   router_timeout_kind: RouterTimeoutKindSchema.optional(),
+  router_recovered_from: RouterFailureKindSchema.optional(),
+  router_recovered_via: RouterRecoveryTriggerSchema.optional(),
+  router_recovered_timeout_kind: RouterTimeoutKindSchema.optional(),
+  router_recovered_failure_stage: RouterFailureStageSchema.optional(),
   proxy_configured: z.boolean().optional(),
   proxy_source: RouterProxySourceSchema.optional(),
   proxy_variable: z.string().regex(/^(?:HTTP|HTTPS|ALL)_PROXY$/i).optional(),
@@ -161,6 +179,8 @@ export const EventRecordSchema = z.object({
 export type RouteMode = z.infer<typeof RouteModeSchema>;
 export type RouterFailureStage = z.infer<typeof RouterFailureStageSchema>;
 export type RouterFallbackResolution = z.infer<typeof RouterFallbackResolutionSchema>;
+export type RouterFailureKind = z.infer<typeof RouterFailureKindSchema>;
+export type RouterRecoveryTrigger = z.infer<typeof RouterRecoveryTriggerSchema>;
 export type EngineName = z.infer<typeof EngineNameSchema>;
 export type WorkerRole = z.infer<typeof WorkerRoleSchema>;
 export type TaskState = z.infer<typeof TaskStateSchema>;

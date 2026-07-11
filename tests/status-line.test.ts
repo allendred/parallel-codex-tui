@@ -62,6 +62,17 @@ describe("formatStatusLine", () => {
       router_attempt: 2
     })).toBe("route simple · try 2 · 42ms");
     expect(formatRouteStatus?.({
+      mode: "simple",
+      source: "codex",
+      duration_ms: 900,
+      router_attempt: 2,
+      router_total_duration_ms: 31500,
+      router_recovered_from: "timeout",
+      router_recovered_via: "auto-retry",
+      router_recovered_timeout_kind: "idle",
+      router_recovered_failure_stage: "streaming"
+    })).toBe("route simple · auto recovered idle timeout · try 2 · 32s total");
+    expect(formatRouteStatus?.({
       mode: "complex",
       source: "fallback",
       reason: "Codex router failed: Codex router timed out after 120000ms. Codex router fallback forced complex.",
@@ -146,9 +157,11 @@ describe("formatStatusLine", () => {
       source: "fallback",
       reason: "Codex router timed out after 30000ms. User selected Parallel after Router fallback.",
       duration_ms: 30000,
+      router_total_duration_ms: 60500,
       router_failure_stage: "waiting-output",
+      router_attempt: 2,
       router_fallback_resolution: "parallel"
-    })).toBe("route complex · fallback · user Parallel · timeout waiting output · 30s");
+    })).toBe("route complex · fallback · user Parallel · try 2 · timeout waiting output · 61s total");
     expect(formatRouteStatus?.({
       mode: "simple",
       source: "fallback",

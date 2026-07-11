@@ -85,6 +85,10 @@ export function formatRouteStatus(route: RouteDecision | null): string {
   } else if (route.router_fallback_resolution === "auto-retry") {
     details.push("auto retry");
   }
+  const recovery = routeRecoveryLabel(route);
+  if (recovery) {
+    details.push(recovery);
+  }
   if (typeof route.router_attempt === "number" && route.router_attempt > 1) {
     details.push(`try ${route.router_attempt}`);
   }
@@ -100,10 +104,34 @@ export function formatRouteStatus(route: RouteDecision | null): string {
   } else if (route.proxy_configured && route.proxy_endpoint) {
     details.push(`via ${route.proxy_endpoint}`);
   }
-  if (typeof route.duration_ms === "number") {
+  if (
+    typeof route.router_total_duration_ms === "number"
+    && typeof route.router_attempt === "number"
+    && route.router_attempt > 1
+  ) {
+    details.push(`${formatRouteDuration(route.router_total_duration_ms)} total`);
+  } else if (typeof route.duration_ms === "number") {
     details.push(formatRouteDuration(route.duration_ms));
   }
   return `route ${details.join(" · ")}`;
+}
+
+function routeRecoveryLabel(route: RouteDecision): string | null {
+  if (!route.router_recovered_from) {
+    return null;
+  }
+  const prefix = route.router_recovered_via === "auto-retry" ? "auto recovered" : "recovered";
+  if (route.router_recovered_from !== "timeout") {
+    return `${prefix} ${route.router_recovered_from.replaceAll("-", " ")}`;
+  }
+  const timeout = route.router_recovered_timeout_kind === "first-output"
+    ? "first output timeout"
+    : route.router_recovered_timeout_kind === "idle"
+      ? "idle timeout"
+      : route.router_recovered_timeout_kind === "total"
+        ? "total timeout"
+        : "timeout";
+  return `${prefix} ${timeout}`;
 }
 
 export function formatRoutePendingStatus(state: RouteStartInfo | null, elapsedMs?: number): string {

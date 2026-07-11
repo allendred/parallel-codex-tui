@@ -69,19 +69,19 @@ describe("RouterDiagnosticsView", () => {
 
     expect(frame).toContain("Router diagnostics");
     expect(frame).toContain("scope · all · 2/2 routes · 1 workspace");
-    expect(frame).toContain("health · codex 1 · fallback 0 · retry 1 · timeout 1");
-    expect(frame).toContain("latency · success p50 9.7s · p95 9.7s · max 9.7s · n 1");
+    expect(frame).toContain("health · codex 1 · recovered 1 · fallback 0 · retry 1 · timeout 1");
+    expect(frame).toContain("latency · successful attempts p50 9.7s · p95 9.7s · max 9.7s · n 1");
     expect(frame).toContain("budget · initial learning · 30s / p95 9.7s · n 1 · follow-up no data · 20s");
     expect(flattened).toContain("policy · auto · total 30s / 20s · first 30s · idle 30s · retry 2x / 500ms · fallback simple");
     expect(flattened).toContain("proxy · router config · HTTPS_PROXY · proxy.test:8443 · 1 recorded · context only");
-    expect(frame).toContain("tetris · initial · simple · codex · try 2 · 9.7s · attempt 2");
+    expect(flattened).toContain("tetris · initial · simple · codex · auto recovered idle timeout · try 2 · 40s total");
     expect(flattened).toContain("evidence · timeout · idle · after stderr · limit 30s · via 127.0.0.1:7890 · router config HTTPS_PROXY · cause unproven");
     expect(flattened).toContain("automatic retry");
     expect(flattened).toContain("diagnosis · Router diagnostics stopped before a route response");
     expect(flattened).toContain("next · inspect the reason; retry Router or raise router.codex.idleTimeoutMs");
-    expect(flattened).toContain("trace · dispatch 2ms · spawn 8ms · first stderr 24ms · process 30s · total 30s");
+    expect(flattened).toContain("trace · dispatch 2ms · spawn 8ms · first stderr 24ms · process 30s · attempt 30s");
     expect(flattened).toContain("io · stdout 0B · stderr 73B");
-    expect(flattened).toContain("trace · dispatch 1ms · spawn 5ms · first stderr 120ms · first stdout 8.9s · process 9.6s · parse 1ms · total 9.7s");
+    expect(flattened).toContain("trace · dispatch 1ms · spawn 5ms · first stderr 120ms · first stdout 8.9s · process 9.6s · parse 1ms · attempt 9.7s · journey 39.7s");
     expect(flattened).toContain("io · stdout 86B · stderr 15B");
     expect(flattened).toContain("idle timeout after stderr · via 127.0.0.1:7890");
     expect(frame).toContain("做个俄罗斯方块");
@@ -211,7 +211,12 @@ function records(): RouterAuditRecord[] {
       router_parse_ms: 1,
       router_stdout_bytes: 86,
       router_stderr_bytes: 15,
-      router_attempt: 2
+      router_attempt: 2,
+      router_total_duration_ms: 39700,
+      router_recovered_from: "timeout",
+      router_recovered_via: "auto-retry",
+      router_recovered_timeout_kind: "idle",
+      router_recovered_failure_stage: "streaming"
     },
     {
       time: "2026-07-11T07:01:00.000Z",

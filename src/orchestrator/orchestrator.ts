@@ -1385,6 +1385,8 @@ export class Orchestrator {
       : currentConfig;
     const semanticRoute = router.defaultMode === "auto";
     let attempt = 1;
+    let accumulatedRouterDurationMs = 0;
+    let previousFailure: RouteDecision | null = null;
 
     while (true) {
       const proxy = routerProxyContext(routeConfig.router.codex.env);
@@ -1412,10 +1414,11 @@ export class Orchestrator {
         signal,
         onRouteProgress
       );
-      let route: RouteDecision = {
+      accumulatedRouterDurationMs += routed.duration_ms ?? 0;
+      let route = annotateRouterJourney({
         ...routed,
         ...(semanticRoute ? { router_attempt: attempt } : {})
-      };
+      }, attempt, accumulatedRouterDurationMs, previousFailure);
 
       if (route.source !== "fallback") {
         await this.appendRouterAuditRecord(request, workspace, scope, route, routeConfig, semanticRoute);
@@ -1429,6 +1432,7 @@ export class Orchestrator {
       ) {
         route = resolveRouterFallback(route, "auto-retry");
         await this.appendRouterAuditRecord(request, workspace, scope, route, routeConfig, semanticRoute);
+        previousFailure = route;
         onRouteStart?.({
           scope,
           mode: router.defaultMode,
@@ -1446,7 +1450,9 @@ export class Orchestrator {
               }
             : {})
         });
+        const backoffStartedAt = Date.now();
         await waitForRouterRetry(routeConfig.router.codex.retryDelayMs, signal);
+        accumulatedRouterDurationMs += Math.max(0, Date.now() - backoffStartedAt);
         attempt += 1;
         continue;
       }
@@ -1471,6 +1477,7 @@ export class Orchestrator {
       route = resolveRouterFallback(route, choice);
       await this.appendRouterAuditRecord(request, workspace, scope, route, routeConfig, semanticRoute);
       if (choice === "retry") {
+        previousFailure = route;
         attempt += 1;
         continue;
       }
@@ -2183,6 +2190,34 @@ function ensureWorkerSuccess(result: WorkerResult): void {
   if (result.exitCode !== 0) {
     throw new Error(`${result.workerId} failed with exit code ${result.exitCode}`);
   }
+}
+
+function annotateRouterJourney(
+  route: RouteDecision,
+  attempt: number,
+  totalDurationMs: number,
+  previousFailure: RouteDecision | null
+): RouteDecision {
+  const recovered = route.source !== "fallback" && previousFailure?.source === "fallback";
+  const recoveredVia = previousFailure?.router_fallback_resolution;
+  return {
+    ...route,
+    ...(attempt > 1 ? { router_total_duration_ms: totalDurationMs } : {}),
+    ...(recovered
+      ? {
+          router_recovered_from: classifyRouterFailure(previousFailure.reason) ?? "unknown",
+          ...(recoveredVia === "retry" || recoveredVia === "auto-retry"
+            ? { router_recovered_via: recoveredVia }
+            : {}),
+          ...(previousFailure.router_timeout_kind
+            ? { router_recovered_timeout_kind: previousFailure.router_timeout_kind }
+            : {}),
+          ...(previousFailure.router_failure_stage
+            ? { router_recovered_failure_stage: previousFailure.router_failure_stage }
+            : {})
+        }
+      : {})
+  };
 }
 
 function resolveRouterFallback(
