@@ -230,6 +230,9 @@ function routePendingPhaseLabel(state: RouteStartInfo): string {
   if (state.phase === "parsing") {
     return "parsing";
   }
+  if (state.phase === "stopping") {
+    return "stopping";
+  }
   return state.scope === "follow-up" ? "follow-up" : "checking";
 }
 

@@ -494,6 +494,9 @@ function routeProgressStatusAlias(value: string): string | null {
   if (value === "parsing") {
     return "parse";
   }
+  if (value === "stopping") {
+    return "stop";
+  }
   return null;
 }
 
@@ -592,7 +595,7 @@ function parseStatusText(text: string, options: { hideTask?: boolean } = {}): Se
       segments.push({
         label: "ROUTE",
         value,
-        tone: /(?:^|\s·\s)fallback(?:\s·\s|$)|^(?:checking|follow-up|starting|retry|waiting output|diagnostics|receiving|parsing)\b/i.test(value)
+        tone: /(?:^|\s·\s)fallback(?:\s·\s|$)|^(?:checking|follow-up|starting|retry|waiting output|diagnostics|receiving|parsing|stopping)\b/i.test(value)
           ? "wait"
           : undefined
       });

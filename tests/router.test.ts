@@ -1,8 +1,9 @@
-import { access, mkdtemp } from "node:fs/promises";
+import { access, mkdtemp, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { defaultConfig } from "../src/core/config.js";
+import { processIsAlive } from "../src/core/process-ownership.js";
 import * as router from "../src/core/router.js";
 import { routeRequestWithCodex } from "../src/core/router.js";
 import type { CodexRouteRunner } from "../src/core/router.js";
@@ -330,6 +331,212 @@ describe("routeRequestWithCodex", () => {
     await expect(access(sentinelPath)).rejects.toMatchObject({ code: "ENOENT" });
   });
 
+  it("waits for graceful Router cleanup before returning a timeout", async () => {
+    if (process.platform === "win32") {
+      return;
+    }
+
+    const root = await mkdtemp(join(tmpdir(), "pct-router-graceful-timeout-"));
+    const cleanupPath = join(root, "router-cleaned.txt");
+    const config = defaultConfig(root);
+    config.router.codex.command = process.execPath;
+    config.router.codex.args = [
+      "-e",
+      [
+        "const {writeFileSync}=require('node:fs');",
+        "process.on('SIGTERM',()=>setTimeout(()=>{",
+        `writeFileSync(${JSON.stringify(cleanupPath)},'done');`,
+        "process.exit(0);",
+        "},120));",
+        "setInterval(()=>{},1000);"
+      ].join("")
+    ];
+    config.router.codex.timeoutMs = 100;
+
+    const route = await routeRequestWithCodex("你好", config, undefined, root);
+
+    expect(route).toMatchObject({ source: "fallback", router_timeout_kind: "total" });
+    await expect(readFile(cleanupPath, "utf8")).resolves.toBe("done");
+    expect(route.duration_ms).toBeGreaterThanOrEqual(180);
+  });
+
+  it("force-kills an uncooperative Router before returning a timeout", async () => {
+    if (process.platform === "win32") {
+      return;
+    }
+
+    const root = await mkdtemp(join(tmpdir(), "pct-router-force-timeout-"));
+    const pidPath = join(root, "router.pid");
+    const config = defaultConfig(root);
+    config.router.codex.command = process.execPath;
+    config.router.codex.args = [
+      "-e",
+      [
+        "const {writeFileSync}=require('node:fs');",
+        `writeFileSync(${JSON.stringify(pidPath)},String(process.pid));`,
+        "process.on('SIGTERM',()=>{});",
+        "setInterval(()=>{},1000);"
+      ].join("")
+    ];
+    config.router.codex.timeoutMs = 100;
+
+    let pid = 0;
+    try {
+      const route = await routeRequestWithCodex("你好", config, undefined, root);
+      pid = Number(await readFile(pidPath, "utf8"));
+
+      expect(route).toMatchObject({ source: "fallback", router_timeout_kind: "total" });
+      expect(processIsAlive(pid)).toBe(false);
+    } finally {
+      killProcessGroupIfAlive(pid);
+    }
+  });
+
+  it("waits for an uncooperative Router descendant after its parent exits", async () => {
+    if (process.platform === "win32") {
+      return;
+    }
+
+    const root = await mkdtemp(join(tmpdir(), "pct-router-descendant-force-"));
+    const pidPath = join(root, "router-descendant.pid");
+    const descendantScript = [
+      "const {writeFileSync}=require('node:fs');",
+      `writeFileSync(${JSON.stringify(pidPath)},String(process.pid));`,
+      "process.on('SIGTERM',()=>{});",
+      "process.send?.('ready');",
+      "setInterval(()=>{},1000);"
+    ].join("");
+    const config = defaultConfig(root);
+    config.router.codex.command = process.execPath;
+    config.router.codex.args = [
+      "-e",
+      [
+        "const {spawn}=require('node:child_process');",
+        `const child=spawn(process.execPath,['-e',${JSON.stringify(descendantScript)}],{stdio:['ignore','ignore','ignore','ipc']});`,
+        "child.once('message',()=>process.stderr.write('ready\\n'));",
+        "setInterval(()=>{},1000);"
+      ].join("")
+    ];
+    config.router.codex.timeoutMs = 2000;
+    config.router.codex.firstOutputTimeoutMs = 1000;
+    config.router.codex.idleTimeoutMs = 100;
+
+    let pid = 0;
+    try {
+      const route = await routeRequestWithCodex("你好", config, undefined, root);
+      pid = Number(await readFile(pidPath, "utf8"));
+
+      expect(route).toMatchObject({
+        source: "fallback",
+        router_timeout_kind: "idle",
+        router_failure_stage: "streaming"
+      });
+      expect(processIsAlive(pid)).toBe(false);
+    } finally {
+      killProcessGroupIfAlive(pid);
+    }
+  });
+
+  it("waits for Router cleanup before completing cancellation", async () => {
+    if (process.platform === "win32") {
+      return;
+    }
+
+    const root = await mkdtemp(join(tmpdir(), "pct-router-cancel-cleanup-"));
+    const cleanupPath = join(root, "router-cancelled.txt");
+    const config = defaultConfig(root);
+    config.router.codex.command = process.execPath;
+    config.router.codex.args = [
+      "-e",
+      [
+        "const {writeFileSync}=require('node:fs');",
+        "process.on('SIGTERM',()=>setTimeout(()=>{",
+        `writeFileSync(${JSON.stringify(cleanupPath)},'done');`,
+        "process.exit(0);",
+        "},120));",
+        "process.stderr.write('ready\\n');",
+        "setInterval(()=>{},1000);"
+      ].join("")
+    ];
+    const controller = new AbortController();
+    let markReady: (() => void) | undefined;
+    const ready = new Promise<void>((resolve) => {
+      markReady = resolve;
+    });
+    const routeWithProgress = routeRequestWithCodex as unknown as (
+      request: string,
+      config: ReturnType<typeof defaultConfig>,
+      runner: undefined,
+      cwd: string,
+      signal: AbortSignal,
+      onProgress: (event: { phase: string }) => void
+    ) => ReturnType<typeof routeRequestWithCodex>;
+    const pending = routeWithProgress(
+      "你好",
+      config,
+      undefined,
+      root,
+      controller.signal,
+      (event) => {
+        if (event.phase === "receiving-stderr") {
+          markReady?.();
+        }
+      }
+    );
+    await ready;
+
+    controller.abort();
+
+    await expect(pending).rejects.toMatchObject({ name: "AbortError" });
+    await expect(readFile(cleanupPath, "utf8")).resolves.toBe("done");
+  });
+
+  it("fails closed when Router process-group termination is not permitted", async () => {
+    if (process.platform === "win32") {
+      return;
+    }
+
+    const root = await mkdtemp(join(tmpdir(), "pct-router-cleanup-denied-"));
+    const pidPath = join(root, "router.pid");
+    const config = defaultConfig(root);
+    config.router.codex.command = process.execPath;
+    config.router.codex.args = [
+      "-e",
+      [
+        "const {writeFileSync}=require('node:fs');",
+        `writeFileSync(${JSON.stringify(pidPath)},String(process.pid));`,
+        "setInterval(()=>{},1000);"
+      ].join("")
+    ];
+    config.router.codex.timeoutMs = 150;
+    const originalKill = process.kill.bind(process);
+    const killSpy = vi.spyOn(process, "kill").mockImplementation((pid, signal) => {
+      if (typeof pid === "number" && pid < 0 && signal === "SIGTERM") {
+        const error = new Error("operation not permitted") as NodeJS.ErrnoException;
+        error.code = "EPERM";
+        throw error;
+      }
+      return originalKill(pid, signal);
+    });
+
+    let pid = 0;
+    try {
+      const error = await routeRequestWithCodex("你好", config, undefined, root)
+        .catch((caught: unknown) => caught);
+      pid = Number(await readFile(pidPath, "utf8"));
+
+      expect(error).toMatchObject({
+        name: "RouterProcessCleanupError",
+        message: expect.stringContaining(`Could not terminate Codex router process ${pid}`)
+      });
+      expect(error).not.toMatchObject({ source: "fallback" });
+      expect(processIsAlive(pid)).toBe(true);
+    } finally {
+      killSpy.mockRestore();
+      killProcessGroupIfAlive(pid);
+    }
+  });
+
   it("records configured proxy context when a stalled router is silent", async () => {
     const root = await mkdtemp(join(tmpdir(), "pct-router-silent-proxy-timeout-"));
     const config = defaultConfig(root);
@@ -372,7 +579,7 @@ describe("routeRequestWithCodex", () => {
       proxy_variable: "HTTPS_PROXY",
       proxy_endpoint: "127.0.0.1:7890"
     });
-    expect(progress).toEqual(["dispatching", "starting", "waiting-output"]);
+    expect(progress).toEqual(["dispatching", "starting", "waiting-output", "stopping"]);
     expect(route.router_first_output_ms).toBeUndefined();
     expect(route.router_parse_ms).toBeUndefined();
   });
@@ -509,7 +716,7 @@ describe("routeRequestWithCodex", () => {
     await new Promise((resolve) => setTimeout(resolve, 80));
 
     expect(route).toMatchObject({ source: "fallback", router_failure_stage: "waiting-output" });
-    expect(progress).toEqual(["dispatching", "starting", "waiting-output"]);
+    expect(progress).toEqual(["dispatching", "starting", "waiting-output", "stopping"]);
   });
 
   it("records response-stage telemetry when a successful process returns invalid output", async () => {
@@ -675,3 +882,14 @@ describe("routeRequestWithCodex", () => {
     expect(route.reason).toContain("Codex router fallback forced complex.");
   });
 });
+
+function killProcessGroupIfAlive(pid: number): void {
+  if (pid <= 0 || !processIsAlive(pid)) {
+    return;
+  }
+  try {
+    process.kill(-pid, "SIGKILL");
+  } catch {
+    process.kill(pid, "SIGKILL");
+  }
+}

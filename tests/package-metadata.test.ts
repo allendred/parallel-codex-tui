@@ -212,12 +212,14 @@ describe("package metadata", () => {
     expect(readme).toContain("configured proxy remains context rather than a proven cause");
     expect(readme).toContain("`first output timeout`, `idle timeout after stdout/stderr`, or `total timeout`");
     expect(readme).toContain("`via <proxy-host:port>` remains context, not a claim that the proxy caused the failure");
-    expect(readme).toContain("`starting`, `waiting output`, `diagnostics`, `receiving`, and `parsing`");
+    expect(readme).toContain("`starting`, `waiting output`, `diagnostics`, `receiving`, `parsing`, and `stopping`");
     expect(readme).toContain("normalized proxy source/variable, sanitized proxy host:port");
     expect(readme).toContain("`firstOutputTimeoutMs` stops a silent process");
     expect(readme).toContain("`idleTimeoutMs` resets after every stdout or stderr chunk");
     expect(readme).toContain("The 15-second first-output and idle defaults stay below the 30-second total ceiling");
     expect(readme).toContain("Two repeated silent starts settle in about 30.5 seconds");
+    expect(readme).toContain("A retry, fallback choice, or completed cancellation is not exposed until that command tree is confirmed stopped");
+    expect(readme).toContain("If termination cannot be verified after `SIGKILL`, the request fails closed");
     expect(readme).toContain("`maxAttempts = 2` retries one transient classification failure after `retryDelayMs = 500`");
     expect(readme).toContain("First-output and idle watchdogs plus explicit network/proxy failures are retryable");
     expect(readme).toContain("router_fallback_resolution = \"auto-retry\"");

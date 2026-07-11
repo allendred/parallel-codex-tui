@@ -1,9 +1,13 @@
-import { spawn } from "node:child_process";
+import { spawn, type ChildProcess } from "node:child_process";
 import { performance } from "node:perf_hooks";
 import type { AppConfig } from "./config.js";
 import type { RouteDecision, RouterFailureStage, RouterProxySource, RouterTimeoutKind } from "../domain/schemas.js";
 import { RouteDecisionSchema } from "../domain/schemas.js";
 import { sanitizeRouterText } from "./router-redaction.js";
+
+const ROUTER_TERM_GRACE_MS = 250;
+const ROUTER_KILL_WAIT_MS = 500;
+const ROUTER_EXIT_POLL_MS = 20;
 
 export interface RouterExecutionTelemetry {
   router_dispatch_ms?: number;
@@ -29,7 +33,8 @@ export type RouterExecutionPhase =
   | "waiting-output"
   | "receiving-stderr"
   | "receiving-response"
-  | "parsing";
+  | "parsing"
+  | "stopping";
 
 export interface RouterExecutionProgress {
   phase: RouterExecutionPhase;
@@ -58,6 +63,13 @@ interface RouterExecutionError extends Error {
   routerTelemetry?: RouterExecutionTelemetry;
   routerFailureStage?: RouterFailureStage;
   routerTimeoutKind?: RouterTimeoutKind;
+}
+
+class RouterProcessCleanupError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "RouterProcessCleanupError";
+  }
 }
 
 export async function routeRequestWithCodex(
@@ -106,6 +118,9 @@ export async function routeRequestWithCodex(
       router_parse_ms: Math.max(0, performance.now() - parseStartedAt)
     }), proxyContext);
   } catch (error) {
+    if (error instanceof RouterProcessCleanupError) {
+      throw error;
+    }
     if (signal?.aborted || isAbortError(error)) {
       throw cancellationError();
     }
@@ -185,6 +200,7 @@ export async function runCodexRouterProcess(
     let firstStdoutMs: number | undefined;
     let firstStderrMs: number | undefined;
     let settled = false;
+    let terminating = false;
     let totalTimeout: NodeJS.Timeout | undefined;
     let firstOutputTimeout: NodeJS.Timeout | undefined;
     let idleTimeout: NodeJS.Timeout | undefined;
@@ -236,10 +252,30 @@ export async function runCodexRouterProcess(
       }
     };
 
-    const terminate = (): void => {
-      signalRouterProcess(child.pid, "SIGTERM", detached);
-      const forceKill = setTimeout(() => signalRouterProcess(child.pid, "SIGKILL", detached), 1500);
-      forceKill.unref();
+    const terminateThenFinish = (
+      error: Error,
+      output = stdout,
+      stage?: RouterFailureStage,
+      timeoutKind?: RouterTimeoutKind
+    ): void => {
+      if (settled || terminating) {
+        return;
+      }
+      terminating = true;
+      reportProgress("stopping");
+      clearRunTimers();
+      if (abortListener) {
+        signal?.removeEventListener("abort", abortListener);
+        abortListener = undefined;
+      }
+      void terminateRouterProcess(child, detached).then(
+        () => finish(error, output, stage, timeoutKind),
+        (cleanupError: unknown) => finish(
+          cleanupError instanceof RouterProcessCleanupError
+            ? cleanupError
+            : new RouterProcessCleanupError(`Codex router cleanup failed: ${errorMessage(cleanupError)}`)
+        )
+      );
     };
 
     const timeoutRouter = (
@@ -247,16 +283,15 @@ export async function runCodexRouterProcess(
       limitMs: number,
       stage: RouterFailureStage
     ): void => {
-      if (settled) {
+      if (settled || terminating) {
         return;
       }
-      terminate();
       const detail = summarizeRouterProcessDetail(stderr);
       const proxyContext = proxyConfigured && !/\bproxy\b|代理/i.test(detail)
         ? " with proxy configured"
         : "";
       const timeoutLabel = kind === "first-output" ? " first output" : kind === "idle" ? " idle" : "";
-      finish(
+      terminateThenFinish(
         new Error(`Codex router${timeoutLabel} timed out after ${limitMs}ms${proxyContext}${detail ? `: ${detail}` : ""}`),
         stdout,
         stage,
@@ -284,12 +319,14 @@ export async function runCodexRouterProcess(
     };
 
     abortListener = () => {
-      terminate();
-      finish(cancellationError());
+      terminateThenFinish(cancellationError());
     };
     signal?.addEventListener("abort", abortListener, { once: true });
 
     child.once("spawn", () => {
+      if (terminating) {
+        return;
+      }
       spawnMs = Math.max(0, Date.now() - processStartedAt);
       reportProgress("waiting-output");
     });
@@ -308,7 +345,7 @@ export async function runCodexRouterProcess(
     }
 
     child.stdout.on("data", (chunk: Buffer) => {
-      if (settled) {
+      if (settled || terminating) {
         return;
       }
       stdoutBytes += chunk.byteLength;
@@ -320,7 +357,7 @@ export async function runCodexRouterProcess(
     });
 
     child.stderr.on("data", (chunk: Buffer) => {
-      if (settled) {
+      if (settled || terminating) {
         return;
       }
       stderrBytes += chunk.byteLength;
@@ -334,10 +371,16 @@ export async function runCodexRouterProcess(
     });
 
     child.on("error", (error) => {
+      if (terminating) {
+        return;
+      }
       finish(error, stdout, "spawn");
     });
 
     child.on("close", (code, signal) => {
+      if (terminating) {
+        return;
+      }
       if (code === 0) {
         finish(null);
         return;
@@ -354,12 +397,85 @@ export async function runCodexRouterProcess(
     });
 
     child.stdin.once("error", (error) => {
-      terminate();
-      finish(new Error(`Codex router input failed: ${error.message}`), stdout, "input");
+      terminateThenFinish(new Error(`Codex router input failed: ${error.message}`), stdout, "input");
     });
 
-    child.stdin.end(prompt);
+    if (signal?.aborted) {
+      abortListener();
+    } else {
+      child.stdin.end(prompt);
+    }
   });
+}
+
+async function terminateRouterProcess(child: ChildProcess, processGroup: boolean): Promise<void> {
+  const pid = child.pid;
+  if (!pid) {
+    return;
+  }
+  try {
+    signalRouterProcess(pid, "SIGTERM", processGroup);
+    if (await waitForRouterProcessExit(child, processGroup, ROUTER_TERM_GRACE_MS)) {
+      return;
+    }
+    signalRouterProcess(pid, "SIGKILL", processGroup);
+    if (await waitForRouterProcessExit(child, processGroup, ROUTER_KILL_WAIT_MS)) {
+      return;
+    }
+  } catch (error) {
+    throw new RouterProcessCleanupError(
+      `Could not terminate Codex router process ${pid}: ${errorMessage(error)}`
+    );
+  }
+  throw new RouterProcessCleanupError(
+    `Codex router process group ${pid} remained alive after SIGKILL.`
+  );
+}
+
+async function waitForRouterProcessExit(
+  child: ChildProcess,
+  processGroup: boolean,
+  timeoutMs: number
+): Promise<boolean> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (!routerProcessTargetIsAlive(child, processGroup)) {
+      return true;
+    }
+    await delay(ROUTER_EXIT_POLL_MS);
+  }
+  return !routerProcessTargetIsAlive(child, processGroup);
+}
+
+function routerProcessTargetIsAlive(child: ChildProcess, processGroup: boolean): boolean {
+  const pid = child.pid;
+  if (!pid) {
+    return false;
+  }
+  if (processGroup && signalTargetIsAlive(-pid)) {
+    return true;
+  }
+  if (child.exitCode !== null || child.signalCode !== null) {
+    return false;
+  }
+  return signalTargetIsAlive(pid);
+}
+
+function signalTargetIsAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === "EPERM";
+  }
+}
+
+async function delay(milliseconds: number): Promise<void> {
+  await new Promise((resolve) => setTimeout(resolve, milliseconds));
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }
 
 function signalRouterProcess(
@@ -375,15 +491,6 @@ function signalRouterProcess(
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== "ESRCH") {
       throw error;
-    }
-    if (processGroup) {
-      try {
-        process.kill(pid, signal);
-      } catch (fallbackError) {
-        if ((fallbackError as NodeJS.ErrnoException).code !== "ESRCH") {
-          throw fallbackError;
-        }
-      }
     }
   }
 }

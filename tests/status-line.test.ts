@@ -264,6 +264,13 @@ describe("formatStatusLine", () => {
       scope: "initial",
       mode: "auto",
       timeoutMs: 30000,
+      phase: "stopping",
+      proxyConfigured: false
+    }, 30500)).toBe("route stopping · direct · 30s / 30s");
+    expect(formatRoutePendingStatus?.({
+      scope: "initial",
+      mode: "auto",
+      timeoutMs: 30000,
       phase: "retrying",
       attempt: 2,
       maxAttempts: 2,
