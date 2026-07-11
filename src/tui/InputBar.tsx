@@ -4,7 +4,7 @@ import { compactEndByDisplayWidth, compactTailByDisplayWidth, displayWidth } fro
 import { TUI_THEME } from "./theme.js";
 
 export interface InputBarProps {
-  mode: "chat" | "worker" | "native";
+  mode: "chat" | "worker" | "native" | "router";
   ready?: boolean;
   busy?: boolean;
   canRetry?: boolean;
@@ -51,6 +51,16 @@ export function InputBar({
 
   if (mode === "native") {
     const hints = nativeInputHints(terminalWidth, nativeClosed);
+    return (
+      <InputRail terminalWidth={terminalWidth} textWidth={displayWidth(`${hints.label}${hints.detail}`)} fill={fillRail}>
+        <Text backgroundColor={TUI_THEME.rail} color={TUI_THEME.accent} bold>{hints.label}</Text>
+        {hints.detail ? <Text backgroundColor={TUI_THEME.rail} color={TUI_THEME.muted}>{hints.detail}</Text> : null}
+      </InputRail>
+    );
+  }
+
+  if (mode === "router") {
+    const hints = routerInputHints(terminalWidth);
     return (
       <InputRail terminalWidth={terminalWidth} textWidth={displayWidth(`${hints.label}${hints.detail}`)} fill={fillRail}>
         <Text backgroundColor={TUI_THEME.rail} color={TUI_THEME.accent} bold>{hints.label}</Text>
@@ -280,6 +290,7 @@ export function chatPlaceholderDisplayValue(
   }
   if (options.hasActiveTask && !options.hasWorkers) {
     return selectChatPlaceholder(terminalWidth, [
+      "message · ^N new · ^P project · ^G routes",
       "message · ^N new · ^P project",
       "message · ^N new",
       "msg · ^N",
@@ -292,7 +303,12 @@ export function chatPlaceholderDisplayValue(
   if (maxScrollOffset > 0 && terminalWidth >= 22) {
     return selectChatPlaceholder(terminalWidth, ["message · scroll", "message", "msg"]);
   }
-  return selectChatPlaceholder(terminalWidth, ["message · ^P project", "message", "msg"]);
+  return selectChatPlaceholder(terminalWidth, [
+    "message · ^P project · ^G routes",
+    "message · ^P project",
+    "message",
+    "msg"
+  ]);
 }
 
 export interface ChatPlaceholderOptions {
@@ -331,8 +347,8 @@ function chatHistoryPlaceholderDisplayValue(terminalWidth: number, offset: numbe
 function chatTaskPlaceholderDisplayValue(terminalWidth: number, scrollable = false, activeTask = false): string {
   if (activeTask && terminalWidth >= 72) {
     const active = scrollable
-      ? "message · scroll · ^N new · ^W logs · Tab · ^O attach"
-      : "message · ^N new · ^W logs · Tab · ^O attach";
+      ? "message · scroll · ^N new · ^W logs · Tab · ^O attach · ^G routes"
+      : "message · ^N new · ^W logs · Tab · ^O attach · ^G routes";
     if (displayWidth(active) <= chatPlaceholderValueWidth(terminalWidth)) {
       return active;
     }
@@ -341,6 +357,7 @@ function chatTaskPlaceholderDisplayValue(terminalWidth: number, scrollable = fal
     terminalWidth,
     scrollable
       ? [
+          "message · scroll · ^W logs · Tab · ^O attach · ^G routes",
           "message · scroll · ^W logs · Tab · ^O attach",
           "PgUp/Dn · ^W log · Tab · ^O attach",
           "PgUp/Dn · ^W logs · Tab · ^O",
@@ -351,6 +368,7 @@ function chatTaskPlaceholderDisplayValue(terminalWidth: number, scrollable = fal
           "msg"
         ]
       : [
+          "message · ^W logs · Tab · ^O attach · ^G routes",
           "message · ^W logs · Tab · ^O attach",
           "message · ^W · ^O",
           "msg · ^W · ^O",
@@ -442,4 +460,20 @@ function nativeInputHints(width: number, closed = false): { label: string; detai
     return { label: "native", detail: " · Pg · ^]" };
   }
   return { label: "native", detail: " · scroll · ^] logs" };
+}
+
+function routerInputHints(width: number): { label: string; detail: string } {
+  if (width < 12) {
+    return { label: "rt", detail: "" };
+  }
+  if (width < 18) {
+    return { label: "routes", detail: " · Esc" };
+  }
+  if (width < 28) {
+    return { label: "routes", detail: " · Pg · Esc" };
+  }
+  if (width < 44) {
+    return { label: "routes", detail: " · scroll · ^G · Esc" };
+  }
+  return { label: "routes", detail: " · scroll · ^G refresh · Esc chat" };
 }

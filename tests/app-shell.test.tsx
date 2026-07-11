@@ -128,6 +128,25 @@ describe("AppShell", () => {
     expect(headerRow).not.toContain("none");
   });
 
+  it("labels Router diagnostics as routes in the application header", () => {
+    const { lastFrame } = render(
+      <AppShell
+        view="router"
+        cwd="/tmp/project"
+        taskId={null}
+        statusText=""
+        terminalWidth={80}
+        input={<TextLine text="routes · scroll · ^G refresh · Esc chat" />}
+      >
+        <TextLine text="Router diagnostics" />
+      </AppShell>
+    );
+
+    const header = (lastFrame() ?? "").split("\n")[0] ?? "";
+    expect(header).toContain("parallel-codex-tui · routes");
+    expect(header).toContain("project");
+  });
+
   it("renders a structured worker interface with header, full-width content, input, and status", () => {
     const { lastFrame } = render(
       <AppShell

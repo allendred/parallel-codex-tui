@@ -44,6 +44,19 @@ describe("keyboard shortcuts", () => {
     expect(isWorkspaceShortcut?.("p", { ctrl: false })).toBe(false);
   });
 
+  it("recognizes ctrl-g as the Router diagnostics shortcut", () => {
+    const isRouterDiagnosticsShortcut = (
+      keyboardModule as typeof keyboardModule & {
+        isRouterDiagnosticsShortcut?: (input: string, key: { ctrl?: boolean }) => boolean;
+      }
+    ).isRouterDiagnosticsShortcut;
+
+    expect(isRouterDiagnosticsShortcut).toBeTypeOf("function");
+    expect(isRouterDiagnosticsShortcut?.("g", { ctrl: true })).toBe(true);
+    expect(isRouterDiagnosticsShortcut?.("\u0007", { ctrl: false })).toBe(true);
+    expect(isRouterDiagnosticsShortcut?.("g", { ctrl: false })).toBe(false);
+  });
+
   it("does not treat plain letters as shortcuts", () => {
     expect(isLogsShortcut("w", { ctrl: false })).toBe(false);
     expect(isAttachShortcut("o", { ctrl: false })).toBe(false);

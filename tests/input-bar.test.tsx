@@ -176,7 +176,7 @@ describe("InputBar", () => {
   });
 
   it("exposes the workspace switcher when the input rail has room", () => {
-    expect(chatPlaceholderDisplayValue(40)).toBe("message · ^P project");
+    expect(chatPlaceholderDisplayValue(40)).toBe("message · ^P project · ^G routes");
     expect(chatPlaceholderDisplayValue(40, { hasActiveTask: true })).toBe(
       "message · ^N new · ^P project"
     );
@@ -206,7 +206,7 @@ describe("InputBar", () => {
   });
 
   it("shows task shortcuts in the empty chat prompt once workers exist", () => {
-    expect(chatPlaceholderDisplayValue(80, { hasWorkers: true })).toBe("message · ^W logs · Tab · ^O attach");
+    expect(chatPlaceholderDisplayValue(80, { hasWorkers: true })).toBe("message · ^W logs · Tab · ^O attach · ^G routes");
     expect(chatPlaceholderDisplayValue(42, { hasWorkers: true })).toBe("message · ^W logs · Tab · ^O attach");
     expect(chatPlaceholderDisplayValue(41, { hasWorkers: true })).toBe("message · ^W logs · Tab · ^O attach");
     expect(chatPlaceholderDisplayValue(40, { hasWorkers: true })).toBe("message · ^W · ^O");
@@ -226,6 +226,7 @@ describe("InputBar", () => {
     expect(frame).toContain("^W logs");
     expect(frame).toContain("Tab");
     expect(frame).toContain("^O attach");
+    expect(frame).toContain("^G routes");
   });
 
   it("uses an intentional compact task hint instead of a clipped word at 40 columns", () => {
@@ -244,7 +245,7 @@ describe("InputBar", () => {
       <InputBar mode="chat" value="" hasWorkers hasActiveTask terminalWidth={80} onChange={() => {}} />
     );
     try {
-      expect(roomy.lastFrame()).toContain("message · ^N new · ^W logs · Tab · ^O attach");
+      expect(roomy.lastFrame()).toContain("message · ^N new · ^W logs · Tab · ^O attach · ^G routes");
     } finally {
       roomy.unmount();
     }
@@ -281,7 +282,7 @@ describe("InputBar", () => {
     } as Parameters<typeof chatPlaceholderDisplayValue>[1];
 
     expect(chatPlaceholderDisplayValue(80, scrollable)).toBe(
-      "message · scroll · ^W logs · Tab · ^O attach"
+      "message · scroll · ^W logs · Tab · ^O attach · ^G routes"
     );
     expect(chatPlaceholderDisplayValue(80, scrolled)).toBe(
       "message · back 3/20 · PgDn latest"
@@ -394,6 +395,27 @@ describe("InputBar", () => {
     expect(frame).not.toContain("read");
     expect(frame).not.toContain("Type a message");
     expect(frame).not.toContain("做个俄罗斯方块");
+  });
+
+  it("shows Router diagnostics navigation and refresh guidance", () => {
+    const roomy = render(
+      <InputBar mode="router" value="ignored" terminalWidth={80} onChange={() => {}} />
+    );
+    const roomyFrame = roomy.lastFrame() ?? "";
+    expect(roomyFrame).toContain("routes · scroll · ^G refresh · Esc chat");
+    expect(roomyFrame).not.toContain("ignored");
+    expect(roomyFrame.split("\n")).toHaveLength(1);
+    expect(displayWidth(roomyFrame)).toBeLessThanOrEqual(80);
+    roomy.unmount();
+
+    const narrow = render(
+      <InputBar mode="router" value="" terminalWidth={24} onChange={() => {}} />
+    );
+    const narrowFrame = narrow.lastFrame() ?? "";
+    expect(narrowFrame).toContain("routes · Pg · Esc");
+    expect(narrowFrame.split("\n")).toHaveLength(1);
+    expect(displayWidth(narrowFrame)).toBeLessThanOrEqual(24);
+    narrow.unmount();
   });
 
   it("keeps worker guidance compact in narrow terminals", () => {

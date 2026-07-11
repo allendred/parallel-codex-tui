@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import React from "react";
+import { join } from "node:path";
 import { render } from "ink";
 import { ZodError } from "zod";
 import { parseCliArgs, validateCliArgs } from "./cli-args.js";
@@ -11,12 +12,14 @@ import { prepareAppRoot } from "./core/app-root.js";
 import { formatConfigErrorMessage } from "./core/config-errors.js";
 import { configPath, loadConfig, withUiThemeOverride, writeDefaultConfig } from "./core/config.js";
 import { pathExists } from "./core/file-store.js";
+import { readRouterAudit } from "./core/router-audit.js";
 import { listWorkspaceChoices } from "./core/workspace.js";
 import { runDoctor } from "./doctor.js";
 import { helpText } from "./cli-help.js";
 import { App } from "./tui/App.js";
 import { formatTuiThemeCatalog } from "./tui/theme-preview.js";
 import { configureTuiTheme } from "./tui/theme.js";
+import { routerDiagnosticsPolicy } from "./tui/RouterDiagnosticsView.js";
 import { version } from "./version.js";
 
 main().catch((error) => {
@@ -98,6 +101,16 @@ async function main(): Promise<void> {
         initialCanRetryTask={state.initialCanRetryTask}
         initialMessages={state.initialMessages}
         workspaceChoices={state.workspaceChoices}
+        loadRouterDiagnostics={async () => {
+          const [records, latestConfig] = await Promise.all([
+            readRouterAudit(join(state.runtime.routerCwd, "routes.jsonl"), 100),
+            loadConfig(cliArgs.appRoot)
+          ]);
+          return {
+            records,
+            policy: routerDiagnosticsPolicy(latestConfig.router)
+          };
+        }}
         switchWorkspace={async (workspace) => {
           if (workspace === current.runtime.workspaceRoot) {
             return;

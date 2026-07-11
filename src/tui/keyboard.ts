@@ -26,6 +26,10 @@ export function isWorkspaceShortcut(input: string, key: KeyboardKey): boolean {
   return (key.ctrl === true && input.toLowerCase() === "p") || input === "\u0010";
 }
 
+export function isRouterDiagnosticsShortcut(input: string, key: KeyboardKey): boolean {
+  return (key.ctrl === true && input.toLowerCase() === "g") || input === "\u0007";
+}
+
 export function scrollDelta(input: string, key: KeyboardKey, pageSize: number): number {
   if (key.pageUp || (key.ctrl === true && input.toLowerCase() === "u")) {
     return pageSize;

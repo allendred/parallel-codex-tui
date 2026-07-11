@@ -4,6 +4,7 @@ import { Box, Text, useApp, useInput, useStdin, type TextProps } from "ink";
 import { Lexer, type Token, type Tokens } from "marked";
 import type { AppConfig } from "../core/config.js";
 import { readJson } from "../core/file-store.js";
+import type { RouterAuditRecord } from "../core/router-audit.js";
 import type { WorkspaceChoice } from "../core/workspace.js";
 import { WorkerStatusSchema, type RouteDecision } from "../domain/schemas.js";
 import type { Orchestrator, RouteStartInfo, WorkerLogRef, WorkerRunStatus } from "../orchestrator/orchestrator.js";
@@ -19,7 +20,7 @@ import {
 import { applyChatInputChunk, insertChatPaste } from "./chat-input.js";
 import { chatRequestHistory, navigateChatDraftHistory, type ChatDraftHistoryState } from "./chat-history.js";
 import { createChatPasteDecoder } from "./chat-paste.js";
-import { AppShell } from "./AppShell.js";
+import { AppShell, type AppView } from "./AppShell.js";
 import { InputBar } from "./InputBar.js";
 import { applyNativeInputChunk } from "./native-input.js";
 import { nextScrollOffset } from "./scrolling.js";
@@ -28,11 +29,16 @@ import { TerminalOutput } from "./TerminalOutput.js";
 import { NativeTerminalScreen } from "./terminal-screen.js";
 import { WorkerOutputView } from "./WorkerOutputView.js";
 import { compactEndByDisplayWidth, displayWidth, wrapByDisplayWidth } from "./display-width.js";
-import { isAttachShortcut, isExitShortcut, isLogsShortcut, isNewTaskShortcut, isWorkspaceShortcut, mouseScrollDelta, rawHistoryDelta, rawPageScrollDelta, scrollDelta } from "./keyboard.js";
+import { isAttachShortcut, isExitShortcut, isLogsShortcut, isNewTaskShortcut, isRouterDiagnosticsShortcut, isWorkspaceShortcut, mouseScrollDelta, rawHistoryDelta, rawPageScrollDelta, scrollDelta } from "./keyboard.js";
 import { createRawInputDecoder } from "./raw-input-decoder.js";
 import { decodeHtmlEntities } from "./markdown-text.js";
 import { configureTuiTheme, TUI_THEME } from "./theme.js";
 import { WorkspacePicker } from "../cli-workspace-picker.js";
+import {
+  RouterDiagnosticsView,
+  routerDiagnosticsPolicy,
+  type RouterDiagnosticsPolicy
+} from "./RouterDiagnosticsView.js";
 import {
   buildNativeAttachLaunch,
   startNativeAttachProcess,
@@ -52,6 +58,10 @@ export interface AppProps {
   persistChatMessage?: (message: Message, taskId?: string) => Promise<void>;
   workspaceChoices?: WorkspaceChoice[];
   switchWorkspace?: (workspace: string) => Promise<void>;
+  loadRouterDiagnostics?: () => Promise<{
+    records: RouterAuditRecord[];
+    policy: RouterDiagnosticsPolicy;
+  }>;
   prepareNativeAttach?: (worker: WorkerLogRef) => Promise<NativeAttachLaunch>;
   startNativeAttach?: (
     launch: NativeAttachLaunch,
@@ -110,6 +120,7 @@ export function App({
   persistChatMessage,
   workspaceChoices = [],
   switchWorkspace,
+  loadRouterDiagnostics,
   prepareNativeAttach,
   startNativeAttach
 }: AppProps) {
@@ -127,7 +138,7 @@ export function App({
   const [lastRoute, setLastRoute] = useState<RouteDecision | null>(initialRoute);
   const [routePending, setRoutePending] = useState<PendingRouteInfo | null>(null);
   const [routeElapsedMs, setRouteElapsedMs] = useState(0);
-  const [view, setView] = useState<"chat" | "worker" | "native" | "workspace">("chat");
+  const [view, setView] = useState<AppView | "workspace">("chat");
   const [workers, setWorkers] = useState<WorkerLogRef[]>(() => [...(initialWorkers ?? [])]);
   const [selectedWorkerIndex, setSelectedWorkerIndex] = useState(0);
   const [activeTaskId, setActiveTaskId] = useState<string | null>(initialTaskId);
@@ -139,6 +150,12 @@ export function App({
   const [workerMaxScrollOffset, setWorkerMaxScrollOffset] = useState(0);
   const [chatScrollOffset, setChatScrollOffset] = useState(0);
   const [chatMaxScrollOffset, setChatMaxScrollOffset] = useState(0);
+  const [routerRecords, setRouterRecords] = useState<RouterAuditRecord[]>([]);
+  const [routerPolicy, setRouterPolicy] = useState<RouterDiagnosticsPolicy>(() => routerDiagnosticsPolicy(config.router));
+  const [routerLoading, setRouterLoading] = useState(false);
+  const [routerError, setRouterError] = useState<string | null>(null);
+  const [routerScrollOffset, setRouterScrollOffset] = useState(0);
+  const [routerMaxScrollOffset, setRouterMaxScrollOffset] = useState(0);
   const [nativeAttach, setNativeAttach] = useState<{
     hasOutput: boolean;
     launch: NativeAttachLaunch;
@@ -163,6 +180,7 @@ export function App({
   const workerMaxScrollOffsetRef = useRef(workerMaxScrollOffset);
   const chatScrollOffsetRef = useRef(chatScrollOffset);
   const chatMaxScrollOffsetRef = useRef(chatMaxScrollOffset);
+  const routerMaxScrollOffsetRef = useRef(routerMaxScrollOffset);
   const autoSelectedFailedWorkerRef = useRef(false);
   const userSelectedWorkerRef = useRef(false);
   const attachSelectedWorkerRef = useRef<(worker: WorkerLogRef) => Promise<void>>(attachSelectedWorker);
@@ -170,7 +188,10 @@ export function App({
   const retryRef = useRef<() => Promise<void>>(retryActiveTask);
   const newTaskRef = useRef<() => Promise<void>>(startNewTask);
   const openWorkspacePickerRef = useRef<() => void>(openWorkspacePicker);
+  const openRouterDiagnosticsRef = useRef<() => Promise<void>>(openRouterDiagnostics);
   const workspaceReturnViewRef = useRef<"chat" | "worker">("chat");
+  const routerReturnViewRef = useRef<"chat" | "worker">("chat");
+  const routerLoadSequenceRef = useRef(0);
   const exitRef = useRef(exit);
   const rawInputDecoderRef = useRef(createRawInputDecoder());
   const chatPasteDecoderRef = useRef(createChatPasteDecoder());
@@ -183,7 +204,7 @@ export function App({
   const outputHeight = Math.max(1, contentHeight);
   const terminalWidth = process.stdout.columns || 120;
   const selectedWorkerStatus = formatSelectedWorkerStatus(status, selectedWorkerIndex);
-  const visibleWorkerStatus = view === "chat" || selectedWorkerStatusIsRedundant(status)
+  const visibleWorkerStatus = view === "chat" || view === "router" || selectedWorkerStatusIsRedundant(status)
     ? ""
     : selectedWorkerStatus;
   const visibleRouteStatus = routePending
@@ -240,6 +261,10 @@ export function App({
   }, [chatMaxScrollOffset]);
 
   useEffect(() => {
+    routerMaxScrollOffsetRef.current = routerMaxScrollOffset;
+  }, [routerMaxScrollOffset]);
+
+  useEffect(() => {
     chatScrollOffsetRef.current = 0;
     setChatScrollOffset(0);
   }, [messages.length]);
@@ -264,6 +289,7 @@ export function App({
     retryRef.current = retryActiveTask;
     newTaskRef.current = startNewTask;
     openWorkspacePickerRef.current = openWorkspacePicker;
+    openRouterDiagnosticsRef.current = openRouterDiagnostics;
   });
 
   useEffect(() => {
@@ -405,7 +431,7 @@ export function App({
         selectedWorkerIndexRef.current = failedWorkerIndex;
         setSelectedWorkerIndex(failedWorkerIndex);
         setWorkerScrollOffset(0);
-        if (viewRef.current !== "native") {
+        if (viewRef.current !== "native" && viewRef.current !== "router" && viewRef.current !== "workspace") {
           setView("worker");
         }
       }
@@ -463,6 +489,31 @@ export function App({
       if (currentView === "workspace") {
         return;
       }
+      if (currentView === "router") {
+        if (isExitShortcut(chunk, {})) {
+          activeRunControllerRef.current?.abort();
+          exitRef.current();
+          return;
+        }
+        if (isRouterDiagnosticsShortcut(chunk, {})) {
+          void openRouterDiagnosticsRef.current();
+          return;
+        }
+        if (chunk === "\x1b") {
+          setAttachError(null);
+          viewRef.current = routerReturnViewRef.current;
+          setView(routerReturnViewRef.current);
+          return;
+        }
+        const routeDelta = mouseScrollDelta(chunk, 3)
+          + rawPageScrollDelta(chunk, Math.max(1, outputHeight - 1));
+        if (routeDelta !== 0) {
+          setRouterScrollOffset((current) => (
+            nextScrollOffset(current, -routeDelta, routerMaxScrollOffsetRef.current)
+          ));
+        }
+        return;
+      }
       if (currentView === "worker") {
         if (isExitShortcut(chunk, {})) {
           activeRunControllerRef.current?.abort();
@@ -475,6 +526,10 @@ export function App({
         }
         if (isWorkspaceShortcut(chunk, {}) && !busyRef.current) {
           openWorkspacePickerRef.current();
+          return;
+        }
+        if (isRouterDiagnosticsShortcut(chunk, {})) {
+          void openRouterDiagnosticsRef.current();
           return;
         }
         if (chunk === "\x1b") {
@@ -493,6 +548,10 @@ export function App({
       if (currentView === "chat") {
         if (isWorkspaceShortcut(chunk, {}) && !busyRef.current) {
           openWorkspacePickerRef.current();
+          return;
+        }
+        if (isRouterDiagnosticsShortcut(chunk, {})) {
+          void openRouterDiagnosticsRef.current();
           return;
         }
         const paste = chatPasteDecoderRef.current.write(chunk);
@@ -660,6 +719,7 @@ export function App({
 
   useEffect(() => () => {
     activeRunControllerRef.current?.abort();
+    routerLoadSequenceRef.current += 1;
   }, []);
 
   useInput((inputKey, key) => {
@@ -999,6 +1059,47 @@ export function App({
     await appendVisibleMessage({ from: "system", text: "new task · ready" });
   }
 
+  async function openRouterDiagnostics(): Promise<void> {
+    const currentView = viewRef.current;
+    if (currentView === "native" || currentView === "workspace") {
+      return;
+    }
+    if (currentView !== "router") {
+      routerReturnViewRef.current = currentView === "worker" ? "worker" : "chat";
+    }
+
+    viewRef.current = "router";
+    setView("router");
+    setAttachError(null);
+    setRouterError(null);
+    setRouterLoading(true);
+    setRouterScrollOffset(0);
+    routerMaxScrollOffsetRef.current = 0;
+    setRouterMaxScrollOffset(0);
+
+    const sequence = routerLoadSequenceRef.current + 1;
+    routerLoadSequenceRef.current = sequence;
+    try {
+      if (!loadRouterDiagnostics) {
+        throw new Error("Router diagnostics are unavailable");
+      }
+      const diagnostics = await loadRouterDiagnostics();
+      if (routerLoadSequenceRef.current !== sequence) {
+        return;
+      }
+      setRouterRecords(diagnostics.records);
+      setRouterPolicy(diagnostics.policy);
+    } catch (error) {
+      if (routerLoadSequenceRef.current === sequence) {
+        setRouterError(error instanceof Error ? error.message : String(error));
+      }
+    } finally {
+      if (routerLoadSequenceRef.current === sequence) {
+        setRouterLoading(false);
+      }
+    }
+  }
+
   function openWorkspacePicker(): void {
     const currentView = viewRef.current;
     if (busyRef.current || !switchWorkspace || currentView === "native" || currentView === "workspace") {
@@ -1061,7 +1162,7 @@ export function App({
           chatScrollOffset={chatScrollOffset}
           chatMaxScrollOffset={chatMaxScrollOffset}
           nativeClosed={view === "native" && nativeAttach?.closedCode !== null}
-          value={view === "native" ? "" : input}
+          value={view === "native" || view === "router" ? "" : input}
           cursor={view === "chat" ? inputCursor : undefined}
           terminalWidth={terminalWidth}
           onChange={view === "native" ? setNativeInput : setInput}
@@ -1072,6 +1173,23 @@ export function App({
     >
         {view === "native" ? (
           <NativeAttachView attach={nativeAttach} viewportHeight={contentHeight} />
+        ) : view === "router" ? (
+          <RouterDiagnosticsView
+            records={routerRecords}
+            policy={routerPolicy}
+            loading={routerLoading}
+            error={routerError}
+            scrollOffset={routerScrollOffset}
+            height={contentHeight}
+            terminalWidth={terminalWidth}
+            onViewportChange={({ offset, maxOffset }) => {
+              routerMaxScrollOffsetRef.current = maxOffset;
+              setRouterMaxScrollOffset(maxOffset);
+              if (offset !== routerScrollOffset) {
+                setRouterScrollOffset(offset);
+              }
+            }}
+          />
         ) : view === "chat" ? (
           <ChatView
             messages={messages}
