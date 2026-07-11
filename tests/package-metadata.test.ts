@@ -248,6 +248,9 @@ describe("package metadata", () => {
     expect(readme).toContain("`Ctrl+R` retries the cancelled task with persisted worker sessions");
     expect(readme).toContain("an unchanged in-progress wave reuses successful Actor and Critic checkpoints");
     expect(readme).toContain("the stale wave checkpoint is rejected and rebuilt from the current project");
+    expect(readme).toContain("The shared Main chat holds its own `sessions/main/run-owner.json` lease");
+    expect(readme).toContain("A second TUI is rejected before it can clear or overwrite the active Main prompt, log, status, or native session");
+    expect(readme).toContain("startup native-session reconciliation skips a Main session owned by another live TUI");
     expect(readme).toContain("Every complex run holds a task-owned `run-owner.json` lease");
     expect(readme).toContain("A retry revalidates the task state and reloads its latest turn, request, and route only after acquiring that lease");
     expect(readme).toContain("an older caller cannot rerun a task another TUI already completed");

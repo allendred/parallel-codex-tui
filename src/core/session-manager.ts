@@ -532,11 +532,9 @@ export class SessionManager {
         continue;
       }
       const sessionDir = join(root, sessionEntry.name);
-      if (sessionEntry.name.startsWith("task-")) {
-        const lease = await inspectTaskRunLease(sessionDir);
-        if (lease.state === "active") {
-          continue;
-        }
+      const lease = await inspectTaskRunLease(sessionDir);
+      if (lease.state === "active") {
+        continue;
       }
 
       const workerEntries = await readdir(sessionDir, { withFileTypes: true });

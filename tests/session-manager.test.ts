@@ -1044,6 +1044,57 @@ describe("SessionManager", () => {
     expect(await pathExists(join(worker.dir, "native-session.json"))).toBe(false);
   });
 
+  it("defers Main native-session cleanup while another TUI owns the shared session", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pct-main-native-session-lease-"));
+    const manager = new SessionManager({
+      projectRoot: root,
+      dataDir: ".parallel-codex",
+      now: () => new Date("2026-06-30T03:32:00.000Z")
+    });
+    const mainDir = manager.mainSessionDir();
+    const workerDir = join(mainDir, "main-mock");
+    const nativePath = join(workerDir, "native-session.json");
+    const record = NativeSessionSchema.parse({
+      engine: "mock",
+      role: "main",
+      worker_id: "main-mock",
+      session_id: "native-main-owned",
+      scope: "main",
+      cwd: root,
+      created_at: "2026-06-30T03:30:00.000Z",
+      last_used_at: "2026-06-30T03:31:00.000Z",
+      source: "manual"
+    });
+    await mkdir(workerDir, { recursive: true });
+    await writeJson(nativePath, record);
+    await writeJson(join(workerDir, "native-session.retired.json"), {
+      ...record,
+      retired_at: "2026-06-30T03:32:00.000Z",
+      retired_reason: "context window full"
+    });
+    await writeJson(join(workerDir, "status.json"), WorkerStatusSchema.parse({
+      worker_id: "main-mock",
+      role: "main",
+      engine: "mock",
+      state: "running",
+      phase: "process-output",
+      last_event_at: "2026-06-30T03:31:00.000Z",
+      summary: "Main worker is active",
+      native_session_id: record.session_id
+    }));
+    const lease = await claimTaskRunLease(mainDir, { ownerId: "live-main-owner" });
+
+    try {
+      await expect(manager.reconcileNativeSessionState()).resolves.toBe(0);
+      expect(await pathExists(nativePath)).toBe(true);
+    } finally {
+      await lease.release();
+    }
+
+    await expect(manager.reconcileNativeSessionState()).resolves.toBe(1);
+    expect(await pathExists(nativePath)).toBe(false);
+  });
+
   it("keeps a fresh native session when its id differs from the retirement tombstone", async () => {
     const root = await mkdtemp(join(tmpdir(), "pct-native-session-retirement-new-session-"));
     const manager = new SessionManager({

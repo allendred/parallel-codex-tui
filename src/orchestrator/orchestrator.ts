@@ -2,7 +2,7 @@ import { readdir } from "node:fs/promises";
 import { join } from "node:path";
 import type { AppConfig } from "../core/config.js";
 import { appendJsonLine, ensureDir, pathExists, readJson, readTextIfExists, removeIfExists, writeJson, writeText } from "../core/file-store.js";
-import { claimTaskRunLease } from "../core/process-ownership.js";
+import { claimTaskRunLease, TaskRunLeaseConflictError } from "../core/process-ownership.js";
 import { routerRuntimeDir } from "../core/paths.js";
 import { classifyRouterFailure, routerFallbackIsTransient } from "../core/router-audit.js";
 import { sanitizeRouterText } from "../core/router-redaction.js";
@@ -1524,6 +1524,32 @@ export class Orchestrator {
   private async runMain(input: HandleRequestInput, workers: WorkerLogRef[], context?: string): Promise<string> {
     const engine = this.config.pairing.main;
     const dir = this.sessions.mainSessionDir();
+    let lease;
+    try {
+      lease = await claimTaskRunLease(dir);
+    } catch (error) {
+      if (error instanceof TaskRunLeaseConflictError) {
+        throw new Error(
+          `Main session is already running in another parallel-codex-tui process (pid ${error.owner?.pid ?? "unknown"}).`
+        );
+      }
+      throw error;
+    }
+
+    try {
+      return await this.runMainWithLease(input, workers, context, engine, dir);
+    } finally {
+      await lease.release();
+    }
+  }
+
+  private async runMainWithLease(
+    input: HandleRequestInput,
+    workers: WorkerLogRef[],
+    context: string | undefined,
+    engine: EngineName,
+    dir: string
+  ): Promise<string> {
     const workerId = `main-${engine}`;
     const filesDir = join(dir, workerId);
     const promptPath = join(filesDir, "prompt.md");
