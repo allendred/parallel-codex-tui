@@ -168,10 +168,12 @@ export async function runCodexRouterProcess(
 
   return new Promise<CodexRouteRunnerResult>((resolve, reject) => {
     const processStartedAt = Date.now();
+    const detached = process.platform !== "win32";
     const child = spawn(command, args, {
       cwd,
       env,
-      stdio: ["pipe", "pipe", "pipe"]
+      stdio: ["pipe", "pipe", "pipe"],
+      detached
     });
     let stdout = "";
     let stderr = "";
@@ -234,10 +236,9 @@ export async function runCodexRouterProcess(
     };
 
     const terminate = (): void => {
-      child.kill("SIGTERM");
-      const forceKill = setTimeout(() => child.kill("SIGKILL"), 1500);
+      signalRouterProcess(child.pid, "SIGTERM", detached);
+      const forceKill = setTimeout(() => signalRouterProcess(child.pid, "SIGKILL", detached), 1500);
       forceKill.unref();
-      child.once("close", () => clearTimeout(forceKill));
     };
 
     const timeoutRouter = (
@@ -358,6 +359,32 @@ export async function runCodexRouterProcess(
 
     child.stdin.end(prompt);
   });
+}
+
+function signalRouterProcess(
+  pid: number | undefined,
+  signal: NodeJS.Signals,
+  processGroup: boolean
+): void {
+  if (!pid) {
+    return;
+  }
+  try {
+    process.kill(processGroup ? -pid : pid, signal);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ESRCH") {
+      throw error;
+    }
+    if (processGroup) {
+      try {
+        process.kill(pid, signal);
+      } catch (fallbackError) {
+        if ((fallbackError as NodeJS.ErrnoException).code !== "ESRCH") {
+          throw fallbackError;
+        }
+      }
+    }
+  }
 }
 
 function normalizeRouterRunnerResult(result: string | CodexRouteRunnerResult): CodexRouteRunnerResult {

@@ -1,4 +1,4 @@
-import { mkdtemp } from "node:fs/promises";
+import { access, mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -294,6 +294,40 @@ describe("routeRequestWithCodex", () => {
     expect(route.router_stderr_bytes).toBeGreaterThan(0);
     expect(route.router_first_stdout_ms).toBeUndefined();
     expect(route.router_parse_ms).toBeUndefined();
+  });
+
+  it("terminates Router descendants when the total timeout expires", async () => {
+    if (process.platform === "win32") {
+      return;
+    }
+
+    const root = await mkdtemp(join(tmpdir(), "pct-router-descendant-timeout-"));
+    const sentinelPath = join(root, "orphaned-router-child.txt");
+    const descendantScript = [
+      "const { writeFileSync } = require('node:fs');",
+      `setTimeout(() => writeFileSync(${JSON.stringify(sentinelPath)}, 'orphaned'), 400);`,
+      "setTimeout(() => process.exit(0), 650);"
+    ].join("");
+    const config = defaultConfig(root);
+    config.router.codex.command = process.execPath;
+    config.router.codex.args = [
+      "-e",
+      [
+        "const { spawn } = require('node:child_process');",
+        `spawn(process.execPath, ['-e', ${JSON.stringify(descendantScript)}], { stdio: 'ignore' });`,
+        "setInterval(() => {}, 1000);"
+      ].join("")
+    ];
+    config.router.codex.timeoutMs = 250;
+
+    const route = await routeRequestWithCodex("你好", config, undefined, root);
+    await new Promise((resolve) => setTimeout(resolve, 600));
+
+    expect(route).toMatchObject({
+      source: "fallback",
+      router_timeout_kind: "total"
+    });
+    await expect(access(sentinelPath)).rejects.toMatchObject({ code: "ENOENT" });
   });
 
   it("records configured proxy context when a stalled router is silent", async () => {
