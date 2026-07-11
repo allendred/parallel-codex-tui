@@ -282,6 +282,9 @@ describe("package metadata", () => {
     expect(readme).toContain("best-effort `process-finalization-error` status");
     expect(readme).toContain("Task failure convergence attempts every Feature status and the task status independently");
     expect(readme).toContain("surfaced alongside the original Worker error");
+    expect(readme).toContain("a missing or invalid Feature status is rebuilt independently");
+    expect(readme).toContain("`feature.status_recovered`");
+    expect(readme).toContain("Actor worklog, replies, or Critic findings");
     expect(readme).toContain("A reused PID with a different start fingerprint is never signalled");
     expect(readme).toContain("Recovery commits cancellation only after every recorded process group is confirmed stopped");
     expect(readme).toContain("An unverifiable or still-running process blocks startup");

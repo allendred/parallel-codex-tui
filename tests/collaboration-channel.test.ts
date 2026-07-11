@@ -1,9 +1,10 @@
-import { mkdtemp } from "node:fs/promises";
+import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { readTextIfExists, writeText } from "../src/core/file-store.js";
 import {
+  createFeatureChannel,
   recordApprovedFindingResolution,
   requireActorFindingReplies,
   requireFeatureRevisionFindings,
@@ -12,6 +13,43 @@ import {
 } from "../src/orchestrator/collaboration-channel.js";
 
 describe("feature collaboration mailbox", () => {
+  it("repairs a missing resumed status without clearing collaboration evidence", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pct-collaboration-channel-resume-"));
+    const taskDir = join(root, "task-test");
+    const turnDir = join(taskDir, "turns", "0001");
+    const input = {
+      task: {
+        id: "task-test",
+        dir: taskDir,
+        metaPath: join(taskDir, "meta.json"),
+        routePath: join(taskDir, "route.json"),
+        eventsPath: join(taskDir, "events.jsonl")
+      },
+      turn: {
+        turnId: "0001",
+        dir: turnDir,
+        metaPath: join(turnDir, "turn.json"),
+        userPath: join(turnDir, "user.md"),
+        routePath: join(turnDir, "route.json")
+      },
+      request: "Preserve mailbox evidence",
+      judgeDir: join(taskDir, "judge-mock")
+    };
+    const channel = await createFeatureChannel(input);
+    await writeText(channel.actorWorklogPath, "existing worklog\n");
+    await writeText(channel.actorRepliesPath, '{"finding_id":"C-001","status":"fixed"}\n');
+    await writeText(channel.criticFindingsPath, '{"id":"C-001","summary":"existing finding"}\n');
+    await rm(channel.statusPath);
+
+    const resumed = await createFeatureChannel({ ...input, resume: true });
+
+    expect(await readTextIfExists(resumed.actorWorklogPath)).toBe("existing worklog\n");
+    expect(await readTextIfExists(resumed.actorRepliesPath)).toContain('"finding_id":"C-001"');
+    expect(await readTextIfExists(resumed.criticFindingsPath)).toContain('"id":"C-001"');
+    expect(JSON.parse(await readTextIfExists(resumed.statusPath))).toMatchObject({ state: "created" });
+    expect(await readTextIfExists(resumed.dialoguePath)).toContain('"type":"feature.status_recovered"');
+  });
+
   it("keeps repeated feature state updates idempotent", async () => {
     const channel = await featureChannel("state-idempotent");
     await writeText(channel.statusPath, `${JSON.stringify({

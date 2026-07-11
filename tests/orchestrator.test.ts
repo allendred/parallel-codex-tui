@@ -2423,6 +2423,17 @@ describe("Orchestrator", () => {
       join(taskDir, "features", "0001-healthy", "status.json")
     ))).toMatchObject({ state: "failed" });
     expect(await pathExists(taskRunOwnerPath(taskDir))).toBe(false);
+
+    await rm(join(taskDir, "features", "0001-broken", "status.json"), { recursive: true });
+    const retried = await orchestrator.retryTask({ taskId, cwd: root });
+
+    expect(retried.mode).toBe("complex");
+    expect(adapter.sawFirstAttemptEvidenceOnRetry).toBe(true);
+    expect(adapter.retriedNativeSessionId).toBe("failure-convergence-actor-session");
+    expect(adapter.actorRuns).toEqual({ broken: 2, healthy: 1 });
+    await expect(readJson(join(taskDir, "meta.json"), TaskMetaSchema)).resolves.toMatchObject({
+      status: "done"
+    });
   });
 
   it("retries a failed task in the same task and turn with its native worker session", async () => {
@@ -3045,6 +3056,10 @@ class FailingJudgeAdapter implements WorkerAdapter {
 }
 
 class RejectingParallelActorWithBrokenFeatureStatusAdapter extends MockWorkerAdapter {
+  readonly actorRuns = { broken: 0, healthy: 0 };
+  sawFirstAttemptEvidenceOnRetry = false;
+  retriedNativeSessionId: string | null = null;
+
   async run(spec: WorkerRunSpec): Promise<WorkerResult> {
     if (spec.role === "judge") {
       const result = await super.run(spec);
@@ -3057,11 +3072,26 @@ class RejectingParallelActorWithBrokenFeatureStatusAdapter extends MockWorkerAda
       });
       return result;
     }
-    if (spec.role !== "actor" || spec.featureId !== "0001-broken") {
+    if (spec.role !== "actor") {
       return super.run(spec);
     }
 
-    const featureStatusPath = join(spec.filesDir, "..", "features", spec.featureId, "status.json");
+    const featureName = spec.featureId === "0001-broken" ? "broken" : "healthy";
+    this.actorRuns[featureName] += 1;
+    if (featureName === "healthy" || this.actorRuns.broken > 1) {
+      if (featureName === "broken") {
+        this.retriedNativeSessionId = spec.nativeSession?.session_id ?? null;
+        this.sawFirstAttemptEvidenceOnRetry = (await readTextIfExists(
+          join(spec.filesDir, "..", "features", spec.featureId ?? "", "actor-worklog.md")
+        )).includes("FIRST_ATTEMPT_EVIDENCE");
+      }
+      return super.run(spec);
+    }
+
+    const featureDir = join(spec.filesDir, "..", "features", spec.featureId ?? "");
+    await spec.onNativeSession?.("failure-convergence-actor-session");
+    await writeText(join(featureDir, "actor-worklog.md"), "FIRST_ATTEMPT_EVIDENCE\n");
+    const featureStatusPath = join(featureDir, "status.json");
     await rm(featureStatusPath, { force: true });
     await mkdir(featureStatusPath);
     throw new Error("actor adapter finalization failed");

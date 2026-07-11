@@ -2,7 +2,7 @@ import { join } from "node:path";
 import { z } from "zod";
 import { appendJsonLine, ensureDir, pathExists, readJson, readTextIfExists, writeJson, writeText } from "../core/file-store.js";
 import type { TaskSession, TaskTurn } from "../core/session-manager.js";
-import { FeatureStatusSchema, type FeatureState, type WorkerRole } from "../domain/schemas.js";
+import { FeatureStatusSchema, type FeatureState, type FeatureStatus, type WorkerRole } from "../domain/schemas.js";
 import type { FeatureDefinition } from "./feature-plan.js";
 
 export interface FeatureChannel {
@@ -116,8 +116,17 @@ export async function createFeatureChannel(input: CreateFeatureChannelInput): Pr
 
   await ensureDir(dir);
   await ensureDir(join(input.task.dir, "dialogue"));
-  if (input.resume && await pathExists(channel.statusPath)) {
+  if (input.resume) {
     await ensureFeatureChannelFiles(input, channel);
+    const repairedState = await repairFeatureStatus(channel);
+    if (repairedState) {
+      await appendFeatureDialogue(
+        channel,
+        "feature.status_recovered",
+        "actor",
+        `Recovered Feature status as ${repairedState} while preserving collaboration evidence.`
+      );
+    }
     return channel;
   }
 
@@ -165,16 +174,7 @@ export async function updateFeatureStatus(channel: FeatureChannel, state: Featur
   if (await pathExists(channel.statusPath)) {
     try {
       const current = await readJson(channel.statusPath, FeatureStatusSchema);
-      if (
-        current.state === state
-        && current.feature_id === channel.id
-        && current.task_id === channel.taskId
-        && current.turn_id === channel.turnId
-        && current.title === channel.title
-        && current.description === channel.description
-        && current.depends_on.length === channel.dependsOn.length
-        && current.depends_on.every((dependency, index) => dependency === channel.dependsOn[index])
-      ) {
+      if (current.state === state && featureStatusMatchesChannel(current, channel)) {
         return;
       }
     } catch {
@@ -191,6 +191,40 @@ export async function updateFeatureStatus(channel: FeatureChannel, state: Featur
     state,
     updated_at: new Date().toISOString()
   });
+}
+
+async function repairFeatureStatus(channel: FeatureChannel): Promise<FeatureState | null> {
+  let current: FeatureStatus | null = null;
+  if (await pathExists(channel.statusPath)) {
+    try {
+      current = await readJson(channel.statusPath, FeatureStatusSchema);
+    } catch {
+      // Invalid status is rebuilt without replacing the collaboration mailbox.
+    }
+  }
+  if (current && featureStatusMatchesChannel(current, channel)) {
+    return null;
+  }
+
+  const state = current && featureStatusIdentityMatches(current, channel)
+    ? current.state
+    : "created";
+  await updateFeatureStatus(channel, state);
+  return state;
+}
+
+function featureStatusMatchesChannel(status: FeatureStatus, channel: FeatureChannel): boolean {
+  return featureStatusIdentityMatches(status, channel)
+    && status.title === channel.title
+    && status.description === channel.description
+    && status.depends_on.length === channel.dependsOn.length
+    && status.depends_on.every((dependency, index) => dependency === channel.dependsOn[index]);
+}
+
+function featureStatusIdentityMatches(status: FeatureStatus, channel: FeatureChannel): boolean {
+  return status.feature_id === channel.id
+    && status.task_id === channel.taskId
+    && status.turn_id === channel.turnId;
 }
 
 export async function appendFeatureDialogue(
