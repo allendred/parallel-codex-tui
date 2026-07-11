@@ -212,6 +212,22 @@ describe("routeRequestWithCodex", () => {
     expect(route.duration_ms).toBeLessThan(1000);
   });
 
+  it("records configured proxy context when a stalled router is silent", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pct-router-silent-proxy-timeout-"));
+    const config = defaultConfig(root);
+    config.router.codex.command = process.execPath;
+    config.router.codex.args = ["-e", "setInterval(() => {}, 1000)"];
+    config.router.codex.timeoutMs = 200;
+    config.router.codex.env = {
+      HTTPS_PROXY: "http://user:secret@127.0.0.1:7890"
+    };
+
+    const route = await routeRequestWithCodex("你好", config, undefined, root);
+
+    expect(route.reason).toContain("timed out after 200ms with proxy configured");
+    expect(route.reason).not.toContain("user:secret");
+  });
+
   it("fails safely when the router closes stdin before receiving the prompt", async () => {
     const root = await mkdtemp(join(tmpdir(), "pct-router-input-error-"));
     const config = defaultConfig(root);

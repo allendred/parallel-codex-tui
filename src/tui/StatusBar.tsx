@@ -374,7 +374,7 @@ function compactRouteStatusValue(value: string, compact: boolean): string {
   if (compact && /(?:^|\s·\s)fallback(?:\s·\s|$)/i.test(value)) {
     const cause = value
       .split(/\s+·\s+/)
-      .find((part) => /^(?:proxy timeout|proxy|auth|rate limit|network|timeout|unavailable|invalid output|exit)$/i.test(part));
+      .find((part) => /^(?:timeout via proxy|proxy|auth|rate limit|network|timeout|unavailable|invalid output|exit)$/i.test(part));
     if (cause) {
       return cause.toLowerCase() === "invalid output" ? "invalid" : cause.toLowerCase();
     }
@@ -407,7 +407,7 @@ function compactRouteStatusValueToWidth(value: string, maxWidth: number): string
 }
 
 function compactRouteFailureAliases(value: string): string[] {
-  if (value === "proxy timeout") {
+  if (value === "timeout via proxy") {
     return ["proxy", "p:to"];
   }
   if (value === "proxy") {

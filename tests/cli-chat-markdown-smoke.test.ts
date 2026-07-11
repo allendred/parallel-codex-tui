@@ -194,11 +194,11 @@ describe("CLI chat Markdown smoke", () => {
       child.write("hello\r");
       await waitForScreenText(() => screenWrites, screen, "route checking · 600ms max");
       await waitForScreenText(() => screenWrites, screen, "Fallback chat response");
-      await waitForScreenText(() => screenWrites, screen, "route simple · fallback · proxy timeout");
+      await waitForScreenText(() => screenWrites, screen, "route simple · fallback · timeout via proxy");
 
       const snapshot = screen.snapshot();
       const routes = await readTextIfExists(join(appRoot, ".parallel-codex", "router", "routes.jsonl"));
-      expect(snapshot).toContain("route simple · fallback · proxy timeout");
+      expect(snapshot).toContain("route simple · fallback · timeout via proxy");
       expect(snapshot).not.toContain("Codex router failed:");
       expect(snapshot).not.toContain(routerScript);
       expect(routes).toContain("Connecting through proxy http://***@127.0.0.1:7890");

@@ -222,7 +222,7 @@ NO_PROXY = "localhost,127.0.0.1"
 
 `router.codex.env` applies only to semantic classification. `workers.codex.model.env` applies to fresh/resumed Codex workers and embedded native attach sessions. Keep these values in local `config.toml`, which is ignored by Git.
 
-Run `parallel-codex-tui --doctor` after changing proxy settings. Doctor checks referenced environment variables, reports when a macOS system proxy is not inherited by Codex subprocesses, and labels configured proxy host/port checks as local-endpoint reachability without printing credentials. Then run `parallel-codex-tui --doctor --probe-router` when you also need to verify the real Codex Router path through that proxy; this explicit probe can take up to `router.codex.timeoutMs`.
+Run `parallel-codex-tui --doctor` after changing proxy settings. Doctor checks referenced environment variables, reports when a macOS system proxy is not inherited by Codex subprocesses, and labels configured proxy host/port checks as local-endpoint reachability without printing credentials. Then run `parallel-codex-tui --doctor --probe-router` when you also need to verify the real Codex Router path through that proxy; this explicit probe can take up to `router.codex.timeoutMs`. A timed-out request with proxy environment configured is recorded as `timeout via proxy`; this reports request context without claiming that the proxy caused the timeout or exposing its URL.
 
 ## Mock Mode
 

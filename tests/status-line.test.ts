@@ -73,7 +73,7 @@ describe("formatStatusLine", () => {
       source: "fallback",
       reason: "Codex router failed: Codex router timed out after 30000ms: Connecting through proxy http://***@127.0.0.1:7890. Codex router fallback forced simple.",
       duration_ms: 30000
-    })).toBe("route simple · fallback · proxy timeout · 30s");
+    })).toBe("route simple · fallback · timeout via proxy · 30s");
     expect(formatRouteStatus?.({
       mode: "simple",
       source: "fallback",

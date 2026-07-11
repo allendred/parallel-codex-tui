@@ -100,7 +100,7 @@ function formatRouteFailureCause(reason: string): string | null {
   const timedOut = /\b(?:timed out|timeout|ETIMEDOUT)\b/i.test(reason);
   const proxy = /\bproxy\b|代理/i.test(reason);
   if (proxy && timedOut) {
-    return "proxy timeout";
+    return "timeout via proxy";
   }
   if (/\b(?:401|403)\b|\b(?:unauthori[sz]ed|forbidden|authentication|api[-_\s]?key|login required|not logged in|sign in)\b/i.test(reason)) {
     return "auth";

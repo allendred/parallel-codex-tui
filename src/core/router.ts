@@ -64,13 +64,16 @@ export async function runCodexRouterProcess(
     throw cancellationError();
   }
 
+  const env = {
+    ...process.env,
+    ...routerEnvironment(config.router.codex.env)
+  };
+  const proxyConfigured = hasConfiguredProxy(env);
+
   return new Promise<string>((resolve, reject) => {
     const child = spawn(command, args, {
       cwd,
-      env: {
-        ...process.env,
-        ...routerEnvironment(config.router.codex.env)
-      },
+      env,
       stdio: ["pipe", "pipe", "pipe"]
     });
     let stdout = "";
@@ -114,7 +117,10 @@ export async function runCodexRouterProcess(
       timeout = setTimeout(() => {
         terminate();
         const detail = summarizeRouterProcessDetail(stderr);
-        finish(new Error(`Codex router timed out after ${timeoutMs}ms${detail ? `: ${detail}` : ""}`));
+        const proxyContext = proxyConfigured && !/\bproxy\b|代理/i.test(detail)
+          ? " with proxy configured"
+          : "";
+        finish(new Error(`Codex router timed out after ${timeoutMs}ms${proxyContext}${detail ? `: ${detail}` : ""}`));
       }, timeoutMs);
     }
 
@@ -160,6 +166,12 @@ function routerEnvironment(configured: Record<string, string>): Record<string, s
       value.replace(/\{env:([A-Za-z_][A-Za-z0-9_]*)\}/g, (_match, variable: string) => process.env[variable] ?? "")
     ])
   );
+}
+
+function hasConfiguredProxy(env: NodeJS.ProcessEnv): boolean {
+  return Object.entries(env).some(([name, value]) => (
+    /^(?:HTTP|HTTPS|ALL)_PROXY$/i.test(name) && Boolean(value?.trim())
+  ));
 }
 
 function cancellationError(): Error {
