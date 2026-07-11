@@ -1,11 +1,12 @@
-import { mkdtemp } from "node:fs/promises";
+import { mkdtemp, readdir } from "node:fs/promises";
 import { spawn } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
-import { pathExists, writeJson } from "../src/core/file-store.js";
+import { pathExists, writeJson, writeText } from "../src/core/file-store.js";
 import {
   claimTaskRunLease,
+  clearStaleTaskRunLease,
   inspectTaskRunLease,
   processIsAlive,
   TaskRunLeaseConflictError,
@@ -48,6 +49,108 @@ describe("process ownership", () => {
       state: "active",
       owner: { owner_id: "replacement-owner", pid: process.pid }
     });
+    await lease.release();
+  });
+
+  it("elects exactly one owner while concurrently replacing a corrupt lease", async () => {
+    const taskDir = await mkdtemp(join(tmpdir(), "pct-corrupt-task-lease-race-"));
+    await writeText(join(taskDir, "run-owner.json"), "{");
+
+    const settled = await Promise.allSettled(
+      Array.from({ length: 12 }, (_, index) => (
+        claimTaskRunLease(taskDir, { ownerId: `candidate-${String(index).padStart(2, "0")}` })
+      ))
+    );
+    const fulfilled = settled.flatMap((result) => result.status === "fulfilled" ? [result.value] : []);
+    const rejected = settled.flatMap((result) => result.status === "rejected" ? [result.reason] : []);
+
+    expect(fulfilled).toHaveLength(1);
+    expect(rejected).toHaveLength(11);
+    expect(rejected.every((error) => error instanceof TaskRunLeaseConflictError)).toBe(true);
+    const winner = fulfilled[0];
+    if (!winner) {
+      throw new Error("Concurrent lease election produced no winner");
+    }
+    await expect(inspectTaskRunLease(taskDir)).resolves.toMatchObject({
+      state: "active",
+      owner: { owner_id: winner.owner.owner_id }
+    });
+    await expectClaimIntentsCleared(taskDir);
+
+    await winner.release();
+    await expect(inspectTaskRunLease(taskDir)).resolves.toEqual({ state: "missing", owner: null });
+    await expectClaimIntentsCleared(taskDir);
+  });
+
+  it("elects exactly one owner while concurrently replacing a dead lease", async () => {
+    const taskDir = await mkdtemp(join(tmpdir(), "pct-dead-task-lease-race-"));
+    await writeJson(join(taskDir, "run-owner.json"), {
+      version: 1,
+      owner_id: "dead-owner",
+      pid: 2147483647,
+      acquired_at: "2026-07-11T14:00:00.000Z",
+      process_start_token: "dead-token"
+    });
+
+    const settled = await Promise.allSettled(
+      Array.from({ length: 12 }, (_, index) => (
+        claimTaskRunLease(taskDir, { ownerId: `replacement-${String(index).padStart(2, "0")}` })
+      ))
+    );
+    const fulfilled = settled.flatMap((result) => result.status === "fulfilled" ? [result.value] : []);
+    const rejected = settled.flatMap((result) => result.status === "rejected" ? [result.reason] : []);
+
+    expect(fulfilled).toHaveLength(1);
+    expect(rejected).toHaveLength(11);
+    expect(rejected.every((error) => error instanceof TaskRunLeaseConflictError)).toBe(true);
+    const winner = fulfilled[0];
+    if (!winner) {
+      throw new Error("Concurrent dead lease recovery produced no winner");
+    }
+    await expect(inspectTaskRunLease(taskDir)).resolves.toMatchObject({
+      state: "active",
+      owner: { owner_id: winner.owner.owner_id }
+    });
+    await expectClaimIntentsCleared(taskDir);
+
+    await winner.release();
+    await expect(inspectTaskRunLease(taskDir)).resolves.toEqual({ state: "missing", owner: null });
+    await expectClaimIntentsCleared(taskDir);
+  });
+
+  it("never clears a live task lease through stale cleanup", async () => {
+    const taskDir = await mkdtemp(join(tmpdir(), "pct-live-task-lease-cleanup-"));
+    const lease = await claimTaskRunLease(taskDir, { ownerId: "live-owner" });
+
+    await clearStaleTaskRunLease(taskDir);
+
+    await expect(inspectTaskRunLease(taskDir)).resolves.toMatchObject({
+      state: "active",
+      owner: { owner_id: "live-owner" }
+    });
+    await expectClaimIntentsCleared(taskDir);
+    await lease.release();
+  });
+
+  it("removes an abandoned claim intent before taking ownership", async () => {
+    const taskDir = await mkdtemp(join(tmpdir(), "pct-abandoned-task-claim-"));
+    await writeJson(join(taskDir, ".run-owner-claim-abandoned.json"), {
+      version: 1,
+      intent_id: "abandoned",
+      pid: 2147483647,
+      created_at: "2026-07-11T14:00:00.000Z",
+      choosing: false,
+      ticket: 1,
+      process_start_token: "dead-token"
+    });
+
+    const lease = await claimTaskRunLease(taskDir, { ownerId: "recovered-owner" });
+
+    await expect(inspectTaskRunLease(taskDir)).resolves.toMatchObject({
+      state: "active",
+      owner: { owner_id: "recovered-owner" }
+    });
+    await expectClaimIntentsCleared(taskDir);
     await lease.release();
   });
 
@@ -216,4 +319,9 @@ async function waitForStopped(pid: number): Promise<void> {
     await new Promise((resolve) => setTimeout(resolve, 25));
   }
   throw new Error(`Process ${pid} did not stop`);
+}
+
+async function expectClaimIntentsCleared(taskDir: string): Promise<void> {
+  const names = await readdir(taskDir);
+  expect(names.filter((name) => name.startsWith(".run-owner-claim-"))).toEqual([]);
 }

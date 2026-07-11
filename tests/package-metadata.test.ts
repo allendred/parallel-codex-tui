@@ -261,6 +261,8 @@ describe("package metadata", () => {
     expect(readme).toContain("marks active Main Workers `cancelled`, preserves native session ids, and records recovery");
     expect(readme).toContain("An unverifiable or still-running Main process blocks startup");
     expect(readme).toContain("Every complex run holds a task-owned `run-owner.json` lease");
+    expect(readme).toContain("Stale or corrupt lease replacement is serialized through file-backed claim intents");
+    expect(readme).toContain("exactly one recovery owner can proceed");
     expect(readme).toContain("A retry revalidates the task state and reloads its latest turn, request, and route only after acquiring that lease");
     expect(readme).toContain("an older caller cannot rerun a task another TUI already completed");
     expect(readme).toContain("Recovery atomically claims the same task lease");
