@@ -265,6 +265,8 @@ command = "claude"
 args = ["--resume", "{sessionId}"]
 ```
 
+`model.args` and `model.env` apply to both automated worker runs and embedded native attach sessions. Native attach appends the rendered model arguments after `interactive.args`, so third-party `{model}` and `{provider}` selections remain active when you press `Ctrl+O`.
+
 Customize each role independently; the main role is applied to simple chat, while Judge, Actor, and Critic receive their configured instructions during complex work:
 
 ```toml

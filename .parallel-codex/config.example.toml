@@ -27,7 +27,8 @@ command = "codex"
 args = ["exec", "--skip-git-repo-check", "--sandbox", "workspace-write", "--color", "never", "-"]
 firstOutputTimeoutMs = 120000
 
-# Worker and native-attach environment use the same model env table.
+# Automated workers and native attach use the same model args and env tables.
+# Model args are appended after the interactive resume args and support {model} and {provider}.
 # [workers.codex.model.env]
 # HTTP_PROXY = "http://127.0.0.1:7890"
 # HTTPS_PROXY = "http://127.0.0.1:7890"

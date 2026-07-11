@@ -63,6 +63,51 @@ describe("buildNativeAttachLaunch", () => {
     });
   });
 
+  it("applies configured third-party model arguments to the embedded native session", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pct-native-attach-model-"));
+    const workerDir = join(root, "task-a", "actor-codex");
+    await writeJson(join(workerDir, "native-session.json"), {
+      engine: "codex",
+      role: "actor",
+      worker_id: "actor-codex",
+      session_id: "native-model",
+      scope: "task",
+      cwd: root,
+      created_at: "2026-06-30T03:30:00.000Z",
+      last_used_at: "2026-06-30T03:30:00.000Z",
+      source: "manual"
+    });
+    const config = defaultConfig(root);
+    config.workers.codex.interactive.args = ["resume", "{sessionId}"];
+    config.workers.codex.model = {
+      name: "vendor-coder-v2",
+      provider: "acme",
+      args: ["--model", "{model}", "--provider", "{provider}"],
+      env: {}
+    };
+
+    const launch = await buildNativeAttachLaunch({
+      config,
+      worker: {
+        id: "actor-codex",
+        role: "actor",
+        engine: "codex",
+        label: "Actor (codex)",
+        logPath: join(workerDir, "output.log"),
+        statusPath: join(workerDir, "status.json")
+      }
+    });
+
+    expect(launch.args).toEqual([
+      "resume",
+      "native-model",
+      "--model",
+      "vendor-coder-v2",
+      "--provider",
+      "acme"
+    ]);
+  });
+
   it("passes worker model environment into the embedded native session", async () => {
     const root = await mkdtemp(join(tmpdir(), "pct-native-attach-env-"));
     const workerDir = join(root, "task-a", "actor-codex");

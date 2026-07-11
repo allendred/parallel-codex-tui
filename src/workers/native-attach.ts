@@ -67,7 +67,10 @@ export async function buildNativeAttachLaunch(input: NativeAttachLaunchInput): P
   return {
     command: workerConfig.interactive.command,
     args: nativeAttachArgs({
-      args: workerConfig.interactive.args.map((arg) => renderTemplate(arg, nativeSession.session_id, modelConfig)),
+      args: [
+        ...workerConfig.interactive.args,
+        ...modelConfig.args
+      ].map((arg) => renderTemplate(arg, nativeSession.session_id, modelConfig)),
       engine: input.worker.engine,
       additionalDirs
     }),
