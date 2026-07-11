@@ -3,7 +3,8 @@ import { join } from "node:path";
 import type { AppConfig } from "../core/config.js";
 import { appendJsonLine, ensureDir, pathExists, readJson, readTextIfExists, removeIfExists, writeJson, writeText } from "../core/file-store.js";
 import { routerRuntimeDir } from "../core/paths.js";
-import { routeRequestWithCodex, type CodexRouteRunner } from "../core/router.js";
+import { classifyRouterFailure } from "../core/router-audit.js";
+import { routeRequestWithCodex, routerProxyConfigured, type CodexRouteRunner } from "../core/router.js";
 import type { SessionManager, TaskSession, TaskTurn, WorkerFiles } from "../core/session-manager.js";
 import { RouteDecisionSchema, TaskMetaSchema, WorkerStatusSchema, type EngineName, type NativeSession, type RouteDecision, type WorkerRole, type WorkerStatus } from "../domain/schemas.js";
 import { getAdapter, type WorkerRegistry } from "../workers/registry.js";
@@ -1065,12 +1066,22 @@ export class Orchestrator {
       timeoutMs: routeConfig.router.codex.timeoutMs
     });
     const route = await routeRequestWithCodex(request, routeConfig, this.routeRunner, this.routerCwd, signal);
+    const semanticRoute = router.defaultMode === "auto";
     await appendJsonLine(join(this.routerCwd, "routes.jsonl"), {
       time: new Date().toISOString(),
       request,
       workspace,
       scope,
-      ...route
+      ...route,
+      ...(semanticRoute
+        ? {
+            router_timeout_ms: routeConfig.router.codex.timeoutMs,
+            proxy_configured: routerProxyConfigured(routeConfig.router.codex.env),
+            ...(route.source === "fallback"
+              ? { failure_kind: classifyRouterFailure(route.reason) ?? "unknown" }
+              : {})
+          }
+        : {})
     });
     return route;
   }

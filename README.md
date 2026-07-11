@@ -205,7 +205,7 @@ Set `defaultMode = "simple"` / `defaultMode = "complex"` to force one path. In `
 
 Valid `[router]` changes are reloaded before the next classification without restarting the TUI, so mode, Codex command arguments, timeouts, fallback, and proxy environment updates take effect on the next request. Worker, pairing, role, orchestration, data-directory, and UI changes still require a restart because those runtime components are constructed at startup.
 
-From chat or worker-log views, press `Ctrl+G` to open the global Router diagnostics view. It reads the shared audit without invoking a model and shows each route's source, duration, fallback cause, scope, and workspace alongside the current policy. It reports only whether a proxy is configured; Proxy credentials are never displayed. Scroll with the mouse wheel or PageUp/PageDown; `Ctrl+G` refreshes it and `Esc` returns with the chat draft intact.
+From chat or worker-log views, press `Ctrl+G` to open the global Router diagnostics view. It reads the shared audit without invoking a model and shows each route's source, duration, fallback cause, scope, and workspace alongside the current policy. `Tab` toggles between all workspaces and the current workspace; the scope summary always retains the loaded global route total. The health panel includes p50/p95/max latency and saves the timeout limit, proxy-configured flag, and normalized failure kind with each new semantic route. Proxy context is correlation evidence, not proof that the proxy caused a failure. Proxy credentials are never displayed. Scroll with the mouse wheel or PageUp/PageDown; `Ctrl+G` refreshes it and `Esc` returns with the chat draft intact.
 
 ### Proxy Environment
 

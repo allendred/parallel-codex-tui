@@ -28,6 +28,40 @@ describe("readRouterAudit", () => {
     ]);
     await expect(readRouterAudit?.(path, 0)).resolves.toEqual([]);
   });
+
+  it("keeps structured timeout and proxy evidence and classifies legacy failures", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pct-router-audit-evidence-"));
+    const path = join(root, "routes.jsonl");
+    const readRouterAudit = (
+      routerAuditModule as typeof routerAuditModule & {
+        readRouterAudit?: (path: string, limit?: number) => Promise<Array<Record<string, unknown>>>;
+        classifyRouterFailure?: (reason: string) => string | null;
+      }
+    ).readRouterAudit;
+    const classifyRouterFailure = (
+      routerAuditModule as typeof routerAuditModule & {
+        classifyRouterFailure?: (reason: string) => string | null;
+      }
+    ).classifyRouterFailure;
+    await writeText(path, `${JSON.stringify({
+      ...routeRecord("timeout", "fallback"),
+      router_timeout_ms: 30000,
+      proxy_configured: true,
+      failure_kind: "timeout"
+    })}\n`);
+
+    expect(classifyRouterFailure).toBeTypeOf("function");
+    expect(classifyRouterFailure?.("Codex router timed out after 30000ms with proxy configured"))
+      .toBe("timeout");
+    expect(classifyRouterFailure?.("No JSON object in Codex router output")).toBe("invalid-output");
+    await expect(readRouterAudit?.(path)).resolves.toEqual([
+      expect.objectContaining({
+        router_timeout_ms: 30000,
+        proxy_configured: true,
+        failure_kind: "timeout"
+      })
+    ]);
+  });
 });
 
 function routeRecord(request: string, source: "codex" | "fallback"): Record<string, unknown> {

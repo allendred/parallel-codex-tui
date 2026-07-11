@@ -773,10 +773,49 @@ describe("Orchestrator", () => {
       workspace: workspaceRoot,
       mode: "simple",
       reason: "Greeting needs Main only.",
-      source: "codex"
+      source: "codex",
+      router_timeout_ms: 30000,
+      proxy_configured: expect.any(Boolean)
     });
     expect(records[0]?.time).toEqual(expect.any(String));
     expect(records[0]?.duration_ms).toEqual(expect.any(Number));
+  });
+
+  it("records structured timeout and proxy evidence for Router fallbacks", async () => {
+    const appRoot = await mkdtemp(join(tmpdir(), "pct-orch-router-evidence-app-"));
+    const workspaceRoot = await mkdtemp(join(tmpdir(), "pct-orch-router-evidence-workspace-"));
+    const routerCwdRoot = join(appRoot, ".parallel-codex", "router");
+    const config = mockConfig(appRoot);
+    config.router.defaultMode = "auto";
+    config.router.codex.timeoutMs = 30000;
+    config.router.codex.env = { HTTPS_PROXY: "http://127.0.0.1:7890" };
+    const manager = new SessionManager({
+      projectRoot: workspaceRoot,
+      dataDir: config.dataDir,
+      now: () => new Date("2026-06-30T03:30:00.000Z"),
+      randomId: () => "a1b2"
+    });
+    const orchestrator = new Orchestrator(
+      config,
+      manager,
+      new Map([["mock", new MockWorkerAdapter()]]),
+      async () => {
+        throw new Error("Codex router timed out after 30000ms with proxy configured");
+      },
+      routerCwdRoot
+    );
+
+    await orchestrator.handleRequest({ request: "你好", cwd: workspaceRoot });
+    const record = JSON.parse(
+      (await readTextIfExists(join(routerCwdRoot, "routes.jsonl"))).trim()
+    ) as Record<string, unknown>;
+
+    expect(record).toMatchObject({
+      source: "fallback",
+      router_timeout_ms: 30000,
+      proxy_configured: true,
+      failure_kind: "timeout"
+    });
   });
 
   it("passes configured role prompts into worker prompts", async () => {

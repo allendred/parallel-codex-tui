@@ -12,6 +12,7 @@ describe("CLI Router diagnostics smoke", () => {
   it("opens the global audit, scrolls, preserves the draft, refreshes, and exits", async () => {
     const appRoot = await mkdtemp(join(tmpdir(), "pct-cli-router-app-"));
     const workspace = await mkdtemp(join(tmpdir(), "pct-cli-router-workspace-"));
+    const otherWorkspace = await mkdtemp(join(tmpdir(), "pct-cli-router-other-"));
     await prepareWorkspace(appRoot, workspace);
     await writeFile(
       join(appRoot, ".parallel-codex", "config.toml"),
@@ -30,11 +31,14 @@ describe("CLI Router diagnostics smoke", () => {
     );
     const routerDirectory = join(appRoot, ".parallel-codex", "router");
     await ensureDir(routerDirectory);
-    const records = Array.from({ length: 26 }, (_, index) => routeRecord(
+    const records = [
+      ...Array.from({ length: 26 }, (_, index) => routeRecord(
       index === 0 ? "oldest-route-00" : index === 25 ? "newest-visible" : `route-${String(index).padStart(2, "0")}`,
       workspace,
       index
-    ));
+      )),
+      routeRecord("other-workspace-route", otherWorkspace, 26)
+    ];
     await writeFile(
       join(routerDirectory, "routes.jsonl"),
       `${records.map((record) => JSON.stringify(record)).join("\n")}\n`,
@@ -70,8 +74,21 @@ describe("CLI Router diagnostics smoke", () => {
       await waitForScreenText(() => screenWrites, screen, "newest-visible");
       let snapshot = screen.snapshot();
       expect(snapshot.split("\n")[0]).toContain("routes");
-      expect(snapshot).toContain("proxy · direct");
+      expect(snapshot).toContain("scope · all · 27/27 routes · 2 workspaces");
+      expect(snapshot).toContain("latency · p50");
+      expect(snapshot).toContain("proxy · direct now");
       expect(snapshot).not.toContain("user:secret");
+
+      child.write("\t");
+      await waitForScreenText(() => screenWrites, screen, `scope · current · ${basename(workspace)} · 26/27 routes`);
+      await waitForScreenText(() => screenWrites, screen, "evidence · timeout · limit 30s");
+      snapshot = screen.snapshot();
+      expect(snapshot).not.toContain("other-workspace-route");
+      expect(snapshot).toContain("Tab scope");
+      expect(snapshot).toContain("cause unproven");
+
+      child.write("\t");
+      await waitForScreenText(() => screenWrites, screen, "scope · all · 27/27 routes · 2 workspaces");
 
       child.write("\x1b[6~".repeat(8));
       await waitForScreenText(() => screenWrites, screen, "oldest-route-00");
@@ -96,7 +113,7 @@ describe("CLI Router diagnostics smoke", () => {
 
       child.write("\x07");
       await waitForScreenText(() => screenWrites, screen, "request · draft survives");
-      child.write("\x03");
+      child.write("\t\t\x03");
       await waitForExit(exits);
       expect(exits[0]).toBe(0);
     } finally {
@@ -122,7 +139,17 @@ function routeRecord(request: string, workspace: string, index: number): RouterA
     actor_engine: "codex",
     critic_engine: "codex",
     source: index === 25 ? "fallback" : "codex",
-    duration_ms: index === 25 ? 30000 : 700
+    duration_ms: index === 25 ? 30000 : 700,
+    ...(index === 25
+      ? {
+          router_timeout_ms: 30000,
+          proxy_configured: true,
+          failure_kind: "timeout" as const
+        }
+      : {
+          router_timeout_ms: 30000,
+          proxy_configured: false
+        })
   };
 }
 

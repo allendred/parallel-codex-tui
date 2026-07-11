@@ -168,6 +168,9 @@ describe("package metadata", () => {
     expect(readme).toContain("rebuilds the runtime in place and restores that workspace's latest task, route, workers, and chat");
     expect(readme).toContain("Router configuration and `router/routes.jsonl` remain shared under the app root");
     expect(readme).toContain("press `Ctrl+G` to open the global Router diagnostics view");
+    expect(readme).toContain("`Tab` toggles between all workspaces and the current workspace");
+    expect(readme).toContain("the timeout limit, proxy-configured flag, and normalized failure kind");
+    expect(readme).toContain("Proxy context is correlation evidence, not proof that the proxy caused a failure");
     expect(readme).toContain("source, duration, fallback cause, scope, and workspace");
     expect(readme).toContain("`Ctrl+G` refreshes it and `Esc` returns with the chat draft intact");
     expect(readme).toContain("Proxy credentials are never displayed");

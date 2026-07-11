@@ -412,7 +412,7 @@ describe("InputBar", () => {
       <InputBar mode="router" value="ignored" terminalWidth={80} onChange={() => {}} />
     );
     const roomyFrame = roomy.lastFrame() ?? "";
-    expect(roomyFrame).toContain("routes · scroll · ^G refresh · Esc chat");
+    expect(roomyFrame).toContain("routes · scroll · Tab scope · ^G refresh · Esc chat");
     expect(roomyFrame).not.toContain("ignored");
     expect(roomyFrame.split("\n")).toHaveLength(1);
     expect(displayWidth(roomyFrame)).toBeLessThanOrEqual(80);
@@ -426,6 +426,21 @@ describe("InputBar", () => {
     expect(narrowFrame.split("\n")).toHaveLength(1);
     expect(displayWidth(narrowFrame)).toBeLessThanOrEqual(24);
     narrow.unmount();
+  });
+
+  it("keeps Router diagnostics guidance on one row at every terminal width", () => {
+    const overflow: string[] = [];
+    for (let width = 8; width <= 100; width += 1) {
+      const view = render(
+        <InputBar mode="router" value="" terminalWidth={width} onChange={() => {}} />
+      );
+      const frame = view.lastFrame() ?? "";
+      if (frame.split("\n").length > 1 || displayWidth(frame) > width) {
+        overflow.push(`${width}:${displayWidth(frame)}:${frame}`);
+      }
+      view.unmount();
+    }
+    expect(overflow).toEqual([]);
   });
 
   it("shows Worker overview selection and action guidance", () => {

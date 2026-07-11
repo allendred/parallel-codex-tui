@@ -38,7 +38,8 @@ import { WorkspacePicker } from "../cli-workspace-picker.js";
 import {
   RouterDiagnosticsView,
   routerDiagnosticsPolicy,
-  type RouterDiagnosticsPolicy
+  type RouterDiagnosticsPolicy,
+  type RouterDiagnosticsScope
 } from "./RouterDiagnosticsView.js";
 import { moveWorkerSelection, WorkerOverviewView } from "./WorkerOverviewView.js";
 import { moveTaskSessionSelection, TaskSessionsView } from "./TaskSessionsView.js";
@@ -190,6 +191,7 @@ export function App({
   const [routerPolicy, setRouterPolicy] = useState<RouterDiagnosticsPolicy>(() => routerDiagnosticsPolicy(config.router));
   const [routerLoading, setRouterLoading] = useState(false);
   const [routerError, setRouterError] = useState<string | null>(null);
+  const [routerScope, setRouterScope] = useState<RouterDiagnosticsScope>("all");
   const [routerScrollOffset, setRouterScrollOffset] = useState(0);
   const [routerMaxScrollOffset, setRouterMaxScrollOffset] = useState(0);
   const [taskSessions, setTaskSessions] = useState<TaskIndexSummary[]>([]);
@@ -742,31 +744,41 @@ export function App({
         return;
       }
       if (currentView === "router") {
-        if (isExitShortcut(chunk, {})) {
+        const routerChunks = tokenizeRawInput(chunk);
+        if (routerChunks.some((routerChunk) => isExitShortcut(routerChunk, {}))) {
           activeRunControllerRef.current?.abort();
           exitRef.current();
           return;
         }
-        if (isRouterDiagnosticsShortcut(chunk, {})) {
-          void openRouterDiagnosticsRef.current();
-          return;
-        }
-        if (isTaskSessionsShortcut(chunk, {}) && !busyRef.current) {
-          void openTaskSessionsRef.current();
-          return;
-        }
-        if (chunk === "\x1b") {
-          setAttachError(null);
-          viewRef.current = routerReturnViewRef.current;
-          setView(routerReturnViewRef.current);
-          return;
-        }
-        const routeDelta = mouseScrollDelta(chunk, 3)
-          + rawPageScrollDelta(chunk, Math.max(1, outputHeight - 1));
-        if (routeDelta !== 0) {
-          setRouterScrollOffset((current) => (
-            nextScrollOffset(current, -routeDelta, routerMaxScrollOffsetRef.current)
-          ));
+        for (const routerChunk of routerChunks) {
+          if (isRouterDiagnosticsShortcut(routerChunk, {})) {
+            void openRouterDiagnosticsRef.current();
+            continue;
+          }
+          if (isTaskSessionsShortcut(routerChunk, {}) && !busyRef.current) {
+            void openTaskSessionsRef.current();
+            return;
+          }
+          if (routerChunk === "\t") {
+            setRouterScope((current) => current === "all" ? "workspace" : "all");
+            routerMaxScrollOffsetRef.current = 0;
+            setRouterMaxScrollOffset(0);
+            setRouterScrollOffset(0);
+            continue;
+          }
+          if (routerChunk === "\x1b") {
+            setAttachError(null);
+            viewRef.current = routerReturnViewRef.current;
+            setView(routerReturnViewRef.current);
+            return;
+          }
+          const routeDelta = mouseScrollDelta(routerChunk, 3)
+            + rawPageScrollDelta(routerChunk, Math.max(1, outputHeight - 1));
+          if (routeDelta !== 0) {
+            setRouterScrollOffset((current) => (
+              nextScrollOffset(current, -routeDelta, routerMaxScrollOffsetRef.current)
+            ));
+          }
         }
         return;
       }
@@ -1668,6 +1680,8 @@ export function App({
           <RouterDiagnosticsView
             records={routerRecords}
             policy={routerPolicy}
+            currentWorkspace={cwd}
+            scope={routerScope}
             loading={routerLoading}
             error={routerError}
             scrollOffset={routerScrollOffset}

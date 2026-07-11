@@ -64,9 +64,10 @@ export async function runCodexRouterProcess(
     throw cancellationError();
   }
 
+  const configuredEnvironment = routerEnvironment(config.router.codex.env);
   const env = {
     ...process.env,
-    ...routerEnvironment(config.router.codex.env)
+    ...configuredEnvironment
   };
   const proxyConfigured = hasConfiguredProxy(env);
 
@@ -159,13 +160,26 @@ export async function runCodexRouterProcess(
   });
 }
 
-function routerEnvironment(configured: Record<string, string>): Record<string, string> {
+function routerEnvironment(
+  configured: Record<string, string>,
+  env: NodeJS.ProcessEnv = process.env
+): Record<string, string> {
   return Object.fromEntries(
     Object.entries(configured).map(([name, value]) => [
       name,
-      value.replace(/\{env:([A-Za-z_][A-Za-z0-9_]*)\}/g, (_match, variable: string) => process.env[variable] ?? "")
+      value.replace(/\{env:([A-Za-z_][A-Za-z0-9_]*)\}/g, (_match, variable: string) => env[variable] ?? "")
     ])
   );
+}
+
+export function routerProxyConfigured(
+  configured: Record<string, string>,
+  env: NodeJS.ProcessEnv = process.env
+): boolean {
+  return hasConfiguredProxy({
+    ...env,
+    ...routerEnvironment(configured, env)
+  });
 }
 
 function hasConfiguredProxy(env: NodeJS.ProcessEnv): boolean {
@@ -218,7 +232,7 @@ function parseCodexRoute(output: string, config: AppConfig): RouteDecision {
   const reason = typeof record.reason === "string" ? record.reason.trim() : "";
   return {
     mode,
-    reason: reason || "Codex router decision.",
+    reason: reason ? redactRouterSecrets(reason) : "Codex router decision.",
     suggested_roles: mode === "complex" ? ["judge", "actor", "critic"] : [],
     judge_engine: config.pairing.judge,
     actor_engine: config.pairing.actor,
@@ -258,7 +272,7 @@ function summarizeRouterError(error: unknown): string {
     .map((line) => line.trim())
     .find((line) => line && !line.toLowerCase().startsWith("tip:") && !line.toLowerCase().startsWith("usage:"));
 
-  return (meaningful || "unknown router error").replace(/[.。]+$/u, "");
+  return redactRouterSecrets(meaningful || "unknown router error").replace(/[.。]+$/u, "");
 }
 
 function summarizeRouterProcessDetail(output: string): string {
@@ -270,9 +284,11 @@ function summarizeRouterProcessDetail(output: string): string {
     .map((line) => line.trim())
     .filter(Boolean);
   const latest = lines.at(-1) ?? "";
-  return latest
-    .replace(/\b([a-z][a-z0-9+.-]*:\/\/)([^@\s/]+)@/gi, "$1***@")
-    .slice(0, 240);
+  return redactRouterSecrets(latest).slice(0, 240);
+}
+
+function redactRouterSecrets(value: string): string {
+  return value.replace(/\b([a-z][a-z0-9+.-]*:\/\/)([^@\s/]+)@/gi, "$1***@");
 }
 
 function simpleRoute(reason: string, config: AppConfig): RouteDecision {

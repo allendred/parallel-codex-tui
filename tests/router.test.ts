@@ -264,6 +264,18 @@ describe("routeRequestWithCodex", () => {
     expect(route.reason).not.toContain("user:secret");
   });
 
+  it("redacts proxy credentials from arbitrary Router failures before audit persistence", async () => {
+    const config = defaultConfig("/tmp/project");
+    const runner: CodexRouteRunner = async () => {
+      throw new Error("proxy handshake failed at http://user:secret@127.0.0.1:7890");
+    };
+
+    const route = await routeRequestWithCodex("你好", config, runner);
+
+    expect(route.reason).toContain("http://***@127.0.0.1:7890");
+    expect(route.reason).not.toContain("user:secret");
+  });
+
   it("fails safely when the router closes stdin before receiving the prompt", async () => {
     const root = await mkdtemp(join(tmpdir(), "pct-router-input-error-"));
     const config = defaultConfig(root);

@@ -47,20 +47,55 @@ describe("RouterDiagnosticsView", () => {
     const view = render(React.createElement(RouterDiagnosticsView!, {
       records: records(),
       policy: policy(),
+      currentWorkspace: "/tmp/tetris",
+      scope: "all",
       terminalWidth: 80,
-      height: 12
+      height: 18
     }));
     const frame = view.lastFrame() ?? "";
 
     expect(frame).toContain("Router diagnostics");
-    expect(frame).toContain("health · codex 1 · fallback 1");
+    expect(frame).toContain("scope · all · 2/2 routes · 1 workspace");
+    expect(frame).toContain("health · codex 1 · fallback 1 · timeout 1");
+    expect(frame).toContain("latency · p50 9.7s · p95 30s · max 30s");
     expect(frame).toContain("policy · auto · 30s / 20s · fallback simple");
-    expect(frame).toContain("proxy · configured");
+    expect(frame).toContain("proxy · configured now · 1 recorded · context only");
     expect(frame).toContain("tetris · initial · simple · codex · 9.7s");
+    expect(frame).toContain("evidence · timeout · limit 30s · proxy configured · cause unproven");
     expect(frame).toContain("timeout via proxy");
     expect(frame).toContain("做个俄罗斯方块");
     expect(frame).not.toContain("user:secret");
     view.unmount();
+  });
+
+  it("filters the shared audit to the current workspace without losing global totals", () => {
+    const diagnostics = diagnosticsModule as typeof diagnosticsModule & {
+      filterRouterAuditRecords?: (
+        records: RouterAuditRecord[],
+        currentWorkspace: string,
+        scope: "all" | "workspace"
+      ) => RouterAuditRecord[];
+      routerDiagnosticsDisplayLines?: (
+        records: RouterAuditRecord[],
+        routerPolicy: ReturnType<typeof policy>,
+        terminalWidth: number,
+        state?: { currentWorkspace?: string; scope?: "all" | "workspace" }
+      ) => Array<{ text: string }>;
+    };
+    const allRecords = [
+      ...records(),
+      { ...records()[0]!, request: "other workspace", workspace: "/tmp/other" }
+    ];
+
+    expect(diagnostics.filterRouterAuditRecords).toBeTypeOf("function");
+    expect(diagnostics.filterRouterAuditRecords?.(allRecords, "/tmp/tetris", "workspace"))
+      .toHaveLength(2);
+    const text = diagnostics.routerDiagnosticsDisplayLines?.(allRecords, policy(), 100, {
+      currentWorkspace: "/tmp/tetris",
+      scope: "workspace"
+    }).map((line) => line.text).join("\n") ?? "";
+    expect(text).toContain("scope · current · tetris · 2/3 routes");
+    expect(text).not.toContain("other workspace");
   });
 
   it("keeps every rendered diagnostic row within narrow terminal widths", () => {
@@ -125,7 +160,10 @@ function records(): RouterAuditRecord[] {
       actor_engine: "codex",
       critic_engine: "codex",
       source: "fallback",
-      duration_ms: 30000
+      duration_ms: 30000,
+      router_timeout_ms: 30000,
+      proxy_configured: true,
+      failure_kind: "timeout"
     }
   ];
 }

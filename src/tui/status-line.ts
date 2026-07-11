@@ -1,5 +1,6 @@
 import type { RouteDecision } from "../domain/schemas.js";
 import type { RouteStartInfo } from "../orchestrator/orchestrator.js";
+import { classifyRouterFailure } from "../core/router-audit.js";
 import { compactEndByDisplayWidth } from "./display-width.js";
 
 export interface StatusLineState {
@@ -74,9 +75,9 @@ export function formatRouteStatus(route: RouteDecision | null): string {
     details.push(route.source);
   }
   if (route.source === "fallback") {
-    const cause = formatRouteFailureCause(route.reason);
+    const cause = classifyRouterFailure(route.reason);
     if (cause) {
-      details.push(cause);
+      details.push(routeFailureKindLabel(cause, route.reason));
     }
   }
   if (typeof route.duration_ms === "number") {
@@ -100,37 +101,11 @@ export function formatRoutePendingStatus(state: RouteStartInfo | null, elapsedMs
   return `route ${label} · ${formatRouteDuration(state.timeoutMs)} max`;
 }
 
-function formatRouteFailureCause(reason: string): string | null {
-  const timedOut = /\b(?:timed out|timeout|ETIMEDOUT)\b/i.test(reason);
-  const proxy = /\bproxy\b|代理/i.test(reason);
-  if (proxy && timedOut) {
+function routeFailureKindLabel(kind: NonNullable<ReturnType<typeof classifyRouterFailure>>, reason: string): string {
+  if (kind === "timeout" && /\bproxy\b|代理/i.test(reason)) {
     return "timeout via proxy";
   }
-  if (/\b(?:401|403)\b|\b(?:unauthori[sz]ed|forbidden|authentication|api[-_\s]?key|login required|not logged in|sign in)\b/i.test(reason)) {
-    return "auth";
-  }
-  if (/\b429\b|\b(?:rate[ -]?limit|too many requests|quota (?:exceeded|exhausted)|usage limit)\b/i.test(reason)) {
-    return "rate limit";
-  }
-  if (proxy) {
-    return "proxy";
-  }
-  if (/\b(?:ECONNREFUSED|ECONNRESET|ENETUNREACH|EHOSTUNREACH|ENOTFOUND|EAI_AGAIN)\b|\b(?:network|websocket|https transport|fetch failed|certificate|tls|ssl)\b/i.test(reason)) {
-    return "network";
-  }
-  if (timedOut) {
-    return "timeout";
-  }
-  if (/\b(?:ENOENT|command not found|spawn error)\b/i.test(reason)) {
-    return "unavailable";
-  }
-  if (/\b(?:no json object|invalid json|invalid codex router (?:mode|response object)|failed to parse json|unexpected token)\b/i.test(reason)) {
-    return "invalid output";
-  }
-  if (/\b(?:exited with (?:code|signal)|process exited)\b/i.test(reason)) {
-    return "exit";
-  }
-  return null;
+  return kind.replaceAll("-", " ");
 }
 
 export function formatSelectedWorkerStatus(state: StatusLineState | null, selectedIndex: number): string {

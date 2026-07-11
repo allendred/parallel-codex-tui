@@ -586,6 +586,9 @@ function routerInputHints(width: number): { label: string; detail: string } {
   if (width < 12) {
     return { label: "rt", detail: "" };
   }
+  if (width < 14) {
+    return { label: "rt", detail: " · Esc" };
+  }
   if (width < 18) {
     return { label: "routes", detail: " · Esc" };
   }
@@ -595,5 +598,8 @@ function routerInputHints(width: number): { label: string; detail: string } {
   if (width < 44) {
     return { label: "routes", detail: " · scroll · ^G · Esc" };
   }
-  return { label: "routes", detail: " · scroll · ^G refresh · Esc chat" };
+  if (width < 58) {
+    return { label: "routes", detail: " · scroll · Tab · ^G · Esc" };
+  }
+  return { label: "routes", detail: " · scroll · Tab scope · ^G refresh · Esc chat" };
 }
