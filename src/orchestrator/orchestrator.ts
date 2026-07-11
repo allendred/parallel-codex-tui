@@ -276,32 +276,34 @@ export class Orchestrator {
 
   async retryTask(input: RetryTaskInput): Promise<HandleRequestResult> {
     const task = this.sessions.taskFromId(input.taskId);
-    const meta = await readTaskMetaIfValid(task.metaPath);
-    if (!meta) {
+    if (!(await readTaskMetaIfValid(task.metaPath))) {
       throw new Error(`Task session not found: ${input.taskId}`);
     }
-    if (meta.status !== "failed" && meta.status !== "cancelled") {
-      throw new Error(`Task ${input.taskId} is ${meta.status}; only failed or cancelled tasks can be retried.`);
-    }
-
-    const turn = await this.sessions.latestTurn(task);
-    if (!turn) {
-      throw new Error(`Task ${input.taskId} has no turn to retry.`);
-    }
-    const request = (await readTextIfExists(turn.userPath)).trim();
-    if (!request) {
-      throw new Error(`Task ${input.taskId} turn ${turn.turnId} has no request to retry.`);
-    }
-    const route = await readJson(turn.routePath, RouteDecisionSchema);
-    const executionInput: HandleRequestInput = {
-      ...input,
-      request,
-      cwd: meta.cwd,
-      retry: true
-    };
-    const workers: WorkerLogRef[] = [];
 
     return this.withTaskRunLease(task, async () => {
+      const meta = await readTaskMetaIfValid(task.metaPath);
+      if (!meta) {
+        throw new Error(`Task session not found: ${input.taskId}`);
+      }
+      if (meta.status !== "failed" && meta.status !== "cancelled") {
+        throw new Error(`Task ${input.taskId} is ${meta.status}; only failed or cancelled tasks can be retried.`);
+      }
+      const turn = await this.sessions.latestTurn(task);
+      if (!turn) {
+        throw new Error(`Task ${input.taskId} has no turn to retry.`);
+      }
+      const request = (await readTextIfExists(turn.userPath)).trim();
+      if (!request) {
+        throw new Error(`Task ${input.taskId} turn ${turn.turnId} has no request to retry.`);
+      }
+      const route = await readJson(turn.routePath, RouteDecisionSchema);
+      const executionInput: HandleRequestInput = {
+        ...input,
+        request,
+        cwd: meta.cwd,
+        retry: true
+      };
+      const workers: WorkerLogRef[] = [];
       await this.sessions.recordLatestRoute(task, route);
       await this.sessions.appendEvent(task, "task.retrying", `Retrying turn ${turn.turnId}`);
       input.onRoute?.(route);

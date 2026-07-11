@@ -249,6 +249,8 @@ describe("package metadata", () => {
     expect(readme).toContain("an unchanged in-progress wave reuses successful Actor and Critic checkpoints");
     expect(readme).toContain("the stale wave checkpoint is rejected and rebuilt from the current project");
     expect(readme).toContain("Every complex run holds a task-owned `run-owner.json` lease");
+    expect(readme).toContain("A retry revalidates the task state and reloads its latest turn, request, and route only after acquiring that lease");
+    expect(readme).toContain("an older caller cannot rerun a task another TUI already completed");
     expect(readme).toContain("Recovery atomically claims the same task lease");
     expect(readme).toContain("concurrent TUI startups cannot recover one task twice or race a new retry");
     expect(readme).toContain("persist `process.json` with their PID and OS process-start fingerprint");
