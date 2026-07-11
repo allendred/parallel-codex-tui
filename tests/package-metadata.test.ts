@@ -193,6 +193,8 @@ describe("package metadata", () => {
     expect(readme).toContain("parallel-codex-tui --doctor --probe-router");
     expect(readme).toContain("one real classification through the configured Codex Router");
     expect(readme).toContain("spawn time, first-output time, process duration, stdout/stderr byte counts, and failure stage");
+    expect(readme).toContain("dispatch, spawn, first output, process, parse, and total stages");
+    expect(readme).toContain("I/O byte evidence on a separate line");
     expect(readme).toContain("a bounded diagnosis and a concrete next action");
     expect(readme).toContain("configured proxy remains context rather than a proven cause");
     expect(readme).toContain("`timeout waiting output`, `timeout after stdout`, or `timeout after stderr`");

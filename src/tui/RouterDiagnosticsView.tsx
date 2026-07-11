@@ -171,14 +171,14 @@ export function routerDiagnosticsDisplayLines(
       if (evidence) {
         logical.push({ text: evidence, tone: "warning" });
       }
-      const trace = routerAuditTrace(record);
+      const trace = routerAuditTraceLines(record);
       if (record.source === "fallback") {
         const diagnosis = diagnoseRouterFailure(record);
         logical.push({ text: `diagnosis · ${diagnosis.summary}`, tone: "danger" });
         logical.push({ text: `next · ${diagnosis.action}`, tone: "warning" });
       }
-      if (trace) {
-        logical.push({ text: trace, tone: "muted" });
+      for (const line of trace) {
+        logical.push({ text: line, tone: "muted" });
       }
       logical.push({ text: `reason · ${boundedDiagnosticText(record.reason)}`, tone: "muted" });
     }
@@ -379,8 +379,11 @@ function routerAuditEvidence(record: RouterAuditRecord): string | null {
   return parts.join(" · ");
 }
 
-function routerAuditTrace(record: RouterAuditRecord): string | null {
-  const parts = [
+function routerAuditTraceLines(record: RouterAuditRecord): string[] {
+  const stages = [
+    ...(typeof record.router_dispatch_ms === "number"
+      ? [`dispatch ${formatDiagnosticDuration(record.router_dispatch_ms)}`]
+      : []),
     ...(typeof record.router_spawn_ms === "number"
       ? [`spawn ${formatDiagnosticDuration(record.router_spawn_ms)}`]
       : []),
@@ -388,6 +391,11 @@ function routerAuditTrace(record: RouterAuditRecord): string | null {
     ...(typeof record.router_process_ms === "number"
       ? [`process ${formatDiagnosticDuration(record.router_process_ms)}`]
       : []),
+    ...(typeof record.router_parse_ms === "number"
+      ? [`parse ${formatDiagnosticDuration(record.router_parse_ms)}`]
+      : [])
+  ];
+  const io = [
     ...(typeof record.router_stdout_bytes === "number"
       ? [`stdout ${formatDiagnosticBytes(record.router_stdout_bytes)}`]
       : []),
@@ -395,20 +403,29 @@ function routerAuditTrace(record: RouterAuditRecord): string | null {
       ? [`stderr ${formatDiagnosticBytes(record.router_stderr_bytes)}`]
       : [])
   ];
-  return parts.length > 0 ? `trace · ${parts.join(" · ")}` : null;
+  if (stages.length === 0 && io.length === 0) {
+    return [];
+  }
+  if (typeof record.duration_ms === "number") {
+    stages.push(`total ${formatDiagnosticDuration(record.duration_ms)}`);
+  }
+  return [
+    ...(stages.length > 0 ? [`trace · ${stages.join(" · ")}`] : []),
+    ...(io.length > 0 ? [`io · ${io.join(" · ")}`] : [])
+  ];
 }
 
 function routerFirstOutputTraceParts(record: RouterAuditRecord): string[] {
   const streams = [
     ...(typeof record.router_first_stdout_ms === "number"
-      ? [`first stdout ${formatDiagnosticDuration(record.router_first_stdout_ms)}`]
+      ? [{ at: record.router_first_stdout_ms, text: `first stdout ${formatDiagnosticDuration(record.router_first_stdout_ms)}` }]
       : []),
     ...(typeof record.router_first_stderr_ms === "number"
-      ? [`first stderr ${formatDiagnosticDuration(record.router_first_stderr_ms)}`]
+      ? [{ at: record.router_first_stderr_ms, text: `first stderr ${formatDiagnosticDuration(record.router_first_stderr_ms)}` }]
       : [])
   ];
   if (streams.length > 0) {
-    return streams;
+    return streams.sort((left, right) => left.at - right.at).map((stream) => stream.text);
   }
   if (typeof record.router_first_output_ms === "number") {
     return [`first output ${formatDiagnosticDuration(record.router_first_output_ms)}`];

@@ -235,9 +235,12 @@ async function runRouterProbe(
 function formatRouterProbeTrace(route: RouteDecision, includeStage: boolean): string {
   return [
     ...(includeStage && route.router_failure_stage ? [`stage ${route.router_failure_stage}`] : []),
+    ...(typeof route.router_dispatch_ms === "number" ? [`dispatch ${Math.round(route.router_dispatch_ms)}ms`] : []),
     ...(typeof route.router_spawn_ms === "number" ? [`spawn ${Math.round(route.router_spawn_ms)}ms`] : []),
     ...formatRouterProbeFirstOutput(route),
     ...(typeof route.router_process_ms === "number" ? [`process ${Math.round(route.router_process_ms)}ms`] : []),
+    ...(typeof route.router_parse_ms === "number" ? [`parse ${Math.round(route.router_parse_ms)}ms`] : []),
+    ...(typeof route.duration_ms === "number" ? [`total ${Math.round(route.duration_ms)}ms`] : []),
     ...(typeof route.router_stdout_bytes === "number" ? [`stdout ${formatRouterProbeBytes(route.router_stdout_bytes)}`] : []),
     ...(typeof route.router_stderr_bytes === "number" ? [`stderr ${formatRouterProbeBytes(route.router_stderr_bytes)}`] : [])
   ].join("; ");
@@ -246,14 +249,14 @@ function formatRouterProbeTrace(route: RouteDecision, includeStage: boolean): st
 function formatRouterProbeFirstOutput(route: RouteDecision): string[] {
   const streams = [
     ...(typeof route.router_first_stdout_ms === "number"
-      ? [`first stdout ${Math.round(route.router_first_stdout_ms)}ms`]
+      ? [{ at: route.router_first_stdout_ms, text: `first stdout ${Math.round(route.router_first_stdout_ms)}ms` }]
       : []),
     ...(typeof route.router_first_stderr_ms === "number"
-      ? [`first stderr ${Math.round(route.router_first_stderr_ms)}ms`]
+      ? [{ at: route.router_first_stderr_ms, text: `first stderr ${Math.round(route.router_first_stderr_ms)}ms` }]
       : [])
   ];
   if (streams.length > 0) {
-    return streams;
+    return streams.sort((left, right) => left.at - right.at).map((stream) => stream.text);
   }
   if (typeof route.router_first_output_ms === "number") {
     return [`first output ${Math.round(route.router_first_output_ms)}ms`];

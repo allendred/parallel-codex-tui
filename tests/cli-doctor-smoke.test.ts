@@ -87,7 +87,7 @@ describe("CLI doctor", () => {
     await mkdir(appRoot, { recursive: true });
     await writeExecutable(
       join(binDir, "codex"),
-      "#!/bin/sh\ncat >/dev/null\nprintf '%s\\n' '{\"mode\":\"simple\",\"reason\":\"live probe ok\"}'\n"
+      "#!/bin/sh\ncat >/dev/null\nprintf 'loading\\n' >&2\nsleep 0.05\nprintf '%s\\n' '{\"mode\":\"simple\",\"reason\":\"live probe ok\"}'\n"
     );
     await writeExecutable(join(binDir, "claude"), "#!/bin/sh\necho claude 1.0\n");
     await expect(runCli(["--app-root", appRoot, "--init"])).resolves.toMatchObject({ exitCode: 0 });
@@ -99,7 +99,7 @@ describe("CLI doctor", () => {
 
     expect(result.exitCode).toBe(0);
     expect(result.stderr).toBe("");
-    expect(result.stdout).toMatch(/router live probe: ok \(simple in \d+ms; spawn \d+ms; first stdout \d+ms; process \d+ms; stdout \d+B; stderr 0B\)/);
+    expect(result.stdout).toMatch(/router live probe: ok \(simple in \d+ms; dispatch \d+ms; spawn \d+ms; first stderr \d+ms; first stdout \d+ms; process \d+ms; parse \d+ms; total \d+ms; stdout \d+B; stderr 8B\)/);
   });
 
   it("fails an explicit live Router probe with a useful authentication reason", async () => {
@@ -127,7 +127,7 @@ describe("CLI doctor", () => {
     expect(result.stdout).toContain("stage exit");
     expect(result.stdout).toContain("diagnosis Codex authentication failed");
     expect(result.stdout).toContain("next run codex login, then retry Router");
-    expect(result.stdout).toMatch(/spawn \d+ms; first stderr \d+ms; process \d+ms; stdout 0B; stderr \d+B/);
+    expect(result.stdout).toMatch(/dispatch \d+ms; spawn \d+ms; first stderr \d+ms; process \d+ms; total \d+ms; stdout 0B; stderr \d+B/);
   });
 
   it("accepts equals-style workspace values in command mode", async () => {

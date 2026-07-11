@@ -775,7 +775,9 @@ describe("Orchestrator", () => {
       reason: "Greeting needs Main only.",
       source: "codex",
       router_timeout_ms: 30000,
-      proxy_configured: expect.any(Boolean)
+      proxy_configured: expect.any(Boolean),
+      router_dispatch_ms: expect.any(Number),
+      router_parse_ms: expect.any(Number)
     });
     expect(records[0]?.time).toEqual(expect.any(String));
     expect(records[0]?.duration_ms).toEqual(expect.any(Number));
@@ -816,8 +818,10 @@ describe("Orchestrator", () => {
       proxy_configured: true,
       failure_kind: "timeout",
       router_attempt: 1,
-      router_fallback_resolution: "configured"
+      router_fallback_resolution: "configured",
+      router_dispatch_ms: expect.any(Number)
     });
+    expect(record.router_parse_ms).toBeUndefined();
   });
 
   it("lets an interactive fallback choose Parallel without keyword rules", async () => {

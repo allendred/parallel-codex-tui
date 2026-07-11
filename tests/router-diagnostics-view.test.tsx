@@ -50,7 +50,7 @@ describe("RouterDiagnosticsView", () => {
       currentWorkspace: "/tmp/tetris",
       scope: "all",
       terminalWidth: 80,
-      height: 18
+      height: 28
     }));
     const frame = view.lastFrame() ?? "";
 
@@ -67,7 +67,10 @@ describe("RouterDiagnosticsView", () => {
     expect(flattened).toContain("resolved Parallel");
     expect(flattened).toContain("diagnosis · Router emitted diagnostics but no route response");
     expect(flattened).toContain("next · inspect the reason, then run parallel-codex-tui --doctor --probe-router");
-    expect(flattened).toContain("trace · spawn 8ms · first stderr 24ms · process 30s · stdout 0B · stderr 73B");
+    expect(flattened).toContain("trace · dispatch 2ms · spawn 8ms · first stderr 24ms · process 30s · total 30s");
+    expect(flattened).toContain("io · stdout 0B · stderr 73B");
+    expect(flattened).toContain("trace · dispatch 1ms · spawn 5ms · first stderr 120ms · first stdout 8.9s · process 9.6s · parse 1ms · total 9.7s");
+    expect(flattened).toContain("io · stdout 86B · stderr 15B");
     expect(flattened).toContain("timeout after stderr · proxy set");
     expect(frame).toContain("做个俄罗斯方块");
     expect(frame).not.toContain("user:secret");
@@ -180,6 +183,15 @@ function records(): RouterAuditRecord[] {
       critic_engine: "codex",
       source: "codex",
       duration_ms: 9700,
+      router_dispatch_ms: 1,
+      router_spawn_ms: 5,
+      router_first_output_ms: 8900,
+      router_first_stdout_ms: 8900,
+      router_first_stderr_ms: 120,
+      router_process_ms: 9600,
+      router_parse_ms: 1,
+      router_stdout_bytes: 86,
+      router_stderr_bytes: 15,
       router_attempt: 2
     },
     {
@@ -201,6 +213,7 @@ function records(): RouterAuditRecord[] {
       router_attempt: 1,
       router_fallback_resolution: "parallel",
       router_failure_stage: "streaming",
+      router_dispatch_ms: 2,
       router_spawn_ms: 8,
       router_first_output_ms: 24,
       router_first_stderr_ms: 24,

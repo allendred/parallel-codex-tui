@@ -1,14 +1,17 @@
 import { spawn } from "node:child_process";
+import { performance } from "node:perf_hooks";
 import type { AppConfig } from "./config.js";
 import type { RouteDecision, RouterFailureStage } from "../domain/schemas.js";
 import { RouteDecisionSchema } from "../domain/schemas.js";
 
 export interface RouterExecutionTelemetry {
+  router_dispatch_ms?: number;
   router_spawn_ms?: number;
   router_first_output_ms?: number;
   router_first_stdout_ms?: number;
   router_first_stderr_ms?: number;
   router_process_ms?: number;
+  router_parse_ms?: number;
   router_stdout_bytes?: number;
   router_stderr_bytes?: number;
 }
@@ -38,6 +41,8 @@ export async function routeRequestWithCodex(
   signal?: AbortSignal
 ): Promise<RouteDecision> {
   const startedAt = Date.now();
+  const telemetryStartedAt = performance.now();
+  let dispatchMs: number | undefined;
   if (signal?.aborted) {
     throw cancellationError();
   }
@@ -50,22 +55,33 @@ export async function routeRequestWithCodex(
   }
 
   try {
+    const prompt = buildCodexRouterPrompt(request, config);
+    dispatchMs = Math.max(0, performance.now() - telemetryStartedAt);
     const result = normalizeRouterRunnerResult(
-      await runner(buildCodexRouterPrompt(request, config), config, cwd, signal)
+      await runner(prompt, config, cwd, signal)
     );
     let route: RouteDecision;
+    const parseStartedAt = performance.now();
     try {
-      route = parseCodexRoute(result.output, config);
+      route = RouteDecisionSchema.parse(parseCodexRoute(result.output, config));
     } catch (error) {
-      throw routerExecutionError(error, result.telemetry, "response");
+      throw routerExecutionError(error, mergeRouterTelemetry(result.telemetry, {
+        router_dispatch_ms: dispatchMs,
+        router_parse_ms: Math.max(0, performance.now() - parseStartedAt)
+      }), "response");
     }
-    return annotateRoute(RouteDecisionSchema.parse(route), "codex", startedAt, result.telemetry);
+    return annotateRoute(route, "codex", startedAt, mergeRouterTelemetry(result.telemetry, {
+      router_dispatch_ms: dispatchMs,
+      router_parse_ms: Math.max(0, performance.now() - parseStartedAt)
+    }));
   } catch (error) {
     if (signal?.aborted || isAbortError(error)) {
       throw cancellationError();
     }
     const context = routerExecutionErrorContext(error);
-    const fallback = annotateRoute(fallbackRoute(config), "fallback", startedAt, context.telemetry);
+    const fallback = annotateRoute(fallbackRoute(config), "fallback", startedAt, mergeRouterTelemetry(context.telemetry, {
+      router_dispatch_ms: dispatchMs
+    }));
     return {
       ...fallback,
       ...(context.stage ? { router_failure_stage: context.stage } : {}),
@@ -248,11 +264,13 @@ function normalizeRouterTelemetry(
   }
   const normalized: RouterExecutionTelemetry = {};
   for (const key of [
+    "router_dispatch_ms",
     "router_spawn_ms",
     "router_first_output_ms",
     "router_first_stdout_ms",
     "router_first_stderr_ms",
     "router_process_ms",
+    "router_parse_ms",
     "router_stdout_bytes",
     "router_stderr_bytes"
   ] as const) {
@@ -263,6 +281,16 @@ function normalizeRouterTelemetry(
     normalized[key] = key.endsWith("_bytes") ? Math.trunc(value) : value;
   }
   return normalized;
+}
+
+function mergeRouterTelemetry(
+  telemetry: RouterExecutionTelemetry | undefined,
+  additions: RouterExecutionTelemetry
+): RouterExecutionTelemetry | undefined {
+  return normalizeRouterTelemetry({
+    ...telemetry,
+    ...Object.fromEntries(Object.entries(additions).filter(([, value]) => value !== undefined))
+  });
 }
 
 function routerExecutionError(

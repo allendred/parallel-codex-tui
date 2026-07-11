@@ -248,6 +248,7 @@ describe("routeRequestWithCodex", () => {
     expect(route.duration_ms).toBeLessThan(1000);
     expect(route).toMatchObject({
       router_failure_stage: "streaming",
+      router_dispatch_ms: expect.any(Number),
       router_spawn_ms: expect.any(Number),
       router_first_output_ms: expect.any(Number),
       router_first_stderr_ms: expect.any(Number),
@@ -257,6 +258,7 @@ describe("routeRequestWithCodex", () => {
     });
     expect(route.router_stderr_bytes).toBeGreaterThan(0);
     expect(route.router_first_stdout_ms).toBeUndefined();
+    expect(route.router_parse_ms).toBeUndefined();
   });
 
   it("records configured proxy context when a stalled router is silent", async () => {
@@ -275,12 +277,14 @@ describe("routeRequestWithCodex", () => {
     expect(route.reason).not.toContain("user:secret");
     expect(route).toMatchObject({
       router_failure_stage: "waiting-output",
+      router_dispatch_ms: expect.any(Number),
       router_spawn_ms: expect.any(Number),
       router_process_ms: expect.any(Number),
       router_stdout_bytes: 0,
       router_stderr_bytes: 0
     });
     expect(route.router_first_output_ms).toBeUndefined();
+    expect(route.router_parse_ms).toBeUndefined();
   });
 
   it("records response-stage telemetry when a successful process returns invalid output", async () => {
@@ -294,13 +298,16 @@ describe("routeRequestWithCodex", () => {
     expect(route).toMatchObject({
       source: "fallback",
       router_failure_stage: "response",
+      router_dispatch_ms: expect.any(Number),
       router_spawn_ms: expect.any(Number),
       router_first_output_ms: expect.any(Number),
       router_first_stdout_ms: expect.any(Number),
       router_process_ms: expect.any(Number),
+      router_parse_ms: expect.any(Number),
       router_stdout_bytes: 8,
       router_stderr_bytes: 0
     });
+    expect(route.router_parse_ms).toBeGreaterThanOrEqual(0);
   });
 
   it("redacts proxy credentials from arbitrary Router failures before audit persistence", async () => {
@@ -357,13 +364,16 @@ describe("routeRequestWithCodex", () => {
       mode: "simple",
       source: "codex",
       reason: "proxy environment reached router",
+      router_dispatch_ms: expect.any(Number),
       router_spawn_ms: expect.any(Number),
       router_first_output_ms: expect.any(Number),
       router_first_stdout_ms: expect.any(Number),
       router_process_ms: expect.any(Number),
+      router_parse_ms: expect.any(Number),
       router_stdout_bytes: expect.any(Number),
       router_stderr_bytes: 0
     });
+    expect(route.duration_ms).toBeGreaterThanOrEqual(route.router_process_ms ?? 0);
     expect(route.router_stdout_bytes).toBeGreaterThan(0);
     expect(route.router_first_stderr_ms).toBeUndefined();
   });
