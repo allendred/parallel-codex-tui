@@ -86,6 +86,8 @@ describe("CLI task lifecycle smoke", () => {
       child.write("\x12");
       await waitForTaskState(join(taskDir, "meta.json"), "done");
       await waitForScreenText(() => screenWrites, screen, "done · complex task completed");
+      await waitForScreenText(() => screenWrites, screen, "review · APPROVED");
+      await waitForScreenText(() => screenWrites, screen, "findings · none");
 
       const completionLines = screen.styledSnapshotLines().filter((line) => (
         /done · complex task completed|review · APPROVED|findings · none/.test(
