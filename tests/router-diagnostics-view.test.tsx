@@ -64,6 +64,8 @@ describe("RouterDiagnosticsView", () => {
     const flattened = frame.replace(/\s+/g, " ");
     expect(flattened).toContain("evidence · timeout · after stderr · limit 30s · proxy configured · cause unproven");
     expect(flattened).toContain("resolved Parallel");
+    expect(flattened).toContain("diagnosis · Router emitted diagnostics but no route response");
+    expect(flattened).toContain("next · inspect the reason, then run parallel-codex-tui --doctor --probe-router");
     expect(flattened).toContain("trace · spawn 8ms · first stderr 24ms · process 30s · stdout 0B · stderr 73B");
     expect(flattened).toContain("timeout after stderr · proxy set");
     expect(frame).toContain("做个俄罗斯方块");

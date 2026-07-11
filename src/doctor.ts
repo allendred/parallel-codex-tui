@@ -8,7 +8,8 @@ import { formatConfigErrorMessage } from "./core/config-errors.js";
 import { configPath, loadConfig, withUiThemeOverride } from "./core/config.js";
 import { ensureDir, pathExists } from "./core/file-store.js";
 import { routerRuntimeDir } from "./core/paths.js";
-import { routeRequestWithCodex, type CodexRouteRunner } from "./core/router.js";
+import { diagnoseRouterFailure } from "./core/router-audit.js";
+import { routeRequestWithCodex, routerProxyConfigured, type CodexRouteRunner } from "./core/router.js";
 import { prepareWorkspace } from "./core/workspace.js";
 import type { RouteDecision } from "./domain/schemas.js";
 import { auditTuiThemeContrast, TUI_THEME_MIN_CONTRAST_RATIO, type TuiThemeContrastAudit } from "./tui/theme-contrast.js";
@@ -213,9 +214,14 @@ async function runRouterProbe(
       };
     }
     const trace = formatRouterProbeTrace(route, true);
+    const diagnosis = diagnoseRouterFailure({
+      ...route,
+      reason: route.reason,
+      proxy_configured: routerProxyConfigured(config.router.codex.env)
+    });
     return {
       ok: false,
-      line: `router live probe: failed (${sanitizeDiagnosticText(route.reason)}${trace ? `; ${trace}` : ""})`
+      line: `router live probe: failed (${sanitizeDiagnosticText(route.reason)}${trace ? `; ${trace}` : ""}; diagnosis ${diagnosis.summary}; next ${diagnosis.action})`
     };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);

@@ -82,6 +82,8 @@ describe("CLI Router diagnostics smoke", () => {
       child.write("\t");
       await waitForScreenText(() => screenWrites, screen, `scope · current · ${basename(workspace)} · 26/27 routes`);
       await waitForScreenText(() => screenWrites, screen, "evidence · timeout · limit 30s");
+      await waitForScreenText(() => screenWrites, screen, "diagnosis · Router timed out before a valid route response");
+      await waitForScreenText(() => screenWrites, screen, "next · run parallel-codex-tui --doctor --probe-router");
       snapshot = screen.snapshot();
       expect(snapshot).not.toContain("other-workspace-route");
       expect(snapshot).toContain("Tab scope");

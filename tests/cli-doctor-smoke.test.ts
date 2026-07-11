@@ -125,6 +125,8 @@ describe("CLI doctor", () => {
     expect(result.stdout).toContain("router live probe: failed");
     expect(result.stdout).toContain("HTTP 401 Unauthorized: sign in required");
     expect(result.stdout).toContain("stage exit");
+    expect(result.stdout).toContain("diagnosis Codex authentication failed");
+    expect(result.stdout).toContain("next run codex login, then retry Router");
     expect(result.stdout).toMatch(/spawn \d+ms; first stderr \d+ms; process \d+ms; stdout 0B; stderr \d+B/);
   });
 

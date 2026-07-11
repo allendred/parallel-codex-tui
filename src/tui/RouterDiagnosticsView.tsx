@@ -2,7 +2,12 @@ import React, { useEffect, useMemo } from "react";
 import { basename, resolve } from "node:path";
 import { Box, Text, type TextProps } from "ink";
 import type { AppConfig } from "../core/config.js";
-import { classifyRouterFailure, type RouterAuditRecord, type RouterFailureKind } from "../core/router-audit.js";
+import {
+  classifyRouterFailure,
+  diagnoseRouterFailure,
+  type RouterAuditRecord,
+  type RouterFailureKind
+} from "../core/router-audit.js";
 import { routerProxyConfigured } from "../core/router.js";
 import { displayWidth, wrapByDisplayWidth } from "./display-width.js";
 import { formatRouteStatus } from "./status-line.js";
@@ -166,6 +171,11 @@ export function routerDiagnosticsDisplayLines(
         logical.push({ text: evidence, tone: "warning" });
       }
       const trace = routerAuditTrace(record);
+      if (record.source === "fallback") {
+        const diagnosis = diagnoseRouterFailure(record);
+        logical.push({ text: `diagnosis · ${diagnosis.summary}`, tone: "danger" });
+        logical.push({ text: `next · ${diagnosis.action}`, tone: "warning" });
+      }
       if (trace) {
         logical.push({ text: trace, tone: "muted" });
       }

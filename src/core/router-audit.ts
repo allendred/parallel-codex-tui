@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { RouteDecisionSchema } from "../domain/schemas.js";
+import { RouteDecisionSchema, type RouterFailureStage } from "../domain/schemas.js";
 import { readTextIfExists } from "./file-store.js";
 
 export const RouterFailureKindSchema = z.enum([
@@ -28,20 +28,40 @@ export const RouterAuditRecordSchema = RouteDecisionSchema.extend({
 export type RouterAuditRecord = z.infer<typeof RouterAuditRecordSchema>;
 export type RouterFailureKind = z.infer<typeof RouterFailureKindSchema>;
 
+export interface RouterFailureEvidence {
+  reason: string;
+  failure_kind?: RouterFailureKind;
+  proxy_configured?: boolean;
+  router_failure_stage?: RouterFailureStage;
+  router_stdout_bytes?: number;
+  router_stderr_bytes?: number;
+}
+
+export interface RouterFailureDiagnosis {
+  kind: RouterFailureKind;
+  summary: string;
+  action: string;
+}
+
 export function classifyRouterFailure(reason: string): RouterFailureKind | null {
   const timedOut = /\b(?:timed out|timeout|ETIMEDOUT)\b/i.test(reason);
-  const proxy = /\bproxy\b|代理/i.test(reason);
-  if (proxy && timedOut) {
+  const proxyMentioned = /\bproxy\b|代理/i.test(reason);
+  const proxyFailure = (
+    /\bproxy(?:\s+(?:connection|connect|handshake|authentication|request|server|transport|tunnel))?\s+(?:authentication|required|failed|failure|error|refused|unreachable|invalid|closed|reset)\b/i.test(reason)
+    || /\b(?:failed|unable|cannot|could not)\s+(?:to\s+)?(?:connect|reach|use|negotiate).{0,30}\bproxy\b/i.test(reason)
+    || /代理.{0,20}(?:认证|失败|错误|拒绝|无法|不可达)/i.test(reason)
+  );
+  if (proxyMentioned && timedOut) {
     return "timeout";
+  }
+  if (proxyFailure) {
+    return "proxy";
   }
   if (/\b(?:401|403)\b|\b(?:unauthori[sz]ed|forbidden|authentication|api[-_\s]?key|login required|not logged in|sign in)\b/i.test(reason)) {
     return "auth";
   }
   if (/\b429\b|\b(?:rate[ -]?limit|too many requests|quota (?:exceeded|exhausted)|usage limit)\b/i.test(reason)) {
     return "rate-limit";
-  }
-  if (proxy) {
-    return "proxy";
   }
   if (/\b(?:ECONNREFUSED|ECONNRESET|ENETUNREACH|EHOSTUNREACH|ENOTFOUND|EAI_AGAIN)\b|\b(?:network|websocket|https transport|fetch failed|certificate|tls|ssl)\b/i.test(reason)) {
     return "network";
@@ -62,6 +82,103 @@ export function classifyRouterFailure(reason: string): RouterFailureKind | null 
     return "input";
   }
   return null;
+}
+
+export function diagnoseRouterFailure(evidence: RouterFailureEvidence): RouterFailureDiagnosis {
+  const kind = evidence.failure_kind ?? classifyRouterFailure(evidence.reason) ?? "unknown";
+  if (kind === "auth") {
+    return diagnosis(kind, "Codex authentication failed", "run codex login, then retry Router");
+  }
+  if (kind === "rate-limit") {
+    return diagnosis(kind, "The provider rate limit blocked routing", "wait for quota or change the Router model/provider");
+  }
+  if (kind === "proxy") {
+    return diagnosis(
+      kind,
+      "Router reported a proxy-path failure",
+      "run parallel-codex-tui --doctor --probe-router and verify the proxy upstream"
+    );
+  }
+  if (kind === "network") {
+    return diagnosis(
+      kind,
+      "Router reported a network-path failure",
+      "run parallel-codex-tui --doctor --probe-router and verify DNS, TLS, and API reachability"
+    );
+  }
+  if (kind === "unavailable") {
+    return diagnosis(
+      kind,
+      evidence.router_failure_stage === "spawn" ? "Router process could not start" : "Router command is unavailable",
+      "run parallel-codex-tui --doctor and fix router.codex.command"
+    );
+  }
+  if (kind === "invalid-output") {
+    return diagnosis(
+      kind,
+      "Router returned output that was not valid route JSON",
+      "retry Router; if it repeats, inspect the Router model/provider output"
+    );
+  }
+  if (kind === "input") {
+    return diagnosis(
+      kind,
+      "Router process rejected the request input",
+      "check that router.codex.args accepts a prompt on stdin"
+    );
+  }
+  if (kind === "timeout") {
+    return diagnoseRouterTimeout(evidence);
+  }
+  if (kind === "exit") {
+    return diagnosis(
+      kind,
+      "Router process exited before a valid route response",
+      "run the configured Codex command directly and inspect its exit output"
+    );
+  }
+  return diagnosis(
+    "unknown",
+    "Router failed before a valid route response",
+    "run parallel-codex-tui --doctor --probe-router and inspect the recorded reason"
+  );
+}
+
+function diagnoseRouterTimeout(evidence: RouterFailureEvidence): RouterFailureDiagnosis {
+  if ((evidence.router_stdout_bytes ?? 0) > 0) {
+    return diagnosis(
+      "timeout",
+      "Router began a route response but did not finish",
+      "retry Router or raise router.codex.timeoutMs"
+    );
+  }
+  if ((evidence.router_stderr_bytes ?? 0) > 0) {
+    return diagnosis(
+      "timeout",
+      "Router emitted diagnostics but no route response",
+      "inspect the reason, then run parallel-codex-tui --doctor --probe-router"
+    );
+  }
+  if (evidence.router_failure_stage === "waiting-output") {
+    return diagnosis(
+      "timeout",
+      "Router produced no output before the timeout",
+      evidence.proxy_configured
+        ? "run parallel-codex-tui --doctor --probe-router; verify Codex login and proxy upstream"
+        : "run parallel-codex-tui --doctor --probe-router; verify Codex login and API network path"
+    );
+  }
+  return diagnosis(
+    "timeout",
+    "Router timed out before a valid route response",
+    evidence.proxy_configured
+      ? "run parallel-codex-tui --doctor --probe-router; verify Codex login and proxy upstream"
+      : "run parallel-codex-tui --doctor --probe-router; verify Codex login and API network path"
+  );
+}
+
+function diagnosis(kind: RouterFailureKind, summary: string, action: string): RouterFailureDiagnosis {
+  return { kind, summary, action };
 }
 
 export async function readRouterAudit(path: string, limit = 100): Promise<RouterAuditRecord[]> {

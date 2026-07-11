@@ -58,6 +58,16 @@ describe("readRouterAudit", () => {
     expect(classifyRouterFailure).toBeTypeOf("function");
     expect(classifyRouterFailure?.("Codex router timed out after 30000ms with proxy configured"))
       .toBe("timeout");
+    expect(classifyRouterFailure?.("Codex router failed while proxy was configured"))
+      .toBeNull();
+    expect(classifyRouterFailure?.("proxy was configured, but the Router failed"))
+      .toBeNull();
+    expect(classifyRouterFailure?.("proxy connection refused"))
+      .toBe("proxy");
+    expect(classifyRouterFailure?.("proxy authentication required"))
+      .toBe("proxy");
+    expect(classifyRouterFailure?.("HTTP 401 Unauthorized"))
+      .toBe("auth");
     expect(classifyRouterFailure?.("No JSON object in Codex router output")).toBe("invalid-output");
     await expect(readRouterAudit?.(path)).resolves.toEqual([
       expect.objectContaining({
@@ -71,6 +81,76 @@ describe("readRouterAudit", () => {
         router_stderr_bytes: 0
       })
     ]);
+  });
+
+  it("turns structured process evidence into bounded diagnoses and next actions", () => {
+    const diagnoseRouterFailure = (
+      routerAuditModule as typeof routerAuditModule & {
+        diagnoseRouterFailure?: (evidence: Record<string, unknown>) => {
+          kind: string;
+          summary: string;
+          action: string;
+        };
+      }
+    ).diagnoseRouterFailure;
+
+    expect(diagnoseRouterFailure).toBeTypeOf("function");
+    expect(diagnoseRouterFailure?.({
+      reason: "Codex router timed out after 30000ms with proxy configured",
+      failure_kind: "timeout",
+      proxy_configured: true,
+      router_failure_stage: "waiting-output",
+      router_stdout_bytes: 0,
+      router_stderr_bytes: 0
+    })).toEqual({
+      kind: "timeout",
+      summary: "Router produced no output before the timeout",
+      action: "run parallel-codex-tui --doctor --probe-router; verify Codex login and proxy upstream"
+    });
+    expect(diagnoseRouterFailure?.({
+      reason: "Codex router timed out after stderr",
+      failure_kind: "timeout",
+      router_failure_stage: "streaming",
+      router_stdout_bytes: 0,
+      router_stderr_bytes: 73
+    })).toEqual(expect.objectContaining({
+      summary: "Router emitted diagnostics but no route response",
+      action: "inspect the reason, then run parallel-codex-tui --doctor --probe-router"
+    }));
+    expect(diagnoseRouterFailure?.({
+      reason: "Codex router timed out after stdout",
+      failure_kind: "timeout",
+      router_failure_stage: "streaming",
+      router_stdout_bytes: 18,
+      router_stderr_bytes: 0
+    })).toEqual(expect.objectContaining({
+      summary: "Router began a route response but did not finish",
+      action: "retry Router or raise router.codex.timeoutMs"
+    }));
+    expect(diagnoseRouterFailure?.({
+      reason: "HTTP 401 Unauthorized: sign in required",
+      router_failure_stage: "exit"
+    })).toEqual({
+      kind: "auth",
+      summary: "Codex authentication failed",
+      action: "run codex login, then retry Router"
+    });
+    expect(diagnoseRouterFailure?.({
+      reason: "No JSON object in Codex router output",
+      router_failure_stage: "response"
+    })).toEqual({
+      kind: "invalid-output",
+      summary: "Router returned output that was not valid route JSON",
+      action: "retry Router; if it repeats, inspect the Router model/provider output"
+    });
+    expect(diagnoseRouterFailure?.({
+      reason: "spawn codex ENOENT",
+      router_failure_stage: "spawn"
+    })).toEqual({
+      kind: "unavailable",
+      summary: "Router process could not start",
+      action: "run parallel-codex-tui --doctor and fix router.codex.command"
+    });
   });
 });
 
