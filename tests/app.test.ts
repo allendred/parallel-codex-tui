@@ -653,6 +653,146 @@ describe("ChatView", () => {
     ]);
   });
 
+  it("expands the active task result into structured full-width sections", () => {
+    const lines = chatMessageDisplayLines(
+      [
+        {
+          from: "system",
+          taskId: "task-result-a",
+          text: [
+            "Complex task completed.",
+            "",
+            "Requirements:",
+            "# Requirements",
+            "",
+            "- Build a playable game.",
+            "- Support keyboard controls.",
+            "",
+            "Actor work:",
+            "# Worklog",
+            "",
+            "- Added the game loop.",
+            "- Added scoring tests.",
+            "",
+            "Critic review:",
+            "# Review",
+            "",
+            "APPROVED",
+            "",
+            "All checks passed.",
+            "",
+            "Critic findings:",
+            "(empty)"
+          ].join("\n")
+        }
+      ],
+      50,
+      30,
+      { expandedTaskResult: true, taskId: "task-result-a" }
+    );
+
+    expect(lines.map((line) => line.text)).toEqual([
+      "done · complex task completed · APPROVED",
+      "Requirements",
+      "  • Build a playable game.",
+      "  • Support keyboard controls.",
+      "Implementation",
+      "  • Added the game loop.",
+      "  • Added scoring tests.",
+      "Review",
+      "  APPROVED",
+      "  All checks passed.",
+      "Findings",
+      "  none"
+    ]);
+    expect(lines.filter((line) => line.background === "rail").map((line) => line.text)).toEqual([
+      "done · complex task completed · APPROVED",
+      "Requirements",
+      "Implementation",
+      "Review",
+      "Findings"
+    ]);
+    expect(lines.find((line) => line.text === "  APPROVED")?.spans).toEqual([
+      { text: "  ", tone: "prefix" },
+      { text: "APPROVED", tone: "success" }
+    ]);
+  });
+
+  it("wraps expanded task-result content with a stable section indent", () => {
+    const lines = chatMessageDisplayLines(
+      [{
+        from: "system",
+        taskId: "task-result-narrow",
+        text: [
+          "Complex task completed.",
+          "Requirements:",
+          "- Build a falling-blocks game with score, preview, hold, levels, and keyboard controls.",
+          "Actor work:",
+          "- Implemented it.",
+          "Critic review:",
+          "APPROVED",
+          "Critic findings:",
+          "(empty)"
+        ].join("\n")
+      }],
+      34,
+      30,
+      { expandedTaskResult: true, taskId: "task-result-narrow" }
+    );
+
+    const requirementLines = lines.slice(
+      lines.findIndex((line) => line.text === "Requirements") + 1,
+      lines.findIndex((line) => line.text === "Implementation")
+    );
+    expect(requirementLines.length).toBeGreaterThan(1);
+    expect(requirementLines.every((line) => line.text.startsWith("  "))).toBe(true);
+    expect(Math.max(...lines.map((line) => displayWidth(line.text)))).toBeLessThanOrEqual(32);
+  });
+
+  it("focuses a long expanded result from its title and scrolls toward findings", () => {
+    const messages = [
+      { from: "user" as const, text: "old unrelated chat", taskId: "task-old" },
+      { from: "system" as const, text: "old answer", taskId: "task-old" },
+      { from: "user" as const, text: "做个俄罗斯方块" },
+      {
+        from: "system" as const,
+        taskId: "task-focus",
+        text: [
+          "Complex task completed.",
+          "Requirements:",
+          "- Build gameplay.",
+          "- Add scoring.",
+          "Actor work:",
+          "- Added board.",
+          "- Added controls.",
+          "- Added tests.",
+          "Critic review:",
+          "APPROVED",
+          "All checks passed.",
+          "Critic findings:",
+          "(empty)"
+        ].join("\n")
+      }
+    ];
+
+    const first = AppModule.chatMessageViewport(messages, 50, 6, 0, {
+      expandedTaskResult: true,
+      taskId: "task-focus"
+    });
+    expect(first.lines[0]?.text).toBe("> 做个俄罗斯方块");
+    expect(first.lines[1]?.text).toBe("done · complex task completed · APPROVED");
+    expect(first.lines.some((line) => line.text.includes("old unrelated"))).toBe(false);
+    expect(first.maxOffset).toBeGreaterThan(0);
+
+    const last = AppModule.chatMessageViewport(messages, 50, 6, first.maxOffset, {
+      expandedTaskResult: true,
+      taskId: "task-focus"
+    });
+    expect(last.clampedOffset).toBe(first.maxOffset);
+    expect(last.lines.some((line) => line.text === "Findings")).toBe(true);
+    expect(last.lines.some((line) => line.text === "  none")).toBe(true);
+  });
+
   it("indents wrapped complex summary continuations in narrow chat views", () => {
     const lines = chatMessageDisplayLines(
       [

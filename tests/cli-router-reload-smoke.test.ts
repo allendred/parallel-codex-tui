@@ -50,7 +50,8 @@ describe("CLI router config reload smoke", () => {
       const completedScreen = screen.snapshot().split("\n");
       const summaryRow = completedScreen.findIndex((line) => line.includes("done · complex task completed"));
       const inputRow = completedScreen.findIndex((line) => line.includes("> | message"));
-      expect(completedScreen[1]).toContain("> 你好");
+      expect(completedScreen[1]).toContain("> 实现热加载");
+      expect(completedScreen.join("\n")).not.toContain("Mock simple response for: 你好");
       expect(summaryRow).toBeGreaterThan(1);
       expect(inputRow - summaryRow).toBeGreaterThan(5);
 

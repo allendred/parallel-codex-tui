@@ -39,7 +39,7 @@ import { TerminalOutput } from "./TerminalOutput.js";
 import { NativeTerminalScreen } from "./terminal-screen.js";
 import { WorkerOutputView, type WorkerOutputNavigationTargets } from "./WorkerOutputView.js";
 import { compactEndByDisplayWidth, displayWidth, wrapByDisplayWidth } from "./display-width.js";
-import { isAttachShortcut, isExitShortcut, isLogsShortcut, isNewTaskShortcut, isRouterDiagnosticsShortcut, isTaskSessionsShortcut, isWorkerOverviewShortcut, isWorkerSearchShortcut, isWorkspaceShortcut, mouseScrollDelta, rawHistoryDelta, rawPageScrollDelta, scrollDelta, workerLogJumpKind } from "./keyboard.js";
+import { isAttachShortcut, isExitShortcut, isLogsShortcut, isNewTaskShortcut, isRouterDiagnosticsShortcut, isTaskResultShortcut, isTaskSessionsShortcut, isWorkerOverviewShortcut, isWorkerSearchShortcut, isWorkspaceShortcut, mouseScrollDelta, rawHistoryDelta, rawPageScrollDelta, scrollDelta, workerLogJumpKind } from "./keyboard.js";
 import { createRawInputDecoder, tokenizeRawInput } from "./raw-input-decoder.js";
 import { decodeHtmlEntities } from "./markdown-text.js";
 import { configureTuiTheme, TUI_THEME } from "./theme.js";
@@ -64,6 +64,12 @@ import {
   nextCollaborationFeatureIndex
 } from "./CollaborationTimelineView.js";
 import { moveTaskSessionSelection, TaskSessionsView } from "./TaskSessionsView.js";
+import {
+  latestTaskResultMessageIndex,
+  parseTaskResultSummary,
+  type TaskResultOutcome,
+  type TaskResultSections
+} from "./task-result.js";
 import {
   buildNativeAttachLaunch,
   startNativeAttachProcess,
@@ -111,6 +117,7 @@ export interface ActivatedTaskSession {
 export interface Message {
   from: "user" | "system";
   text: string;
+  taskId?: string;
 }
 
 export interface ChatDisplayLine {
@@ -122,7 +129,7 @@ export interface ChatDisplayLine {
 }
 
 export type ChatLineBackground = "surface" | "rail";
-export type ChatSpanTone = "text" | "strong" | "emphasis" | "code" | "link" | "muted" | "prefix" | "heading" | "success";
+export type ChatSpanTone = "text" | "strong" | "emphasis" | "code" | "link" | "muted" | "prefix" | "heading" | "success" | "warning" | "danger";
 export interface ChatDisplaySpan {
   text: string;
   tone: ChatSpanTone;
@@ -191,6 +198,9 @@ export function App({
   const [inputCursor, setInputCursor] = useState(0);
   const [inputReady, setInputReady] = useState(false);
   const [messages, setMessages] = useState<Message[]>(() => [...initialMessages]);
+  const [taskResultExpanded, setTaskResultExpanded] = useState(() => (
+    Boolean(initialTaskId) && latestTaskResultMessageIndex(initialMessages, initialTaskId) >= 0
+  ));
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState<StatusLineState | null>(() => restoredWorkerStatusLine(initialTaskId, initialWorkers));
   const [lastRoute, setLastRoute] = useState<RouteDecision | null>(initialRoute);
@@ -271,6 +281,7 @@ export function App({
   const workerMaxScrollOffsetRef = useRef(workerMaxScrollOffset);
   const chatScrollOffsetRef = useRef(chatScrollOffset);
   const chatMaxScrollOffsetRef = useRef(chatMaxScrollOffset);
+  const taskResultExpandedRef = useRef(taskResultExpanded);
   const routerMaxScrollOffsetRef = useRef(routerMaxScrollOffset);
   const taskSessionsRef = useRef(taskSessions);
   const selectedTaskSessionIndexRef = useRef(selectedTaskSessionIndex);
@@ -345,6 +356,11 @@ export function App({
     : formatRouteStatus(lastRoute);
   const visibleTaskStatus = routePending && !activeTaskId ? "" : formatStatusLine(status);
   const workerRefreshKey = workers.map((worker) => `${worker.id}\u0000${worker.statusPath}`).join("\u0001");
+  const taskResultMessageIndex = useMemo(
+    () => activeTaskId ? latestTaskResultMessageIndex(messages, activeTaskId) : -1,
+    [activeTaskId, messages]
+  );
+  const hasTaskResult = taskResultMessageIndex >= 0;
 
   useEffect(() => {
     inputRef.current = input;
@@ -369,6 +385,10 @@ export function App({
   useEffect(() => {
     busyRef.current = busy;
   }, [busy]);
+
+  useEffect(() => {
+    taskResultExpandedRef.current = taskResultExpanded;
+  }, [taskResultExpanded]);
 
   useEffect(() => {
     exitRef.current = exit;
@@ -691,6 +711,16 @@ export function App({
       }
       if (busyRef.current) {
         return false;
+      }
+      if (
+        taskResultExpandedRef.current
+        && update.value !== previousValue
+        && update.value.length > 0
+      ) {
+        taskResultExpandedRef.current = false;
+        setTaskResultExpanded(false);
+        chatScrollOffsetRef.current = 0;
+        setChatScrollOffset(0);
       }
       inputRef.current = update.value;
       inputCursorRef.current = update.cursor;
@@ -1240,6 +1270,18 @@ export function App({
           openWorkerOverviewRef.current();
           return;
         }
+        if (
+          isTaskResultShortcut(chunk, {})
+          && activeTaskIdRef.current
+          && latestTaskResultMessageIndex(messagesRef.current, activeTaskIdRef.current) >= 0
+        ) {
+          const expanded = !taskResultExpandedRef.current;
+          taskResultExpandedRef.current = expanded;
+          setTaskResultExpanded(expanded);
+          chatScrollOffsetRef.current = 0;
+          setChatScrollOffset(0);
+          return;
+        }
         const paste = chatPasteDecoderRef.current.write(chunk);
         if (paste.intercepted) {
           if (busyRef.current) {
@@ -1276,13 +1318,17 @@ export function App({
         const historyDelta = wheelDelta + pageDelta;
         if (historyDelta !== 0 && chatMaxScrollOffsetRef.current > 0) {
           setChatScrollOffset((current) => {
-            const next = nextScrollOffset(current, historyDelta, chatMaxScrollOffsetRef.current);
+            const next = nextScrollOffset(
+              current,
+              taskResultExpandedRef.current ? -historyDelta : historyDelta,
+              chatMaxScrollOffsetRef.current
+            );
             chatScrollOffsetRef.current = next;
             return next;
           });
           return;
         }
-        if (wheelDelta !== 0 && workersRef.current.length > 0) {
+        if (wheelDelta !== 0 && workersRef.current.length > 0 && !taskResultExpandedRef.current) {
           setAttachError(null);
           setView("worker");
           setWorkerScrollOffset((current) => nextScrollOffset(current, wheelDelta, workerMaxScrollOffsetRef.current));
@@ -1599,8 +1645,9 @@ export function App({
   }
 
   async function appendVisibleMessage(message: Message, taskId?: string): Promise<void> {
+    const visibleMessage = taskId ? { ...message, taskId } : message;
     setMessages((current) => {
-      const next = [...current, message];
+      const next = [...current, visibleMessage];
       messagesRef.current = next;
       return next;
     });
@@ -1635,6 +1682,7 @@ export function App({
     setBusy(true);
     setRoutePending(null);
     setLastRoute(null);
+    setTaskResultExpanded(false);
     const controller = new AbortController();
     activeRunControllerRef.current = controller;
     await appendVisibleMessage(
@@ -1704,6 +1752,9 @@ export function App({
         { from: "system", text: result.summary },
         nextMemory.activeTaskId ?? undefined
       );
+      if (result.mode === "complex" && parseTaskResultSummary(result.summary)) {
+        setTaskResultExpanded(true);
+      }
     } catch (error) {
       const retryTaskId = activeTaskIdRef.current;
       if (retryTaskId) {
@@ -1748,6 +1799,9 @@ export function App({
       setActiveMode("complex");
       setCanRetryTask(false);
       await appendVisibleMessage({ from: "system", text: result.summary }, taskId);
+      if (parseTaskResultSummary(result.summary)) {
+        setTaskResultExpanded(true);
+      }
     } catch (error) {
       setCanRetryTask(await orchestrator.canRetryTask(taskId));
       await appendVisibleMessage({
@@ -1784,6 +1838,7 @@ export function App({
     setStatus(null);
     setRoutePending(null);
     setLastRoute(null);
+    setTaskResultExpanded(false);
     setWorkers([]);
     workersRef.current = [];
     selectedWorkerIndexRef.current = 0;
@@ -1926,6 +1981,7 @@ export function App({
       setStatus(restoredWorkerStatusLine(restored.taskId, restored.workers));
       setRoutePending(null);
       setLastRoute(restored.route);
+      setTaskResultExpanded(latestTaskResultMessageIndex(messagesRef.current, restored.taskId) >= 0);
       workersRef.current = restored.workers;
       setWorkers(restored.workers);
       selectedWorkerIndexRef.current = 0;
@@ -2214,6 +2270,8 @@ export function App({
           canRetry={canRetryTask}
           hasWorkers={workers.length > 0}
           hasActiveTask={Boolean(activeTaskId)}
+          hasTaskResult={hasTaskResult}
+          taskResultExpanded={taskResultExpanded}
           chatScrollOffset={chatScrollOffset}
           chatMaxScrollOffset={chatMaxScrollOffset}
           nativeClosed={view === "native" && nativeAttach?.closedCode !== null}
@@ -2310,6 +2368,7 @@ export function App({
             terminalWidth={terminalWidth}
             viewportHeight={contentHeight}
             scrollOffset={chatScrollOffset}
+            expandedTaskResult={taskResultExpanded}
             onViewportChange={({ offset, maxOffset }) => {
               chatMaxScrollOffsetRef.current = maxOffset;
               setChatMaxScrollOffset(maxOffset);
@@ -2349,6 +2408,7 @@ export function ChatView({
   terminalWidth = process.stdout.columns || 120,
   viewportHeight,
   scrollOffset = 0,
+  expandedTaskResult = false,
   onViewportChange
 }: {
   messages: Message[];
@@ -2357,12 +2417,16 @@ export function ChatView({
   terminalWidth?: number;
   viewportHeight?: number;
   scrollOffset?: number;
+  expandedTaskResult?: boolean;
   onViewportChange?: (viewport: { offset: number; maxOffset: number }) => void;
 }) {
   const height = viewportHeight ? Math.max(1, viewportHeight) : undefined;
   const viewport = useMemo(
-    () => chatMessageViewport(messages, terminalWidth, height ?? 12, scrollOffset),
-    [height, messages, scrollOffset, terminalWidth]
+    () => chatMessageViewport(messages, terminalWidth, height ?? 12, scrollOffset, {
+      expandedTaskResult,
+      taskId: activeTaskId
+    }),
+    [activeTaskId, expandedTaskResult, height, messages, scrollOffset, terminalWidth]
   );
 
   useEffect(() => {
@@ -2384,7 +2448,9 @@ export function ChatView({
   }
   const lines = viewport.lines;
   const spacerLines = chatViewportSpacerLineCount(lines.length, height);
-  const topAligned = chatCompletionIsTopAligned(messages);
+  const topAligned = (
+    expandedTaskResult && latestTaskResultMessageIndex(messages, activeTaskId) >= 0
+  ) || chatCompletionIsTopAligned(messages);
 
   return (
     <Box flexDirection="column" height={height}>
@@ -2442,6 +2508,20 @@ export function chatSpanTheme(
       color: TUI_THEME.success
     };
   }
+  if (tone === "warning") {
+    return {
+      backgroundColor,
+      bold: true,
+      color: TUI_THEME.warning
+    };
+  }
+  if (tone === "danger") {
+    return {
+      backgroundColor,
+      bold: true,
+      color: TUI_THEME.danger
+    };
+  }
   if (tone === "heading") {
     return {
       backgroundColor,
@@ -2476,19 +2556,52 @@ export function chatLineTrailingFillWidth(line: ChatDisplayLine, terminalWidth: 
   return Math.max(0, chatContentWidth(terminalWidth) - displayWidth(chatLineDisplayText(line)));
 }
 
-export function chatMessageDisplayLines(messages: Message[], terminalWidth: number, maxLines = 12): ChatDisplayLine[] {
-  return chatMessageViewport(messages, terminalWidth, maxLines, 0).lines;
+export interface ChatMessageViewportOptions {
+  expandedTaskResult?: boolean;
+  taskId?: string | null;
+}
+
+export function chatMessageDisplayLines(
+  messages: Message[],
+  terminalWidth: number,
+  maxLines = 12,
+  options: ChatMessageViewportOptions = {}
+): ChatDisplayLine[] {
+  return chatMessageViewport(messages, terminalWidth, maxLines, 0, options).lines;
 }
 
 export function chatMessageViewport(
   messages: Message[],
   terminalWidth: number,
   maxLines = 12,
-  offsetFromBottom = 0
+  offsetFromBottom = 0,
+  options: ChatMessageViewportOptions = {}
 ): { lines: ChatDisplayLine[]; clampedOffset: number; maxOffset: number } {
   const contentWidth = chatContentWidth(terminalWidth);
-  const rendered = messages.flatMap((message) => chatSingleMessageDisplayLines(message, contentWidth));
+  const expandedResultIndex = options.expandedTaskResult
+    ? latestTaskResultMessageIndex(messages, options.taskId)
+    : -1;
+  const renderedByMessage = messages.map((message, index) => (
+    chatSingleMessageDisplayLines(message, contentWidth, index === expandedResultIndex)
+  ));
   const viewportHeight = Math.max(1, maxLines);
+
+  if (expandedResultIndex >= 0) {
+    const requestIndex = taskResultRequestMessageIndex(messages, expandedResultIndex);
+    const focused = [
+      ...(requestIndex >= 0 ? renderedByMessage[requestIndex] ?? [] : []),
+      ...(renderedByMessage[expandedResultIndex] ?? [])
+    ];
+    const maxOffset = Math.max(0, focused.length - viewportHeight);
+    const clampedOffset = Math.min(Math.max(0, Math.trunc(offsetFromBottom)), maxOffset);
+    return {
+      lines: focused.slice(clampedOffset, clampedOffset + viewportHeight),
+      clampedOffset,
+      maxOffset
+    };
+  }
+
+  const rendered = renderedByMessage.flat();
   const maxOffset = Math.max(0, rendered.length - viewportHeight);
   const clampedOffset = Math.min(Math.max(0, Math.trunc(offsetFromBottom)), maxOffset);
   const end = rendered.length - clampedOffset;
@@ -2499,6 +2612,27 @@ export function chatMessageViewport(
     clampedOffset,
     maxOffset
   };
+}
+
+function taskResultRequestMessageIndex(
+  messages: readonly Message[],
+  resultIndex: number
+): number {
+  const resultTaskId = messages[resultIndex]?.taskId;
+  for (let index = resultIndex - 1; index >= 0; index -= 1) {
+    const message = messages[index];
+    if (!message || message.from !== "user") {
+      continue;
+    }
+    if (!resultTaskId) {
+      return message.taskId === undefined ? index : -1;
+    }
+    if (message.taskId === resultTaskId || message.taskId === undefined) {
+      return index;
+    }
+    return -1;
+  }
+  return -1;
 }
 
 export function chatViewportBlankLineTheme(): ChatViewportBlankLineTheme {
@@ -2558,8 +2692,12 @@ function chatContentWidth(terminalWidth: number): number {
   return Math.max(8, terminalWidth - 2);
 }
 
-function chatSingleMessageDisplayLines(message: Message, contentWidth: number): ChatDisplayLine[] {
-  const rawLines = chatMessageMarkdownLines(message);
+function chatSingleMessageDisplayLines(
+  message: Message,
+  contentWidth: number,
+  expandedTaskResult = false
+): ChatDisplayLine[] {
+  const rawLines = chatMessageMarkdownLines(message, expandedTaskResult);
   const rendered: ChatDisplayLine[] = [];
 
   rawLines.forEach((rawLine, rawIndex) => {
@@ -2604,7 +2742,13 @@ function chatSingleMessageDisplayLines(message: Message, contentWidth: number): 
   return rendered;
 }
 
-function chatMessageMarkdownLines(message: Message): ChatMarkdownLine[] {
+function chatMessageMarkdownLines(message: Message, expandedTaskResult = false): ChatMarkdownLine[] {
+  if (message.from === "system" && expandedTaskResult) {
+    const expanded = expandedSupervisorSummaryForChat(message.text);
+    if (expanded) {
+      return expanded;
+    }
+  }
   const compact = message.from === "system" ? compactSupervisorSummaryForChat(message.text) : null;
   if (compact) {
     return compact.map((line) => ({
@@ -2946,6 +3090,97 @@ function chatLinePrefix(
     return markdownContinuationPrefix ?? (isCompactChatSummaryLine(rawLine) ? "  " : "");
   }
   return "";
+}
+
+function expandedSupervisorSummaryForChat(text: string): ChatMarkdownLine[] | null {
+  const result = parseTaskResultSummary(text);
+  if (!result) {
+    return null;
+  }
+
+  const outcome = taskResultOutcomeDisplay(result.outcome);
+  const lines: ChatMarkdownLine[] = [
+    {
+      spans: [
+        { text: "done", tone: "success" },
+        { text: " · ", tone: "muted" },
+        { text: "complex task completed", tone: "text" },
+        { text: " · ", tone: "muted" },
+        { text: outcome.label, tone: outcome.tone }
+      ],
+      background: "rail",
+      continuationPrefix: "  "
+    }
+  ];
+
+  const sections: Array<{
+    key: keyof TaskResultSections;
+    title: string;
+  }> = [
+    { key: "requirements", title: "Requirements" },
+    { key: "implementation", title: "Implementation" },
+    { key: "review", title: "Review" },
+    { key: "findings", title: "Findings" }
+  ];
+
+  for (const section of sections) {
+    lines.push({
+      spans: [{ text: section.title, tone: "heading" }],
+      background: "rail",
+      continuationPrefix: "  "
+    });
+    lines.push(...taskResultSectionMarkdownLines(
+      result.sections[section.key],
+      section.key,
+      result.outcome
+    ));
+  }
+
+  return lines;
+}
+
+function taskResultSectionMarkdownLines(
+  content: string,
+  section: keyof TaskResultSections,
+  outcome: TaskResultOutcome
+): ChatMarkdownLine[] {
+  if (!content.trim()) {
+    return [{
+      spans: [
+        { text: "  ", tone: "prefix" },
+        { text: "none", tone: "muted" }
+      ],
+      continuationPrefix: "  "
+    }];
+  }
+
+  return chatMarkdownBlockLines(content)
+    .filter((line) => !chatMarkdownLineIsBlank(line))
+    .map((line) => {
+      const text = chatSpanText(line.spans).trim();
+      const semanticTone = section === "review" && /^APPROVED\b/i.test(text)
+        ? "success"
+        : section === "review" && /^(?:REVISION_REQUIRED|REJECTED|FAILED)\b/i.test(text)
+          ? "danger"
+          : section === "findings" && outcome === "revision-required"
+            ? "warning"
+            : null;
+      const spans = semanticTone ? applyChatSpanTone(line.spans, semanticTone) : line.spans;
+      return prependChatMarkdownLine({ ...line, spans }, "  ", "prefix", "  ");
+    });
+}
+
+function taskResultOutcomeDisplay(outcome: TaskResultOutcome): {
+  label: string;
+  tone: ChatSpanTone;
+} {
+  if (outcome === "approved") {
+    return { label: "APPROVED", tone: "success" };
+  }
+  if (outcome === "revision-required") {
+    return { label: "REVISION REQUIRED", tone: "danger" };
+  }
+  return { label: "COMPLETE", tone: "warning" };
 }
 
 function compactSupervisorSummaryForChat(text: string): string[] | null {

@@ -212,7 +212,11 @@ async function loadInteractiveWorkspace(
       initialWorkers,
       initialCanRetryTask,
       initialMessages: [
-        ...initialHistory.map(({ from, text }) => ({ from, text })),
+        ...initialHistory.map(({ from, text, task_id }) => ({
+          from,
+          text,
+          ...(task_id ? { taskId: task_id } : {})
+        })),
         ...recoveryMessages
       ],
       workspaceChoices

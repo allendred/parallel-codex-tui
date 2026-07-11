@@ -180,7 +180,9 @@ describe("package metadata", () => {
     expect(readme).toContain("Valid `[router]` changes are reloaded before the next classification without restarting the TUI");
     expect(readme).toContain("Worker, pairing, role, orchestration, data-directory, and UI changes still require a restart");
     expect(readme).toContain("While classification is running, it follows the real subprocess");
-    expect(readme).toContain("Completed complex-task summaries move to the top of the chat viewport");
+    expect(readme).toContain("Completed complex tasks open as a structured result at the top of the chat viewport");
+    expect(readme).toContain("`Ctrl+D` toggles the focused result between full detail and its five-line compact summary");
+    expect(readme).toContain("Result lookup follows the persisted task id");
     expect(readme).toContain("Restarting an existing task restores the latest persisted route evidence");
     expect(readme).toContain("`.parallel-codex/sessions/main/chat.jsonl`");
     expect(readme).toContain("startup restores the latest 200 valid messages");

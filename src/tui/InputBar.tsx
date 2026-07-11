@@ -16,6 +16,8 @@ export interface InputBarProps {
   canRetry?: boolean;
   hasWorkers?: boolean;
   hasActiveTask?: boolean;
+  hasTaskResult?: boolean;
+  taskResultExpanded?: boolean;
   chatScrollOffset?: number;
   chatMaxScrollOffset?: number;
   nativeClosed?: boolean;
@@ -41,6 +43,8 @@ export function InputBar({
   canRetry = false,
   hasWorkers = false,
   hasActiveTask = false,
+  hasTaskResult = false,
+  taskResultExpanded = false,
   chatScrollOffset = 0,
   chatMaxScrollOffset = 0,
   nativeClosed = false,
@@ -204,6 +208,8 @@ export function InputBar({
     {
       hasWorkers,
       hasActiveTask,
+      hasTaskResult,
+      taskResultExpanded,
       canRetry,
       scrollOffset: chatScrollOffset,
       maxScrollOffset: chatMaxScrollOffset
@@ -220,7 +226,7 @@ export function InputBar({
       <Text backgroundColor={TUI_THEME.rail} color={TUI_THEME.accent} bold>{prompt}</Text>
       {hasLeadingPromptSpace ? <Text backgroundColor={TUI_THEME.rail}> </Text> : null}
       <Text backgroundColor={TUI_THEME.rail} color={TUI_THEME.accent} bold>|</Text>
-      <Text backgroundColor={TUI_THEME.rail} color={canRetry ? TUI_THEME.warning : TUI_THEME.muted}>{placeholder}</Text>
+      <Text backgroundColor={TUI_THEME.rail} color={canRetry ? TUI_THEME.warning : hasTaskResult ? TUI_THEME.accent : TUI_THEME.muted}>{placeholder}</Text>
     </InputRail>
   );
 }
@@ -375,6 +381,16 @@ export function chatPlaceholderDisplayValue(
   }
   const maxScrollOffset = Math.max(0, options.maxScrollOffset ?? 0);
   const scrollOffset = Math.min(Math.max(0, options.scrollOffset ?? 0), maxScrollOffset);
+  if (options.hasTaskResult) {
+    return chatTaskResultPlaceholderDisplayValue(
+      terminalWidth,
+      Boolean(options.taskResultExpanded),
+      Boolean(options.hasWorkers),
+      Boolean(options.hasActiveTask),
+      scrollOffset,
+      maxScrollOffset
+    );
+  }
   if (scrollOffset > 0) {
     return chatHistoryPlaceholderDisplayValue(terminalWidth, scrollOffset, maxScrollOffset);
   }
@@ -406,9 +422,44 @@ export function chatPlaceholderDisplayValue(
 export interface ChatPlaceholderOptions {
   hasWorkers?: boolean;
   hasActiveTask?: boolean;
+  hasTaskResult?: boolean;
+  taskResultExpanded?: boolean;
   canRetry?: boolean;
   scrollOffset?: number;
   maxScrollOffset?: number;
+}
+
+function chatTaskResultPlaceholderDisplayValue(
+  terminalWidth: number,
+  expanded: boolean,
+  hasWorkers: boolean,
+  hasActiveTask: boolean,
+  scrollOffset: number,
+  maxScrollOffset: number
+): string {
+  const toggle = expanded ? "^D compact" : "^D details";
+  const position = expanded && maxScrollOffset > 0
+    ? scrollOffset > 0 ? `result ${scrollOffset}/${maxScrollOffset}` : "result · scroll"
+    : "message";
+  const candidates = hasWorkers
+    ? [
+        `${position} · ${toggle} · ^N new · ^W logs · ^B workers · ^T tasks · Tab · ^O attach`,
+        `${position} · ${toggle} · ^N new · ^W logs · ^T tasks · Tab · ^O attach`,
+        `${position} · ${toggle} · ^W logs · ^B workers · ^T tasks · Tab · ^O attach`,
+        `${position} · ${toggle} · ^W logs · ^T tasks · Tab · ^O attach`,
+        `${position} · ${toggle} · ^W logs · Tab · ^O attach`,
+        `${position} · ${toggle} · ^W logs`,
+        `${toggle} · ^W logs`,
+        toggle,
+        "^D"
+      ]
+    : [
+        `${position} · ${toggle}${hasActiveTask ? " · ^N new" : ""}`,
+        `${position} · ${toggle}`,
+        toggle,
+        "^D"
+      ];
+  return selectChatPlaceholder(terminalWidth, candidates);
 }
 
 function chatHistoryPlaceholderDisplayValue(terminalWidth: number, offset: number, maxOffset: number): string {

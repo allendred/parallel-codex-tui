@@ -83,6 +83,19 @@ describe("keyboard shortcuts", () => {
     expect(isTaskSessionsShortcut?.("t", { ctrl: false })).toBe(false);
   });
 
+  it("recognizes ctrl-d as the task-result shortcut", () => {
+    const isTaskResultShortcut = (
+      keyboardModule as typeof keyboardModule & {
+        isTaskResultShortcut?: (input: string, key: { ctrl?: boolean }) => boolean;
+      }
+    ).isTaskResultShortcut;
+
+    expect(isTaskResultShortcut).toBeTypeOf("function");
+    expect(isTaskResultShortcut?.("d", { ctrl: true })).toBe(true);
+    expect(isTaskResultShortcut?.("\u0004", { ctrl: false })).toBe(true);
+    expect(isTaskResultShortcut?.("d", { ctrl: false })).toBe(false);
+  });
+
   it("recognizes worker log search and semantic jump shortcuts", () => {
     const isWorkerSearchShortcut = (
       keyboardModule as typeof keyboardModule & {

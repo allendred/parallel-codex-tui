@@ -15,7 +15,9 @@ describe("InputBar", () => {
       ["retry", { canRetry: true }],
       ["retry-task", { canRetry: true, hasActiveTask: true }],
       ["back", { hasWorkers: true, scrollOffset: 3, maxScrollOffset: 20 }],
-      ["history", { maxScrollOffset: 20 }]
+      ["history", { maxScrollOffset: 20 }],
+      ["result", { hasWorkers: true, hasActiveTask: true, hasTaskResult: true, taskResultExpanded: true }],
+      ["result-scroll", { hasWorkers: true, hasActiveTask: true, hasTaskResult: true, taskResultExpanded: true, scrollOffset: 4, maxScrollOffset: 12 }]
     ] as const;
     const clipped: string[] = [];
 
@@ -254,6 +256,41 @@ describe("InputBar", () => {
     expect(frame).toContain("^B workers");
     expect(frame).toContain("^T tasks");
     expect(frame).toContain("^G routes");
+  });
+
+  it("prioritizes the task-result toggle after a complex task completes", () => {
+    expect(chatPlaceholderDisplayValue(80, {
+      hasWorkers: true,
+      hasActiveTask: true,
+      hasTaskResult: true,
+      taskResultExpanded: true
+    })).toContain("^D compact");
+    expect(chatPlaceholderDisplayValue(42, {
+      hasWorkers: true,
+      hasActiveTask: true,
+      hasTaskResult: true,
+      taskResultExpanded: false
+    })).toContain("^D details");
+    expect(chatPlaceholderDisplayValue(16, {
+      hasWorkers: true,
+      hasActiveTask: true,
+      hasTaskResult: true,
+      taskResultExpanded: true
+    })).toBe("^D compact");
+  });
+
+  it("renders the result toggle in the themed chat rail", () => {
+    const { lastFrame } = render(<InputBar
+      mode="chat"
+      value=""
+      hasWorkers
+      hasActiveTask
+      hasTaskResult
+      taskResultExpanded
+      terminalWidth={60}
+    />);
+
+    expect(lastFrame()).toContain("^D compact");
   });
 
   it("uses an intentional compact task hint instead of a clipped word at 40 columns", () => {

@@ -86,11 +86,25 @@ describe("CLI task lifecycle smoke", () => {
       child.write("\x12");
       await waitForTaskState(join(taskDir, "meta.json"), "done");
       await waitForScreenText(() => screenWrites, screen, "done · complex task completed");
-      await waitForScreenText(() => screenWrites, screen, "review · APPROVED");
-      await waitForScreenText(() => screenWrites, screen, "findings · none");
+      await waitForScreenText(() => screenWrites, screen, "Implementation");
+      await waitForScreenText(() => screenWrites, screen, "Actor retry completed.");
+      await waitForScreenText(() => screenWrites, screen, "^D compact");
+      expect(screen.snapshot()).not.toContain("Findings");
+      const resultHeader = screen.styledSnapshotLines().find((line) => (
+        line.chunks.some((chunk) => chunk.text.includes("complex task completed"))
+      ));
+      expect(resultHeader?.chunks.some((chunk) => (
+        chunk.text.includes("done")
+        && chunk.style.color === TUI_THEME_PRESETS.codex.success
+        && chunk.style.bold
+      ))).toBe(true);
+
+      child.write("\x1b[6~");
+      await waitForScreenText(() => screenWrites, screen, "Findings");
+      await waitForScreenText(() => screenWrites, screen, "result 2/2");
 
       const completionLines = screen.styledSnapshotLines().filter((line) => (
-        /done · complex task completed|review · APPROVED|findings · none/.test(
+        /done · complex task completed|APPROVED|none/.test(
           line.chunks.map((chunk) => chunk.text).join("")
         )
       ));
@@ -104,10 +118,19 @@ describe("CLI task lifecycle smoke", () => {
         .filter((chunk) => chunk.style.color === TUI_THEME_PRESETS.codex.muted)
         .map((chunk) => chunk.text)
         .join("");
-      expect(successText).toContain("done");
       expect(successText).toContain("APPROVED");
-      expect(mutedText).toContain("review · ");
-      expect(mutedText).toContain("findings · none");
+      expect(mutedText).toContain("none");
+
+      child.write("\x04");
+      await waitForScreenText(() => screenWrites, screen, "review · APPROVED");
+      await waitForScreenText(() => screenWrites, screen, "findings · none");
+      await waitForScreenText(() => screenWrites, screen, "^D details");
+      child.write("\x04");
+      await waitForScreenText(() => screenWrites, screen, "Implementation");
+      await waitForScreenText(() => screenWrites, screen, "^D compact");
+      child.write("继续优化");
+      await waitForScreenText(() => screenWrites, screen, "继续优化|");
+      expect(screen.snapshot()).not.toContain("Implementation");
 
       const actorLog = await readTextIfExists(join(taskDir, "actor-codex", "output.log"));
       const events = await readTextIfExists(join(taskDir, "events.jsonl"));
@@ -123,6 +146,7 @@ describe("CLI task lifecycle smoke", () => {
       expect(chat).toContain("做个可取消的俄罗斯方块");
       expect(chat).toContain("cancelled · request stopped");
       expect(chat).toContain("Complex task completed.");
+      expect(chat).toContain(`"task_id":"${taskDir.split("/").at(-1)}"`);
       expect(await pathExists(join(taskDir, "turns", "0002"))).toBe(false);
 
       child.write("\x03");
@@ -161,7 +185,7 @@ function lifecycleAgentSource(): string {
     "      setInterval(() => {}, 1000);",
     "      return;",
     "    }",
-    "    fs.writeFileSync(path.join(dir, 'worklog.md'), '# Worklog\\n\\n- Actor retry completed.\\n');",
+    "    fs.writeFileSync(path.join(dir, 'worklog.md'), '# Worklog\\n\\n- Actor retry completed.\\n- Added board state.\\n- Added keyboard controls.\\n- Added scoring.\\n- Added level progression.\\n- Added next-piece preview.\\n- Added hold support.\\n- Added pause support.\\n- Added game-over handling.\\n- Verified retry state.\\n');",
     "    fs.writeFileSync(path.join(dir, 'patch.diff'), 'diff --git a/game b/game\\n');",
     "    console.log('actor retry done');",
     "    return;",
