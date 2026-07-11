@@ -300,6 +300,10 @@ describe("package metadata", () => {
     expect(workflow).toContain('npm install --global --prefix "$VERIFY_PREFIX" "$PACKAGE_SPEC"');
     expect(workflow).toContain('"$VERIFY_PREFIX/bin/parallel-codex-tui" --version');
     expect(workflow).toContain('grep -F "parallel-codex-tui $PACKAGE_VERSION"');
-    expect(workflow).toContain("softprops/action-gh-release@v2");
+    expect(workflow).toContain("GH_TOKEN: ${{ github.token }}");
+    expect(workflow).toContain('gh release view "$RELEASE_VERSION"');
+    expect(workflow).toContain('gh release upload "$RELEASE_VERSION" "$PACKAGE_TARBALL" --clobber');
+    expect(workflow).toContain('gh release create "$RELEASE_VERSION" "$PACKAGE_TARBALL" --verify-tag --title "$RELEASE_VERSION"');
+    expect(workflow).not.toContain("softprops/action-gh-release");
   });
 });

@@ -163,8 +163,21 @@ jobs:
           npm install --global --prefix "$VERIFY_PREFIX" "$PACKAGE_SPEC"
           "$VERIFY_PREFIX/bin/parallel-codex-tui" --version | grep -F "parallel-codex-tui $PACKAGE_VERSION"
 
-      - name: Create GitHub release
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: ${{ steps.release.outputs.version }}
-          files: parallel-codex-tui-*.tgz
+      - name: Create or update GitHub release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          RELEASE_VERSION="${{ steps.release.outputs.version }}"
+          PACKAGE_TARBALL="${{ steps.pack.outputs.tarball }}"
+
+          if [ ! -f "$PACKAGE_TARBALL" ]; then
+            echo "Package tarball not found: $PACKAGE_TARBALL" >&2
+            exit 1
+          fi
+
+          if gh release view "$RELEASE_VERSION" >/dev/null 2>&1; then
+            gh release upload "$RELEASE_VERSION" "$PACKAGE_TARBALL" --clobber
+          else
+            gh release create "$RELEASE_VERSION" "$PACKAGE_TARBALL" --verify-tag --title "$RELEASE_VERSION"
+          fi
