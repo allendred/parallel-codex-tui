@@ -235,6 +235,7 @@ async function runRouterProbe(
 function formatRouterProbeTrace(route: RouteDecision, includeStage: boolean): string {
   return [
     ...(includeStage && route.router_failure_stage ? [`stage ${route.router_failure_stage}`] : []),
+    ...(includeStage && route.router_timeout_kind ? [`timeout ${route.router_timeout_kind}`] : []),
     ...(typeof route.router_dispatch_ms === "number" ? [`dispatch ${Math.round(route.router_dispatch_ms)}ms`] : []),
     ...(typeof route.router_spawn_ms === "number" ? [`spawn ${Math.round(route.router_spawn_ms)}ms`] : []),
     ...formatRouterProbeFirstOutput(route),

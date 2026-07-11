@@ -14,6 +14,8 @@ describe("StatusBar", () => {
       ["fallback", "workers 3 | done 3 | route complex · fallback · timeout · 120s"],
       ["proxy-timeout", "workers 3 | done 3 | route simple · fallback · timeout via proxy · 30s"],
       ["structured-proxy-timeout", "workers 3 | done 3 | route simple · fallback · timeout waiting output · via proxy.test:8443 · 30s"],
+      ["first-output-timeout", "workers 3 | done 3 | route simple · fallback · first output timeout · direct · 15s"],
+      ["idle-timeout", "workers 3 | done 3 | route simple · fallback · idle timeout after stderr · via proxy.test:8443 · 25s"],
       ["proxy", "workers 3 | done 3 | route simple · fallback · proxy"],
       ["auth", "workers 3 | done 3 | route simple · fallback · auth"],
       ["rate-limit", "workers 3 | done 3 | route simple · fallback · rate limit"],
@@ -113,6 +115,8 @@ describe("StatusBar", () => {
     expect(frame("workers 3 | done 3 | route simple · fallback · timeout via proxy · 30s", 8)).toContain("r:p:to");
     expect(frame("workers 3 | done 3 | route simple · fallback · timeout waiting output · via proxy.test:8443 · 30s", 8)).toContain("r:w:to");
     expect(frame("workers 3 | done 3 | route simple · fallback · timeout after stderr · via proxy.test:8443 · 30s", 8)).toContain("r:e:to");
+    expect(frame("workers 3 | done 3 | route simple · fallback · first output timeout · direct · 15s", 8)).toContain("r:f:to");
+    expect(frame("workers 3 | done 3 | route simple · fallback · idle timeout after stderr · via proxy.test:8443 · 25s", 8)).toContain("r:i:to");
     expect(frame("route diagnostics · via proxy.test:8443 · 7s / 30s", 13)).toContain("r:diag 7s");
     expect(frame("route receiving · direct · 7s / 30s", 13)).toContain("r:recv 7s");
     expect(frame("workers 3 | done 3 | route simple · fallback · proxy", 8)).toContain("r:pxy");

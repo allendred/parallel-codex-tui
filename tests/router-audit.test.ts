@@ -46,6 +46,9 @@ describe("readRouterAudit", () => {
     await writeText(path, `${JSON.stringify({
       ...routeRecord("timeout", "fallback"),
       router_timeout_ms: 30000,
+      router_first_output_timeout_ms: 15000,
+      router_idle_timeout_ms: 25000,
+      router_timeout_kind: "first-output",
       proxy_configured: true,
       proxy_source: "router-config",
       proxy_variable: "HTTPS_PROXY",
@@ -76,6 +79,9 @@ describe("readRouterAudit", () => {
     await expect(readRouterAudit?.(path)).resolves.toEqual([
       expect.objectContaining({
         router_timeout_ms: 30000,
+        router_first_output_timeout_ms: 15000,
+        router_idle_timeout_ms: 25000,
+        router_timeout_kind: "first-output",
         proxy_configured: true,
         proxy_source: "router-config",
         proxy_variable: "HTTPS_PROXY",
@@ -107,13 +113,26 @@ describe("readRouterAudit", () => {
       reason: "Codex router timed out after 30000ms with proxy configured",
       failure_kind: "timeout",
       proxy_configured: true,
+      router_timeout_kind: "first-output",
       router_failure_stage: "waiting-output",
       router_stdout_bytes: 0,
       router_stderr_bytes: 0
     })).toEqual({
       kind: "timeout",
-      summary: "Router produced no output before the timeout",
-      action: "run parallel-codex-tui --doctor --probe-router; verify Codex login and proxy upstream"
+      summary: "Router produced no output before the first-output deadline",
+      action: "run parallel-codex-tui --doctor --probe-router; verify Codex login and proxy upstream, or raise router.codex.firstOutputTimeoutMs"
+    });
+    expect(diagnoseRouterFailure?.({
+      reason: "Codex router idle timed out after 25000ms",
+      failure_kind: "timeout",
+      router_timeout_kind: "idle",
+      router_failure_stage: "streaming",
+      router_stdout_bytes: 0,
+      router_stderr_bytes: 73
+    })).toEqual({
+      kind: "timeout",
+      summary: "Router diagnostics stopped before a route response",
+      action: "inspect the reason; retry Router or raise router.codex.idleTimeoutMs"
     });
     expect(diagnoseRouterFailure?.({
       reason: "Codex router timed out after stderr",

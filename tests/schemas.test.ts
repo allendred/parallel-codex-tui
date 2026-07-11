@@ -27,6 +27,7 @@ describe("domain schemas", () => {
     const result = RouteDecisionSchema.parse({
       mode: "complex",
       reason: "Requires code changes and review.",
+      router_timeout_kind: "idle",
       suggested_roles: ["judge", "actor", "critic"],
       judge_engine: "codex",
       actor_engine: "codex",
@@ -34,6 +35,7 @@ describe("domain schemas", () => {
     });
 
     expect(result.mode).toBe("complex");
+    expect(result.router_timeout_kind).toBe("idle");
     expect(result.suggested_roles).toEqual(["judge", "actor", "critic"]);
   });
 

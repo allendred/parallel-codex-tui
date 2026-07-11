@@ -343,6 +343,102 @@ describe("routeRequestWithCodex", () => {
     expect(route.router_parse_ms).toBeUndefined();
   });
 
+  it("stops a silent Router at the first-output deadline before the total timeout", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pct-router-first-output-timeout-"));
+    const config = defaultConfig(root);
+    config.router.codex.command = process.execPath;
+    config.router.codex.args = ["-e", "setInterval(()=>{},1000)"];
+    config.router.codex.timeoutMs = 500;
+    config.router.codex.firstOutputTimeoutMs = 100;
+    config.router.codex.idleTimeoutMs = 300;
+
+    const route = await routeRequestWithCodex("你好", config, undefined, root);
+
+    expect(route).toMatchObject({
+      source: "fallback",
+      router_failure_stage: "waiting-output",
+      router_timeout_kind: "first-output",
+      router_stdout_bytes: 0,
+      router_stderr_bytes: 0
+    });
+    expect(route.reason).toContain("first output timed out after 100ms");
+    expect(route.duration_ms).toBeGreaterThanOrEqual(70);
+    expect(route.duration_ms).toBeLessThan(400);
+  });
+
+  it("stops a Router that becomes idle after emitting diagnostics", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pct-router-idle-timeout-"));
+    const config = defaultConfig(root);
+    config.router.codex.command = process.execPath;
+    config.router.codex.args = [
+      "-e",
+      "process.stderr.write('connected\\n');setInterval(()=>{},1000)"
+    ];
+    config.router.codex.timeoutMs = 600;
+    config.router.codex.firstOutputTimeoutMs = 300;
+    config.router.codex.idleTimeoutMs = 120;
+
+    const route = await routeRequestWithCodex("你好", config, undefined, root);
+
+    expect(route).toMatchObject({
+      source: "fallback",
+      router_failure_stage: "streaming",
+      router_timeout_kind: "idle",
+      router_stdout_bytes: 0,
+      router_stderr_bytes: expect.any(Number)
+    });
+    expect(route.reason).toContain("idle timed out after 120ms");
+    expect(route.duration_ms).toBeLessThan(500);
+  });
+
+  it("resets the Router idle deadline whenever either output stream is active", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pct-router-idle-reset-"));
+    const config = defaultConfig(root);
+    config.router.codex.command = process.execPath;
+    config.router.codex.args = [
+      "-e",
+      [
+        "process.stderr.write('phase-1\\n');",
+        "setTimeout(()=>process.stderr.write('phase-2\\n'),100);",
+        "setTimeout(()=>process.stderr.write('phase-3\\n'),200);",
+        "setTimeout(()=>process.stderr.write('phase-4\\n'),300);",
+        "setTimeout(()=>process.stdout.write(JSON.stringify({mode:'simple',reason:'active'})),400);"
+      ].join("")
+    ];
+    config.router.codex.timeoutMs = 1500;
+    config.router.codex.firstOutputTimeoutMs = 300;
+    config.router.codex.idleTimeoutMs = 180;
+
+    const route = await routeRequestWithCodex("你好", config, undefined, root);
+
+    expect(route).toMatchObject({ mode: "simple", source: "codex", reason: "active" });
+    expect(route.duration_ms).toBeGreaterThanOrEqual(320);
+  });
+
+  it("keeps the total Router timeout authoritative while output remains active", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pct-router-total-timeout-"));
+    const config = defaultConfig(root);
+    config.router.codex.command = process.execPath;
+    config.router.codex.args = [
+      "-e",
+      "process.stderr.write('start\\n');setInterval(()=>process.stderr.write('.'),50)"
+    ];
+    config.router.codex.timeoutMs = 250;
+    config.router.codex.firstOutputTimeoutMs = 150;
+    config.router.codex.idleTimeoutMs = 120;
+
+    const route = await routeRequestWithCodex("你好", config, undefined, root);
+
+    expect(route).toMatchObject({
+      source: "fallback",
+      router_failure_stage: "streaming",
+      router_timeout_kind: "total"
+    });
+    expect(route.reason).toContain("timed out after 250ms");
+    expect(route.duration_ms).toBeGreaterThanOrEqual(200);
+    expect(route.duration_ms).toBeLessThan(700);
+  });
+
   it("ignores output that arrives only while a timed-out Router is terminating", async () => {
     const root = await mkdtemp(join(tmpdir(), "pct-router-late-output-"));
     const config = defaultConfig(root);

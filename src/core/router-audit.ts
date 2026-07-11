@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { RouteDecisionSchema, type RouterFailureStage } from "../domain/schemas.js";
+import { RouteDecisionSchema, type RouterFailureStage, type RouterTimeoutKind } from "../domain/schemas.js";
 import { readTextIfExists } from "./file-store.js";
 
 export const RouterFailureKindSchema = z.enum([
@@ -21,6 +21,8 @@ export const RouterAuditRecordSchema = RouteDecisionSchema.extend({
   workspace: z.string().min(1),
   scope: z.enum(["initial", "follow-up"]).default("initial"),
   router_timeout_ms: z.number().int().positive().optional(),
+  router_first_output_timeout_ms: z.number().int().positive().optional(),
+  router_idle_timeout_ms: z.number().int().positive().optional(),
   proxy_configured: z.boolean().optional(),
   failure_kind: RouterFailureKindSchema.optional()
 });
@@ -33,6 +35,7 @@ export interface RouterFailureEvidence {
   failure_kind?: RouterFailureKind;
   proxy_configured?: boolean;
   router_failure_stage?: RouterFailureStage;
+  router_timeout_kind?: RouterTimeoutKind;
   router_stdout_bytes?: number;
   router_stderr_bytes?: number;
 }
@@ -145,6 +148,24 @@ export function diagnoseRouterFailure(evidence: RouterFailureEvidence): RouterFa
 }
 
 function diagnoseRouterTimeout(evidence: RouterFailureEvidence): RouterFailureDiagnosis {
+  if (evidence.router_timeout_kind === "first-output") {
+    return diagnosis(
+      "timeout",
+      "Router produced no output before the first-output deadline",
+      evidence.proxy_configured
+        ? "run parallel-codex-tui --doctor --probe-router; verify Codex login and proxy upstream, or raise router.codex.firstOutputTimeoutMs"
+        : "run parallel-codex-tui --doctor --probe-router; verify Codex login and API network path, or raise router.codex.firstOutputTimeoutMs"
+    );
+  }
+  if (evidence.router_timeout_kind === "idle") {
+    return diagnosis(
+      "timeout",
+      (evidence.router_stdout_bytes ?? 0) > 0
+        ? "Router response stopped before valid route JSON completed"
+        : "Router diagnostics stopped before a route response",
+      "inspect the reason; retry Router or raise router.codex.idleTimeoutMs"
+    );
+  }
   if ((evidence.router_stdout_bytes ?? 0) > 0) {
     return diagnosis(
       "timeout",

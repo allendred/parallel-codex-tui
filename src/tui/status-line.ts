@@ -125,18 +125,35 @@ function routeFailureKindLabel(
   route: RouteDecision
 ): string {
   if (kind === "timeout") {
-    const stage = route.router_failure_stage === "waiting-output"
-      ? "timeout waiting output"
-      : route.router_failure_stage === "streaming"
-        ? route.router_stdout_bytes && route.router_stdout_bytes > 0
-          ? "timeout after stdout"
-          : route.router_stderr_bytes && route.router_stderr_bytes > 0
-            ? "timeout after stderr"
-            : "timeout after output"
-        : "timeout";
-    return stage;
+    const stage = routeTimeoutStageSuffix(route);
+    if (route.router_timeout_kind === "first-output") {
+      return "first output timeout";
+    }
+    if (route.router_timeout_kind === "idle") {
+      return `idle timeout${stage}`;
+    }
+    if (route.router_timeout_kind === "total") {
+      return `total timeout${stage}`;
+    }
+    return `timeout${stage}`;
   }
   return kind.replaceAll("-", " ");
+}
+
+function routeTimeoutStageSuffix(route: RouteDecision): string {
+  if (route.router_failure_stage === "waiting-output") {
+    return " waiting output";
+  }
+  if (route.router_failure_stage !== "streaming") {
+    return "";
+  }
+  if (route.router_stdout_bytes && route.router_stdout_bytes > 0) {
+    return " after stdout";
+  }
+  if (route.router_stderr_bytes && route.router_stderr_bytes > 0) {
+    return " after stderr";
+  }
+  return " after output";
 }
 
 function routeProxyStatus(

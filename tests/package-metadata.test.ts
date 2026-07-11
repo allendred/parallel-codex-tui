@@ -169,7 +169,7 @@ describe("package metadata", () => {
     expect(readme).toContain("Router configuration and `router/routes.jsonl` remain shared under the app root");
     expect(readme).toContain("press `Ctrl+G` to open the global Router diagnostics view");
     expect(readme).toContain("`Tab` toggles between all workspaces and the current workspace");
-    expect(readme).toContain("the timeout limit, proxy-configured flag, normalized proxy source/variable, sanitized proxy host:port, and normalized failure kind");
+    expect(readme).toContain("all three watchdog limits, the triggered `first-output`/`idle`/`total` timeout kind, proxy-configured flag, normalized proxy source/variable, sanitized proxy host:port, and normalized failure kind");
     expect(readme).toContain("Successful Codex latency excludes fallback wait time");
     expect(readme).toContain("marks each timeout budget as healthy, tight, or high");
     expect(readme).toContain("at least three successful samples");
@@ -196,10 +196,13 @@ describe("package metadata", () => {
     expect(readme).toContain("I/O byte evidence on a separate line");
     expect(readme).toContain("a bounded diagnosis and a concrete next action");
     expect(readme).toContain("configured proxy remains context rather than a proven cause");
-    expect(readme).toContain("`timeout waiting output`, `timeout after stdout`, or `timeout after stderr`");
+    expect(readme).toContain("`first output timeout`, `idle timeout after stdout/stderr`, or `total timeout`");
     expect(readme).toContain("`via <proxy-host:port>` remains context, not a claim that the proxy caused the failure");
     expect(readme).toContain("`starting`, `waiting output`, `diagnostics`, `receiving`, and `parsing`");
     expect(readme).toContain("normalized proxy source/variable, sanitized proxy host:port");
+    expect(readme).toContain("`firstOutputTimeoutMs` stops a silent process");
+    expect(readme).toContain("`idleTimeoutMs` resets after every stdout or stderr chunk");
+    expect(readme).toContain("the triggered `first-output`/`idle`/`total` timeout kind");
     expect(readme).toContain("Proxy URLs, credentials, paths, and query strings are never displayed or persisted");
     expect(readme).toContain("When semantic routing falls back inside the TUI, execution pauses");
     expect(readme).toContain("`1` selects Main, `2` selects Parallel, `R` retries Codex routing, and `Esc` cancels");

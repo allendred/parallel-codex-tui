@@ -155,7 +155,9 @@ describe("CLI chat Markdown smoke", () => {
         "[router.codex]",
         `command = "${escapeToml(process.execPath)}"`,
         `args = ["${escapeToml(routerScript)}"]`,
-        "timeoutMs = 1600",
+        "timeoutMs = 5000",
+        "firstOutputTimeoutMs = 1200",
+        "idleTimeoutMs = 1600",
         'fallback = "simple"',
         "",
         "[router.codex.env]",
@@ -198,12 +200,12 @@ describe("CLI chat Markdown smoke", () => {
       await waitForScreenText(
         () => screenWrites,
         screen,
-        "route diagnostics · via 127.0.0.1:7890 · 0s / 1.6s"
+        "route diagnostics · via 127.0.0.1:7890 · 0s / 5s"
       );
       await waitForScreenText(
         () => screenWrites,
         screen,
-        "route diagnostics · via 127.0.0.1:7890 · 1s / 1.6s"
+        "route diagnostics · via 127.0.0.1:7890 · 1s / 5s"
       );
       await waitForScreenText(
         () => screenWrites,
@@ -211,7 +213,7 @@ describe("CLI chat Markdown smoke", () => {
         "route failed · 1 Main · 2 Parallel · R retry · Esc cancel"
       );
       expect(screen.snapshot()).toContain(
-        "route simple · fallback · timeout after stderr · via 127.0.0.1:7890"
+        "route simple · fallback · idle timeout after stderr · via 127.0.0.1:7890"
       );
       expect(screen.snapshot()).not.toContain("Fallback chat response");
       child.write("1");
@@ -219,12 +221,12 @@ describe("CLI chat Markdown smoke", () => {
       await waitForScreenText(
         () => screenWrites,
         screen,
-        "route simple · fallback · user Main · timeout after stderr · via 127.0.0.1:7890"
+        "route simple · fallback · user Main · idle timeout after stderr · via 127.0.0.1:7890"
       );
 
       const snapshot = screen.snapshot();
       const routes = await readTextIfExists(join(appRoot, ".parallel-codex", "router", "routes.jsonl"));
-      expect(snapshot).toContain("route simple · fallback · user Main · timeout after stderr · via 127.0.0.1:7890");
+      expect(snapshot).toContain("route simple · fallback · user Main · idle timeout after stderr · via 127.0.0.1:7890");
       expect(snapshot).not.toContain("Codex router failed:");
       expect(snapshot).not.toContain(routerScript);
       expect(routes).toContain("Router connection established");
@@ -232,6 +234,10 @@ describe("CLI chat Markdown smoke", () => {
       expect(routes).toContain('"proxy_source":"router-config"');
       expect(routes).toContain('"proxy_variable":"HTTPS_PROXY"');
       expect(routes).toContain('"proxy_endpoint":"127.0.0.1:7890"');
+      expect(routes).toContain('"router_timeout_kind":"idle"');
+      expect(routes).toContain('"router_timeout_ms":5000');
+      expect(routes).toContain('"router_first_output_timeout_ms":1200');
+      expect(routes).toContain('"router_idle_timeout_ms":1600');
       expect(routes).toContain('"router_failure_stage":"streaming"');
       expect(routes).toContain('"router_first_output_ms":');
       expect(routes).toContain('"router_first_stderr_ms":');

@@ -19,6 +19,7 @@ export const RouterFallbackResolutionSchema = z.enum([
   "configured"
 ]);
 export const RouterProxySourceSchema = z.enum(["router-config", "environment"]);
+export const RouterTimeoutKindSchema = z.enum(["first-output", "idle", "total"]);
 
 export const TaskStateSchema = z.enum([
   "created",
@@ -74,6 +75,7 @@ export const RouteDecisionSchema = z.object({
   router_failure_stage: RouterFailureStageSchema.optional(),
   router_attempt: z.number().int().positive().optional(),
   router_fallback_resolution: RouterFallbackResolutionSchema.optional(),
+  router_timeout_kind: RouterTimeoutKindSchema.optional(),
   proxy_configured: z.boolean().optional(),
   proxy_source: RouterProxySourceSchema.optional(),
   proxy_variable: z.string().regex(/^(?:HTTP|HTTPS|ALL)_PROXY$/i).optional(),
@@ -164,6 +166,7 @@ export type TaskState = z.infer<typeof TaskStateSchema>;
 export type WorkerState = z.infer<typeof WorkerStateSchema>;
 export type FeatureState = z.infer<typeof FeatureStateSchema>;
 export type RouterProxySource = z.infer<typeof RouterProxySourceSchema>;
+export type RouterTimeoutKind = z.infer<typeof RouterTimeoutKindSchema>;
 export type RouteDecision = z.infer<typeof RouteDecisionSchema>;
 export type TaskMeta = z.infer<typeof TaskMetaSchema>;
 export type WorkerStatus = z.infer<typeof WorkerStatusSchema>;

@@ -102,6 +102,40 @@ describe("CLI doctor", () => {
     expect(result.stdout).toMatch(/router live probe: ok \(simple in \d+ms; dispatch \d+ms; spawn \d+ms; first stderr \d+ms; first stdout \d+ms; process \d+ms; parse \d+ms; total \d+ms; stdout \d+B; stderr 8B\)/);
   });
 
+  it("reports which Router watchdog stopped a live probe", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pct-cli-doctor-watchdog-"));
+    const binDir = join(root, "bin");
+    const appRoot = join(root, "app");
+
+    await mkdir(binDir, { recursive: true });
+    await mkdir(join(appRoot, ".parallel-codex"), { recursive: true });
+    await writeExecutable(join(binDir, "codex"), "#!/bin/sh\ncat >/dev/null\nexec sleep 5\n");
+    await writeExecutable(join(binDir, "claude"), "#!/bin/sh\necho claude 1.0\n");
+    await writeFile(
+      join(appRoot, ".parallel-codex", "config.toml"),
+      [
+        "[router]",
+        'defaultMode = "auto"',
+        "",
+        "[router.codex]",
+        "timeoutMs = 1000",
+        "firstOutputTimeoutMs = 150",
+        "idleTimeoutMs = 500"
+      ].join("\n") + "\n"
+    );
+
+    const result = await runCli(["--app-root", appRoot, "--doctor", "--probe-router"], {
+      env: { PATH: `${binDir}${delimiter}${process.env.PATH ?? ""}` }
+    });
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr).toBe("");
+    expect(result.stdout).toContain("first output timed out after 150ms");
+    expect(result.stdout).toContain("stage waiting-output; timeout first-output");
+    expect(result.stdout).toContain("Router produced no output before the first-output deadline");
+    expect(result.stdout).toContain("raise router.codex.firstOutputTimeoutMs");
+  });
+
   it("fails an explicit live Router probe with a useful authentication reason", async () => {
     const root = await mkdtemp(join(tmpdir(), "pct-cli-doctor-probe-auth-"));
     const binDir = join(root, "bin");

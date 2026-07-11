@@ -28,6 +28,8 @@ describe("config", () => {
       "-"
     ]);
     expect(config.router.codex.timeoutMs).toBe(30000);
+    expect(config.router.codex.firstOutputTimeoutMs).toBe(30000);
+    expect(config.router.codex.idleTimeoutMs).toBe(30000);
     expect(config.router.codex.fallback).toBe("simple");
     expect(config.router.codex.env).toEqual({});
     expect(config.router.codex.followUpTimeoutMs).toBe(20000);
@@ -298,6 +300,8 @@ describe("config", () => {
         'command = "codex"',
         'args = ["exec", "--skip-git-repo-check", "--sandbox", "workspace-write", "--color", "never", "-"]',
         "timeoutMs = 120000",
+        "firstOutputTimeoutMs = 15000",
+        "idleTimeoutMs = 25000",
         "followUpTimeoutMs = 9000",
         'fallback = "complex"',
         "",
@@ -311,6 +315,8 @@ describe("config", () => {
     expect(config.router.codex.command).toBe("codex");
     expect(config.router.codex.args).toContain("exec");
     expect(config.router.codex.timeoutMs).toBe(120000);
+    expect(config.router.codex.firstOutputTimeoutMs).toBe(15000);
+    expect(config.router.codex.idleTimeoutMs).toBe(25000);
     expect(config.router.codex.followUpTimeoutMs).toBe(9000);
     expect(config.router.codex.fallback).toBe("complex");
     expect(config.router.codex.env).toEqual({
@@ -327,6 +333,18 @@ describe("config", () => {
     );
 
     await expect(loadConfig(root)).rejects.toThrow();
+  });
+
+  it("rejects non-positive Router watchdog limits", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pct-config-router-watchdogs-"));
+
+    for (const field of ["firstOutputTimeoutMs", "idleTimeoutMs"]) {
+      await writeText(
+        join(root, ".parallel-codex", "config.toml"),
+        ["[router.codex]", `${field} = 0`].join("\n")
+      );
+      await expect(loadConfig(root)).rejects.toThrow();
+    }
   });
 
   it("rejects invalid TUI color overrides", async () => {

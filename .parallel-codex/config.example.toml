@@ -5,6 +5,10 @@ defaultMode = "auto"
 command = "codex"
 args = ["exec", "--ephemeral", "--ignore-rules", "-c", "model_reasoning_effort=low", "--skip-git-repo-check", "--sandbox", "read-only", "--color", "never", "-"]
 timeoutMs = 30000
+# Stop a silent Router early when timeoutMs is raised above the default.
+firstOutputTimeoutMs = 30000
+# Reset after every stdout/stderr chunk; timeoutMs remains the hard ceiling.
+idleTimeoutMs = 30000
 # Active-task follow-ups fail safely to Main after this shorter Codex timeout.
 followUpTimeoutMs = 20000
 # Non-interactive fallback; the TUI pauses and asks before executing it.

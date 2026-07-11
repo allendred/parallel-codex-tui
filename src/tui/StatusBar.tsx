@@ -374,7 +374,7 @@ function compactRouteStatusValue(value: string, compact: boolean): string {
   if (compact && /(?:^|\s·\s)fallback(?:\s·\s|$)/i.test(value)) {
     const cause = value
       .split(/\s+·\s+/)
-      .find((part) => /^(?:timeout(?: via proxy| waiting output| after (?:stdout|stderr|output))?|proxy|auth|rate limit|network|unavailable|invalid output|exit)$/i.test(part));
+      .find((part) => /^(?:(?:idle|total) timeout(?: waiting output| after (?:stdout|stderr|output))?|first output timeout|timeout(?: via proxy| waiting output| after (?:stdout|stderr|output))?|proxy|auth|rate limit|network|unavailable|invalid output|exit)$/i.test(part));
     if (cause) {
       return cause.toLowerCase() === "invalid output" ? "invalid" : cause.toLowerCase();
     }
@@ -450,6 +450,15 @@ function compactRouteFailureAliases(value: string): string[] {
   }
   if (value === "timeout after output") {
     return ["out:to", "o:to", "time"];
+  }
+  if (value === "first output timeout") {
+    return ["first:to", "f:to", "time"];
+  }
+  if (value.startsWith("idle timeout")) {
+    return ["idle:to", "i:to", "time"];
+  }
+  if (value.startsWith("total timeout")) {
+    return ["total:to", "t:to", "time"];
   }
   if (value === "network") {
     return ["net"];

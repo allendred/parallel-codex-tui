@@ -16,6 +16,8 @@ import { TUI_THEME } from "./theme.js";
 export interface RouterDiagnosticsPolicy {
   mode: "auto" | "simple" | "complex";
   timeoutMs: number;
+  firstOutputTimeoutMs: number;
+  idleTimeoutMs: number;
   followUpTimeoutMs: number;
   fallback: "simple" | "complex";
   proxyConfigured: boolean;
@@ -34,6 +36,8 @@ export function routerDiagnosticsPolicy(
   return {
     mode: router.defaultMode,
     timeoutMs: router.codex.timeoutMs,
+    firstOutputTimeoutMs: router.codex.firstOutputTimeoutMs,
+    idleTimeoutMs: router.codex.idleTimeoutMs,
     followUpTimeoutMs: router.codex.followUpTimeoutMs,
     fallback: router.codex.fallback,
     proxyConfigured: proxy.configured,
@@ -147,7 +151,7 @@ export function routerDiagnosticsDisplayLines(
     { text: routerDiagnosticsLatencyText(visibleRecords), tone: "muted" },
     budget,
     {
-      text: `policy · ${policy.mode} · ${formatDiagnosticDuration(policy.timeoutMs)} / ${formatDiagnosticDuration(policy.followUpTimeoutMs)} · fallback ${policy.fallback}`,
+      text: `policy · ${policy.mode} · total ${formatDiagnosticDuration(policy.timeoutMs)} / ${formatDiagnosticDuration(policy.followUpTimeoutMs)} · first ${formatDiagnosticDuration(policy.firstOutputTimeoutMs)} · idle ${formatDiagnosticDuration(policy.idleTimeoutMs)} · fallback ${policy.fallback}`,
       tone: "muted"
     },
     {
@@ -363,12 +367,15 @@ function routerAuditEvidence(record: RouterAuditRecord): string | null {
   }
   const kind = routerAuditFailureKind(record) ?? "unknown";
   const parts = [`evidence · ${routerFailureKindLabel(kind)}`];
+  if (kind === "timeout" && record.router_timeout_kind) {
+    parts.push(record.router_timeout_kind.replaceAll("-", " "));
+  }
   const stage = routerFailureStageLabel(record);
   if (stage) {
     parts.push(stage);
   }
   if (kind === "timeout") {
-    const timeoutMs = record.router_timeout_ms ?? record.duration_ms;
+    const timeoutMs = routerAuditTimeoutLimit(record);
     if (typeof timeoutMs === "number") {
       parts.push(`limit ${formatDiagnosticDuration(timeoutMs)}`);
     }
@@ -391,6 +398,16 @@ function routerAuditEvidence(record: RouterAuditRecord): string | null {
   }
   parts.push(`fallback ${record.mode}`);
   return parts.join(" · ");
+}
+
+function routerAuditTimeoutLimit(record: RouterAuditRecord): number | undefined {
+  if (record.router_timeout_kind === "first-output") {
+    return record.router_first_output_timeout_ms ?? record.duration_ms;
+  }
+  if (record.router_timeout_kind === "idle") {
+    return record.router_idle_timeout_ms ?? record.duration_ms;
+  }
+  return record.router_timeout_ms ?? record.duration_ms;
 }
 
 function routerAuditTraceLines(record: RouterAuditRecord): string[] {

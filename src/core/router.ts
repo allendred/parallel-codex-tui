@@ -1,7 +1,7 @@
 import { spawn } from "node:child_process";
 import { performance } from "node:perf_hooks";
 import type { AppConfig } from "./config.js";
-import type { RouteDecision, RouterFailureStage, RouterProxySource } from "../domain/schemas.js";
+import type { RouteDecision, RouterFailureStage, RouterProxySource, RouterTimeoutKind } from "../domain/schemas.js";
 import { RouteDecisionSchema } from "../domain/schemas.js";
 
 export interface RouterExecutionTelemetry {
@@ -55,6 +55,7 @@ export type CodexRouteRunner = (
 interface RouterExecutionError extends Error {
   routerTelemetry?: RouterExecutionTelemetry;
   routerFailureStage?: RouterFailureStage;
+  routerTimeoutKind?: RouterTimeoutKind;
 }
 
 export async function routeRequestWithCodex(
@@ -113,6 +114,7 @@ export async function routeRequestWithCodex(
     return {
       ...fallback,
       ...(context.stage ? { router_failure_stage: context.stage } : {}),
+      ...(context.timeoutKind ? { router_timeout_kind: context.timeoutKind } : {}),
       reason: `Codex router failed: ${summarizeRouterError(error)}. ${fallback.reason}`
     };
   }
@@ -141,7 +143,7 @@ export async function runCodexRouterProcess(
   signal?: AbortSignal,
   onProgress?: RouterProgressListener
 ): Promise<CodexRouteRunnerResult> {
-  const { command, args, timeoutMs } = config.router.codex;
+  const { command, args, timeoutMs, firstOutputTimeoutMs, idleTimeoutMs } = config.router.codex;
 
   if (signal?.aborted) {
     throw cancellationError();
@@ -179,8 +181,25 @@ export async function runCodexRouterProcess(
     let firstStdoutMs: number | undefined;
     let firstStderrMs: number | undefined;
     let settled = false;
-    let timeout: NodeJS.Timeout | undefined;
+    let totalTimeout: NodeJS.Timeout | undefined;
+    let firstOutputTimeout: NodeJS.Timeout | undefined;
+    let idleTimeout: NodeJS.Timeout | undefined;
     let abortListener: (() => void) | undefined;
+
+    const clearRunTimers = (): void => {
+      if (totalTimeout) {
+        clearTimeout(totalTimeout);
+        totalTimeout = undefined;
+      }
+      if (firstOutputTimeout) {
+        clearTimeout(firstOutputTimeout);
+        firstOutputTimeout = undefined;
+      }
+      if (idleTimeout) {
+        clearTimeout(idleTimeout);
+        idleTimeout = undefined;
+      }
+    };
 
     const telemetry = (): RouterExecutionTelemetry => ({
       ...(typeof spawnMs === "number" ? { router_spawn_ms: spawnMs } : {}),
@@ -195,20 +214,19 @@ export async function runCodexRouterProcess(
     const finish = (
       error: Error | null,
       output = stdout,
-      stage?: RouterFailureStage
+      stage?: RouterFailureStage,
+      timeoutKind?: RouterTimeoutKind
     ): void => {
       if (settled) {
         return;
       }
       settled = true;
-      if (timeout) {
-        clearTimeout(timeout);
-      }
+      clearRunTimers();
       if (abortListener) {
         signal?.removeEventListener("abort", abortListener);
       }
       if (error) {
-        reject(stage ? routerExecutionError(error, telemetry(), stage) : error);
+        reject(stage ? routerExecutionError(error, telemetry(), stage, timeoutKind) : error);
       } else {
         resolve({ output, telemetry: telemetry() });
       }
@@ -219,6 +237,47 @@ export async function runCodexRouterProcess(
       const forceKill = setTimeout(() => child.kill("SIGKILL"), 1500);
       forceKill.unref();
       child.once("close", () => clearTimeout(forceKill));
+    };
+
+    const timeoutRouter = (
+      kind: RouterTimeoutKind,
+      limitMs: number,
+      stage: RouterFailureStage
+    ): void => {
+      if (settled) {
+        return;
+      }
+      terminate();
+      const detail = summarizeRouterProcessDetail(stderr);
+      const proxyContext = proxyConfigured && !/\bproxy\b|代理/i.test(detail)
+        ? " with proxy configured"
+        : "";
+      const timeoutLabel = kind === "first-output" ? " first output" : kind === "idle" ? " idle" : "";
+      finish(
+        new Error(`Codex router${timeoutLabel} timed out after ${limitMs}ms${proxyContext}${detail ? `: ${detail}` : ""}`),
+        stdout,
+        stage,
+        kind
+      );
+    };
+
+    const resetIdleTimeout = (): void => {
+      if (idleTimeout) {
+        clearTimeout(idleTimeout);
+        idleTimeout = undefined;
+      }
+      if (idleTimeoutMs <= 0 || (timeoutMs > 0 && idleTimeoutMs >= timeoutMs)) {
+        return;
+      }
+      idleTimeout = setTimeout(() => timeoutRouter("idle", idleTimeoutMs, "streaming"), idleTimeoutMs);
+    };
+
+    const recordOutputActivity = (): void => {
+      if (firstOutputTimeout) {
+        clearTimeout(firstOutputTimeout);
+        firstOutputTimeout = undefined;
+      }
+      resetIdleTimeout();
     };
 
     abortListener = () => {
@@ -233,19 +292,16 @@ export async function runCodexRouterProcess(
     });
 
     if (timeoutMs > 0) {
-      timeout = setTimeout(() => {
-        terminate();
-        const detail = summarizeRouterProcessDetail(stderr);
-        const proxyContext = proxyConfigured && !/\bproxy\b|代理/i.test(detail)
-          ? " with proxy configured"
-          : "";
+      totalTimeout = setTimeout(() => {
         const stage = stdoutBytes + stderrBytes === 0 ? "waiting-output" : "streaming";
-        finish(
-          new Error(`Codex router timed out after ${timeoutMs}ms${proxyContext}${detail ? `: ${detail}` : ""}`),
-          stdout,
-          stage
-        );
+        timeoutRouter("total", timeoutMs, stage);
       }, timeoutMs);
+    }
+    if (firstOutputTimeoutMs > 0 && (timeoutMs <= 0 || firstOutputTimeoutMs < timeoutMs)) {
+      firstOutputTimeout = setTimeout(
+        () => timeoutRouter("first-output", firstOutputTimeoutMs, "waiting-output"),
+        firstOutputTimeoutMs
+      );
     }
 
     child.stdout.on("data", (chunk: Buffer) => {
@@ -256,6 +312,7 @@ export async function runCodexRouterProcess(
       firstOutputMs ??= Math.max(0, Date.now() - processStartedAt);
       firstStdoutMs ??= Math.max(0, Date.now() - processStartedAt);
       stdout += chunk.toString("utf8");
+      recordOutputActivity();
       reportProgress("receiving-response");
     });
 
@@ -267,6 +324,7 @@ export async function runCodexRouterProcess(
       firstOutputMs ??= Math.max(0, Date.now() - processStartedAt);
       firstStderrMs ??= Math.max(0, Date.now() - processStartedAt);
       stderr += chunk.toString("utf8");
+      recordOutputActivity();
       if (stdoutBytes === 0) {
         reportProgress("receiving-stderr");
       }
@@ -347,19 +405,22 @@ function mergeRouterTelemetry(
 function routerExecutionError(
   error: unknown,
   telemetry: RouterExecutionTelemetry | undefined,
-  stage: RouterFailureStage
+  stage: RouterFailureStage,
+  timeoutKind?: RouterTimeoutKind
 ): RouterExecutionError {
   const source = error instanceof Error ? error : new Error(String(error));
   const wrapped = new Error(source.message) as RouterExecutionError;
   wrapped.name = source.name;
   wrapped.routerTelemetry = normalizeRouterTelemetry(telemetry);
   wrapped.routerFailureStage = stage;
+  wrapped.routerTimeoutKind = timeoutKind;
   return wrapped;
 }
 
 function routerExecutionErrorContext(error: unknown): {
   telemetry?: RouterExecutionTelemetry;
   stage?: RouterFailureStage;
+  timeoutKind?: RouterTimeoutKind;
 } {
   if (!(error instanceof Error)) {
     return {};
@@ -367,7 +428,8 @@ function routerExecutionErrorContext(error: unknown): {
   const executionError = error as RouterExecutionError;
   return {
     ...(executionError.routerTelemetry ? { telemetry: executionError.routerTelemetry } : {}),
-    ...(executionError.routerFailureStage ? { stage: executionError.routerFailureStage } : {})
+    ...(executionError.routerFailureStage ? { stage: executionError.routerFailureStage } : {}),
+    ...(executionError.routerTimeoutKind ? { timeoutKind: executionError.routerTimeoutKind } : {})
   };
 }
 

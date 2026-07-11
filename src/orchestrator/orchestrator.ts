@@ -1427,8 +1427,10 @@ export class Orchestrator {
       scope,
       ...route,
       ...(semanticRoute
-        ? {
+          ? {
             router_timeout_ms: routeConfig.router.codex.timeoutMs,
+            router_first_output_timeout_ms: routeConfig.router.codex.firstOutputTimeoutMs,
+            router_idle_timeout_ms: routeConfig.router.codex.idleTimeoutMs,
             ...(route.source === "fallback"
               ? { failure_kind: classifyRouterFailure(route.reason) ?? "unknown" }
               : {})

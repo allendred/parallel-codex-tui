@@ -104,6 +104,38 @@ describe("formatStatusLine", () => {
       proxy_configured: false
     })).toBe("route complex · fallback · timeout waiting output · direct · 30s");
     expect(formatRouteStatus?.({
+      mode: "simple",
+      source: "fallback",
+      reason: "Codex router first output timed out after 15000ms.",
+      duration_ms: 15000,
+      router_failure_stage: "waiting-output",
+      router_timeout_kind: "first-output",
+      proxy_configured: false
+    })).toBe("route simple · fallback · first output timeout · direct · 15s");
+    expect(formatRouteStatus?.({
+      mode: "simple",
+      source: "fallback",
+      reason: "Codex router idle timed out after 25000ms.",
+      duration_ms: 25000,
+      router_failure_stage: "streaming",
+      router_timeout_kind: "idle",
+      router_stdout_bytes: 0,
+      router_stderr_bytes: 73,
+      proxy_configured: true,
+      proxy_endpoint: "proxy.test:8443"
+    })).toBe("route simple · fallback · idle timeout after stderr · via proxy.test:8443 · 25s");
+    expect(formatRouteStatus?.({
+      mode: "complex",
+      source: "fallback",
+      reason: "Codex router timed out after 120000ms.",
+      duration_ms: 120000,
+      router_failure_stage: "streaming",
+      router_timeout_kind: "total",
+      router_stdout_bytes: 18,
+      router_stderr_bytes: 0,
+      proxy_configured: false
+    })).toBe("route complex · fallback · total timeout after stdout · direct · 120s");
+    expect(formatRouteStatus?.({
       mode: "complex",
       source: "fallback",
       reason: "Codex router timed out after 30000ms. User selected Parallel after Router fallback.",

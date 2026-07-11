@@ -67,6 +67,8 @@ const CodexRouterConfigSchema = z.object({
     "-"
   ]),
   timeoutMs: z.number().int().positive().default(30000),
+  firstOutputTimeoutMs: z.number().int().positive().default(30000),
+  idleTimeoutMs: z.number().int().positive().default(30000),
   followUpTimeoutMs: z.number().int().positive().max(120000).default(20000),
   fallback: z.enum(["simple", "complex"]).default("simple"),
   env: z.record(z.string()).default({})
@@ -146,6 +148,8 @@ export function defaultConfig(projectRoot: string): AppConfig {
           "-"
         ],
         timeoutMs: 30000,
+        firstOutputTimeoutMs: 30000,
+        idleTimeoutMs: 30000,
         followUpTimeoutMs: 20000,
         fallback: "simple",
         env: {}

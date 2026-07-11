@@ -26,6 +26,8 @@ describe("RouterDiagnosticsView", () => {
     expect(routerDiagnosticsPolicy?.(router, {})).toEqual({
       mode: "auto",
       timeoutMs: 30000,
+      firstOutputTimeoutMs: 30000,
+      idleTimeoutMs: 30000,
       followUpTimeoutMs: 20000,
       fallback: "simple",
       proxyConfigured: false,
@@ -68,18 +70,18 @@ describe("RouterDiagnosticsView", () => {
     expect(frame).toContain("health · codex 1 · fallback 1 · timeout 1");
     expect(frame).toContain("latency · success p50 9.7s · p95 9.7s · max 9.7s · n 1");
     expect(frame).toContain("budget · initial learning · 30s / p95 9.7s · n 1 · follow-up no data · 20s");
-    expect(frame).toContain("policy · auto · 30s / 20s · fallback simple");
+    expect(frame).toContain("policy · auto · total 30s / 20s · first 30s · idle 30s · fallback simple");
     expect(flattened).toContain("proxy · router config · HTTPS_PROXY · proxy.test:8443 · 1 recorded · context only");
     expect(frame).toContain("tetris · initial · simple · codex · 9.7s · attempt 2");
-    expect(flattened).toContain("evidence · timeout · after stderr · limit 30s · via 127.0.0.1:7890 · router config HTTPS_PROXY · cause unproven");
+    expect(flattened).toContain("evidence · timeout · idle · after stderr · limit 30s · via 127.0.0.1:7890 · router config HTTPS_PROXY · cause unproven");
     expect(flattened).toContain("resolved Parallel");
-    expect(flattened).toContain("diagnosis · Router emitted diagnostics but no route response");
-    expect(flattened).toContain("next · inspect the reason, then run parallel-codex-tui --doctor --probe-router");
+    expect(flattened).toContain("diagnosis · Router diagnostics stopped before a route response");
+    expect(flattened).toContain("next · inspect the reason; retry Router or raise router.codex.idleTimeoutMs");
     expect(flattened).toContain("trace · dispatch 2ms · spawn 8ms · first stderr 24ms · process 30s · total 30s");
     expect(flattened).toContain("io · stdout 0B · stderr 73B");
     expect(flattened).toContain("trace · dispatch 1ms · spawn 5ms · first stderr 120ms · first stdout 8.9s · process 9.6s · parse 1ms · total 9.7s");
     expect(flattened).toContain("io · stdout 86B · stderr 15B");
-    expect(flattened).toContain("timeout after stderr · via 127.0.0.1:7890");
+    expect(flattened).toContain("idle timeout after stderr · via 127.0.0.1:7890");
     expect(frame).toContain("做个俄罗斯方块");
     expect(frame).not.toContain("user:secret");
     view.unmount();
@@ -170,6 +172,8 @@ function policy() {
   return {
     mode: "auto" as const,
     timeoutMs: 30000,
+    firstOutputTimeoutMs: 30000,
+    idleTimeoutMs: 30000,
     followUpTimeoutMs: 20000,
     fallback: "simple" as const,
     proxyConfigured: true,
@@ -219,6 +223,9 @@ function records(): RouterAuditRecord[] {
       source: "fallback",
       duration_ms: 30000,
       router_timeout_ms: 30000,
+      router_first_output_timeout_ms: 15000,
+      router_idle_timeout_ms: 30000,
+      router_timeout_kind: "idle",
       proxy_configured: true,
       proxy_source: "router-config",
       proxy_variable: "HTTPS_PROXY",
