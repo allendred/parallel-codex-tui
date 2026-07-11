@@ -7,6 +7,46 @@ import type { Orchestrator, WorkerLogRef } from "../src/orchestrator/orchestrato
 import { App } from "../src/tui/App.js";
 
 describe("App initial task restore", () => {
+  it("opens preloaded worker logs before the asynchronous restore fallback resolves", async () => {
+    const testInput = installTestInputStream();
+    const workerRestore = deferred<WorkerLogRef[]>();
+    const retryRestore = deferred<boolean>();
+    const orchestrator = {
+      listTaskWorkers: () => workerRestore.promise,
+      canRetryTask: () => retryRestore.promise
+    } as unknown as Orchestrator;
+    const view = render(
+      <App
+        config={defaultConfig("/tmp/pct-app-preloaded-restore")}
+        orchestrator={orchestrator}
+        cwd="/tmp/pct-workspace"
+        initialTaskId="task-20260707-033720-fefc"
+        initialWorkers={[{
+          id: "critic-codex",
+          role: "critic",
+          engine: "codex",
+          label: "Critic (codex)",
+          logPath: "/tmp/preloaded-task/critic-codex/output.log",
+          statusPath: "/tmp/preloaded-task/critic-codex/status.json"
+        }]}
+        initialCanRetryTask={false}
+      />
+    );
+
+    try {
+      await settleEffects();
+      testInput.send(view.stdin, "\x17");
+      await waitForFrame(view.lastFrame, "· logs ·");
+
+      const frame = view.lastFrame() ?? "";
+      expect(frame).toContain("critic/codex · 1/1");
+      expect(frame).not.toContain("No workers yet");
+    } finally {
+      view.unmount();
+      testInput.restore();
+    }
+  });
+
   it("does not restore old workers after Ctrl+N clears the active task", async () => {
     const testInput = installTestInputStream();
     const workerRestore = deferred<WorkerLogRef[]>();

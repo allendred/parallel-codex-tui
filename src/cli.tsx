@@ -82,10 +82,15 @@ async function main(): Promise<void> {
     }
     const latestTask = await runtime.sessions.latestTask();
     const initialTaskId = cliArgs.taskId ?? latestTask?.id ?? null;
-    const initialRoute = initialTaskId
-      ? await runtime.sessions.readLatestRoute(runtime.sessions.taskFromId(initialTaskId))
-      : null;
-    const initialMessages = (await runtime.sessions.readChatHistory()).map(({ from, text }) => ({ from, text }));
+    const [initialRoute, initialWorkers, initialCanRetryTask, initialHistory] = await Promise.all([
+      initialTaskId
+        ? runtime.sessions.readLatestRoute(runtime.sessions.taskFromId(initialTaskId))
+        : null,
+      initialTaskId ? runtime.orchestrator.listTaskWorkers(initialTaskId) : [],
+      initialTaskId ? runtime.orchestrator.canRetryTask(initialTaskId) : false,
+      runtime.sessions.readChatHistory()
+    ]);
+    const initialMessages = initialHistory.map(({ from, text }) => ({ from, text }));
 
     render(
       <App
@@ -94,6 +99,8 @@ async function main(): Promise<void> {
         cwd={runtime.workspaceRoot}
         initialTaskId={initialTaskId}
         initialRoute={initialRoute}
+        initialWorkers={initialWorkers}
+        initialCanRetryTask={initialCanRetryTask}
         initialMessages={initialMessages}
         persistChatMessage={(message, taskId) => runtime.sessions.appendChatMessage({
           ...message,

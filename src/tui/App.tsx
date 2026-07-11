@@ -44,6 +44,8 @@ export interface AppProps {
   cwd: string;
   initialTaskId?: string | null;
   initialRoute?: RouteDecision | null;
+  initialWorkers?: WorkerLogRef[];
+  initialCanRetryTask?: boolean;
   initialMessages?: Message[];
   persistChatMessage?: (message: Message, taskId?: string) => Promise<void>;
   prepareNativeAttach?: (worker: WorkerLogRef) => Promise<NativeAttachLaunch>;
@@ -97,6 +99,8 @@ export function App({
   cwd,
   initialTaskId = null,
   initialRoute = null,
+  initialWorkers,
+  initialCanRetryTask = false,
   initialMessages = [],
   persistChatMessage,
   prepareNativeAttach,
@@ -109,17 +113,18 @@ export function App({
 
   const [input, setInput] = useState("");
   const [inputCursor, setInputCursor] = useState(0);
+  const [inputReady, setInputReady] = useState(false);
   const [messages, setMessages] = useState<Message[]>(() => [...initialMessages]);
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState<StatusLineState | null>(initialTaskId ? { taskId: initialTaskId } : null);
   const [lastRoute, setLastRoute] = useState<RouteDecision | null>(initialRoute);
   const [routePending, setRoutePending] = useState<RouteStartInfo | null>(null);
   const [view, setView] = useState<"chat" | "worker" | "native">("chat");
-  const [workers, setWorkers] = useState<WorkerLogRef[]>([]);
+  const [workers, setWorkers] = useState<WorkerLogRef[]>(() => [...(initialWorkers ?? [])]);
   const [selectedWorkerIndex, setSelectedWorkerIndex] = useState(0);
   const [activeTaskId, setActiveTaskId] = useState<string | null>(initialTaskId);
   const [activeMode, setActiveMode] = useState<"simple" | "complex" | null>(initialTaskId ? "complex" : null);
-  const [canRetryTask, setCanRetryTask] = useState(false);
+  const [canRetryTask, setCanRetryTask] = useState(initialCanRetryTask);
   const [attachError, setAttachError] = useState<string | null>(null);
   const [nativeInput, setNativeInput] = useState("");
   const [workerScrollOffset, setWorkerScrollOffset] = useState(0);
@@ -279,7 +284,7 @@ export function App({
   }, [nativeInput]);
 
   useEffect(() => {
-    if (!initialTaskId || activeTaskId !== initialTaskId) {
+    if (!initialTaskId || activeTaskId !== initialTaskId || initialWorkers !== undefined) {
       return;
     }
 
@@ -314,7 +319,7 @@ export function App({
     return () => {
       active = false;
     };
-  }, [activeTaskId, initialTaskId, orchestrator]);
+  }, [activeTaskId, initialTaskId, initialWorkers, orchestrator]);
 
   useEffect(() => {
     if (workers.length === 0 || !status) {
@@ -606,6 +611,7 @@ export function App({
     };
 
     stdinEvents.on("input", handleRawInput);
+    setInputReady(true);
     return () => {
       stdinEvents.removeListener("input", handleRawInput);
       rawInputDecoderRef.current.end();
@@ -964,6 +970,7 @@ export function App({
       input={
         <InputBar
           mode={view}
+          ready={inputReady}
           busy={busy}
           canRetry={canRetryTask}
           hasWorkers={workers.length > 0}

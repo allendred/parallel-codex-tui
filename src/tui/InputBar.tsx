@@ -5,6 +5,7 @@ import { TUI_THEME } from "./theme.js";
 
 export interface InputBarProps {
   mode: "chat" | "worker" | "native";
+  ready?: boolean;
   busy?: boolean;
   canRetry?: boolean;
   hasWorkers?: boolean;
@@ -21,6 +22,7 @@ export interface InputBarProps {
 
 export function InputBar({
   mode,
+  ready = true,
   busy = false,
   canRetry = false,
   hasWorkers = false,
@@ -53,6 +55,15 @@ export function InputBar({
       <InputRail terminalWidth={terminalWidth} textWidth={displayWidth(`${hints.label}${hints.detail}`)} fill={fillRail}>
         <Text backgroundColor={TUI_THEME.rail} color={TUI_THEME.accent} bold>{hints.label}</Text>
         {hints.detail ? <Text backgroundColor={TUI_THEME.rail} color={TUI_THEME.muted}>{hints.detail}</Text> : null}
+      </InputRail>
+    );
+  }
+
+  if (!ready) {
+    const starting = chatStartingDisplayValue(terminalWidth);
+    return (
+      <InputRail terminalWidth={terminalWidth} textWidth={displayWidth(starting)} fill={fillRail}>
+        <Text backgroundColor={TUI_THEME.rail} color={TUI_THEME.muted}>{starting}</Text>
       </InputRail>
     );
   }
@@ -366,6 +377,13 @@ export function chatBusyDisplayValue(terminalWidth: number): string {
     return "working · Esc stop";
   }
   return "working";
+}
+
+export function chatStartingDisplayValue(terminalWidth: number): string {
+  if (terminalWidth < 8) {
+    return "";
+  }
+  return terminalWidth < 12 ? "start" : "starting";
 }
 
 function workerInputHints(width: number): { label: string; detail: string } {

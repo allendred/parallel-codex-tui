@@ -70,6 +70,18 @@ describe("InputBar", () => {
     expect(lastFrame()).not.toContain("Running...");
   });
 
+  it("hides actionable chat controls until the raw input listener is ready", () => {
+    const { lastFrame } = render(
+      <InputBar mode="chat" ready={false} value="" hasWorkers terminalWidth={40} onChange={() => {}} />
+    );
+
+    const frame = lastFrame() ?? "";
+    expect(frame.trim()).toBe("starting");
+    expect(frame).not.toContain("|");
+    expect(frame).not.toContain("^W");
+    expect(frame).not.toContain("^O");
+  });
+
   it("shows a visible cursor at the end of chat input", () => {
     const { lastFrame } = render(<InputBar mode="chat" value="hello" onChange={() => {}} />);
 
