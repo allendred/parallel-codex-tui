@@ -200,7 +200,7 @@ describe("CLI worker layout smoke", () => {
       expect(inputLine?.chunks.some((chunk) => chunk.style.backgroundColor === TUI_THEME_PRESETS.codex.rail)).toBe(true);
       expect(displayWidth(inputLineText)).toBe(139);
       expect(snapshot).toContain("1 worker");
-      expect(snapshot).toContain("1 done");
+      expect(snapshot).toContain("done");
       expect(snapshot).not.toContain("@ critic/mock");
       expect(statusLine?.chunks.some((chunk) => chunk.style.backgroundColor === TUI_THEME_PRESETS.codex.rail)).toBe(true);
       const successStatusText = statusLine?.chunks
@@ -208,7 +208,6 @@ describe("CLI worker layout smoke", () => {
         .map((chunk) => chunk.text)
         .join("") ?? "";
       expect(successStatusText).toContain("done");
-      expect(successStatusText).toContain("1");
       expect(successStatusText).not.toContain("critic/mock");
       expect(displayWidth(statusLineText)).toBe(139);
       expect(snapshot).not.toContain("Type a message");
@@ -218,7 +217,7 @@ describe("CLI worker layout smoke", () => {
       const chatSnapshot = screen.snapshot();
       expect(chatSnapshot).toContain("> | message · ^N new · ^W logs · Tab · ^O attach");
       expect(chatSnapshot).toContain("1 worker");
-      expect(chatSnapshot).toContain("1 done");
+      expect(chatSnapshot).toContain("done");
       expect(chatSnapshot).not.toContain("@ critic/mock");
     } finally {
       child.kill("SIGTERM");

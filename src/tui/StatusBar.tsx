@@ -109,7 +109,7 @@ function shouldUseCompactStatus(segments: Segment[], terminalWidth: number): boo
 }
 
 function readableCompletedSegments(segments: Segment[], terminalWidth: number): Segment[] {
-  if (terminalWidth < 35 || terminalWidth >= 56) {
+  if (terminalWidth < 35) {
     return segments;
   }
   const workersIndex = segments.findIndex((segment) => segment.label.toLowerCase() === "workers");
@@ -123,7 +123,7 @@ function readableCompletedSegments(segments: Segment[], terminalWidth: number): 
   ));
   const completed = workersIndex >= 0
     && doneIndex >= 0
-    && !segments.some((segment) => segment.tone === "run" || segment.tone === "fail" || segment.tone === "wait");
+    && segments[workersIndex]?.value === segments[doneIndex]?.value;
   if (!completed) {
     return segments;
   }
@@ -131,7 +131,7 @@ function readableCompletedSegments(segments: Segment[], terminalWidth: number): 
   const readable = segments.map((segment, index) => (
     index === doneIndex
       ? { ...segment, value: "done", hideLabel: true }
-      : index === routeIndex
+      : index === routeIndex && terminalWidth < 56
         ? { ...segment, hideLabel: true }
         : segment
   ));

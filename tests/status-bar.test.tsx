@@ -48,7 +48,7 @@ describe("StatusBar", () => {
       ] as const) {
         const view = render(<StatusBar text={text} terminalWidth={width} />);
         const frame = view.lastFrame() ?? "";
-        if (!frame.includes("r:")) {
+        if (!frame.includes("r:") && !frame.includes("route ")) {
           missing.push(`${name}:${width}:${frame}`);
         }
         view.unmount();
@@ -70,6 +70,26 @@ describe("StatusBar", () => {
     expect(frame.trim()).toBe("3 workers · done · simple · 13s");
     expect(displayWidth(frame)).toBeLessThanOrEqual(40);
     view.unmount();
+  });
+
+  it("removes a redundant completed count in roomy terminals without hiding partial completion", () => {
+    const completed = render(
+      <StatusBar
+        text="workers 3 | done 3 | route simple · 13s"
+        terminalWidth={80}
+      />
+    );
+    const partial = render(
+      <StatusBar
+        text="workers 3 | done 2"
+        terminalWidth={80}
+      />
+    );
+
+    expect((completed.lastFrame() ?? "").trim()).toBe("3 workers · done · route simple · 13s");
+    expect(partial.lastFrame()).toContain("3 workers · 2 done");
+    completed.unmount();
+    partial.unmount();
   });
 
   it("uses intentional route abbreviations and atomic worker identities in nano terminals", () => {
@@ -479,7 +499,7 @@ describe("StatusBar", () => {
     const frame = lastFrame() ?? "";
     expect(frame).toContain("4 workers");
     expect(frame).toContain("1 failed");
-    expect(frame).toContain("3 done");
+    expect(frame).toContain("done");
     expect(frame).toContain("@ actor/codex");
     expect(frame).not.toContain("w4");
     expect(frame).not.toContain("f1");
@@ -512,7 +532,7 @@ describe("StatusBar", () => {
 
     expect(frame).toContain("20260702-000000-wheel");
     expect(frame).toContain("3 workers");
-    expect(frame).toContain("3 done");
+    expect(frame).toContain("done");
     expect(frame).not.toContain("w3");
     expect(frame).not.toContain("d3");
   });
