@@ -1984,29 +1984,43 @@ describe("Orchestrator", () => {
       })
     );
 
-    await expect(
-      orchestrator.routeTaskFollowUp({
-        taskId: task.id,
-        request: "原因呢超时",
-        cwd: root
-      })
-    ).resolves.toMatchObject({
+    const simple = await orchestrator.routeTaskFollowUp({
+      taskId: task.id,
+      request: "原因呢超时",
+      cwd: root
+    });
+    expect(simple).toMatchObject({
       mode: "simple",
       taskId: null
+    });
+    expect(await pathExists(join(task.dir, "latest-route.json"))).toBe(false);
+    await orchestrator.answerTaskQuestion({
+      taskId: task.id,
+      request: "原因呢超时",
+      cwd: root,
+      route: simple.route
     });
     await expect(readJson(join(task.dir, "latest-route.json"), RouteDecisionSchema)).resolves.toMatchObject({
       mode: "simple",
       source: "codex"
     });
-    await expect(
-      orchestrator.routeTaskFollowUp({
-        taskId: task.id,
-        request: "那改成不用 Docker 评测呢",
-        cwd: root
-      })
-    ).resolves.toMatchObject({
+    const complex = await orchestrator.routeTaskFollowUp({
+      taskId: task.id,
+      request: "那改成不用 Docker 评测呢",
+      cwd: root
+    });
+    expect(complex).toMatchObject({
       mode: "complex",
       taskId: task.id
+    });
+    await expect(readJson(join(task.dir, "latest-route.json"), RouteDecisionSchema)).resolves.toMatchObject({
+      mode: "simple"
+    });
+    await orchestrator.handleTaskTurn({
+      taskId: task.id,
+      request: "那改成不用 Docker 评测呢",
+      cwd: root,
+      route: complex.route
     });
     await expect(readJson(join(task.dir, "latest-route.json"), RouteDecisionSchema)).resolves.toMatchObject({
       mode: "complex",
@@ -2146,6 +2160,13 @@ describe("Orchestrator", () => {
         source: "fallback",
         router_fallback_resolution: "parallel"
       }
+    });
+    expect(await pathExists(join(task.dir, "latest-route.json"))).toBe(false);
+    await orchestrator.handleTaskTurn({
+      taskId: task.id,
+      request: "改成不用 Docker",
+      cwd: root,
+      route: result.route
     });
     await expect(readJson(join(task.dir, "latest-route.json"), RouteDecisionSchema)).resolves.toMatchObject({
       mode: "complex",

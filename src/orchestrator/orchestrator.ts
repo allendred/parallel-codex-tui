@@ -75,6 +75,7 @@ export interface HandleTaskTurnInput extends HandleRequestInput {
 
 export interface HandleTaskQuestionInput extends HandleRequestInput {
   taskId: string;
+  route?: RouteDecision;
 }
 
 export interface RetryTaskInput extends Omit<HandleRequestInput, "request"> {
@@ -260,11 +261,11 @@ export class Orchestrator {
     if (!input.route) {
       input.onRoute?.(route);
     }
-    await this.sessions.recordLatestRoute(task, route);
     if (route.mode === "simple") {
-      return this.answerTaskQuestion(input);
+      return this.answerTaskQuestion({ ...input, route });
     }
     return this.withTaskRunLease(task, async () => {
+      await this.sessions.recordLatestRoute(task, route);
       const turn = await this.sessions.appendTurn(task, {
         request: input.request,
         route
@@ -353,7 +354,6 @@ export class Orchestrator {
   }
 
   async routeTaskFollowUp(input: HandleTaskQuestionInput): Promise<TaskFollowUpRouteResult> {
-    const task = this.sessions.taskFromId(input.taskId);
     const route = await this.routeRequest(
       input.request,
       input.cwd,
@@ -364,7 +364,6 @@ export class Orchestrator {
       input.onRouteProgress
     );
     input.onRoute?.(route);
-    await this.sessions.recordLatestRoute(task, route);
 
     return {
       mode: route.mode,
@@ -376,6 +375,20 @@ export class Orchestrator {
 
   async answerTaskQuestion(input: HandleTaskQuestionInput): Promise<HandleRequestResult> {
     const task = this.sessions.taskFromId(input.taskId);
+    if (!(await pathExists(task.dir))) {
+      throw new Error(`Task session not found: ${input.taskId}`);
+    }
+    return this.withTaskRunLease(task, () => this.answerTaskQuestionWithLease(input, task));
+  }
+
+  private async answerTaskQuestionWithLease(
+    input: HandleTaskQuestionInput,
+    task: TaskSession
+  ): Promise<HandleRequestResult> {
+    throwIfCancelled(input.signal);
+    if (input.route) {
+      await this.sessions.recordLatestRoute(task, input.route);
+    }
     const meta = await readTaskMetaIfValid(task.metaPath);
     const workerSummaries = await Promise.all(
       ["judge", "actor", "critic"].map((role) => this.readLatestWorkerQuestionSummary(task, role as WorkerRole))

@@ -1787,6 +1787,7 @@ export function App({
                 request,
                 cwd,
                 taskId: target.taskId,
+                route: followUpRoute?.route,
                 ...callbacks
               })
           : await orchestrator.handleRequest({

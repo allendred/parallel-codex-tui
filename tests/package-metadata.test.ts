@@ -227,6 +227,9 @@ describe("package metadata", () => {
     expect(readme).toContain("`1` selects Main, `2` selects Parallel, `R` retries Codex routing, and `Esc` cancels");
     expect(readme).toContain("`router_attempt` and `router_fallback_resolution`");
     expect(readme).toContain("Active-task follow-ups use the same fallback choice");
+    expect(readme).toContain("Follow-up Router classification has no task-side effects");
+    expect(readme).toContain("a complex turn or simple question refreshes `sessions/<task>/latest-route.json` only after acquiring the task lease");
+    expect(readme).toContain("A conflicting TUI leaves the previous committed route and turn files untouched");
     expect(readme).toContain("reports the loaded TUI theme, core palette values, ANSI swatch previews, and color override values");
     expect(readme).toContain("including any temporary `--theme` override");
     expect(readme).toContain('OPENAI_API_KEY = "{env:OPENAI_API_KEY}"');
@@ -249,6 +252,7 @@ describe("package metadata", () => {
     expect(readme).toContain("an unchanged in-progress wave reuses successful Actor and Critic checkpoints");
     expect(readme).toContain("the stale wave checkpoint is rejected and rebuilt from the current project");
     expect(readme).toContain("The shared Main chat holds its own `sessions/main/run-owner.json` lease");
+    expect(readme).toContain("They hold the active task lease while committing the route, taking that context snapshot, and running Main");
     expect(readme).toContain("A second TUI is rejected before it can clear or overwrite the active Main prompt, log, status, or native session");
     expect(readme).toContain("startup native-session reconciliation skips a Main session owned by another live TUI");
     expect(readme).toContain("startup atomically claims the stale Main lease");
