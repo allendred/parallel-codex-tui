@@ -59,6 +59,42 @@ describe("routeRequestWithCodex", () => {
     expect(route.duration_ms).toEqual(expect.any(Number));
   });
 
+  it("normalizes harmless casing and whitespace in Codex route modes", async () => {
+    const config = defaultConfig("/tmp/project");
+    const runner: CodexRouteRunner = async () => JSON.stringify({
+      mode: " COMPLEX ",
+      reason: " Project work needs parallel workers. "
+    });
+
+    const route = await routeRequestWithCodex("实现一个功能", config, runner);
+
+    expect(route).toMatchObject({
+      mode: "complex",
+      reason: "Project work needs parallel workers.",
+      source: "codex",
+      suggested_roles: ["judge", "actor", "critic"]
+    });
+  });
+
+  it("uses the configured fallback when Codex returns an unknown route mode", async () => {
+    const config = defaultConfig("/tmp/project");
+    config.router.codex.fallback = "complex";
+    const runner: CodexRouteRunner = async () => JSON.stringify({
+      mode: "analysis",
+      reason: "Unrecognized classifier label."
+    });
+
+    const route = await routeRequestWithCodex("实现一个大型功能", config, runner);
+
+    expect(route).toMatchObject({
+      mode: "complex",
+      source: "fallback",
+      suggested_roles: ["judge", "actor", "critic"]
+    });
+    expect(route.reason).toContain("Invalid Codex router mode");
+    expect(route.reason).toContain("Codex router fallback forced complex.");
+  });
+
   it("uses configured role pairing instead of router-provided engines", async () => {
     const config = defaultConfig("/tmp/project");
     config.pairing.judge = "mock";

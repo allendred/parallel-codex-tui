@@ -101,6 +101,11 @@ describe("formatStatusLine", () => {
     })).toBe("route simple · fallback · invalid output");
     expect(formatRouteStatus?.({
       mode: "complex",
+      source: "fallback",
+      reason: "Codex router failed: Invalid Codex router mode. Codex router fallback forced complex."
+    })).toBe("route complex · fallback · invalid output");
+    expect(formatRouteStatus?.({
+      mode: "complex",
       source: "forced",
       reason: "Forced complex mode after a timeout.",
       duration_ms: 120000

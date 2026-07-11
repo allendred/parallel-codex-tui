@@ -206,11 +206,20 @@ function buildCodexRouterPrompt(request: string, config: AppConfig): string {
 
 function parseCodexRoute(output: string, config: AppConfig): RouteDecision {
   const jsonText = extractJsonObject(output);
-  const parsed = JSON.parse(jsonText) as Partial<RouteDecision>;
+  const parsed: unknown = JSON.parse(jsonText);
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw new Error("Invalid Codex router response object");
+  }
+  const record = parsed as Record<string, unknown>;
+  const mode = typeof record.mode === "string" ? record.mode.trim().toLowerCase() : "";
+  if (mode !== "simple" && mode !== "complex") {
+    throw new Error("Invalid Codex router mode");
+  }
+  const reason = typeof record.reason === "string" ? record.reason.trim() : "";
   return {
-    mode: parsed.mode === "complex" ? "complex" : "simple",
-    reason: parsed.reason || "Codex router decision.",
-    suggested_roles: parsed.mode === "complex" ? ["judge", "actor", "critic"] : [],
+    mode,
+    reason: reason || "Codex router decision.",
+    suggested_roles: mode === "complex" ? ["judge", "actor", "critic"] : [],
     judge_engine: config.pairing.judge,
     actor_engine: config.pairing.actor,
     critic_engine: config.pairing.critic

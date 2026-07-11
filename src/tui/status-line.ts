@@ -120,7 +120,7 @@ function formatRouteFailureCause(reason: string): string | null {
   if (/\b(?:ENOENT|command not found|spawn error)\b/i.test(reason)) {
     return "unavailable";
   }
-  if (/\b(?:no json object|invalid json|failed to parse json|unexpected token)\b/i.test(reason)) {
+  if (/\b(?:no json object|invalid json|invalid codex router (?:mode|response object)|failed to parse json|unexpected token)\b/i.test(reason)) {
     return "invalid output";
   }
   if (/\b(?:exited with (?:code|signal)|process exited)\b/i.test(reason)) {
