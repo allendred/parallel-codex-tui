@@ -45,7 +45,7 @@ describe("CLI workspace picker smoke", () => {
       await waitForScreenText(() => screenWrites, screen, "Open project");
       const pickerLines = screen.styledSnapshotLines();
       const pickerHeader = pickerLines.find((line) => lineText(line).includes("parallel-codex-tui"));
-      const initiallySelected = pickerLines.find((line) => lineText(line).includes("second-project"));
+      const initiallySelected = await waitForSelectedProject(() => screenWrites, screen, "second-project");
 
       expect(lineText(pickerHeader)).toContain("workspace");
       expect(pickerHeader?.chunks.some((chunk) => (
@@ -59,11 +59,7 @@ describe("CLI workspace picker smoke", () => {
       ))).toBe(true);
 
       child.write("\u001B[B");
-      await new Promise((resolve) => setTimeout(resolve, 80));
-      await screenWrites;
-      const movedSelection = screen
-        .styledSnapshotLines()
-        .find((line) => lineText(line).includes("first-project"));
+      const movedSelection = await waitForSelectedProject(() => screenWrites, screen, "first-project");
       expect(movedSelection?.chunks.some((chunk) => (
         chunk.style.backgroundColor === TUI_THEME_PRESETS.paper.rail && chunk.style.bold
       ))).toBe(true);
@@ -157,6 +153,24 @@ async function waitForScreenText(
     await new Promise((resolve) => setTimeout(resolve, 50));
   }
   throw new Error(`Timed out waiting for ${text}\nSnapshot:\n${screen.snapshot()}`);
+}
+
+async function waitForSelectedProject(
+  screenWritesRef: () => Promise<void>,
+  screen: NativeTerminalScreen,
+  projectName: string
+): Promise<ReturnType<NativeTerminalScreen["styledSnapshotLines"]>[number]> {
+  for (let attempt = 0; attempt < 120; attempt += 1) {
+    await screenWritesRef();
+    const line = screen.styledSnapshotLines().find((candidate) => lineText(candidate).includes(projectName));
+    if (line?.chunks.some((chunk) => (
+      chunk.style.backgroundColor === TUI_THEME_PRESETS.paper.rail && chunk.style.bold
+    ))) {
+      return line;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+  throw new Error(`Timed out waiting for selected project ${projectName}\nSnapshot:\n${screen.snapshot()}`);
 }
 
 async function waitForExit(exits: number[]): Promise<void> {
