@@ -9,6 +9,52 @@ import { NativeTerminalScreen } from "../src/tui/terminal-screen.js";
 import { TUI_THEME_PRESETS } from "../src/tui/theme.js";
 
 describe("CLI workspace picker smoke", () => {
+  it("opens a two-digit recent project shortcut from separate PTY keypresses", async () => {
+    const appRoot = await mkdtemp(join(tmpdir(), "pct-cli-workspace-picker-two-digit-"));
+    const projects = Array.from({ length: 10 }, (_, index) => join(appRoot, `project-${index + 1}`));
+    for (const project of projects) {
+      await prepareWorkspace(appRoot, project);
+    }
+    const screen = new NativeTerminalScreen({ cols: 84, rows: 18, scrollback: 1000 });
+    const exits: number[] = [];
+    let screenWrites = Promise.resolve();
+    const child = spawn(
+      process.execPath,
+      ["./node_modules/.bin/tsx", "src/cli.tsx", "--app-root", appRoot],
+      {
+        cwd: process.cwd(),
+        cols: 84,
+        rows: 18,
+        name: "xterm-256color",
+        env: { ...process.env, TERM: "xterm-256color" }
+      }
+    );
+
+    child.onData((chunk) => {
+      screenWrites = screenWrites.then(() => screen.write(chunk));
+    });
+    child.onExit(({ exitCode }) => exits.push(exitCode));
+
+    try {
+      await waitForScreenText(() => screenWrites, screen, "Open project");
+      child.write("1");
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      child.write("0");
+      await waitForScreenText(() => screenWrites, screen, "> | message");
+
+      const header = lineText(screen.styledSnapshotLines()[0]);
+      expect(header).toContain("· project-1 ·");
+      expect(header).not.toContain("· project-10 ·");
+      child.write("\x03");
+      await waitForExit(exits);
+      expect(exits[0]).toBe(0);
+    } finally {
+      if (exits.length === 0) {
+        child.kill("SIGTERM");
+      }
+    }
+  }, 10000);
+
   it("selects a recent project with arrow keys and clears the picker before chat", async () => {
     const appRoot = await mkdtemp(join(tmpdir(), "pct-cli-workspace-picker-"));
     const first = join(appRoot, "first-project");

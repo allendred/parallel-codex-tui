@@ -130,6 +130,40 @@ describe("selectWorkspaceForCli", () => {
     expect(stdout.output()).not.toContain("Workspace [");
   });
 
+  it("selects a two-digit recent project shortcut when digits arrive one key at a time", async () => {
+    const appRoot = await mkdtemp(join(tmpdir(), "pct-cli-workspace-two-digit-"));
+    const projects = Array.from({ length: 10 }, (_, index) => join(appRoot, `project-${index + 1}`));
+    for (const project of projects) {
+      await prepareWorkspace(appRoot, project);
+    }
+
+    await expect(
+      selectWorkspaceForCli({
+        appRoot,
+        cwd: appRoot,
+        stdin: fakeInputChunks(["1", "0"]),
+        stdout: fakeOutput()
+      })
+    ).resolves.toBe(projects[0]);
+  });
+
+  it("commits an ambiguous single-digit project shortcut after a short pause", async () => {
+    const appRoot = await mkdtemp(join(tmpdir(), "pct-cli-workspace-single-digit-"));
+    const projects = Array.from({ length: 10 }, (_, index) => join(appRoot, `project-${index + 1}`));
+    for (const project of projects) {
+      await prepareWorkspace(appRoot, project);
+    }
+
+    await expect(
+      selectWorkspaceForCli({
+        appRoot,
+        cwd: appRoot,
+        stdin: fakeInputChunks(["1"]),
+        stdout: fakeOutput()
+      })
+    ).resolves.toBe(projects[9]);
+  });
+
   it("lets a TTY user move through recent projects with arrow keys", async () => {
     const appRoot = await mkdtemp(join(tmpdir(), "pct-cli-workspace-arrows-"));
     const first = join(appRoot, "first");

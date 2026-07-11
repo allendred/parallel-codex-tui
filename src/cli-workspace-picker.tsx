@@ -1,4 +1,4 @@
-import React, { useMemo, useRef, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { basename } from "node:path";
 import { Box, Text, render, useInput } from "ink";
 import type { WorkspaceChoice } from "./core/workspace.js";
@@ -30,6 +30,8 @@ interface WorkspacePickerOption {
   path: string | null;
   exists: boolean;
 }
+
+const WORKSPACE_SHORTCUT_DELAY_MS = 500;
 
 export async function promptForWorkspaceTui(input: WorkspacePickerInput): Promise<string> {
   let resolveSelection: (workspace: string) => void = () => undefined;
@@ -90,15 +92,32 @@ export function WorkspacePicker({
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [pathValue, setPathValue] = useState("");
   const settledRef = useRef(false);
+  const shortcutBufferRef = useRef("");
+  const shortcutTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const width = Math.max(1, terminalWidth - 1);
   const visibleRows = Math.max(1, Math.min(9, terminalHeight - (invalidExplicitWorkspace ? 7 : 6)));
   const visible = workspacePickerWindow(options, selectedIndex, visibleRows);
+
+  useEffect(() => () => {
+    if (shortcutTimerRef.current) {
+      clearTimeout(shortcutTimerRef.current);
+    }
+  }, []);
+
+  function clearShortcutBuffer() {
+    shortcutBufferRef.current = "";
+    if (shortcutTimerRef.current) {
+      clearTimeout(shortcutTimerRef.current);
+      shortcutTimerRef.current = null;
+    }
+  }
 
   function finish(value: string) {
     if (settledRef.current) {
       return;
     }
     settledRef.current = true;
+    clearShortcutBuffer();
     onSelect(value);
   }
 
@@ -108,12 +127,44 @@ export function WorkspacePicker({
   }
 
   function openOption(option: WorkspacePickerOption | undefined) {
+    clearShortcutBuffer();
     if (!option || option.kind === "new" || !option.path) {
       setPathValue("");
       setMode("path");
       return;
     }
     finish(option.path);
+  }
+
+  function selectNumericShortcut(digits: string) {
+    const candidate = `${shortcutBufferRef.current}${digits}`;
+    const exactIndex = options.findIndex((option) => option.shortcut === candidate);
+    const hasLonger = options.some((option) => (
+      option.shortcut.length > candidate.length && option.shortcut.startsWith(candidate)
+    ));
+
+    if (exactIndex < 0 && !hasLonger) {
+      clearShortcutBuffer();
+      return;
+    }
+
+    shortcutBufferRef.current = candidate;
+    if (exactIndex >= 0) {
+      setSelectedIndex(exactIndex);
+    }
+    if (exactIndex >= 0 && !hasLonger) {
+      openOption(options[exactIndex]);
+      return;
+    }
+
+    if (shortcutTimerRef.current) {
+      clearTimeout(shortcutTimerRef.current);
+    }
+    shortcutTimerRef.current = setTimeout(() => {
+      const pending = shortcutBufferRef.current;
+      clearShortcutBuffer();
+      openOption(options.find((option) => option.shortcut === pending));
+    }, WORKSPACE_SHORTCUT_DELAY_MS);
   }
 
   useInput((input, key) => {
@@ -128,6 +179,7 @@ export function WorkspacePicker({
     }
 
     if (mode === "path") {
+      clearShortcutBuffer();
       if (key.escape) {
         if (options.some((option) => option.kind === "workspace")) {
           setMode("list");
@@ -160,18 +212,27 @@ export function WorkspacePicker({
     }
 
     if (key.escape) {
+      clearShortcutBuffer();
       onCancel();
       return;
     }
     if (key.upArrow || (key.tab && key.shift)) {
+      clearShortcutBuffer();
       setSelectedIndex((current) => (current - 1 + options.length) % options.length);
       return;
     }
     if (key.downArrow || key.tab) {
+      clearShortcutBuffer();
       setSelectedIndex((current) => (current + 1) % options.length);
       return;
     }
     if (key.return) {
+      const pending = shortcutBufferRef.current;
+      if (pending) {
+        clearShortcutBuffer();
+        openOption(options.find((option) => option.shortcut === pending));
+        return;
+      }
       openOption(options[selectedIndex]);
       return;
     }
@@ -182,19 +243,18 @@ export function WorkspacePicker({
       return;
     }
     if (/^n(?:ew)?$/i.test(printableInput)) {
+      clearShortcutBuffer();
       setPathValue("");
       setMode("path");
       return;
     }
     if (/^\d+$/.test(printableInput)) {
-      const direct = options.find((option) => option.shortcut === printableInput);
-      if (direct) {
-        openOption(direct);
-      }
+      selectNumericShortcut(printableInput);
       return;
     }
 
     if (printableInput) {
+      clearShortcutBuffer();
       if (inputHasReturn) {
         submitPath(printableInput);
       } else {
