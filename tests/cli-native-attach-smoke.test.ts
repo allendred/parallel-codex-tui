@@ -8,7 +8,7 @@ import { writeJson } from "../src/core/file-store.js";
 import { NativeSessionSchema, TaskMetaSchema, WorkerStatusSchema } from "../src/domain/schemas.js";
 
 describe("CLI native attach smoke", () => {
-  it("forwards Chinese text and terminal controls through the outer TUI to the native agent", async () => {
+  it("forwards model configuration, Chinese text, and terminal controls to the native agent", async () => {
     const workspace = await mkdtemp(join(tmpdir(), "pct-cli-native-"));
     const appRoot = await mkdtemp(join(tmpdir(), "pct-cli-native-app-"));
     const taskId = "task-20260702-000000-smoke";
@@ -16,6 +16,7 @@ describe("CLI native attach smoke", () => {
     const workerDir = join(taskDir, "actor-mock");
     const agentScript = join(workspace, "fake-agent.cjs");
     const receivedPath = join(workspace, "received.txt");
+    const launchPath = join(workspace, "launch.json");
     const chunks: string[] = [];
 
     await mkdir(workerDir, { recursive: true });
@@ -23,6 +24,7 @@ describe("CLI native attach smoke", () => {
     await writeFile(
       agentScript,
       [
+        `require('node:fs').writeFileSync(${JSON.stringify(launchPath)}, JSON.stringify({ argv: process.argv.slice(2), endpoint: process.env.MODEL_ENDPOINT, secret: process.env.MODEL_SECRET }));`,
         "if (process.stdin.isTTY) process.stdin.setRawMode(true);",
         "process.stdin.setEncoding('utf8');",
         "let input = '';",
@@ -49,6 +51,8 @@ describe("CLI native attach smoke", () => {
         name: "xterm-256color",
         env: {
           ...process.env,
+          PCT_NATIVE_MODEL_ENDPOINT: "https://gateway.example/v1",
+          PCT_NATIVE_MODEL_SECRET: "smoke-secret",
           TERM: "xterm-256color"
         }
       }
@@ -60,6 +64,12 @@ describe("CLI native attach smoke", () => {
       await waitForText(chunks, "attach");
       child.write("\x0f");
       await waitForText(chunks, "fake-agent-ready");
+      expect(JSON.parse(await readFile(launchPath, "utf8"))).toEqual({
+        argv: ["--model", "vendor-coder-v2", "--provider", "acme-gateway"],
+        endpoint: "https://gateway.example/v1",
+        secret: "smoke-secret"
+      });
+      expect(chunks.join("")).not.toContain("smoke-secret");
       child.write("\x1b[200~做个俄罗斯方块的游戏\x1b[201~");
       child.write("\x1b");
       child.write("\x1b[5~");
@@ -86,6 +96,15 @@ async function writeConfig(appRoot: string, agentScript: string): Promise<void> 
     "[workers.mock]",
     `command = "${escapeToml(agentScript)}"`,
     "args = []",
+    "",
+    "[workers.mock.model]",
+    'name = "vendor-coder-v2"',
+    'provider = "acme-gateway"',
+    'args = ["--model", "{model}", "--provider", "{provider}"]',
+    "",
+    "[workers.mock.model.env]",
+    'MODEL_ENDPOINT = "{env:PCT_NATIVE_MODEL_ENDPOINT}"',
+    'MODEL_SECRET = "{env:PCT_NATIVE_MODEL_SECRET}"',
     "",
     "[workers.mock.interactive]",
     `command = "${escapeToml(process.execPath)}"`,
