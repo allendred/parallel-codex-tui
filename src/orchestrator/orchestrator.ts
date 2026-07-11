@@ -2,7 +2,7 @@ import { readdir } from "node:fs/promises";
 import { join } from "node:path";
 import type { AppConfig } from "../core/config.js";
 import { appendJsonLine, ensureDir, pathExists, readJson, readTextIfExists, removeIfExists, writeJson, writeText } from "../core/file-store.js";
-import { claimTaskRunLease, TaskRunLeaseConflictError } from "../core/process-ownership.js";
+import { claimTaskRunLease, TaskRunLeaseConflictError, type TaskRunLease } from "../core/process-ownership.js";
 import { routerRuntimeDir } from "../core/paths.js";
 import { classifyRouterFailure, routerFallbackIsTransient } from "../core/router-audit.js";
 import { sanitizeRouterText } from "../core/router-redaction.js";
@@ -154,6 +154,10 @@ export interface WorkerLogRef {
 
 export type RouterConfigLoader = () => Promise<AppConfig["router"]>;
 
+export interface OrchestratorDependencies {
+  claimTaskRunLease?: (dir: string) => Promise<TaskRunLease>;
+}
+
 interface FeatureActorRun {
   definition: FeatureDefinition;
   channel: FeatureChannel;
@@ -197,7 +201,8 @@ export class Orchestrator {
     private readonly workers: WorkerRegistry,
     private readonly routeRunner?: CodexRouteRunner,
     private readonly routerCwd = routerRuntimeDir(config.projectRoot, config.dataDir),
-    private readonly routerConfigLoader?: RouterConfigLoader
+    private readonly routerConfigLoader?: RouterConfigLoader,
+    private readonly dependencies: OrchestratorDependencies = {}
   ) {}
 
   async handleRequest(input: HandleRequestInput): Promise<HandleRequestResult> {
@@ -345,12 +350,8 @@ export class Orchestrator {
   }
 
   private async withTaskRunLease<Result>(task: TaskSession, run: () => Promise<Result>): Promise<Result> {
-    const lease = await claimTaskRunLease(task.dir);
-    try {
-      return await run();
-    } finally {
-      await lease.release();
-    }
+    const lease = await (this.dependencies.claimTaskRunLease ?? claimTaskRunLease)(task.dir);
+    return runWithLeaseFinalization(`Task ${task.id}`, lease, run);
   }
 
   async routeTaskFollowUp(input: HandleTaskQuestionInput): Promise<TaskFollowUpRouteResult> {
@@ -1567,7 +1568,7 @@ export class Orchestrator {
     const dir = this.sessions.mainSessionDir();
     let lease;
     try {
-      lease = await claimTaskRunLease(dir);
+      lease = await (this.dependencies.claimTaskRunLease ?? claimTaskRunLease)(dir);
     } catch (error) {
       if (error instanceof TaskRunLeaseConflictError) {
         throw new Error(
@@ -1577,11 +1578,11 @@ export class Orchestrator {
       throw error;
     }
 
-    try {
-      return await this.runMainWithLease(input, workers, context, engine, dir);
-    } finally {
-      await lease.release();
-    }
+    return runWithLeaseFinalization(
+      "Main session",
+      lease,
+      () => this.runMainWithLease(input, workers, context, engine, dir)
+    );
   }
 
   private async runMainWithLease(
@@ -2490,6 +2491,34 @@ function requiredFeatureWorkspace(
 
 function uniquePaths(paths: string[]): string[] {
   return [...new Set(paths.filter(Boolean))];
+}
+
+async function runWithLeaseFinalization<Result>(
+  subject: string,
+  lease: TaskRunLease,
+  run: () => Promise<Result>
+): Promise<Result> {
+  const outcome = await run().then(
+    (value) => ({ ok: true as const, value }),
+    (error: unknown) => ({ ok: false as const, error })
+  );
+
+  try {
+    await lease.release();
+  } catch (releaseError) {
+    const releaseSummary = `${subject} lease release failed: ${errorMessage(releaseError)}`;
+    if (!outcome.ok) {
+      throw new Error(`${errorMessage(outcome.error)}; ${releaseSummary}`, {
+        cause: new AggregateError([outcome.error, releaseError])
+      });
+    }
+    throw new Error(releaseSummary, { cause: releaseError });
+  }
+
+  if (!outcome.ok) {
+    throw outcome.error;
+  }
+  return outcome.value;
 }
 
 async function allOrThrow<T>(promises: Array<Promise<T>>): Promise<T[]> {

@@ -259,6 +259,9 @@ describe("package metadata", () => {
     expect(readme).toContain("an unchanged in-progress wave reuses successful Actor and Critic checkpoints");
     expect(readme).toContain("the stale wave checkpoint is rejected and rebuilt from the current project");
     expect(readme).toContain("The shared Main chat holds its own `sessions/main/run-owner.json` lease");
+    expect(readme).toContain("a successful run cannot report success until its lease is released");
+    expect(readme).toContain("If both the run and lease release fail");
+    expect(readme).toContain("`AggregateError`");
     expect(readme).toContain("They hold the active task lease while committing the route, taking that context snapshot, and running Main");
     expect(readme).toContain("A failed or cancelled Main answer replaces the transient `running` state with its real terminal state");
     expect(readme).toContain("releases both task and Main leases, so the next question can proceed");
