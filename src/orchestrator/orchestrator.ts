@@ -420,15 +420,21 @@ export class Orchestrator {
     const workers: WorkerLogRef[] = [];
 
     input.onStatus?.({ taskId: task.id, main: "running" });
-    const output = await this.runMain(input, workers, context);
-    input.onStatus?.({ taskId: task.id, main: "done" });
+    try {
+      const output = await this.runMain(input, workers, context);
+      input.onStatus?.({ taskId: task.id, main: "done" });
 
-    return {
-      mode: "simple",
-      taskId: task.id,
-      summary: extractMainResponse(output) || fallbackLines.join("\n"),
-      workers
-    };
+      return {
+        mode: "simple",
+        taskId: task.id,
+        summary: extractMainResponse(output) || fallbackLines.join("\n"),
+        workers
+      };
+    } catch (error) {
+      const cancelled = isCancellation(error, input.signal);
+      input.onStatus?.({ taskId: task.id, main: cancelled ? "cancelled" : "failed" });
+      throw cancelled ? cancellationError() : error;
+    }
   }
 
   async listTaskWorkers(taskId: string): Promise<WorkerLogRef[]> {

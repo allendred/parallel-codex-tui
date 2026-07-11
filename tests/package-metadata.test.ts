@@ -253,6 +253,8 @@ describe("package metadata", () => {
     expect(readme).toContain("the stale wave checkpoint is rejected and rebuilt from the current project");
     expect(readme).toContain("The shared Main chat holds its own `sessions/main/run-owner.json` lease");
     expect(readme).toContain("They hold the active task lease while committing the route, taking that context snapshot, and running Main");
+    expect(readme).toContain("A failed or cancelled Main answer replaces the transient `running` state with its real terminal state");
+    expect(readme).toContain("releases both task and Main leases, so the next question can proceed");
     expect(readme).toContain("A second TUI is rejected before it can clear or overwrite the active Main prompt, log, status, or native session");
     expect(readme).toContain("startup native-session reconciliation skips a Main session owned by another live TUI");
     expect(readme).toContain("startup atomically claims the stale Main lease");
