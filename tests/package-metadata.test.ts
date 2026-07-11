@@ -165,7 +165,8 @@ describe("package metadata", () => {
     expect(readme).toContain("will not use that file path as the default folder to create");
     expect(readme).toContain("press `Ctrl+P` to open the same project picker without exiting");
     expect(readme).toContain("`Esc` returns with the unsent draft intact");
-    expect(readme).toContain("rebuilds the runtime in place and restores that workspace's latest task, route, workers, and chat");
+    expect(readme).toContain("locks duplicate picker input, shows the project being opened, rebuilds the runtime in place");
+    expect(readme).toContain("A failed open returns to the original view without replacing its runtime or draft");
     expect(readme).toContain("Router configuration and `router/routes.jsonl` remain shared under the app root");
     expect(readme).toContain("press `Ctrl+G` to open the global Router diagnostics view");
     expect(readme).toContain("`Tab` toggles between all workspaces and the current workspace");

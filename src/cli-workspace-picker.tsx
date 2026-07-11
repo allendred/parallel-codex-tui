@@ -98,6 +98,7 @@ export function WorkspacePicker({
   );
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [pathValue, setPathValue] = useState("");
+  const [openingPath, setOpeningPath] = useState<string | null>(null);
   const pathValueRef = useRef("");
   const settledRef = useRef(false);
   const shortcutBufferRef = useRef("");
@@ -131,6 +132,7 @@ export function WorkspacePicker({
     }
     settledRef.current = true;
     clearShortcutBuffer();
+    setOpeningPath(value);
     onSelect(value);
   }
 
@@ -186,6 +188,9 @@ export function WorkspacePicker({
   }
 
   useInput((input, key) => {
+    if (settledRef.current) {
+      return;
+    }
     const inputHasReturn = /[\r\n]/.test(input);
     const printableInput = input.replace(/[\u0000-\u001f\u007f]/g, "");
     if (key.ctrl && input.toLowerCase() === "c") {
@@ -291,6 +296,7 @@ export function WorkspacePicker({
       <WorkspacePickerTitle
         count={choices.length}
         mode={mode}
+        openingPath={openingPath}
         width={width}
       />
       {mode === "list" ? (
@@ -304,7 +310,9 @@ export function WorkspacePicker({
             />
           ))}
           <WorkspacePickerFooter
-            text={workspacePickerListStatus(selectedIndex, options.length)}
+            text={openingPath
+              ? workspacePickerOpeningStatus(openingPath)
+              : workspacePickerListStatus(selectedIndex, options.length)}
             width={width}
           />
         </>
@@ -312,10 +320,16 @@ export function WorkspacePicker({
         <>
           <WorkspacePickerPathRow
             defaultWorkspace={defaultWorkspace ?? cwd}
+            locked={Boolean(openingPath)}
             value={pathValue}
             width={width}
           />
-          <WorkspacePickerFooter text={choices.length > 0 ? `${choices.length} recent` : "new workspace"} width={width} />
+          <WorkspacePickerFooter
+            text={openingPath
+              ? workspacePickerOpeningStatus(openingPath)
+              : choices.length > 0 ? `${choices.length} recent` : "new workspace"}
+            width={width}
+          />
         </>
       )}
       {Array.from({ length: trailingRows }, (_, index) => (
@@ -362,9 +376,19 @@ function WorkspacePickerNotice({
   return <FilledText text={text} width={width} backgroundColor={TUI_THEME.dangerSurface} color={TUI_THEME.danger} />;
 }
 
-function WorkspacePickerTitle({ count, mode, width }: { count: number; mode: "list" | "path"; width: number }) {
-  const rawLabel = mode === "list" ? " Open project" : " Workspace path";
-  const rawMeta = mode === "list" && count > 0 ? `  ${count} recent` : "";
+function WorkspacePickerTitle({
+  count,
+  mode,
+  openingPath,
+  width
+}: {
+  count: number;
+  mode: "list" | "path";
+  openingPath: string | null;
+  width: number;
+}) {
+  const rawLabel = openingPath ? " Opening project" : mode === "list" ? " Open project" : " Workspace path";
+  const rawMeta = !openingPath && mode === "list" && count > 0 ? `  ${count} recent` : "";
   const label = compactEndByDisplayWidth(rawLabel, width);
   const meta = displayWidth(label) + displayWidth(rawMeta) <= width ? rawMeta : "";
   const fill = Math.max(0, width - displayWidth(label) - displayWidth(meta));
@@ -426,18 +450,20 @@ function WorkspacePickerOptionRow({
 
 function WorkspacePickerPathRow({
   defaultWorkspace,
+  locked,
   value,
   width
 }: {
   defaultWorkspace: string;
+  locked: boolean;
   value: string;
   width: number;
 }) {
   if (width < 4) {
-    return <FilledText text="|" width={width} backgroundColor={TUI_THEME.rail} color={TUI_THEME.accent} />;
+    return <FilledText text={locked ? "·" : "|"} width={width} backgroundColor={TUI_THEME.rail} color={locked ? TUI_THEME.muted : TUI_THEME.accent} />;
   }
-  const prefix = " > ";
-  const cursor = "|";
+  const prefix = locked ? "   " : " > ";
+  const cursor = locked ? "" : "|";
   const valueWidth = Math.max(1, width - displayWidth(prefix) - displayWidth(cursor));
   const visibleValue = value
     ? compactTailByDisplayWidth(value, valueWidth)
@@ -447,9 +473,9 @@ function WorkspacePickerPathRow({
   const fill = Math.max(0, width - used);
   return (
     <Text>
-      <Text backgroundColor={TUI_THEME.rail} color={TUI_THEME.accent} bold>{prefix}</Text>
+      <Text backgroundColor={TUI_THEME.rail} color={locked ? TUI_THEME.muted : TUI_THEME.accent} bold={!locked}>{prefix}</Text>
       <Text backgroundColor={TUI_THEME.rail} color={valueColor}>{visibleValue}</Text>
-      <Text backgroundColor={TUI_THEME.rail} color={TUI_THEME.accent} bold>{cursor}</Text>
+      {cursor ? <Text backgroundColor={TUI_THEME.rail} color={TUI_THEME.accent} bold>{cursor}</Text> : null}
       {fill > 0 ? <Text backgroundColor={TUI_THEME.rail}>{" ".repeat(fill)}</Text> : null}
     </Text>
   );
@@ -520,4 +546,8 @@ function workspacePickerWindow(
 
 function workspacePickerListStatus(selectedIndex: number, total: number): string {
   return `${Math.min(total, selectedIndex + 1)} / ${total}`;
+}
+
+function workspacePickerOpeningStatus(path: string): string {
+  return `opening ${basename(path) || path}`;
 }

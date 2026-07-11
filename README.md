@@ -37,7 +37,7 @@ Startup resolves the worker project before routing:
 - Without `--workspace`, an interactive terminal shows remembered projects from `.parallel-codex/workspaces.json`; use Up/Down and Enter, a displayed number, or `N` to enter a new folder path. The picker clears before the main chat opens.
 - In non-interactive startup, the CLI reuses the last remembered workspace, falls back to the current directory if none was saved, and creates an explicit `--workspace` path if needed.
 - The selected workspace is prepared before any router or worker process starts.
-- While the TUI is idle, press `Ctrl+P` to open the same project picker without exiting. `Esc` returns with the unsent draft intact; selecting or creating a folder rebuilds the runtime in place and restores that workspace's latest task, route, workers, and chat.
+- While the TUI is idle, press `Ctrl+P` to open the same project picker without exiting. `Esc` returns with the unsent draft intact; selecting or creating a folder locks duplicate picker input, shows the project being opened, rebuilds the runtime in place, and restores that workspace's latest task, route, workers, and chat. A failed open returns to the original view without replacing its runtime or draft.
 - Workspace chat, task files, and `session-index.sqlite` stay isolated under each project. Router configuration and `router/routes.jsonl` remain shared under the app root, so classifications across projects use one global Router audit.
 
 From a source checkout, install dependencies and link the local binary:
