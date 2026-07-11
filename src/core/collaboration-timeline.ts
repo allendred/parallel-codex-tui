@@ -2,31 +2,8 @@ import type { Dirent } from "node:fs";
 import { readdir } from "node:fs/promises";
 import { join } from "node:path";
 import { z } from "zod";
-import { EventRecordSchema } from "../domain/schemas.js";
+import { EventRecordSchema, FeatureStatusSchema, type FeatureState } from "../domain/schemas.js";
 import { readTextIfExists } from "./file-store.js";
-
-const CollaborationFeatureStateSchema = z.enum([
-  "created",
-  "actor_running",
-  "critic_running",
-  "revision_needed",
-  "integrating",
-  "verifying",
-  "approved",
-  "failed",
-  "cancelled"
-]);
-
-const FeatureStatusSchema = z.object({
-  feature_id: z.string().min(1),
-  task_id: z.string().min(1),
-  turn_id: z.string().min(1),
-  title: z.string().min(1).optional(),
-  description: z.string().default(""),
-  depends_on: z.array(z.string().min(1)).default([]),
-  state: CollaborationFeatureStateSchema,
-  updated_at: z.string().datetime()
-});
 
 const FeatureDialogueSchema = z.object({
   time: z.string().datetime(),
@@ -38,7 +15,7 @@ const FeatureDialogueSchema = z.object({
   paths: z.record(z.string()).default({})
 });
 
-export type CollaborationFeatureState = z.infer<typeof CollaborationFeatureStateSchema>;
+export type CollaborationFeatureState = FeatureState;
 export type CollaborationRole = "actor" | "critic" | "supervisor";
 
 export interface CollaborationArtifactRef {

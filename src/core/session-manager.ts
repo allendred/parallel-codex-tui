@@ -16,16 +16,23 @@ import { sessionsRoot } from "./paths.js";
 import type { SessionIndex } from "./session-index.js";
 import { loadCollaborationTimeline, type CollaborationTimeline } from "./collaboration-timeline.js";
 import {
+  clearStaleTaskRunLease,
+  inspectTaskRunLease,
+  terminateOwnedWorkerProcess
+} from "./process-ownership.js";
+import {
   type ChatRecord,
   ChatRecordSchema,
   type EngineName,
   type EventRecord,
+  FeatureStatusSchema,
   type NativeSession,
   NativeSessionSchema,
   type RouteDecision,
   RouteDecisionSchema,
   type TaskMeta,
   TaskMetaSchema,
+  type TaskState,
   type TurnMeta,
   TurnMetaSchema,
   type WorkerRole,
@@ -91,6 +98,24 @@ export interface TaskTurn {
   userPath: string;
   routePath: string;
 }
+
+export interface InterruptedTaskRecovery {
+  taskId: string;
+  previousState: TaskState;
+  workersRecovered: number;
+  featuresRecovered: number;
+  processesTerminated: number;
+}
+
+const TERMINAL_TASK_STATES = new Set<TaskState>(["done", "failed", "cancelled"]);
+const ACTIVE_WORKER_STATES = new Set<WorkerStatus["state"]>(["idle", "starting", "running", "waiting"]);
+const ACTIVE_FEATURE_STATES = new Set([
+  "actor_running",
+  "critic_running",
+  "revision_needed",
+  "integrating",
+  "verifying"
+]);
 
 export class SessionManager {
   private readonly projectRoot: string;
@@ -197,6 +222,48 @@ export class SessionManager {
   async hasTask(taskId: string): Promise<boolean> {
     const task = this.taskFromId(taskId);
     return Boolean(await readTaskMetaIfValid(task.metaPath));
+  }
+
+  async reconcileInterruptedTasks(): Promise<InterruptedTaskRecovery[]> {
+    const root = sessionsRoot(this.projectRoot, this.dataDir);
+    if (!(await pathExists(root))) {
+      return [];
+    }
+
+    const entries = await readdir(root, { withFileTypes: true });
+    const recovered: InterruptedTaskRecovery[] = [];
+    for (const entry of entries.sort((left, right) => left.name.localeCompare(right.name))) {
+      if (!entry.isDirectory() || !entry.name.startsWith("task-")) {
+        continue;
+      }
+      const task = this.taskFromId(entry.name);
+      const meta = await readTaskMetaIfValid(task.metaPath);
+      if (!meta || TERMINAL_TASK_STATES.has(meta.status)) {
+        continue;
+      }
+      const lease = await inspectTaskRunLease(task.dir);
+      if (lease.state === "active") {
+        continue;
+      }
+
+      const workers = await this.reconcileTaskWorkers(task);
+      const featuresRecovered = await this.reconcileTaskFeatures(task);
+      await this.updateTaskStatus(task, "cancelled");
+      await this.appendEvent(
+        task,
+        "task.recovered_after_restart",
+        `Recovered interrupted task from ${meta.status}; ${workers.recovered} active workers and ${featuresRecovered} active features marked cancelled, checkpoints preserved`
+      );
+      await clearStaleTaskRunLease(task.dir, lease.owner);
+      recovered.push({
+        taskId: task.id,
+        previousState: meta.status,
+        workersRecovered: workers.recovered,
+        featuresRecovered,
+        processesTerminated: workers.terminated
+      });
+    }
+    return recovered;
   }
 
   async latestTask(): Promise<TaskSession | null> {
@@ -397,6 +464,73 @@ export class SessionManager {
       return (await pathExists(join(task.dir, "user-request.md"))) ? "0002" : "0001";
     }
     return String(Number(latest.turnId) + 1).padStart(4, "0");
+  }
+
+  private async reconcileTaskWorkers(task: TaskSession): Promise<{ recovered: number; terminated: number }> {
+    const entries = await readdir(task.dir, { withFileTypes: true });
+    let recovered = 0;
+    let terminated = 0;
+    for (const entry of entries) {
+      if (!entry.isDirectory()) {
+        continue;
+      }
+      const dir = join(task.dir, entry.name);
+      const processResult = await terminateOwnedWorkerProcess(dir);
+      if (processResult === "terminated") {
+        terminated += 1;
+      }
+      const statusPath = join(dir, "status.json");
+      const status = await readWorkerStatusIfValid(statusPath);
+      if (!status || !ACTIVE_WORKER_STATES.has(status.state)) {
+        continue;
+      }
+      const nextStatus: WorkerStatus = WorkerStatusSchema.parse({
+        ...status,
+        state: "cancelled",
+        phase: "orphaned-after-restart",
+        last_event_at: this.now().toISOString(),
+        summary: "Previous TUI exited before this worker finished; checkpoint is ready to retry"
+      });
+      await writeJson(statusPath, nextStatus);
+      const outputLogPath = join(dir, "output.log");
+      await appendText(outputLogPath, "\nRecovered after previous TUI exit; worker marked cancelled for checkpoint retry.\n");
+      await this.index?.upsertWorker(task.id, nextStatus, { dir, statusPath, outputLogPath });
+      recovered += 1;
+    }
+    return { recovered, terminated };
+  }
+
+  private async reconcileTaskFeatures(task: TaskSession): Promise<number> {
+    const root = join(task.dir, "features");
+    if (!(await pathExists(root))) {
+      return 0;
+    }
+    const entries = await readdir(root, { withFileTypes: true });
+    let recovered = 0;
+    for (const entry of entries) {
+      if (!entry.isDirectory()) {
+        continue;
+      }
+      const statusPath = join(root, entry.name, "status.json");
+      if (!(await pathExists(statusPath))) {
+        continue;
+      }
+      try {
+        const status = await readJson(statusPath, FeatureStatusSchema);
+        if (!ACTIVE_FEATURE_STATES.has(status.state)) {
+          continue;
+        }
+        await writeJson(statusPath, FeatureStatusSchema.parse({
+          ...status,
+          state: "cancelled",
+          updated_at: this.now().toISOString()
+        }));
+        recovered += 1;
+      } catch {
+        // Corrupt feature evidence must not prevent other task checkpoints from being recovered.
+      }
+    }
+    return recovered;
   }
 
   private async indexTaskFromFiles(task: TaskSession): Promise<void> {

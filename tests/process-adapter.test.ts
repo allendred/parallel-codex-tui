@@ -2,7 +2,8 @@ import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { readJson, readTextIfExists, writeText } from "../src/core/file-store.js";
+import { pathExists, readJson, readTextIfExists, writeText } from "../src/core/file-store.js";
+import { processIsAlive, workerProcessRecordPath } from "../src/core/process-ownership.js";
 import { WorkerStatusSchema } from "../src/domain/schemas.js";
 import { ProcessWorkerAdapter } from "../src/workers/process-adapter.js";
 
@@ -319,6 +320,49 @@ describe("ProcessWorkerAdapter", () => {
 
     const result = await resultPromise;
     expect(result.exitCode).toBe(0);
+  });
+
+  it("records the owned child identity while running and clears it after exit", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pct-process-ownership-"));
+    const filesDir = join(root, "actor-mock");
+    const promptPath = join(filesDir, "prompt.md");
+    const outputLogPath = join(filesDir, "output.log");
+    const statusPath = join(filesDir, "status.json");
+    const controller = new AbortController();
+    const adapter = new ProcessWorkerAdapter(process.execPath, [
+      "-e",
+      "console.log('owned child ready');setInterval(()=>{},1000)"
+    ]);
+
+    const running = adapter.run({
+      workerId: "actor-owned",
+      role: "actor",
+      engine: "mock",
+      cwd: root,
+      filesDir,
+      promptPath,
+      outputLogPath,
+      statusPath,
+      prompt: "keep running",
+      signal: controller.signal
+    });
+
+    await waitForStatusPhase(statusPath, "process-output");
+    await waitForPath(workerProcessRecordPath(filesDir));
+    const record = JSON.parse(await readTextIfExists(workerProcessRecordPath(filesDir))) as {
+      worker_id: string;
+      pid: number;
+      process_group_id?: number;
+      process_start_token?: string;
+    };
+    expect(record.worker_id).toBe("actor-owned");
+    expect(processIsAlive(record.pid)).toBe(true);
+    expect(record.process_group_id).toBe(process.platform === "win32" ? undefined : record.pid);
+    expect(record.process_start_token).toEqual(expect.any(String));
+
+    controller.abort();
+    await running;
+    expect(await pathExists(workerProcessRecordPath(filesDir))).toBe(false);
   });
 
   it("cancels a running worker through AbortSignal and persists cancelled state", async () => {
@@ -1077,4 +1121,15 @@ async function waitForStatusPhase(path: string, phase: string) {
   }
 
   throw new Error(`Timed out waiting for status phase ${phase}`);
+}
+
+async function waitForPath(path: string): Promise<void> {
+  const deadline = Date.now() + 5000;
+  while (Date.now() < deadline) {
+    if (await pathExists(path)) {
+      return;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  throw new Error(`Timed out waiting for path ${path}`);
 }

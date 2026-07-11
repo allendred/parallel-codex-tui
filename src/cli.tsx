@@ -203,6 +203,7 @@ async function loadInteractiveWorkspace(
       runtime.sessions.readChatHistory(),
       listWorkspaceChoices(appRoot)
     ]);
+    const recoveryMessages = startupRecoveryMessages(runtime, initialTaskId);
 
     return {
       runtime,
@@ -210,13 +211,44 @@ async function loadInteractiveWorkspace(
       initialRoute,
       initialWorkers,
       initialCanRetryTask,
-      initialMessages: initialHistory.map(({ from, text }) => ({ from, text })),
+      initialMessages: [
+        ...initialHistory.map(({ from, text }) => ({ from, text })),
+        ...recoveryMessages
+      ],
       workspaceChoices
     };
   } catch (error) {
     runtime.index.close();
     throw error;
   }
+}
+
+function startupRecoveryMessages(
+  runtime: AppRuntime,
+  activeTaskId: string | null
+): Array<{ from: "system"; text: string }> {
+  if (runtime.recoveredTasks.length === 0) {
+    return [];
+  }
+  const active = activeTaskId
+    ? runtime.recoveredTasks.find((recovery) => recovery.taskId === activeTaskId)
+    : null;
+  if (active) {
+    const workerLabel = `${active.workersRecovered} ${active.workersRecovered === 1 ? "worker" : "workers"}`;
+    return [{
+      from: "system",
+      text: `Recovered interrupted task #${compactStartupTaskId(active.taskId)} · ${workerLabel} stopped · checkpoints kept · Ctrl+R resume`
+    }];
+  }
+  return [{
+    from: "system",
+    text: `Recovered ${runtime.recoveredTasks.length} interrupted ${runtime.recoveredTasks.length === 1 ? "task" : "tasks"} · checkpoints kept · Ctrl+T inspect`
+  }];
+}
+
+function compactStartupTaskId(taskId: string): string {
+  const parts = taskId.split("-");
+  return parts.length > 2 ? parts.slice(-2).join("-") : taskId;
 }
 
 function canRenderInteractiveTui(): boolean {

@@ -1,3 +1,4 @@
+import { spawn } from "node:child_process";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -5,6 +6,13 @@ import { describe, expect, it } from "vitest";
 import { appendText, pathExists, readJson, readTextIfExists, writeJson, writeText } from "../src/core/file-store.js";
 import { SessionIndex } from "../src/core/session-index.js";
 import { SessionManager } from "../src/core/session-manager.js";
+import {
+  claimTaskRunLease,
+  processIsAlive,
+  taskRunOwnerPath,
+  workerProcessRecordPath,
+  writeWorkerProcessRecord
+} from "../src/core/process-ownership.js";
 import {
   NativeSessionSchema,
   RouteDecisionSchema,
@@ -923,5 +931,212 @@ describe("SessionManager", () => {
 
     await expect(index.countRows("native_sessions")).resolves.toBe(0);
     index.close();
+  });
+
+  it("reconciles an interrupted task while preserving its retry checkpoints", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pct-reconcile-interrupted-"));
+    const index = await SessionIndex.open(root, ".parallel-codex");
+    const manager = new SessionManager({
+      projectRoot: root,
+      dataDir: ".parallel-codex",
+      now: () => new Date("2026-07-11T14:30:00.000Z"),
+      randomId: () => "orphan",
+      index
+    });
+    const task = await manager.createTask({
+      request: "实现可恢复任务",
+      cwd: root,
+      route: {
+        mode: "complex",
+        reason: "Project work.",
+        suggested_roles: ["judge", "actor", "critic"],
+        judge_engine: "codex",
+        actor_engine: "codex",
+        critic_engine: "claude"
+      }
+    });
+    await manager.updateTaskStatus(task, "actor_running");
+    const worker = await manager.initializeWorker(task, {
+      workerId: "actor-codex-0001-ui",
+      featureId: "0001-ui",
+      featureTitle: "Game UI",
+      role: "actor",
+      engine: "codex",
+      prompt: "implement UI"
+    });
+    await writeJson(worker.statusPath, {
+      worker_id: worker.workerId,
+      feature_id: "0001-ui",
+      feature_title: "Game UI",
+      role: "actor",
+      engine: "codex",
+      state: "running",
+      phase: "process-output",
+      last_event_at: "2026-07-11T14:29:00.000Z",
+      summary: "editing UI",
+      native_session_id: "native-ui-session"
+    });
+    const featureStatusPath = join(task.dir, "features", "0001-ui", "status.json");
+    await writeJson(featureStatusPath, {
+      feature_id: "0001-ui",
+      task_id: task.id,
+      turn_id: "0001",
+      title: "Game UI",
+      description: "Render the UI",
+      depends_on: [],
+      state: "actor_running",
+      updated_at: "2026-07-11T14:29:00.000Z"
+    });
+    await writeJson(taskRunOwnerPath(task.dir), {
+      version: 1,
+      owner_id: "dead-tui",
+      pid: 2147483647,
+      acquired_at: "2026-07-11T14:28:00.000Z",
+      process_start_token: "dead-token"
+    });
+    await writeWorkerProcessRecord(worker.dir, {
+      workerId: worker.workerId,
+      pid: 2147483647,
+      command: "codex"
+    });
+
+    const recovered = await manager.reconcileInterruptedTasks();
+
+    expect(recovered).toEqual([{
+      taskId: task.id,
+      previousState: "actor_running",
+      workersRecovered: 1,
+      featuresRecovered: 1,
+      processesTerminated: 0
+    }]);
+    await expect(readJson(task.metaPath, TaskMetaSchema)).resolves.toMatchObject({ status: "cancelled" });
+    await expect(readJson(worker.statusPath, WorkerStatusSchema)).resolves.toMatchObject({
+      state: "cancelled",
+      phase: "orphaned-after-restart",
+      native_session_id: "native-ui-session"
+    });
+    expect(JSON.parse(await readTextIfExists(featureStatusPath))).toMatchObject({
+      state: "cancelled",
+      updated_at: "2026-07-11T14:30:00.000Z"
+    });
+    expect(await readTextIfExists(worker.outputLogPath)).toContain("Recovered after previous TUI exit");
+    expect(await readTextIfExists(task.eventsPath)).toContain("task.recovered_after_restart");
+    expect(await pathExists(taskRunOwnerPath(task.dir))).toBe(false);
+    expect(await pathExists(workerProcessRecordPath(worker.dir))).toBe(false);
+    await expect(index.listTasks()).resolves.toEqual([
+      expect.objectContaining({ id: task.id, status: "cancelled" })
+    ]);
+    index.close();
+  });
+
+  it("leaves a nonterminal task untouched while its owner lease is active", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pct-reconcile-live-owner-"));
+    const manager = new SessionManager({
+      projectRoot: root,
+      dataDir: ".parallel-codex",
+      now: () => new Date("2026-07-11T14:31:00.000Z"),
+      randomId: () => "live"
+    });
+    const task = await manager.createTask({
+      request: "保持运行",
+      cwd: root,
+      route: {
+        mode: "complex",
+        reason: "Project work.",
+        suggested_roles: ["judge", "actor", "critic"],
+        judge_engine: "mock",
+        actor_engine: "mock",
+        critic_engine: "mock"
+      }
+    });
+    await manager.updateTaskStatus(task, "actor_running");
+    const lease = await claimTaskRunLease(task.dir, { ownerId: "live-tui" });
+
+    try {
+      await expect(manager.reconcileInterruptedTasks()).resolves.toEqual([]);
+      await expect(readJson(task.metaPath, TaskMetaSchema)).resolves.toMatchObject({ status: "actor_running" });
+    } finally {
+      await lease.release();
+    }
+  });
+
+  it("terminates a recorded orphan even when its worker status is already terminal", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pct-reconcile-terminal-worker-"));
+    const manager = new SessionManager({
+      projectRoot: root,
+      dataDir: ".parallel-codex",
+      now: () => new Date("2026-07-11T14:32:00.000Z"),
+      randomId: () => "terminal-worker"
+    });
+    const task = await manager.createTask({
+      request: "恢复超时进程",
+      cwd: root,
+      route: {
+        mode: "complex",
+        reason: "Project work.",
+        suggested_roles: ["judge", "actor", "critic"],
+        judge_engine: "mock",
+        actor_engine: "mock",
+        critic_engine: "mock"
+      }
+    });
+    await manager.updateTaskStatus(task, "actor_running");
+    const worker = await manager.initializeWorker(task, {
+      workerId: "actor-mock",
+      role: "actor",
+      engine: "mock",
+      prompt: "keep running"
+    });
+    await writeJson(worker.statusPath, {
+      worker_id: worker.workerId,
+      role: "actor",
+      engine: "mock",
+      state: "failed",
+      phase: "process-idle-timeout",
+      last_event_at: "2026-07-11T14:31:00.000Z",
+      summary: "worker timed out"
+    });
+    const detached = process.platform !== "win32";
+    const orphan = spawn(process.execPath, ["-e", "setInterval(()=>{},1000)"], {
+      detached,
+      stdio: "ignore"
+    });
+    orphan.unref();
+    const orphanPid = orphan.pid ?? 0;
+    if (!orphanPid) {
+      throw new Error("Orphan process did not receive a pid");
+    }
+    await writeWorkerProcessRecord(worker.dir, {
+      workerId: worker.workerId,
+      pid: orphanPid,
+      command: process.execPath,
+      ...(detached ? { processGroupId: orphanPid } : {})
+    });
+
+    try {
+      const recovered = await manager.reconcileInterruptedTasks();
+
+      expect(recovered).toEqual([{
+        taskId: task.id,
+        previousState: "actor_running",
+        workersRecovered: 0,
+        featuresRecovered: 0,
+        processesTerminated: 1
+      }]);
+      expect(processIsAlive(orphanPid)).toBe(false);
+      expect(await pathExists(workerProcessRecordPath(worker.dir))).toBe(false);
+      await expect(readJson(worker.statusPath, WorkerStatusSchema)).resolves.toMatchObject({
+        state: "failed",
+        phase: "process-idle-timeout"
+      });
+    } finally {
+      if (processIsAlive(orphanPid)) {
+        try {
+          process.kill(detached ? -orphanPid : orphanPid, "SIGKILL");
+        } catch {
+          // Best-effort cleanup for a failed reconciliation assertion.
+        }
+      }
+    }
   });
 });

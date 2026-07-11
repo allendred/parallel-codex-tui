@@ -3,7 +3,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { createRuntime } from "../src/bootstrap.js";
-import { pathExists, writeText } from "../src/core/file-store.js";
+import { pathExists, readJson, writeJson, writeText } from "../src/core/file-store.js";
+import { TaskMetaSchema, WorkerStatusSchema } from "../src/domain/schemas.js";
 
 describe("createRuntime", () => {
   it("wires config, session manager, workers, and orchestrator", async () => {
@@ -86,6 +87,58 @@ describe("createRuntime", () => {
     const latest = await restarted.sessions.latestTask();
 
     expect(latest?.id).toBe(task.id);
+  });
+
+  it("repairs an interrupted task before restoring the workspace", async () => {
+    const appRoot = await mkdtemp(join(tmpdir(), "pct-reconcile-app-root-"));
+    const workspaceRoot = await mkdtemp(join(tmpdir(), "pct-reconcile-worker-root-"));
+    const firstRuntime = await createRuntime(appRoot, workspaceRoot);
+    const task = await firstRuntime.sessions.createTask({
+      request: "实现可恢复任务",
+      cwd: workspaceRoot,
+      route: {
+        mode: "complex",
+        reason: "test",
+        suggested_roles: ["judge", "actor", "critic"],
+        judge_engine: "mock",
+        actor_engine: "mock",
+        critic_engine: "mock"
+      }
+    });
+    await firstRuntime.sessions.updateTaskStatus(task, "actor_running");
+    const worker = await firstRuntime.sessions.initializeWorker(task, {
+      workerId: "actor-mock",
+      role: "actor",
+      engine: "mock",
+      prompt: "keep working"
+    });
+    await writeJson(worker.statusPath, {
+      worker_id: worker.workerId,
+      role: "actor",
+      engine: "mock",
+      state: "running",
+      phase: "process-running",
+      last_event_at: "2026-07-11T14:00:00.000Z",
+      summary: "worker running"
+    });
+    firstRuntime.index.close();
+
+    const restarted = await createRuntime(appRoot, workspaceRoot);
+
+    expect(restarted.recoveredTasks).toEqual([{
+      taskId: task.id,
+      previousState: "actor_running",
+      workersRecovered: 1,
+      featuresRecovered: 0,
+      processesTerminated: 0
+    }]);
+    await expect(readJson(task.metaPath, TaskMetaSchema)).resolves.toMatchObject({ status: "cancelled" });
+    await expect(readJson(worker.statusPath, WorkerStatusSchema)).resolves.toMatchObject({
+      state: "cancelled",
+      phase: "orphaned-after-restart"
+    });
+    await expect(restarted.orchestrator.canRetryTask(task.id)).resolves.toBe(true);
+    restarted.index.close();
   });
 
   it("reloads router settings for the next request without rebuilding the worker runtime", async () => {

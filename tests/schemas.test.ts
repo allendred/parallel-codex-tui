@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   ChatRecordSchema,
   EventRecordSchema,
+  FeatureStatusSchema,
   NativeSessionSchema,
   RouteDecisionSchema,
   TaskMetaSchema,
@@ -63,6 +64,22 @@ describe("domain schemas", () => {
 
     expect(result.role).toBe("actor");
     expect(result.native_session_id).toBe("019f17e4-d12c-7c41-95cd-bc3e2a9b0574");
+  });
+
+  it("validates feature checkpoint status", () => {
+    const result = FeatureStatusSchema.parse({
+      feature_id: "0001-ui",
+      task_id: "task-20260630-033000-a1b2",
+      turn_id: "0001",
+      title: "Game UI",
+      description: "Render the board",
+      depends_on: [],
+      state: "actor_running",
+      updated_at: "2026-06-30T03:36:00.000Z"
+    });
+
+    expect(result.state).toBe("actor_running");
+    expect(result.title).toBe("Game UI");
   });
 
   it("validates turn metadata", () => {

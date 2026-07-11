@@ -1,5 +1,6 @@
 import { spawn } from "node:child_process";
 import { appendText, writeJson } from "../core/file-store.js";
+import { clearWorkerProcessRecord, writeWorkerProcessRecord } from "../core/process-ownership.js";
 import type { EngineName, WorkerStatus } from "../domain/schemas.js";
 import { detectNativeSessionId } from "./native-session-detection.js";
 import type { WorkerAdapter, WorkerModelRunConfig, WorkerResult, WorkerRunSpec } from "./types.js";
@@ -118,6 +119,7 @@ export class ProcessWorkerAdapter implements WorkerAdapter {
     await appendText(runSpec.outputLogPath, `$ ${formatShellCommand(this.command, launch.args)}\n`);
 
     return new Promise<ProcessAttemptResult>((resolve, reject) => {
+      const detached = process.platform !== "win32";
       const child = spawn(this.command, launch.args, {
         cwd: runSpec.cwd,
         env: {
@@ -127,8 +129,22 @@ export class ProcessWorkerAdapter implements WorkerAdapter {
           PARALLEL_CODEX_ROLE: runSpec.role,
           PARALLEL_CODEX_FILES_DIR: runSpec.filesDir
         },
-        stdio: ["pipe", "pipe", "pipe"]
+        stdio: ["pipe", "pipe", "pipe"],
+        detached
       });
+      const processRecordReady = typeof child.pid === "number"
+        ? writeWorkerProcessRecord(runSpec.filesDir, {
+            workerId: runSpec.workerId,
+            pid: child.pid,
+            command: this.command,
+            ...(detached ? { processGroupId: child.pid } : {})
+          }).then(() => undefined, async (error: unknown) => {
+            await appendText(
+              runSpec.outputLogPath,
+              `Process ownership record failed: ${error instanceof Error ? error.message : String(error)}\n`
+            );
+          })
+        : Promise.resolve();
 
       let settled = false;
       let timeout: NodeJS.Timeout | undefined;
@@ -165,10 +181,10 @@ export class ProcessWorkerAdapter implements WorkerAdapter {
       };
 
       const terminateWithFallback = (): void => {
-        child.kill("SIGTERM");
+        signalChildProcess(child.pid, "SIGTERM", detached);
         abortKillTimeout = setTimeout(() => {
           if (!settled) {
-            child.kill("SIGKILL");
+            signalChildProcess(child.pid, "SIGKILL", detached);
           }
         }, 1500);
         abortKillTimeout.unref();
@@ -210,6 +226,8 @@ export class ProcessWorkerAdapter implements WorkerAdapter {
           summary,
           detectedNativeSessionId
         );
+        await processRecordReady;
+        await clearWorkerProcessRecord(runSpec.filesDir);
         const finalResult: WorkerResult = {
           ...result,
           ...(terminalState === "cancelled" ? { cancelled: true } : {})
@@ -305,7 +323,12 @@ export class ProcessWorkerAdapter implements WorkerAdapter {
         if (abortListener) {
           runSpec.signal?.removeEventListener("abort", abortListener);
         }
-        void setStatus(runSpec, "failed", "process-error", error.message, detectedNativeSessionId).finally(() => reject(error));
+        void setStatus(runSpec, "failed", "process-error", error.message, detectedNativeSessionId)
+          .then(async () => {
+            await processRecordReady;
+            await clearWorkerProcessRecord(runSpec.filesDir);
+          })
+          .finally(() => reject(error));
       });
 
       child.on("close", (code, signal) => {
@@ -603,6 +626,28 @@ function summarizeOutput(text: string): string {
     .filter(Boolean);
   const summary = lines.at(-1) ?? "Worker produced output";
   return summary.length > 160 ? `${summary.slice(0, 157)}...` : summary;
+}
+
+function signalChildProcess(pid: number | undefined, signal: NodeJS.Signals, processGroup: boolean): void {
+  if (!pid) {
+    return;
+  }
+  try {
+    process.kill(processGroup ? -pid : pid, signal);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ESRCH") {
+      throw error;
+    }
+    if (processGroup) {
+      try {
+        process.kill(pid, signal);
+      } catch (fallbackError) {
+        if ((fallbackError as NodeJS.ErrnoException).code !== "ESRCH") {
+          throw fallbackError;
+        }
+      }
+    }
+  }
 }
 
 async function setStatus(

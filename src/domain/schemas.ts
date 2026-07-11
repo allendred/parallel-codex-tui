@@ -44,6 +44,18 @@ export const WorkerStateSchema = z.enum([
   "cancelled"
 ]);
 
+export const FeatureStateSchema = z.enum([
+  "created",
+  "actor_running",
+  "critic_running",
+  "revision_needed",
+  "integrating",
+  "verifying",
+  "approved",
+  "failed",
+  "cancelled"
+]);
+
 export const RouteDecisionSchema = z.object({
   mode: RouteModeSchema,
   reason: z.string().min(1),
@@ -87,6 +99,17 @@ export const WorkerStatusSchema = z.object({
   last_event_at: z.string().datetime(),
   summary: z.string(),
   native_session_id: z.string().min(1).optional()
+});
+
+export const FeatureStatusSchema = z.object({
+  feature_id: z.string().min(1),
+  task_id: z.string().min(1),
+  turn_id: z.string().min(1),
+  title: z.string().min(1).optional(),
+  description: z.string().default(""),
+  depends_on: z.array(z.string().min(1)).default([]),
+  state: FeatureStateSchema,
+  updated_at: z.string().datetime()
 });
 
 export const TurnMetaSchema = z.object({
@@ -134,9 +157,11 @@ export type EngineName = z.infer<typeof EngineNameSchema>;
 export type WorkerRole = z.infer<typeof WorkerRoleSchema>;
 export type TaskState = z.infer<typeof TaskStateSchema>;
 export type WorkerState = z.infer<typeof WorkerStateSchema>;
+export type FeatureState = z.infer<typeof FeatureStateSchema>;
 export type RouteDecision = z.infer<typeof RouteDecisionSchema>;
 export type TaskMeta = z.infer<typeof TaskMetaSchema>;
 export type WorkerStatus = z.infer<typeof WorkerStatusSchema>;
+export type FeatureStatus = z.infer<typeof FeatureStatusSchema>;
 export type TurnMeta = z.infer<typeof TurnMetaSchema>;
 export type NativeSession = z.infer<typeof NativeSessionSchema>;
 export type NativeSessionSource = z.infer<typeof NativeSessionSourceSchema>;

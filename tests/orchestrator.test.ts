@@ -6,6 +6,7 @@ import { defaultConfig } from "../src/core/config.js";
 import { appendJsonLine, appendText, pathExists, readJson, readTextIfExists, writeJson, writeText } from "../src/core/file-store.js";
 import { SessionIndex } from "../src/core/session-index.js";
 import { SessionManager } from "../src/core/session-manager.js";
+import { claimTaskRunLease } from "../src/core/process-ownership.js";
 import { NativeSessionSchema, RouteDecisionSchema, TaskMetaSchema, WorkerStatusSchema } from "../src/domain/schemas.js";
 import { Orchestrator, type FeatureRunProgress } from "../src/orchestrator/orchestrator.js";
 import { MockWorkerAdapter } from "../src/workers/mock-adapter.js";
@@ -1875,6 +1876,40 @@ describe("Orchestrator", () => {
     expect(await pathExists(join(taskDir, "turns", "0002"))).toBe(false);
     expect(await readTextIfExists(join(taskDir, "actor-mock", "output.log"))).toContain("FIRST_ACTOR_FAILURE");
     expect(await readTextIfExists(join(taskDir, "events.jsonl"))).toContain("task.retrying");
+  });
+
+  it("rejects a concurrent retry while another TUI owns the task", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pct-orch-live-owner-"));
+    const config = mockConfig(root);
+    const manager = new SessionManager({
+      projectRoot: root,
+      dataDir: config.dataDir,
+      now: () => new Date("2026-06-30T03:31:11.000Z"),
+      randomId: () => "owned"
+    });
+    const task = await manager.createTask({
+      request: "实现并行功能",
+      cwd: root,
+      route: {
+        mode: "complex",
+        reason: "Project work.",
+        suggested_roles: ["judge", "actor", "critic"],
+        judge_engine: "mock",
+        actor_engine: "mock",
+        critic_engine: "mock"
+      }
+    });
+    await manager.updateTaskStatus(task, "failed");
+    const lease = await claimTaskRunLease(task.dir, { ownerId: "other-live-tui" });
+    const orchestrator = new Orchestrator(config, manager, new Map([["mock", new MockWorkerAdapter()]]));
+
+    try {
+      await expect(orchestrator.retryTask({ taskId: task.id, cwd: root }))
+        .rejects.toThrow("Task is already running in another parallel-codex-tui process");
+      expect(await pathExists(join(task.dir, "turns", "0002"))).toBe(false);
+    } finally {
+      await lease.release();
+    }
   });
 
   it("retries a failed single-feature Critic without rerunning its completed Actor", async () => {

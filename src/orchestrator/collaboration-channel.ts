@@ -1,19 +1,8 @@
 import { join } from "node:path";
 import { appendJsonLine, ensureDir, pathExists, writeJson, writeText } from "../core/file-store.js";
 import type { TaskSession, TaskTurn } from "../core/session-manager.js";
-import type { WorkerRole } from "../domain/schemas.js";
+import type { FeatureState, WorkerRole } from "../domain/schemas.js";
 import type { FeatureDefinition } from "./feature-plan.js";
-
-export type FeatureState =
-  | "created"
-  | "actor_running"
-  | "critic_running"
-  | "revision_needed"
-  | "integrating"
-  | "verifying"
-  | "approved"
-  | "failed"
-  | "cancelled";
 
 export interface FeatureChannel {
   id: string;

@@ -2,6 +2,7 @@ import { readdir } from "node:fs/promises";
 import { join } from "node:path";
 import type { AppConfig } from "../core/config.js";
 import { appendJsonLine, ensureDir, pathExists, readJson, readTextIfExists, removeIfExists, writeJson, writeText } from "../core/file-store.js";
+import { claimTaskRunLease } from "../core/process-ownership.js";
 import { routerRuntimeDir } from "../core/paths.js";
 import { classifyRouterFailure } from "../core/router-audit.js";
 import { routeRequestWithCodex, routerProxyConfigured, type CodexRouteRunner } from "../core/router.js";
@@ -221,7 +222,7 @@ export class Orchestrator {
       routePath: join(task.dir, "turns", "0001", "route.json")
     };
 
-    return this.runInitialTask(input, task, route, turn, workers);
+    return this.withTaskRunLease(task, () => this.runInitialTask(input, task, route, turn, workers));
   }
 
   async handleTaskTurn(input: HandleTaskTurnInput): Promise<HandleRequestResult> {
@@ -241,12 +242,14 @@ export class Orchestrator {
     if (route.mode === "simple") {
       return this.answerTaskQuestion(input);
     }
-    const turn = await this.sessions.appendTurn(task, {
-      request: input.request,
-      route
+    return this.withTaskRunLease(task, async () => {
+      const turn = await this.sessions.appendTurn(task, {
+        request: input.request,
+        route
+      });
+      const workers: WorkerLogRef[] = [];
+      return this.runPairTask(input, task, route, turn, workers);
     });
-    const workers: WorkerLogRef[] = [];
-    return this.runPairTask(input, task, route, turn, workers);
   }
 
   async retryTask(input: RetryTaskInput): Promise<HandleRequestResult> {
@@ -276,12 +279,14 @@ export class Orchestrator {
     };
     const workers: WorkerLogRef[] = [];
 
-    await this.sessions.recordLatestRoute(task, route);
-    await this.sessions.appendEvent(task, "task.retrying", `Retrying turn ${turn.turnId}`);
-    input.onRoute?.(route);
-    return turn.turnId === "0001"
-      ? this.runInitialTask(executionInput, task, route, turn, workers)
-      : this.runPairTask(executionInput, task, route, turn, workers);
+    return this.withTaskRunLease(task, async () => {
+      await this.sessions.recordLatestRoute(task, route);
+      await this.sessions.appendEvent(task, "task.retrying", `Retrying turn ${turn.turnId}`);
+      input.onRoute?.(route);
+      return turn.turnId === "0001"
+        ? this.runInitialTask(executionInput, task, route, turn, workers)
+        : this.runPairTask(executionInput, task, route, turn, workers);
+    });
   }
 
   async canRetryTask(taskId: string): Promise<boolean> {
@@ -312,6 +317,15 @@ export class Orchestrator {
       featureId,
       role: active.role
     };
+  }
+
+  private async withTaskRunLease<Result>(task: TaskSession, run: () => Promise<Result>): Promise<Result> {
+    const lease = await claimTaskRunLease(task.dir);
+    try {
+      return await run();
+    } finally {
+      await lease.release();
+    }
   }
 
   async routeTaskFollowUp(input: HandleTaskQuestionInput): Promise<TaskFollowUpRouteResult> {

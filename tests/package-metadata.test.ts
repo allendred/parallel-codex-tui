@@ -224,6 +224,10 @@ describe("package metadata", () => {
     expect(readme).toContain("`Ctrl+R` retries the cancelled task with persisted worker sessions");
     expect(readme).toContain("an unchanged in-progress wave reuses successful Actor and Critic checkpoints");
     expect(readme).toContain("the stale wave checkpoint is rejected and rebuilt from the current project");
+    expect(readme).toContain("Every complex run holds a task-owned `run-owner.json` lease");
+    expect(readme).toContain("persist `process.json` with their PID and OS process-start fingerprint");
+    expect(readme).toContain("A reused PID with a different start fingerprint is never signalled");
+    expect(readme).toContain("`checkpoints kept · Ctrl+R resume`");
     expect(readme).toContain("Checkpoint load, reuse, and recovery events appear in the collaboration timeline");
     expect(readme).toContain("press `C` to open the file-backed Actor/Critic collaboration timeline");
     expect(readme).toContain("`dialogue/actor-critic.jsonl`, feature status, Critic findings, Actor replies, and Wave events");

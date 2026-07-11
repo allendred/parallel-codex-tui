@@ -1,0 +1,315 @@
+import { execFile } from "node:child_process";
+import { randomUUID } from "node:crypto";
+import { readFile, writeFile } from "node:fs/promises";
+import { join } from "node:path";
+import { promisify } from "node:util";
+import { z } from "zod";
+import { ensureDir, pathExists, readJson, removeIfExists, writeJson } from "./file-store.js";
+
+const execFileAsync = promisify(execFile);
+
+const TaskRunOwnerSchema = z.object({
+  version: z.literal(1),
+  owner_id: z.string().min(1),
+  pid: z.number().int().positive(),
+  acquired_at: z.string().datetime(),
+  process_start_token: z.string().min(1).optional()
+});
+
+const WorkerProcessRecordSchema = z.object({
+  version: z.literal(1),
+  worker_id: z.string().min(1),
+  pid: z.number().int().positive(),
+  process_group_id: z.number().int().positive().optional(),
+  process_start_token: z.string().min(1).optional(),
+  owner_pid: z.number().int().positive(),
+  command: z.string().min(1),
+  started_at: z.string().datetime()
+});
+
+export type TaskRunOwner = z.infer<typeof TaskRunOwnerSchema>;
+export type WorkerProcessRecord = z.infer<typeof WorkerProcessRecordSchema>;
+export type TaskRunLeaseInspection = {
+  state: "missing" | "active" | "stale";
+  owner: TaskRunOwner | null;
+};
+export type WorkerProcessTermination = "missing" | "not-running" | "identity-mismatch" | "terminated";
+
+export interface ClaimTaskRunLeaseOptions {
+  ownerId?: string;
+  pid?: number;
+  now?: () => Date;
+}
+
+export interface TaskRunLease {
+  owner: TaskRunOwner;
+  release(): Promise<void>;
+}
+
+export interface WriteWorkerProcessRecordInput {
+  workerId: string;
+  pid: number;
+  command: string;
+  processGroupId?: number;
+  now?: () => Date;
+}
+
+export function taskRunOwnerPath(taskDir: string): string {
+  return join(taskDir, "run-owner.json");
+}
+
+export function workerProcessRecordPath(workerDir: string): string {
+  return join(workerDir, "process.json");
+}
+
+export async function claimTaskRunLease(
+  taskDir: string,
+  options: ClaimTaskRunLeaseOptions = {}
+): Promise<TaskRunLease> {
+  const pid = options.pid ?? process.pid;
+  const owner: TaskRunOwner = TaskRunOwnerSchema.parse({
+    version: 1,
+    owner_id: options.ownerId ?? randomUUID(),
+    pid,
+    acquired_at: (options.now ?? (() => new Date()))().toISOString(),
+    ...await optionalProcessStartToken(pid)
+  });
+  const path = taskRunOwnerPath(taskDir);
+  await ensureDir(taskDir);
+
+  for (let attempt = 0; attempt < 4; attempt += 1) {
+    if (await writeJsonExclusive(path, owner)) {
+      return {
+        owner,
+        release: () => removeOwnedLease(path, owner.owner_id)
+      };
+    }
+    const inspection = await inspectTaskRunLease(taskDir);
+    if (inspection.state === "active") {
+      throw new Error(`Task is already running in another parallel-codex-tui process (pid ${inspection.owner?.pid ?? "unknown"}).`);
+    }
+    await removeOwnedLease(path, inspection.owner?.owner_id);
+  }
+
+  throw new Error("Could not claim task run ownership after concurrent updates.");
+}
+
+export async function inspectTaskRunLease(taskDir: string): Promise<TaskRunLeaseInspection> {
+  const path = taskRunOwnerPath(taskDir);
+  if (!(await pathExists(path))) {
+    return { state: "missing", owner: null };
+  }
+  const owner = await readValidJson(path, TaskRunOwnerSchema);
+  if (!owner) {
+    return { state: "stale", owner: null };
+  }
+  if (!processIsAlive(owner.pid)) {
+    return { state: "stale", owner };
+  }
+  if (owner.process_start_token) {
+    const currentToken = await readProcessStartToken(owner.pid);
+    if (!currentToken || currentToken !== owner.process_start_token) {
+      return { state: "stale", owner };
+    }
+  }
+  return { state: "active", owner };
+}
+
+export async function clearStaleTaskRunLease(taskDir: string, owner?: TaskRunOwner | null): Promise<void> {
+  await removeOwnedLease(taskRunOwnerPath(taskDir), owner?.owner_id);
+}
+
+export async function writeWorkerProcessRecord(
+  workerDir: string,
+  input: WriteWorkerProcessRecordInput
+): Promise<WorkerProcessRecord> {
+  const record = WorkerProcessRecordSchema.parse({
+    version: 1,
+    worker_id: input.workerId,
+    pid: input.pid,
+    ...(input.processGroupId ? { process_group_id: input.processGroupId } : {}),
+    owner_pid: process.pid,
+    command: input.command,
+    started_at: (input.now ?? (() => new Date()))().toISOString(),
+    ...await optionalProcessStartToken(input.pid)
+  });
+  await writeJson(workerProcessRecordPath(workerDir), record);
+  return record;
+}
+
+export async function clearWorkerProcessRecord(workerDir: string): Promise<void> {
+  await removeIfExists(workerProcessRecordPath(workerDir));
+}
+
+export async function terminateOwnedWorkerProcess(workerDir: string): Promise<WorkerProcessTermination> {
+  const path = workerProcessRecordPath(workerDir);
+  if (!(await pathExists(path))) {
+    return "missing";
+  }
+  const record = await readValidJson(path, WorkerProcessRecordSchema);
+  if (!record) {
+    return "identity-mismatch";
+  }
+  if (!processIsAlive(record.pid)) {
+    await removeIfExists(path);
+    return "not-running";
+  }
+  if (!record.process_start_token) {
+    return "identity-mismatch";
+  }
+  const currentToken = await readProcessStartToken(record.pid);
+  if (!currentToken || currentToken !== record.process_start_token) {
+    return "identity-mismatch";
+  }
+
+  signalOwnedProcess(record, "SIGTERM");
+  if (!(await waitForOwnedProcessExit(record, 1500))) {
+    if (!targetsProcessGroup(record)) {
+      const tokenBeforeKill = await readProcessStartToken(record.pid);
+      if (tokenBeforeKill !== record.process_start_token) {
+        return "identity-mismatch";
+      }
+    }
+    signalOwnedProcess(record, "SIGKILL");
+    await waitForOwnedProcessExit(record, 500);
+  }
+  if (!ownedProcessIsAlive(record)) {
+    await removeIfExists(path);
+  }
+  return "terminated";
+}
+
+export function processIsAlive(pid: number): boolean {
+  if (!Number.isInteger(pid) || pid <= 0) {
+    return false;
+  }
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === "EPERM";
+  }
+}
+
+export async function readProcessStartToken(pid: number): Promise<string | null> {
+  if (!processIsAlive(pid)) {
+    return null;
+  }
+  if (process.platform === "linux") {
+    try {
+      const stat = await readFile(`/proc/${pid}/stat`, "utf8");
+      const fields = stat.slice(stat.lastIndexOf(") ") + 2).trim().split(/\s+/);
+      const startTick = fields[19];
+      if (startTick) {
+        return `linux:${startTick}`;
+      }
+    } catch {
+      // Fall through to ps when procfs is unavailable.
+    }
+  }
+  if (process.platform !== "win32") {
+    try {
+      const result = await execFileAsync("ps", ["-o", "lstart=", "-p", String(pid)], {
+        encoding: "utf8",
+        timeout: 1000
+      });
+      const value = String(result.stdout).trim().replace(/\s+/g, " ");
+      return value ? `ps:${value}` : null;
+    } catch {
+      return null;
+    }
+  }
+  return null;
+}
+
+async function optionalProcessStartToken(pid: number): Promise<{ process_start_token?: string }> {
+  const processStartToken = await readProcessStartToken(pid);
+  return processStartToken ? { process_start_token: processStartToken } : {};
+}
+
+async function writeJsonExclusive(path: string, value: unknown): Promise<boolean> {
+  try {
+    await writeFile(path, `${JSON.stringify(value, null, 2)}\n`, { encoding: "utf8", flag: "wx" });
+    return true;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "EEXIST") {
+      return false;
+    }
+    throw error;
+  }
+}
+
+async function removeOwnedLease(path: string, ownerId?: string): Promise<void> {
+  if (ownerId) {
+    const current = await readValidJson(path, TaskRunOwnerSchema);
+    if (!current || current.owner_id !== ownerId) {
+      return;
+    }
+  }
+  await removeIfExists(path);
+}
+
+async function readValidJson<TSchema extends z.ZodTypeAny>(
+  path: string,
+  schema: TSchema
+): Promise<z.output<TSchema> | null> {
+  try {
+    return await readJson(path, schema);
+  } catch {
+    return null;
+  }
+}
+
+function signalProcess(pid: number, signal: NodeJS.Signals): void {
+  try {
+    process.kill(pid, signal);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ESRCH") {
+      throw error;
+    }
+  }
+}
+
+function signalOwnedProcess(record: WorkerProcessRecord, signal: NodeJS.Signals): void {
+  if (targetsProcessGroup(record)) {
+    try {
+      process.kill(-record.process_group_id!, signal);
+      return;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ESRCH") {
+        throw error;
+      }
+    }
+  }
+  signalProcess(record.pid, signal);
+}
+
+function targetsProcessGroup(record: WorkerProcessRecord): record is WorkerProcessRecord & { process_group_id: number } {
+  return Boolean(record.process_group_id && process.platform !== "win32");
+}
+
+function ownedProcessIsAlive(record: WorkerProcessRecord): boolean {
+  return targetsProcessGroup(record)
+    ? processGroupIsAlive(record.process_group_id)
+    : processIsAlive(record.pid);
+}
+
+function processGroupIsAlive(processGroupId: number): boolean {
+  try {
+    process.kill(-processGroupId, 0);
+    return true;
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === "EPERM";
+  }
+}
+
+async function waitForOwnedProcessExit(record: WorkerProcessRecord, timeoutMs: number): Promise<boolean> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (!ownedProcessIsAlive(record)) {
+      return true;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 40));
+  }
+  return !ownedProcessIsAlive(record);
+}
