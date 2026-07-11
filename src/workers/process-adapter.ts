@@ -230,7 +230,10 @@ export class ProcessWorkerAdapter implements WorkerAdapter {
         await clearWorkerProcessRecord(runSpec.filesDir);
         const finalResult: WorkerResult = {
           ...result,
-          ...(terminalState === "cancelled" ? { cancelled: true } : {})
+          ...(terminalState === "cancelled" ? { cancelled: true } : {}),
+          ...(terminalState === "failed"
+            ? { failure: { phase, summary } }
+            : {})
         };
         resolve({
           result: finalResult,
@@ -241,6 +244,16 @@ export class ProcessWorkerAdapter implements WorkerAdapter {
 
       const resetIdleTimeout = (): void => {
         if (!runSpec.idleTimeoutMs || runSpec.idleTimeoutMs <= 0 || settled || terminalState) {
+          return;
+        }
+        if (!sawOutput) {
+          return;
+        }
+        if (
+          runSpec.timeoutMs
+          && runSpec.timeoutMs > 0
+          && runSpec.idleTimeoutMs >= runSpec.timeoutMs
+        ) {
           return;
         }
 
@@ -371,7 +384,11 @@ export class ProcessWorkerAdapter implements WorkerAdapter {
         }, runSpec.timeoutMs);
       }
 
-      if (runSpec.firstOutputTimeoutMs && runSpec.firstOutputTimeoutMs > 0) {
+      if (
+        runSpec.firstOutputTimeoutMs
+        && runSpec.firstOutputTimeoutMs > 0
+        && (!runSpec.timeoutMs || runSpec.timeoutMs <= 0 || runSpec.firstOutputTimeoutMs < runSpec.timeoutMs)
+      ) {
         firstOutputTimeout = setTimeout(() => {
           if (sawOutput || settled) {
             return;
@@ -384,8 +401,6 @@ export class ProcessWorkerAdapter implements WorkerAdapter {
         }, runSpec.firstOutputTimeoutMs);
       }
 
-      void setStatus(runSpec, "running", "process-running", `${this.command} running`, detectedNativeSessionId);
-      resetIdleTimeout();
       if (runSpec.signal?.aborted) {
         abortListener();
       } else {
@@ -583,7 +598,7 @@ function shouldFallbackToNewNativeSession(
   return (
     attempt.launch.isResume &&
     !attempt.result.cancelled &&
-    attempt.result.exitCode !== 0 &&
+    (Boolean(attempt.result.failure) || attempt.result.exitCode !== 0) &&
     nativeSessionConfig?.fallback === "new" &&
     isUnrecoverableNativeResumeOutput(attempt.output)
   );

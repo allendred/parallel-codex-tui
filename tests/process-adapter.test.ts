@@ -322,6 +322,41 @@ describe("ProcessWorkerAdapter", () => {
     expect(result.exitCode).toBe(0);
   });
 
+  it("keeps a silent worker in starting state until its first output", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pct-process-starting-state-"));
+    const filesDir = join(root, "actor-mock");
+    const promptPath = join(filesDir, "prompt.md");
+    const outputLogPath = join(filesDir, "output.log");
+    const statusPath = join(filesDir, "status.json");
+    const script = "setTimeout(()=>console.log('first output'),400);setTimeout(()=>process.exit(0),500)";
+
+    await writeText(promptPath, "wait for output");
+    const adapter = new ProcessWorkerAdapter(process.execPath, ["-e", script]);
+    const running = adapter.run({
+      workerId: "actor-starting",
+      role: "actor",
+      engine: "mock",
+      cwd: root,
+      filesDir,
+      promptPath,
+      outputLogPath,
+      statusPath,
+      prompt: "wait for output",
+      firstOutputTimeoutMs: 1000,
+      idleTimeoutMs: 1000
+    });
+
+    await new Promise((resolve) => setTimeout(resolve, 120));
+    await expect(readJson(statusPath, WorkerStatusSchema)).resolves.toMatchObject({
+      state: "starting",
+      phase: "process-starting"
+    });
+    await expect(waitForStatusPhase(statusPath, "process-output")).resolves.toMatchObject({
+      state: "running"
+    });
+    await expect(running).resolves.toMatchObject({ exitCode: 0 });
+  });
+
   it("records the owned child identity while running and clears it after exit", async () => {
     const root = await mkdtemp(join(tmpdir(), "pct-process-ownership-"));
     const filesDir = join(root, "actor-mock");
@@ -462,11 +497,16 @@ describe("ProcessWorkerAdapter", () => {
     });
 
     expect(result.exitCode).toBe(0);
+    expect(result.failure).toEqual({
+      phase: "process-timeout",
+      summary: `${process.execPath} exceeded 1000ms`
+    });
     expect(await readTextIfExists(outputLogPath)).toContain("Process timed out after 1000ms");
     await expect(readJson(statusPath, WorkerStatusSchema)).resolves.toMatchObject({
       state: "failed",
       phase: "process-timeout"
     });
+    expect(await pathExists(workerProcessRecordPath(filesDir))).toBe(false);
   });
 
   it("force kills a timed-out worker that ignores SIGTERM", async () => {
@@ -494,6 +534,10 @@ describe("ProcessWorkerAdapter", () => {
     });
 
     expect(result.signal).toBe("SIGKILL");
+    expect(result.failure).toEqual({
+      phase: "process-timeout",
+      summary: `${process.execPath} exceeded 1000ms`
+    });
     await expect(readJson(statusPath, WorkerStatusSchema)).resolves.toMatchObject({
       state: "failed",
       phase: "process-timeout"
@@ -511,7 +555,7 @@ describe("ProcessWorkerAdapter", () => {
 
     await writeText(promptPath, prompt);
     const adapter = new ProcessWorkerAdapter(process.execPath, ["-e", script]);
-    await adapter.run({
+    const result = await adapter.run({
       workerId: "actor-input-error",
       role: "actor",
       engine: "mock",
@@ -524,6 +568,7 @@ describe("ProcessWorkerAdapter", () => {
       timeoutMs: 2000
     });
 
+    expect(result.failure?.phase).toBe("process-input-error");
     expect(await readTextIfExists(outputLogPath)).toContain("Process input failed");
     await expect(readJson(statusPath, WorkerStatusSchema)).resolves.toMatchObject({
       state: "failed",
@@ -537,7 +582,7 @@ describe("ProcessWorkerAdapter", () => {
     const promptPath = join(filesDir, "prompt.md");
     const outputLogPath = join(filesDir, "output.log");
     const statusPath = join(filesDir, "status.json");
-    const script = "process.on('SIGTERM',()=>process.exit(0));setInterval(() => {}, 1000)";
+    const script = "console.log('worker started');process.on('SIGTERM',()=>process.exit(0));setInterval(() => {}, 1000)";
 
     await writeText(promptPath, "hello process");
 
@@ -556,6 +601,10 @@ describe("ProcessWorkerAdapter", () => {
     });
 
     expect(result.exitCode).toBe(0);
+    expect(result.failure).toEqual({
+      phase: "process-idle-timeout",
+      summary: `${process.execPath} produced no output for 1000ms`
+    });
     expect(await readTextIfExists(outputLogPath)).toContain("Process idle timed out after 1000ms");
 
     const status = await readJson(statusPath, WorkerStatusSchema);
@@ -589,11 +638,81 @@ describe("ProcessWorkerAdapter", () => {
     });
 
     expect(result.exitCode).toBe(0);
+    expect(result.failure).toEqual({
+      phase: "process-first-output-timeout",
+      summary: `${process.execPath} produced no first output for 1000ms`
+    });
     expect(await readTextIfExists(outputLogPath)).toContain("Process produced no first output after 1000ms");
 
     const status = await readJson(statusPath, WorkerStatusSchema);
     expect(status.state).toBe("failed");
     expect(status.phase).toBe("process-first-output-timeout");
+  });
+
+  it("does not let the idle watchdog preempt the first-output deadline", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pct-process-watchdog-order-"));
+    const filesDir = join(root, "critic-mock");
+    const promptPath = join(filesDir, "prompt.md");
+    const outputLogPath = join(filesDir, "output.log");
+    const statusPath = join(filesDir, "status.json");
+    const script = "process.on('SIGTERM',()=>process.exit(0));setInterval(() => {}, 1000)";
+
+    await writeText(promptPath, "review this");
+
+    const adapter = new ProcessWorkerAdapter(process.execPath, ["-e", script]);
+    const result = await adapter.run({
+      workerId: "critic-watchdog-order",
+      role: "critic",
+      engine: "mock",
+      cwd: root,
+      filesDir,
+      promptPath,
+      outputLogPath,
+      statusPath,
+      prompt: "review this",
+      firstOutputTimeoutMs: 400,
+      idleTimeoutMs: 100,
+      timeoutMs: 1000
+    });
+
+    expect(result.failure?.phase).toBe("process-first-output-timeout");
+    expect(await readJson(statusPath, WorkerStatusSchema)).toMatchObject({
+      state: "failed",
+      phase: "process-first-output-timeout"
+    });
+  });
+
+  it("keeps the total deadline authoritative during silent startup", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pct-process-watchdog-total-"));
+    const filesDir = join(root, "actor-mock");
+    const promptPath = join(filesDir, "prompt.md");
+    const outputLogPath = join(filesDir, "output.log");
+    const statusPath = join(filesDir, "status.json");
+    const script = "process.on('SIGTERM',()=>process.exit(0));setInterval(() => {}, 1000)";
+
+    await writeText(promptPath, "implement this");
+
+    const adapter = new ProcessWorkerAdapter(process.execPath, ["-e", script]);
+    const result = await adapter.run({
+      workerId: "actor-watchdog-total",
+      role: "actor",
+      engine: "mock",
+      cwd: root,
+      filesDir,
+      promptPath,
+      outputLogPath,
+      statusPath,
+      prompt: "implement this",
+      firstOutputTimeoutMs: 1000,
+      idleTimeoutMs: 100,
+      timeoutMs: 300
+    });
+
+    expect(result.failure?.phase).toBe("process-timeout");
+    expect(await readJson(statusPath, WorkerStatusSchema)).toMatchObject({
+      state: "failed",
+      phase: "process-timeout"
+    });
   });
 
   it("uses resume args when a native session is present", async () => {

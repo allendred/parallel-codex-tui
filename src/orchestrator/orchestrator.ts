@@ -2187,6 +2187,9 @@ function ensureWorkerSuccess(result: WorkerResult): void {
   if (result.cancelled) {
     throw cancellationError();
   }
+  if (result.failure) {
+    throw new Error(`${result.workerId} failed during ${result.failure.phase}: ${result.failure.summary}`);
+  }
   if (result.exitCode !== 0) {
     throw new Error(`${result.workerId} failed with exit code ${result.exitCode}`);
   }

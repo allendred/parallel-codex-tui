@@ -2269,6 +2269,61 @@ describe("Orchestrator", () => {
     expect(meta.status).toBe("failed");
   });
 
+  it("stops before Critic when a timed-out worker handles SIGTERM with exit code zero", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pct-orch-logical-worker-failure-"));
+    const config = mockConfig(root);
+    const manager = new SessionManager({
+      projectRoot: root,
+      dataDir: config.dataDir,
+      now: () => new Date("2026-06-30T03:30:00.000Z"),
+      randomId: () => "logical-failure"
+    });
+    const script = [
+      "const fs = require('node:fs');",
+      "const path = require('node:path');",
+      "const role = process.env.PARALLEL_CODEX_ROLE;",
+      "const dir = process.env.PARALLEL_CODEX_FILES_DIR;",
+      "process.stdin.resume();",
+      "process.stdin.on('end', () => {",
+      "  if (role === 'judge') {",
+      "    fs.writeFileSync(path.join(dir, 'requirements.md'), '# Requirements\\n\\n- [R-001] Preserve watchdog failures.\\n');",
+      "    fs.writeFileSync(path.join(dir, 'plan.md'), '# Plan\\n\\n1. [P-001] Run the Actor.\\n');",
+      "    fs.writeFileSync(path.join(dir, 'acceptance.md'), '# Acceptance\\n\\n- [A-001] [R-001] A timed-out Actor blocks Critic.\\n');",
+      "    fs.writeFileSync(path.join(dir, 'actor-brief.md'), '# Actor Brief\\n\\nImplement the requested behavior.\\n');",
+      "    fs.writeFileSync(path.join(dir, 'critic-brief.md'), '# Critic Brief\\n\\nReview only successful Actor work.\\n');",
+      "    return;",
+      "  }",
+      "  if (role === 'actor') {",
+      "    fs.writeFileSync(path.join(dir, 'worklog.md'), '# Worklog\\n\\nActor reached the deadline.\\n');",
+      "    process.on('SIGTERM', () => process.exit(0));",
+      "    setInterval(() => {}, 1000);",
+      "    return;",
+      "  }",
+      "  fs.writeFileSync(path.join(dir, 'review.md'), 'APPROVED\\n');",
+      "});"
+    ].join("");
+    const adapter = new ProcessWorkerAdapter(process.execPath, ["-e", script], "mock", {
+      timeoutMs: 800
+    });
+    const orchestrator = new Orchestrator(config, manager, new Map([["mock", adapter]]));
+
+    await expect(orchestrator.handleRequest({
+      request: "实现一个不能忽略超时的功能",
+      cwd: root
+    })).rejects.toThrow("actor-mock failed during process-timeout");
+
+    const taskDir = join(root, ".parallel-codex", "sessions", "task-20260630-033000-logical-failure");
+    expect(await pathExists(join(taskDir, "critic-mock"))).toBe(false);
+    await expect(readJson(join(taskDir, "actor-mock", "status.json"), WorkerStatusSchema)).resolves.toMatchObject({
+      state: "failed",
+      phase: "process-timeout"
+    });
+    await expect(readJson(join(taskDir, "meta.json"), TaskMetaSchema)).resolves.toMatchObject({
+      status: "failed"
+    });
+    await expect(orchestrator.canRetryTask("task-20260630-033000-logical-failure")).resolves.toBe(true);
+  }, 5000);
+
   it("retries a failed task in the same task and turn with its native worker session", async () => {
     const root = await mkdtemp(join(tmpdir(), "pct-orch-retry-"));
     const config = mockConfig(root);

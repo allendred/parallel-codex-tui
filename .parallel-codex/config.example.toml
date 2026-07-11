@@ -33,6 +33,9 @@ maxParallelFeatures = 3
 command = "codex"
 # Automated Judge/Actor/Critic runs enforce workspace-write even if private args request a broader sandbox.
 args = ["exec", "--skip-git-repo-check", "--sandbox", "workspace-write", "--color", "never", "-"]
+# timeoutMs is the hard ceiling; first output owns silent startup and idle starts after actual output.
+# timeoutMs = 2700000
+# idleTimeoutMs = 300000
 firstOutputTimeoutMs = 120000
 
 # Automated workers and native attach use the same model args and env tables.
@@ -54,6 +57,9 @@ fallback = "new"
 command = "claude"
 # Automated isolated roles enforce acceptEdits and remove permission-bypass flags.
 args = ["--print", "--permission-mode", "acceptEdits", "--output-format", "text"]
+# timeoutMs is the hard ceiling; first output owns silent startup and idle starts after actual output.
+# timeoutMs = 2700000
+# idleTimeoutMs = 300000
 firstOutputTimeoutMs = 120000
 
 [workers.claude.interactive]

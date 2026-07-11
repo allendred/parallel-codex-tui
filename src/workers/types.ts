@@ -44,6 +44,10 @@ export interface WorkerResult {
   exitCode: number;
   signal: NodeJS.Signals | null;
   cancelled?: boolean;
+  failure?: {
+    phase: string;
+    summary: string;
+  };
 }
 
 export interface WorkerAdapter {
