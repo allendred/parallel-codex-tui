@@ -37,7 +37,11 @@ describe("WorkerOverviewView", () => {
           workers: WorkerLogRef[],
           selectedIndex: number,
           height: number,
-          terminalWidth: number
+          terminalWidth: number,
+          activity?: {
+            nowMs: number;
+            policies: Record<string, { idleTimeoutMs?: number; firstOutputTimeoutMs?: number }>;
+          }
         ) => Array<{ text: string; workerIndex?: number }>;
       }
     ).workerOverviewDisplayLines;
@@ -53,19 +57,126 @@ describe("WorkerOverviewView", () => {
     const overflow: string[] = [];
 
     for (let width = 8; width <= 100; width += 1) {
-      for (const line of displayLines?.(manyWorkers, 13, 6, width) ?? []) {
+      for (const line of displayLines?.(manyWorkers, 13, 6, width, activityOptions()) ?? []) {
         if (displayWidth(line.text) > Math.max(1, width - 2)) {
           overflow.push(`${width}:${displayWidth(line.text)}:${line.text}`);
         }
       }
     }
 
-    const visible = displayLines?.(manyWorkers, 13, 6, 80) ?? [];
+    const visible = displayLines?.(manyWorkers, 13, 6, 80, activityOptions()) ?? [];
     expect(overflow).toEqual([]);
     expect(visible.some((line) => line.workerIndex === 13 && line.text.startsWith("> "))).toBe(true);
     expect(visible.some((line) => line.workerIndex === 0)).toBe(false);
   });
+
+  it("turns Worker heartbeat timestamps into live first-output and idle deadlines", () => {
+    const activityLine = (
+      overviewModule as typeof overviewModule & {
+        workerOverviewActivityLine?: (
+          worker: WorkerLogRef,
+          nowMs: number,
+          policy: { idleTimeoutMs?: number; firstOutputTimeoutMs?: number }
+        ) => { text: string; tone: string } | null;
+      }
+    ).workerOverviewActivityLine;
+
+    expect(activityLine).toBeTypeOf("function");
+    expect(activityLine?.(
+      worker({
+        id: "healthy",
+        label: "Actor (codex)",
+        state: "running",
+        phase: "process-output",
+        summary: "working"
+      }),
+      Date.parse("2026-07-11T08:01:00.000Z"),
+      { idleTimeoutMs: 5 * 60 * 1000 }
+    )).toEqual({
+      text: "activity · output 1m ago · idle timeout in 4m",
+      tone: "muted"
+    });
+    expect(activityLine?.(
+      worker({
+        id: "running",
+        label: "Actor (codex)",
+        state: "running",
+        phase: "process-output",
+        summary: "still working"
+      }),
+      Date.parse("2026-07-11T08:04:10.000Z"),
+      { idleTimeoutMs: 5 * 60 * 1000 }
+    )).toEqual({
+      text: "activity · output 4m 10s ago · idle timeout in 50s",
+      tone: "warning"
+    });
+    expect(activityLine?.(
+      worker({
+        id: "starting",
+        label: "Critic (codex)",
+        role: "critic",
+        state: "starting",
+        phase: "process-starting",
+        summary: "starting"
+      }),
+      Date.parse("2026-07-11T08:01:45.000Z"),
+      { firstOutputTimeoutMs: 2 * 60 * 1000 }
+    )).toEqual({
+      text: "activity · started 1m 45s ago · first output timeout in 15s",
+      tone: "warning"
+    });
+    expect(activityLine?.(
+      worker({
+        id: "overdue",
+        label: "Actor (codex)",
+        state: "running",
+        phase: "process-output",
+        summary: "quiet"
+      }),
+      Date.parse("2026-07-11T08:05:05.000Z"),
+      { idleTimeoutMs: 5 * 60 * 1000 }
+    )).toEqual({
+      text: "activity · no output for 5m 5s · idle timeout overdue 5s",
+      tone: "danger"
+    });
+    expect(activityLine?.(workers()[0]!, Date.parse("2026-07-11T08:10:00.000Z"), {
+      idleTimeoutMs: 5 * 60 * 1000
+    })).toBeNull();
+  });
+
+  it("shows activity only for the selected active Worker", () => {
+    const WorkerOverviewView = (
+      overviewModule as typeof overviewModule & {
+        WorkerOverviewView?: React.ComponentType<Record<string, unknown>>;
+      }
+    ).WorkerOverviewView;
+    const view = render(React.createElement(WorkerOverviewView!, {
+      workers: workers(),
+      selectedIndex: 1,
+      height: 8,
+      terminalWidth: 100,
+      nowMs: Date.parse("2026-07-11T08:04:10.000Z"),
+      activityPolicies: activityOptions().policies
+    }));
+    const frame = view.lastFrame() ?? "";
+
+    expect(frame).toContain("> Actor (codex) · Build board");
+    expect(frame).toContain("activity · output 4m 10s ago · idle timeout in 50s");
+    expect(frame.match(/activity ·/g)).toHaveLength(1);
+    view.unmount();
+  });
 });
+
+function activityOptions() {
+  return {
+    nowMs: Date.parse("2026-07-11T08:04:10.000Z"),
+    policies: {
+      codex: { idleTimeoutMs: 5 * 60 * 1000, firstOutputTimeoutMs: 2 * 60 * 1000 },
+      claude: { idleTimeoutMs: 5 * 60 * 1000, firstOutputTimeoutMs: 2 * 60 * 1000 },
+      mock: {}
+    }
+  };
+}
 
 function workers(): WorkerLogRef[] {
   return [

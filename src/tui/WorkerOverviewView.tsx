@@ -1,7 +1,7 @@
 import React from "react";
 import { Box, Text, type TextProps } from "ink";
 import type { WorkerLogRef } from "../orchestrator/orchestrator.js";
-import type { WorkerState } from "../domain/schemas.js";
+import type { EngineName, WorkerState } from "../domain/schemas.js";
 import { compactEndByDisplayWidth, displayWidth } from "./display-width.js";
 import { TUI_THEME } from "./theme.js";
 
@@ -13,9 +13,18 @@ export interface WorkerOverviewLine {
   workerIndex?: number;
 }
 
+export interface WorkerActivityPolicy {
+  idleTimeoutMs?: number;
+  firstOutputTimeoutMs?: number;
+}
+
+export type WorkerActivityPolicies = Partial<Record<EngineName, WorkerActivityPolicy>>;
+
 export interface WorkerOverviewViewProps {
   workers: WorkerLogRef[];
   selectedIndex: number;
+  nowMs?: number;
+  activityPolicies?: WorkerActivityPolicies;
   height?: number;
   terminalWidth?: number;
 }
@@ -23,12 +32,17 @@ export interface WorkerOverviewViewProps {
 export function WorkerOverviewView({
   workers,
   selectedIndex,
+  nowMs = Date.now(),
+  activityPolicies = {},
   height = 20,
   terminalWidth = process.stdout.columns || 120
 }: WorkerOverviewViewProps) {
   const viewportHeight = Math.max(1, height);
   const width = workerOverviewContentWidth(terminalWidth);
-  const lines = workerOverviewDisplayLines(workers, selectedIndex, viewportHeight, terminalWidth);
+  const lines = workerOverviewDisplayLines(workers, selectedIndex, viewportHeight, terminalWidth, {
+    nowMs,
+    policies: activityPolicies
+  });
   const blankRows = Math.max(0, viewportHeight - lines.length);
 
   return (
@@ -49,7 +63,11 @@ export function workerOverviewDisplayLines(
   workers: WorkerLogRef[],
   selectedIndex: number,
   height: number,
-  terminalWidth: number
+  terminalWidth: number,
+  activity: { nowMs: number; policies: WorkerActivityPolicies } = {
+    nowMs: Date.now(),
+    policies: {}
+  }
 ): WorkerOverviewLine[] {
   const viewportHeight = Math.max(1, Math.trunc(height));
   const width = workerOverviewContentWidth(terminalWidth);
@@ -69,8 +87,20 @@ export function workerOverviewDisplayLines(
     return lines;
   }
 
+  if (slots === 0) {
+    return lines;
+  }
   const selected = clampWorkerIndex(selectedIndex, workers.length);
-  const visibleCount = Math.min(slots, workers.length);
+  const selectedWorker = workers[selected];
+  const selectedActivity = selectedWorker
+    ? workerOverviewActivityLine(
+        selectedWorker,
+        activity.nowMs,
+        activity.policies[selectedWorker.engine] ?? {}
+      )
+    : null;
+  const activityRows = selectedActivity && slots >= 2 ? 1 : 0;
+  const visibleCount = Math.min(Math.max(0, slots - activityRows), workers.length);
   const start = workerOverviewWindowStart(selected, workers.length, visibleCount);
   for (let index = start; index < start + visibleCount; index += 1) {
     const worker = workers[index];
@@ -83,9 +113,62 @@ export function workerOverviewDisplayLines(
       tone: workerOverviewStateTone(state),
       workerIndex: index
     });
+    if (index === selected && selectedActivity && activityRows > 0) {
+      lines.push({
+        text: fitWorkerOverviewText(`    ${selectedActivity.text}`, width),
+        tone: selectedActivity.tone,
+        workerIndex: index
+      });
+    }
   }
 
   return lines;
+}
+
+export function workerOverviewActivityLine(
+  worker: WorkerLogRef,
+  nowMs: number,
+  policy: WorkerActivityPolicy
+): Pick<WorkerOverviewLine, "text" | "tone"> | null {
+  const status = worker.runtimeStatus;
+  if (!status || (status.state !== "starting" && status.state !== "running")) {
+    return null;
+  }
+  const lastEventMs = Date.parse(status.last_event_at);
+  if (!Number.isFinite(lastEventMs)) {
+    return null;
+  }
+  const ageMs = Math.max(0, nowMs - lastEventMs);
+  const starting = status.state === "starting";
+  const limitMs = starting ? policy.firstOutputTimeoutMs : policy.idleTimeoutMs;
+  const activity = starting ? "started" : "output";
+  const timeout = starting ? "first output timeout" : "idle timeout";
+
+  if (!limitMs || limitMs <= 0) {
+    return {
+      text: `activity · ${activity} ${formatWorkerActivityDuration(ageMs)} ago · no ${timeout}`,
+      tone: "muted"
+    };
+  }
+
+  const remainingMs = limitMs - ageMs;
+  if (remainingMs <= 0) {
+    return {
+      text: [
+        "activity",
+        starting
+          ? `waiting for first output ${formatWorkerActivityDuration(ageMs)}`
+          : `no output for ${formatWorkerActivityDuration(ageMs)}`,
+        `${timeout} overdue ${formatWorkerActivityDuration(Math.abs(remainingMs))}`
+      ].join(" · "),
+      tone: "danger"
+    };
+  }
+
+  return {
+    text: `activity · ${activity} ${formatWorkerActivityDuration(ageMs)} ago · ${timeout} in ${formatWorkerActivityDuration(remainingMs)}`,
+    tone: remainingMs <= limitMs * 0.2 ? "warning" : "muted"
+  };
 }
 
 export function moveWorkerSelection(current: number, delta: number, workerCount: number, wrap = false): number {
@@ -177,6 +260,24 @@ function fitWorkerOverviewCandidates(candidates: string[], width: number): strin
 
 function fitWorkerOverviewText(text: string, width: number): string {
   return compactEndByDisplayWidth(text, Math.max(1, width));
+}
+
+function formatWorkerActivityDuration(durationMs: number): string {
+  const totalSeconds = Math.max(0, Math.floor(durationMs / 1000));
+  if (totalSeconds === 0) {
+    return "now";
+  }
+  if (totalSeconds < 60) {
+    return `${totalSeconds}s`;
+  }
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  if (minutes < 60) {
+    return seconds > 0 ? `${minutes}m ${seconds}s` : `${minutes}m`;
+  }
+  const hours = Math.floor(minutes / 60);
+  const remainingMinutes = minutes % 60;
+  return remainingMinutes > 0 ? `${hours}h ${remainingMinutes}m` : `${hours}h`;
 }
 
 function safeWorkerOverviewText(text: string): string {

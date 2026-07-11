@@ -71,6 +71,19 @@ describe("CLI Feature cancel smoke", () => {
 
       child.write("\x02");
       await waitForScreenText(() => screenWrites, screen, "F features");
+      for (let attempt = 0; attempt < 3 && !screen.snapshot().includes("> Actor (codex) · Alpha"); attempt += 1) {
+        child.write("\x1b[B");
+        await new Promise((resolve) => setTimeout(resolve, 100));
+        await screenWrites;
+      }
+      await waitForScreenText(() => screenWrites, screen, "> Actor (codex) · Alpha");
+      await waitForScreenText(() => screenWrites, screen, "activity · output");
+      await waitForScreenText(() => screenWrites, screen, "idle timeout in");
+      const firstDeadline = idleDeadlineSeconds(screen.snapshot());
+      await new Promise((resolve) => setTimeout(resolve, 1200));
+      await screenWrites;
+      const nextDeadline = idleDeadlineSeconds(screen.snapshot());
+      expect(nextDeadline).toBeLessThan(firstDeadline);
       child.write("f");
       await waitForScreenText(() => screenWrites, screen, "Feature board");
       await waitForScreenText(() => screenWrites, screen, "> T0001 · Alpha · actor running");
@@ -147,6 +160,14 @@ function featureCancelAgentSource(): string {
 
 function escapeToml(value: string): string {
   return value.replaceAll("\\", "\\\\").replaceAll('"', '\\"');
+}
+
+function idleDeadlineSeconds(snapshot: string): number {
+  const match = snapshot.match(/idle timeout in (\d+)s/);
+  if (!match) {
+    throw new Error(`Worker idle deadline is not visible:\n${snapshot}`);
+  }
+  return Number(match[1]);
 }
 
 async function waitForTaskDir(workspace: string): Promise<string> {

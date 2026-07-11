@@ -49,7 +49,11 @@ import {
   type RouterDiagnosticsPolicy,
   type RouterDiagnosticsScope
 } from "./RouterDiagnosticsView.js";
-import { moveWorkerSelection, WorkerOverviewView } from "./WorkerOverviewView.js";
+import {
+  moveWorkerSelection,
+  WorkerOverviewView,
+  type WorkerActivityPolicies
+} from "./WorkerOverviewView.js";
 import { FeatureBoardView, moveFeatureBoardSelection } from "./FeatureBoardView.js";
 import {
   CollaborationTimelineView,
@@ -195,6 +199,7 @@ export function App({
   const [view, setView] = useState<AppView | "workspace">("chat");
   const [workers, setWorkers] = useState<WorkerLogRef[]>(() => [...(initialWorkers ?? [])]);
   const [selectedWorkerIndex, setSelectedWorkerIndex] = useState(0);
+  const [workerClockMs, setWorkerClockMs] = useState(() => Date.now());
   const [activeTaskId, setActiveTaskId] = useState<string | null>(initialTaskId);
   const [activeMode, setActiveMode] = useState<"simple" | "complex" | null>(initialTaskId ? "complex" : null);
   const [canRetryTask, setCanRetryTask] = useState(initialCanRetryTask);
@@ -311,6 +316,20 @@ export function App({
   const contentHeight = appContentHeight(process.stdout.rows || 30, Boolean(attachError), config.ui.showStatusBar);
   const outputHeight = Math.max(1, contentHeight);
   const terminalWidth = process.stdout.columns || 120;
+  const workerActivityPolicies = useMemo<WorkerActivityPolicies>(() => ({
+    codex: {
+      idleTimeoutMs: config.workers.codex.idleTimeoutMs,
+      firstOutputTimeoutMs: config.workers.codex.firstOutputTimeoutMs
+    },
+    claude: {
+      idleTimeoutMs: config.workers.claude.idleTimeoutMs,
+      firstOutputTimeoutMs: config.workers.claude.firstOutputTimeoutMs
+    },
+    mock: {
+      idleTimeoutMs: config.workers.mock.idleTimeoutMs,
+      firstOutputTimeoutMs: config.workers.mock.firstOutputTimeoutMs
+    }
+  }), [config.workers.claude, config.workers.codex, config.workers.mock]);
   const selectedBoardFeature = collaborationTimeline?.features[featureBoardSelectedIndex];
   const featureCanCancel = busy && (
     selectedBoardFeature?.state === "actor_running"
@@ -464,6 +483,16 @@ export function App({
     }, 1500);
     return () => clearInterval(interval);
   }, [activeTaskId, loadCollaborationTimeline, view]);
+
+  useEffect(() => {
+    if (view !== "workers") {
+      return;
+    }
+    const tick = () => setWorkerClockMs(Date.now());
+    tick();
+    const interval = setInterval(tick, 1000);
+    return () => clearInterval(interval);
+  }, [view]);
 
   useEffect(() => {
     nativeAttachRef.current = nativeAttach;
@@ -2245,6 +2274,8 @@ export function App({
           <WorkerOverviewView
             workers={workers}
             selectedIndex={selectedWorkerIndex}
+            nowMs={workerClockMs}
+            activityPolicies={workerActivityPolicies}
             height={contentHeight}
             terminalWidth={terminalWidth}
           />
