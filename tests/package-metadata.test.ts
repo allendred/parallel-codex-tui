@@ -217,7 +217,9 @@ describe("package metadata", () => {
     expect(readme).toContain("First-output and idle watchdogs plus explicit network/proxy failures are retryable");
     expect(readme).toContain("router_fallback_resolution = \"auto-retry\"");
     expect(readme).toContain("the triggered `first-output`/`idle`/`total` timeout kind");
-    expect(readme).toContain("Proxy URLs, credentials, paths, and query strings are never displayed or persisted");
+    expect(readme).toContain("The classifier receives the original user request, while `routes.jsonl` stores a sanitized diagnostic copy");
+    expect(readme).toContain("authorization values, secret assignments, and common provider tokens are removed before display or audit persistence");
+    expect(readme).toContain("legacy records are sanitized again when read");
     expect(readme).toContain("When semantic routing falls back inside the TUI, execution pauses");
     expect(readme).toContain("`1` selects Main, `2` selects Parallel, `R` retries Codex routing, and `Esc` cancels");
     expect(readme).toContain("`router_attempt` and `router_fallback_resolution`");

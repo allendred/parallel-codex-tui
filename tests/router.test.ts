@@ -535,16 +535,25 @@ describe("routeRequestWithCodex", () => {
     expect(route.router_parse_ms).toBeGreaterThanOrEqual(0);
   });
 
-  it("redacts proxy credentials from arbitrary Router failures before audit persistence", async () => {
+  it("redacts proxy paths, query strings, and credentials from Router failures", async () => {
     const config = defaultConfig("/tmp/project");
     const runner: CodexRouteRunner = async () => {
-      throw new Error("proxy handshake failed at http://user:secret@127.0.0.1:7890");
+      throw new Error(
+        "proxy handshake failed at https://user:secret@proxy.test:8443/private/path?token=hidden "
+        + "Authorization: Bearer bearer-secret OPENAI_API_KEY=sk-proj-routersecret "
+        + "npm_abcdefghijklmnopqrstuvwxyz"
+      );
     };
 
     const route = await routeRequestWithCodex("你好", config, runner);
 
-    expect(route.reason).toContain("http://***@127.0.0.1:7890");
+    expect(route.reason).toContain("https://***@proxy.test:8443");
     expect(route.reason).not.toContain("user:secret");
+    expect(route.reason).not.toContain("/private/path");
+    expect(route.reason).not.toContain("hidden");
+    expect(route.reason).not.toContain("bearer-secret");
+    expect(route.reason).not.toContain("sk-proj-routersecret");
+    expect(route.reason).not.toContain("npm_abcdefghijklmnopqrstuvwxyz");
   });
 
   it("fails safely when the router closes stdin before receiving the prompt", async () => {

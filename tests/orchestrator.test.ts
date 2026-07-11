@@ -879,6 +879,50 @@ describe("Orchestrator", () => {
     expect(records[0]?.duration_ms).toEqual(expect.any(Number));
   });
 
+  it("sanitizes requests and reasons before writing the shared Router audit", async () => {
+    const appRoot = await mkdtemp(join(tmpdir(), "pct-orch-router-redaction-app-"));
+    const workspaceRoot = await mkdtemp(join(tmpdir(), "pct-orch-router-redaction-workspace-"));
+    const routerCwdRoot = join(appRoot, ".parallel-codex", "router");
+    const config = mockConfig(appRoot);
+    config.router.defaultMode = "auto";
+    const manager = new SessionManager({
+      projectRoot: workspaceRoot,
+      dataDir: config.dataDir,
+      now: () => new Date("2026-06-30T03:30:00.000Z"),
+      randomId: () => "a1b2"
+    });
+    const request = "检查 https://user:secret@proxy.test/private?token=hidden OPENAI_API_KEY=sk-proj-routersecret npm_abcdefghijklmnopqrstuvwxyz";
+    const orchestrator = new Orchestrator(
+      config,
+      manager,
+      new Map([["mock", new MockWorkerAdapter()]]),
+      async (prompt) => {
+        expect(prompt).toContain(request);
+        return JSON.stringify({
+          mode: "simple",
+          reason: "Proxy https://user:secret@proxy.test/private?token=hidden is configured."
+        });
+      },
+      routerCwdRoot
+    );
+
+    await orchestrator.handleRequest({ request, cwd: workspaceRoot });
+    const audit = await readTextIfExists(join(routerCwdRoot, "routes.jsonl"));
+    const record = JSON.parse(audit.trim()) as Record<string, unknown>;
+
+    expect(record.request).toContain("https://***@proxy.test");
+    expect(record.reason).toContain("https://***@proxy.test");
+    for (const secret of [
+      "user:secret",
+      "/private",
+      "hidden",
+      "sk-proj-routersecret",
+      "npm_abcdefghijklmnopqrstuvwxyz"
+    ]) {
+      expect(audit).not.toContain(secret);
+    }
+  });
+
   it("records structured timeout and proxy evidence for Router fallbacks", async () => {
     const appRoot = await mkdtemp(join(tmpdir(), "pct-orch-router-evidence-app-"));
     const workspaceRoot = await mkdtemp(join(tmpdir(), "pct-orch-router-evidence-workspace-"));

@@ -3,6 +3,7 @@ import { performance } from "node:perf_hooks";
 import type { AppConfig } from "./config.js";
 import type { RouteDecision, RouterFailureStage, RouterProxySource, RouterTimeoutKind } from "../domain/schemas.js";
 import { RouteDecisionSchema } from "../domain/schemas.js";
+import { sanitizeRouterText } from "./router-redaction.js";
 
 export interface RouterExecutionTelemetry {
   router_dispatch_ms?: number;
@@ -613,7 +614,7 @@ function parseCodexRoute(output: string, config: AppConfig): RouteDecision {
   const reason = typeof record.reason === "string" ? record.reason.trim() : "";
   return {
     mode,
-    reason: reason ? redactRouterSecrets(reason) : "Codex router decision.",
+    reason: reason ? sanitizeRouterText(reason) : "Codex router decision.",
     suggested_roles: mode === "complex" ? ["judge", "actor", "critic"] : [],
     judge_engine: config.pairing.judge,
     actor_engine: config.pairing.actor,
@@ -653,7 +654,7 @@ function summarizeRouterError(error: unknown): string {
     .map((line) => line.trim())
     .find((line) => line && !line.toLowerCase().startsWith("tip:") && !line.toLowerCase().startsWith("usage:"));
 
-  return redactRouterSecrets(meaningful || "unknown router error").replace(/[.。]+$/u, "");
+  return sanitizeRouterText(meaningful || "unknown router error").replace(/[.。]+$/u, "");
 }
 
 function summarizeRouterProcessDetail(output: string): string {
@@ -665,11 +666,7 @@ function summarizeRouterProcessDetail(output: string): string {
     .map((line) => line.trim())
     .filter(Boolean);
   const latest = lines.at(-1) ?? "";
-  return redactRouterSecrets(latest).slice(0, 240);
-}
-
-function redactRouterSecrets(value: string): string {
-  return value.replace(/\b([a-z][a-z0-9+.-]*:\/\/)([^@\s/]+)@/gi, "$1***@");
+  return sanitizeRouterText(latest).slice(0, 240);
 }
 
 function simpleRoute(reason: string, config: AppConfig): RouteDecision {

@@ -5,6 +5,7 @@ import { appendJsonLine, ensureDir, pathExists, readJson, readTextIfExists, remo
 import { claimTaskRunLease } from "../core/process-ownership.js";
 import { routerRuntimeDir } from "../core/paths.js";
 import { classifyRouterFailure, routerFallbackIsTransient } from "../core/router-audit.js";
+import { sanitizeRouterText } from "../core/router-redaction.js";
 import {
   routeRequestWithCodex,
   routerProxyContext,
@@ -1498,10 +1499,11 @@ export class Orchestrator {
   ): Promise<void> {
     await appendJsonLine(join(this.routerCwd, "routes.jsonl"), {
       time: new Date().toISOString(),
-      request,
+      request: sanitizeRouterText(request),
       workspace,
       scope,
       ...route,
+      reason: sanitizeRouterText(route.reason),
       ...(semanticRoute
           ? {
             router_timeout_ms: routeConfig.router.codex.timeoutMs,

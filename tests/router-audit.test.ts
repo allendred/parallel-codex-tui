@@ -29,6 +29,30 @@ describe("readRouterAudit", () => {
     await expect(readRouterAudit?.(path, 0)).resolves.toEqual([]);
   });
 
+  it("sanitizes legacy Router audit text before diagnostics display", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pct-router-audit-redaction-"));
+    const path = join(root, "routes.jsonl");
+    const readRouterAudit = (
+      routerAuditModule as typeof routerAuditModule & {
+        readRouterAudit?: (path: string, limit?: number) => Promise<Array<Record<string, unknown>>>;
+      }
+    ).readRouterAudit;
+    await writeText(path, `${JSON.stringify({
+      ...routeRecord(
+        "inspect https://user:secret@proxy.test/private?token=hidden OPENAI_API_KEY=sk-proj-routersecret",
+        "fallback"
+      ),
+      reason: "Bearer bearer-secret failed through https://proxy.test/private?token=hidden"
+    })}\n`);
+
+    const record = (await readRouterAudit?.(path))?.[0];
+    const visibleText = JSON.stringify(record);
+
+    expect(record?.request).toContain("https://***@proxy.test");
+    expect(record?.reason).toContain("https://proxy.test");
+    expect(visibleText).not.toMatch(/user:secret|\/private|hidden|routersecret|bearer-secret/);
+  });
+
   it("keeps structured timeout and proxy evidence and classifies legacy failures", async () => {
     const root = await mkdtemp(join(tmpdir(), "pct-router-audit-evidence-"));
     const path = join(root, "routes.jsonl");

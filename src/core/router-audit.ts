@@ -8,6 +8,7 @@ import {
   type RouterTimeoutKind
 } from "../domain/schemas.js";
 import { readTextIfExists } from "./file-store.js";
+import { sanitizeRouterText } from "./router-redaction.js";
 
 export { RouterFailureKindSchema };
 
@@ -243,7 +244,11 @@ export async function readRouterAudit(path: string, limit = 100): Promise<Router
     try {
       const parsed = RouterAuditRecordSchema.safeParse(JSON.parse(line));
       if (parsed.success) {
-        records.push(parsed.data);
+        records.push({
+          ...parsed.data,
+          request: sanitizeRouterText(parsed.data.request),
+          reason: sanitizeRouterText(parsed.data.reason)
+        });
       }
     } catch {
       // A partial final write must not hide earlier Router evidence.
