@@ -466,13 +466,15 @@ describe("InputBar", () => {
 
   it("shows Worker overview selection and action guidance", () => {
     const roomy = render(
-      <InputBar mode="workers" value="ignored" terminalWidth={80} onChange={() => {}} />
+      <InputBar mode="workers" value="ignored" terminalWidth={100} onChange={() => {}} />
     );
     const roomyFrame = roomy.lastFrame() ?? "";
-    expect(roomyFrame).toContain("workers · Up/Dn select · Enter logs · C timeline · ^O attach · Esc back");
+    expect(roomyFrame).toContain(
+      "workers · Up/Dn select · Enter logs · F features · C timeline · ^O attach · Esc back"
+    );
     expect(roomyFrame).not.toContain("ignored");
     expect(roomyFrame.split("\n")).toHaveLength(1);
-    expect(displayWidth(roomyFrame)).toBeLessThanOrEqual(80);
+    expect(displayWidth(roomyFrame)).toBeLessThanOrEqual(100);
     roomy.unmount();
 
     const narrow = render(
@@ -483,6 +485,31 @@ describe("InputBar", () => {
     expect(narrowFrame.split("\n")).toHaveLength(1);
     expect(displayWidth(narrowFrame)).toBeLessThanOrEqual(24);
     narrow.unmount();
+  });
+
+  it("shows Feature board selection and timeline guidance", () => {
+    const featureMode = "features" as Parameters<typeof InputBar>[0]["mode"];
+    const roomy = render(
+      <InputBar mode={featureMode} value="ignored" terminalWidth={100} onChange={() => {}} />
+    );
+    expect(roomy.lastFrame()).toContain(
+      "features · Up/Dn select · Enter timeline · R refresh · Esc workers"
+    );
+    expect(roomy.lastFrame()).not.toContain("ignored");
+    roomy.unmount();
+
+    const overflow: string[] = [];
+    for (let width = 8; width <= 100; width += 1) {
+      const view = render(
+        <InputBar mode={featureMode} value="" terminalWidth={width} onChange={() => {}} />
+      );
+      const frame = view.lastFrame() ?? "";
+      if (frame.split("\n").length > 1 || displayWidth(frame) > width) {
+        overflow.push(`${width}:${displayWidth(frame)}:${frame}`);
+      }
+      view.unmount();
+    }
+    expect(overflow).toEqual([]);
   });
 
   it("shows collaboration timeline filtering and refresh guidance", () => {
@@ -506,6 +533,19 @@ describe("InputBar", () => {
     );
     expect(unresolved.lastFrame()).toContain("U all");
     unresolved.unmount();
+
+    const fromFeatures = render(
+      <InputBar
+        mode={collaborationMode}
+        collaborationBack="features"
+        value=""
+        terminalWidth={100}
+        onChange={() => {}}
+      />
+    );
+    expect(fromFeatures.lastFrame()).toContain("Esc features");
+    expect(fromFeatures.lastFrame()).not.toContain("Esc workers");
+    fromFeatures.unmount();
 
     const detail = render(
       <InputBar

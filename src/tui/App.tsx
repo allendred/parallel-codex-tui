@@ -50,6 +50,7 @@ import {
   type RouterDiagnosticsScope
 } from "./RouterDiagnosticsView.js";
 import { moveWorkerSelection, WorkerOverviewView } from "./WorkerOverviewView.js";
+import { FeatureBoardView, moveFeatureBoardSelection } from "./FeatureBoardView.js";
 import {
   CollaborationTimelineView,
   collaborationSelectionScrollOffset,
@@ -144,6 +145,7 @@ const NO_WORKERS_ATTACH_MESSAGE = "No workers yet · start a complex task before
 const NO_WORKERS_LOGS_MESSAGE = "No workers yet · start a complex task before opening logs";
 const NO_WORKERS_OVERVIEW_MESSAGE = "No workers yet · start a complex task before opening overview";
 const NO_ACTIVE_COLLABORATION_MESSAGE = "No active task · restore a task before opening timeline";
+const NO_ACTIVE_FEATURES_MESSAGE = "No active task · restore a task before opening features";
 const EMPTY_WORKER_NAVIGATION_TARGETS: WorkerOutputNavigationTargets = {
   searchOffsets: [],
   searchLineIndexes: [],
@@ -218,6 +220,7 @@ export function App({
   const [taskSessionsLoading, setTaskSessionsLoading] = useState(false);
   const [taskSessionsError, setTaskSessionsError] = useState<string | null>(null);
   const [collaborationTimeline, setCollaborationTimeline] = useState<CollaborationTimeline | null>(null);
+  const [featureBoardSelectedIndex, setFeatureBoardSelectedIndex] = useState(0);
   const [collaborationLoading, setCollaborationLoading] = useState(false);
   const [collaborationError, setCollaborationError] = useState<string | null>(null);
   const [collaborationFeatureIndex, setCollaborationFeatureIndex] = useState(-1);
@@ -260,6 +263,7 @@ export function App({
   const selectedTaskSessionIndexRef = useRef(selectedTaskSessionIndex);
   const taskSessionsLoadingRef = useRef(taskSessionsLoading);
   const collaborationTimelineRef = useRef<CollaborationTimeline | null>(null);
+  const featureBoardSelectedIndexRef = useRef(0);
   const collaborationFeatureIndexRef = useRef(-1);
   const collaborationSelectedEventIdRef = useRef<string | null>(null);
   const collaborationDetailOpenRef = useRef(false);
@@ -275,13 +279,15 @@ export function App({
   const openRouterDiagnosticsRef = useRef<() => Promise<void>>(openRouterDiagnostics);
   const openWorkerOverviewRef = useRef<() => void>(openWorkerOverview);
   const openTaskSessionsRef = useRef<() => Promise<void>>(openTaskSessions);
-  const openCollaborationTimelineRef = useRef<() => Promise<void>>(openCollaborationTimeline);
+  const openFeatureBoardRef = useRef<() => Promise<void>>(openFeatureBoard);
+  const openCollaborationTimelineRef = useRef<(featureIndex?: number) => Promise<void>>(openCollaborationTimeline);
   const refreshCollaborationTimelineRef = useRef<(showLoading?: boolean) => Promise<void>>(refreshCollaborationTimeline);
   const activateSelectedTaskSessionRef = useRef<() => Promise<void>>(activateSelectedTaskSession);
   const workspaceReturnViewRef = useRef<"chat" | "worker" | "workers" | "sessions">("chat");
   const routerReturnViewRef = useRef<"chat" | "worker" | "workers" | "sessions">("chat");
   const workerOverviewReturnViewRef = useRef<"chat" | "worker">("chat");
   const taskSessionsReturnViewRef = useRef<"chat" | "worker" | "workers" | "router">("chat");
+  const collaborationReturnViewRef = useRef<"workers" | "features">("workers");
   const collaborationLoadSequenceRef = useRef(0);
   const routerLoadSequenceRef = useRef(0);
   const taskSessionsLoadSequenceRef = useRef(0);
@@ -297,7 +303,7 @@ export function App({
   const outputHeight = Math.max(1, contentHeight);
   const terminalWidth = process.stdout.columns || 120;
   const selectedWorkerStatus = formatSelectedWorkerStatus(status, selectedWorkerIndex);
-  const visibleWorkerStatus = view === "chat" || view === "router" || view === "sessions" || view === "collaboration" || selectedWorkerStatusIsRedundant(status)
+  const visibleWorkerStatus = view === "chat" || view === "router" || view === "sessions" || view === "features" || view === "collaboration" || selectedWorkerStatusIsRedundant(status)
     ? ""
     : selectedWorkerStatus;
   const visibleRouteStatus = routePending
@@ -371,6 +377,10 @@ export function App({
   }, [taskSessionsLoading]);
 
   useEffect(() => {
+    featureBoardSelectedIndexRef.current = featureBoardSelectedIndex;
+  }, [featureBoardSelectedIndex]);
+
+  useEffect(() => {
     collaborationSelectedEventIdRef.current = collaborationSelectedEventId;
   }, [collaborationSelectedEventId]);
 
@@ -410,13 +420,14 @@ export function App({
     openRouterDiagnosticsRef.current = openRouterDiagnostics;
     openWorkerOverviewRef.current = openWorkerOverview;
     openTaskSessionsRef.current = openTaskSessions;
+    openFeatureBoardRef.current = openFeatureBoard;
     openCollaborationTimelineRef.current = openCollaborationTimeline;
     refreshCollaborationTimelineRef.current = refreshCollaborationTimeline;
     activateSelectedTaskSessionRef.current = activateSelectedTaskSession;
   });
 
   useEffect(() => {
-    if (view !== "collaboration" || !activeTaskId || !loadCollaborationTimeline) {
+    if ((view !== "collaboration" && view !== "features") || !activeTaskId || !loadCollaborationTimeline) {
       return;
     }
     const interval = setInterval(() => {
@@ -662,6 +673,17 @@ export function App({
       setTaskSessionsError(null);
       setSelectedTaskSessionIndex(nextIndex);
     };
+    const moveSelectedFeature = (delta: number, wrap = false) => {
+      const nextIndex = moveFeatureBoardSelection(
+        featureBoardSelectedIndexRef.current,
+        delta,
+        collaborationTimelineRef.current?.features.length ?? 0,
+        wrap
+      );
+      featureBoardSelectedIndexRef.current = nextIndex;
+      setCollaborationError(null);
+      setFeatureBoardSelectedIndex(nextIndex);
+    };
     const commitWorkerSearch = (next: WorkerSearchState) => {
       workerSearchRef.current = next;
       setWorkerSearch(next);
@@ -776,6 +798,45 @@ export function App({
         }
         return;
       }
+      if (currentView === "features") {
+        const featureChunks = tokenizeRawInput(chunk);
+        if (featureChunks.some((featureChunk) => isExitShortcut(featureChunk, {}))) {
+          activeRunControllerRef.current?.abort();
+          exitRef.current();
+          return;
+        }
+        for (const featureChunk of featureChunks) {
+          if (featureChunk === "\x1b" || isWorkerOverviewShortcut(featureChunk, {})) {
+            setCollaborationError(null);
+            viewRef.current = "workers";
+            setView("workers");
+            return;
+          }
+          if (featureChunk === "r" || featureChunk === "R") {
+            void refreshCollaborationTimelineRef.current(false);
+            continue;
+          }
+          if (featureChunk === "\r" || featureChunk === "\n" || featureChunk === "c" || featureChunk === "C") {
+            if ((collaborationTimelineRef.current?.features.length ?? 0) > 0) {
+              void openCollaborationTimelineRef.current(featureBoardSelectedIndexRef.current);
+            }
+            return;
+          }
+          if (featureChunk === "\t") {
+            moveSelectedFeature(1, true);
+            continue;
+          }
+          const selectionDelta = -(
+            rawHistoryDelta(featureChunk)
+            + rawPageScrollDelta(featureChunk, Math.max(1, outputHeight - 2))
+            + mouseScrollDelta(featureChunk, 1)
+          );
+          if (selectionDelta !== 0) {
+            moveSelectedFeature(selectionDelta);
+          }
+        }
+        return;
+      }
       if (currentView === "collaboration") {
         const timelineChunks = tokenizeRawInput(chunk);
         if (timelineChunks.some((timelineChunk) => isExitShortcut(timelineChunk, {}))) {
@@ -804,8 +865,8 @@ export function App({
           }
           if (timelineChunk === "\x1b" || isWorkerOverviewShortcut(timelineChunk, {})) {
             setCollaborationError(null);
-            viewRef.current = "workers";
-            setView("workers");
+            viewRef.current = collaborationReturnViewRef.current;
+            setView(collaborationReturnViewRef.current);
             return;
           }
           const scopedEvents = collaborationTimelineRef.current
@@ -911,6 +972,10 @@ export function App({
         }
         if (isNewTaskShortcut(chunk, {}) && !busyRef.current) {
           void newTaskRef.current();
+          return;
+        }
+        if (chunk === "f" || chunk === "F") {
+          void openFeatureBoardRef.current();
           return;
         }
         if (chunk === "c" || chunk === "C") {
@@ -1784,20 +1849,22 @@ export function App({
     }
   }
 
-  async function openCollaborationTimeline(): Promise<void> {
+  async function openFeatureBoard(): Promise<void> {
     if (viewRef.current !== "workers") {
       return;
     }
     if (!activeTaskIdRef.current) {
-      setAttachError(NO_ACTIVE_COLLABORATION_MESSAGE);
+      setAttachError(NO_ACTIVE_FEATURES_MESSAGE);
       return;
     }
-    viewRef.current = "collaboration";
-    setView("collaboration");
+    viewRef.current = "features";
+    setView("features");
     setAttachError(null);
     setCollaborationError(null);
     collaborationTimelineRef.current = null;
     setCollaborationTimeline(null);
+    featureBoardSelectedIndexRef.current = 0;
+    setFeatureBoardSelectedIndex(0);
     collaborationFeatureIndexRef.current = -1;
     setCollaborationFeatureIndex(-1);
     collaborationSelectedEventIdRef.current = null;
@@ -1810,6 +1877,42 @@ export function App({
     setCollaborationMaxScrollOffset(0);
     setCollaborationScrollOffset(0);
     await refreshCollaborationTimeline(true);
+  }
+
+  async function openCollaborationTimeline(featureIndex = -1): Promise<void> {
+    const source = viewRef.current;
+    if (source !== "workers" && source !== "features") {
+      return;
+    }
+    if (!activeTaskIdRef.current) {
+      setAttachError(NO_ACTIVE_COLLABORATION_MESSAGE);
+      return;
+    }
+    collaborationReturnViewRef.current = source;
+    viewRef.current = "collaboration";
+    setView("collaboration");
+    setAttachError(null);
+    setCollaborationError(null);
+    const existingTimeline = source === "features" ? collaborationTimelineRef.current : null;
+    if (!existingTimeline) {
+      collaborationTimelineRef.current = null;
+      setCollaborationTimeline(null);
+    }
+    const nextFeatureIndex = featureIndex >= 0 && featureIndex < (existingTimeline?.features.length ?? 0)
+      ? featureIndex
+      : -1;
+    collaborationFeatureIndexRef.current = nextFeatureIndex;
+    setCollaborationFeatureIndex(nextFeatureIndex);
+    collaborationSelectedEventIdRef.current = null;
+    setCollaborationSelectedEventId(null);
+    collaborationDetailOpenRef.current = false;
+    setCollaborationDetailOpen(false);
+    collaborationUnresolvedOnlyRef.current = false;
+    setCollaborationUnresolvedOnly(false);
+    collaborationMaxScrollOffsetRef.current = 0;
+    setCollaborationMaxScrollOffset(0);
+    setCollaborationScrollOffset(0);
+    await refreshCollaborationTimeline(!existingTimeline);
   }
 
   async function refreshCollaborationTimeline(showLoading = true): Promise<void> {
@@ -1833,6 +1936,14 @@ export function App({
       }
       collaborationTimelineRef.current = timeline;
       setCollaborationTimeline(timeline);
+      const currentBoardIndex = featureBoardSelectedIndexRef.current;
+      const nextBoardIndex = timeline.features.length > 0
+        ? Math.min(timeline.features.length - 1, Math.max(0, currentBoardIndex))
+        : 0;
+      if (nextBoardIndex !== currentBoardIndex) {
+        featureBoardSelectedIndexRef.current = nextBoardIndex;
+        setFeatureBoardSelectedIndex(nextBoardIndex);
+      }
       const currentIndex = collaborationFeatureIndexRef.current;
       const nextIndex = currentIndex >= timeline.features.length ? -1 : currentIndex;
       if (nextIndex !== currentIndex) {
@@ -1975,6 +2086,7 @@ export function App({
           routeFallback={Boolean(routeFallbackPrompt)}
           collaborationDetail={collaborationDetailOpen}
           collaborationUnresolved={collaborationUnresolvedOnly}
+          collaborationBack={collaborationReturnViewRef.current}
           canRetry={canRetryTask}
           hasWorkers={workers.length > 0}
           hasActiveTask={Boolean(activeTaskId)}
@@ -1985,7 +2097,7 @@ export function App({
           searchMatchCount={workerNavigationTargets.searchOffsets.length}
           value={workerSearch.open && view === "worker"
             ? workerSearch.query
-            : view === "native" || view === "router" || view === "workers" || view === "sessions" || view === "collaboration" ? "" : input}
+            : view === "native" || view === "router" || view === "workers" || view === "features" || view === "sessions" || view === "collaboration" ? "" : input}
           cursor={workerSearch.open && view === "worker"
             ? workerSearch.cursor
             : view === "chat" ? inputCursor : undefined}
@@ -2005,6 +2117,15 @@ export function App({
             selectedIndex={selectedTaskSessionIndex}
             loading={taskSessionsLoading}
             error={taskSessionsError}
+            height={contentHeight}
+            terminalWidth={terminalWidth}
+          />
+        ) : view === "features" ? (
+          <FeatureBoardView
+            timeline={collaborationTimeline}
+            selectedIndex={featureBoardSelectedIndex}
+            loading={collaborationLoading}
+            error={collaborationError}
             height={contentHeight}
             terminalWidth={terminalWidth}
           />

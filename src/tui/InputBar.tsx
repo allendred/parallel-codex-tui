@@ -4,12 +4,13 @@ import { compactEndByDisplayWidth, compactTailByDisplayWidth, displayWidth } fro
 import { TUI_THEME } from "./theme.js";
 
 export interface InputBarProps {
-  mode: "chat" | "worker" | "worker-search" | "workers" | "collaboration" | "native" | "router" | "sessions";
+  mode: "chat" | "worker" | "worker-search" | "workers" | "features" | "collaboration" | "native" | "router" | "sessions";
   ready?: boolean;
   busy?: boolean;
   routeFallback?: boolean;
   collaborationDetail?: boolean;
   collaborationUnresolved?: boolean;
+  collaborationBack?: "workers" | "features";
   canRetry?: boolean;
   hasWorkers?: boolean;
   hasActiveTask?: boolean;
@@ -32,6 +33,7 @@ export function InputBar({
   routeFallback = false,
   collaborationDetail = false,
   collaborationUnresolved = false,
+  collaborationBack = "workers",
   canRetry = false,
   hasWorkers = false,
   hasActiveTask = false,
@@ -80,7 +82,17 @@ export function InputBar({
   if (mode === "collaboration") {
     const hints = collaborationDetail
       ? collaborationDetailInputHints(terminalWidth)
-      : collaborationTimelineInputHints(terminalWidth, collaborationUnresolved);
+      : collaborationTimelineInputHints(terminalWidth, collaborationUnresolved, collaborationBack);
+    return (
+      <InputRail terminalWidth={terminalWidth} textWidth={displayWidth(`${hints.label}${hints.detail}`)} fill={fillRail}>
+        <Text backgroundColor={TUI_THEME.rail} color={TUI_THEME.accent} bold>{hints.label}</Text>
+        {hints.detail ? <Text backgroundColor={TUI_THEME.rail} color={TUI_THEME.muted}>{hints.detail}</Text> : null}
+      </InputRail>
+    );
+  }
+
+  if (mode === "features") {
+    const hints = featureBoardInputHints(terminalWidth);
     return (
       <InputRail terminalWidth={terminalWidth} textWidth={displayWidth(`${hints.label}${hints.detail}`)} fill={fillRail}>
         <Text backgroundColor={TUI_THEME.rail} color={TUI_THEME.accent} bold>{hints.label}</Text>
@@ -565,14 +577,40 @@ function workerOverviewInputHints(width: number): { label: string; detail: strin
     return { label: "workers", detail: " · Up/Dn · Enter logs · ^O · Esc" };
   }
   if (width < 74) {
-    return { label: "workers", detail: " · Up/Dn · Enter · C flow · ^O · Esc" };
+    return { label: "workers", detail: " · Up/Dn · Enter · F board · C flow · ^O · Esc" };
   }
-  return { label: "workers", detail: " · Up/Dn select · Enter logs · C timeline · ^O attach · Esc back" };
+  if (width < 88) {
+    return { label: "workers", detail: " · Up/Dn · Enter · F board · C flow · ^O · Esc" };
+  }
+  return { label: "workers", detail: " · Up/Dn select · Enter logs · F features · C timeline · ^O attach · Esc back" };
+}
+
+function featureBoardInputHints(width: number): { label: string; detail: string } {
+  if (width < 10) {
+    return { label: "ft", detail: "" };
+  }
+  if (width < 16) {
+    return { label: "features", detail: "" };
+  }
+  if (width < 24) {
+    return { label: "features", detail: " · Esc" };
+  }
+  if (width < 34) {
+    return { label: "features", detail: " · Up/Dn · Esc" };
+  }
+  if (width < 46) {
+    return { label: "features", detail: " · Up/Dn · Enter · Esc" };
+  }
+  if (width < 72) {
+    return { label: "features", detail: " · Up/Dn · Enter flow · R · Esc" };
+  }
+  return { label: "features", detail: " · Up/Dn select · Enter timeline · R refresh · Esc workers" };
 }
 
 function collaborationTimelineInputHints(
   width: number,
-  unresolvedOnly: boolean
+  unresolvedOnly: boolean,
+  back: "workers" | "features"
 ): { label: string; detail: string } {
   if (width < 10) {
     return { label: "tl", detail: "" };
@@ -606,7 +644,7 @@ function collaborationTimelineInputHints(
   }
   return {
     label: "timeline",
-    detail: ` · Up/Dn event · Enter detail · Tab feature · ${unresolvedOnly ? "U all" : "U unresolved"} · R refresh · Esc workers`
+    detail: ` · Up/Dn event · Enter detail · Tab feature · ${unresolvedOnly ? "U all" : "U unresolved"} · R refresh · Esc ${back}`
   };
 }
 

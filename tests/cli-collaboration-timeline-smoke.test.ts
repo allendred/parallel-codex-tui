@@ -92,6 +92,20 @@ describe("CLI collaboration timeline smoke", () => {
       await waitForScreenText(() => screenWrites, screen, "^B workers");
       child.write("\x02");
       await waitForScreenText(() => screenWrites, screen, "C timeline");
+
+      child.write("f");
+      await waitForScreenText(() => screenWrites, screen, "Feature board");
+      await waitForScreenText(() => screenWrites, screen, "2 features · 1 approved · 1 revision");
+      await waitForScreenText(() => screenWrites, screen, "features · Up/Dn select · Enter timeline · R refresh · Esc workers");
+      child.write("\x1b[B");
+      await waitForScreenText(() => screenWrites, screen, "> T0001 · Game UI · approved");
+      child.write("\r");
+      await waitForScreenText(() => screenWrites, screen, "Game UI · approved · 4 events · 1 finding · 1 reply");
+      child.write("\x1b");
+      await waitForScreenText(() => screenWrites, screen, "Feature board");
+      child.write("\x1b");
+      await waitForScreenText(() => screenWrites, screen, "parallel-codex-tui · workers");
+
       child.write("c");
       await waitForScreenText(() => screenWrites, screen, "Collaboration timeline");
       await waitForScreenText(() => screenWrites, screen, "all · 2 features · approved 1 · revision 1 · 7 events");
@@ -165,6 +179,8 @@ async function writeFeature(
     task_id: taskId,
     turn_id: "0001",
     title,
+    description: `${title} implementation`,
+    depends_on: featureId === "0001-ui" ? ["engine"] : [],
     state,
     updated_at: updatedAt
   });

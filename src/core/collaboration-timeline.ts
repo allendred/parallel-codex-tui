@@ -22,6 +22,8 @@ const FeatureStatusSchema = z.object({
   task_id: z.string().min(1),
   turn_id: z.string().min(1),
   title: z.string().min(1).optional(),
+  description: z.string().default(""),
+  depends_on: z.array(z.string().min(1)).default([]),
   state: CollaborationFeatureStateSchema,
   updated_at: z.string().datetime()
 });
@@ -47,6 +49,8 @@ export interface CollaborationArtifactRef {
 export interface CollaborationFeature {
   id: string;
   title: string;
+  description: string;
+  dependsOn: string[];
   turnId: string;
   state: CollaborationFeatureState;
   updatedAt: string;
@@ -172,6 +176,8 @@ async function readCollaborationFeatures(taskDir: string): Promise<Collaboration
       return {
         id: status.feature_id,
         title: status.title?.trim() || featureSpecTitle(spec) || status.feature_id,
+        description: status.description?.trim() ?? "",
+        dependsOn: status.depends_on ?? [],
         turnId: status.turn_id,
         state: status.state,
         updatedAt: status.updated_at,

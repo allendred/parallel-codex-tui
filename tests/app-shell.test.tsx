@@ -185,6 +185,25 @@ describe("AppShell", () => {
     expect(header).not.toContain(" · workers · ");
   });
 
+  it("labels the feature overview independently from workers", () => {
+    const { lastFrame } = render(
+      <AppShell
+        view={"features" as Parameters<typeof AppShell>[0]["view"]}
+        cwd="/tmp/project"
+        taskId="task-1"
+        statusText="task running"
+        terminalWidth={80}
+        input={<TextLine text="features · Up/Dn · Enter timeline · Esc workers" />}
+      >
+        <TextLine text="Feature board" />
+      </AppShell>
+    );
+
+    const header = (lastFrame() ?? "").split("\n")[0] ?? "";
+    expect(header).toContain("parallel-codex-tui · features");
+    expect(header).not.toContain(" · workers · ");
+  });
+
   it("labels the task Session manager independently from chat", () => {
     const { lastFrame } = render(
       <AppShell

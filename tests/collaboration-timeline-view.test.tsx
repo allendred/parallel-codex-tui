@@ -194,6 +194,8 @@ function fixture(): CollaborationTimeline {
       {
         id: "0001-engine",
         title: "Game Engine",
+        description: "",
+        dependsOn: [],
         turnId: "0001",
         state: "revision_needed",
         updatedAt: "2026-07-11T07:04:00.000Z",
@@ -204,6 +206,8 @@ function fixture(): CollaborationTimeline {
       {
         id: "0001-ui",
         title: "Game UI",
+        description: "",
+        dependsOn: [],
         turnId: "0001",
         state: "approved",
         updatedAt: "2026-07-11T07:05:00.000Z",

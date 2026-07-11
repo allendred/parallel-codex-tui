@@ -38,6 +38,8 @@ describe("collaboration timeline", () => {
       task_id: task.id,
       turn_id: "0001",
       title: "Game UI",
+      description: "Render the game board and controls",
+      depends_on: ["engine"],
       state: "approved",
       updated_at: "2026-07-11T07:05:00.000Z"
     });
@@ -104,6 +106,8 @@ describe("collaboration timeline", () => {
       expect.objectContaining({
         id: "0001-engine",
         title: "Game Engine",
+        description: "",
+        dependsOn: [],
         state: "revision_needed",
         findings: 0,
         replies: 0
@@ -111,6 +115,8 @@ describe("collaboration timeline", () => {
       expect.objectContaining({
         id: "0001-ui",
         title: "Game UI",
+        description: "Render the game board and controls",
+        dependsOn: ["engine"],
         state: "approved",
         findings: 1,
         replies: 1,
