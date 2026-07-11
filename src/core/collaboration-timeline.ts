@@ -15,6 +15,13 @@ const FeatureDialogueSchema = z.object({
   paths: z.record(z.string()).default({})
 });
 
+const FindingResolutionSchema = z.object({
+  version: z.literal(1),
+  decision: z.enum(["pending", "approved", "inconsistent"]),
+  fixed_ids: z.array(z.string().min(1)),
+  unresolved_ids: z.array(z.string().min(1))
+});
+
 export type CollaborationFeatureState = FeatureState;
 export type CollaborationRole = "actor" | "critic" | "supervisor";
 
@@ -33,6 +40,8 @@ export interface CollaborationFeature {
   updatedAt: string;
   findings: number;
   replies: number;
+  resolvedFindings?: number;
+  unresolvedFindings?: number;
   latestFinding?: string;
   latestReply?: string;
   artifactRefs: CollaborationArtifactRef[];
@@ -50,6 +59,8 @@ export interface CollaborationEvent {
   featureTitle?: string;
   findings?: number;
   replies?: number;
+  resolvedFindings?: number;
+  unresolvedFindings?: number;
   artifacts: string[];
   artifactRefs: CollaborationArtifactRef[];
 }
@@ -88,6 +99,12 @@ export async function loadCollaborationTimeline(taskId: string, taskDir: string)
         featureTitle: feature?.title ?? event.feature_id,
         findings: feature?.findings ?? 0,
         replies: feature?.replies ?? 0,
+        ...(typeof feature?.resolvedFindings === "number"
+          ? { resolvedFindings: feature.resolvedFindings }
+          : {}),
+        ...(typeof feature?.unresolvedFindings === "number"
+          ? { unresolvedFindings: feature.unresolvedFindings }
+          : {}),
         artifacts: artifactRefs.map((artifact) => artifact.label),
         artifactRefs
       };
@@ -118,6 +135,12 @@ export async function loadCollaborationTimeline(taskId: string, taskDir: string)
       featureTitle: feature.title,
       findings: feature.findings,
       replies: feature.replies,
+      ...(typeof feature.resolvedFindings === "number"
+        ? { resolvedFindings: feature.resolvedFindings }
+        : {}),
+      ...(typeof feature.unresolvedFindings === "number"
+        ? { unresolvedFindings: feature.unresolvedFindings }
+        : {}),
       artifacts: feature.artifactRefs.map((artifact) => artifact.label),
       artifactRefs: feature.artifactRefs
     }))
@@ -138,11 +161,12 @@ async function readCollaborationFeatures(taskDir: string): Promise<Collaboration
     .filter((entry) => entry.isDirectory())
     .map(async (entry): Promise<CollaborationFeature | null> => {
       const dir = join(root, entry.name);
-      const [statusText, spec, findings, replies] = await Promise.all([
+      const [statusText, spec, findings, replies, resolutionText] = await Promise.all([
         readTextIfExists(join(dir, "status.json")),
         readTextIfExists(join(dir, "spec.md")),
         readTextIfExists(join(dir, "critic-findings.jsonl")),
-        readTextIfExists(join(dir, "actor-replies.jsonl"))
+        readTextIfExists(join(dir, "actor-replies.jsonl")),
+        readTextIfExists(join(dir, "finding-resolution.json"))
       ]);
       const status = parseJsonValue(statusText, FeatureStatusSchema);
       if (!status) {
@@ -150,6 +174,7 @@ async function readCollaborationFeatures(taskDir: string): Promise<Collaboration
       }
       const findingEvidence = readMailboxEvidence(findings);
       const replyEvidence = readMailboxEvidence(replies);
+      const resolution = parseJsonValue(resolutionText, FindingResolutionSchema);
       return {
         id: status.feature_id,
         title: status.title?.trim() || featureSpecTitle(spec) || status.feature_id,
@@ -164,8 +189,15 @@ async function readCollaborationFeatures(taskDir: string): Promise<Collaboration
           { label: "status", path: join(dir, "status.json") },
           { label: "spec", path: join(dir, "spec.md") },
           { label: "critic findings", path: join(dir, "critic-findings.jsonl") },
-          { label: "actor replies", path: join(dir, "actor-replies.jsonl") }
+          { label: "actor replies", path: join(dir, "actor-replies.jsonl") },
+          ...(resolution ? [{ label: "finding resolution", path: join(dir, "finding-resolution.json") }] : [])
         ],
+        ...(resolution
+          ? {
+              resolvedFindings: new Set(resolution.fixed_ids).size,
+              unresolvedFindings: new Set(resolution.unresolved_ids).size
+            }
+          : {}),
         ...(findingEvidence.latest ? { latestFinding: findingEvidence.latest } : {}),
         ...(replyEvidence.latest ? { latestReply: replyEvidence.latest } : {})
       };

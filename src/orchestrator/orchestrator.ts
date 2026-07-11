@@ -19,7 +19,11 @@ import type { WorkerResult, WorkerRunSpec } from "../workers/types.js";
 import {
   appendFeatureDialogue,
   createFeatureChannel,
+  featureCriticCheckpointIsReusable,
   featurePromptContext,
+  recordApprovedFindingResolution,
+  requireActorFindingReplies,
+  requireFeatureRevisionFindings,
   type FeatureChannel,
   updateFeatureStatus,
   writeFeatureDecision
@@ -810,13 +814,19 @@ export class Orchestrator {
       throwIfCancelled(input.signal);
 
       const revisionRuns: Array<FeaturePairRun & { review: string }> = [];
+      const revisionFindingIds = new Map<string, string[]>();
       for (const pair of pairRuns) {
         const review = await readTextIfExists(join(pair.critic.dir, "review.md"));
         const decision = criticReviewDecision(review);
         if (decision === "revision") {
+          revisionFindingIds.set(pair.channel.id, await requireFeatureRevisionFindings(pair.channel));
           revisionRuns.push({ ...pair, review });
         } else if (decision !== "approved") {
           throw new Error(`Critic review for feature ${pair.channel.id} must include APPROVED or REVISION_REQUIRED.`);
+        } else {
+          await recordApprovedFindingResolution(pair.channel, [], {
+            allowLegacyResolvedFindings: Boolean(input.retry)
+          });
         }
       }
 
@@ -845,6 +855,10 @@ export class Orchestrator {
             buildRevisionRequest(pair.review, pair.channel),
             true,
             requiredFeatureWorkspace(workspaceWave.featureDirs, pair.channel)
+          );
+          await requireActorFindingReplies(
+            pair.channel,
+            revisionFindingIds.get(pair.channel.id) ?? []
           );
           revisionCompleted += 1;
           reportProgress("revision", revisionCompleted, revisionRuns.length, "revision", "done");
@@ -889,6 +903,10 @@ export class Orchestrator {
           if (criticReviewDecision(review) !== "approved") {
             throw new Error(`Critic did not approve feature ${pair.channel.id} after Actor revision.`);
           }
+          await recordApprovedFindingResolution(
+            pair.channel,
+            revisionFindingIds.get(pair.channel.id) ?? []
+          );
         }
         throwIfCancelled(input.signal);
       }
@@ -899,8 +917,7 @@ export class Orchestrator {
           actorDir: pair.actor.dir,
           criticDir: pair.critic.dir,
           turnDir: turn.dir,
-          featureActorWorklogPath: pair.channel.actorWorklogPath,
-          featureCriticFindingsPath: pair.channel.criticFindingsPath
+          featureActorWorklogPath: pair.channel.actorWorklogPath
         });
         await writeFeatureDecision(pair.channel, summary);
         return { id: pair.channel.id, title: pair.definition.title, summary };
@@ -1194,6 +1211,7 @@ export class Orchestrator {
     }
 
     if (decision === "revision") {
+      const findingIds = await requireFeatureRevisionFindings(feature);
       await this.sessions.updateTaskStatus(task, "revision_needed");
       await updateFeatureStatus(feature, "revision_needed");
       await appendFeatureDialogue(feature, "critic.revision_requested", "critic", "Critic requested Actor revision.", {
@@ -1214,6 +1232,7 @@ export class Orchestrator {
         workspaceDir,
         true
       );
+      await requireActorFindingReplies(feature, findingIds);
       throwIfCancelled(input.signal);
       reviewWorkspace = await workspaceManager.prepareFeatureReviewWorkspace(workspaceWave, feature.id);
       await this.sessions.updateTaskStatus(task, "critic_running");
@@ -1238,6 +1257,11 @@ export class Orchestrator {
       if (decision !== "approved") {
         throw new Error(`Critic did not approve ${feature.id} after Actor revision.`);
       }
+      await recordApprovedFindingResolution(feature, findingIds);
+    } else {
+      await recordApprovedFindingResolution(feature, [], {
+        allowLegacyResolvedFindings: Boolean(input.retry)
+      });
     }
 
     await this.sessions.updateTaskStatus(task, "integrating");
@@ -1281,7 +1305,6 @@ export class Orchestrator {
       criticDir: critic.dir,
       turnDir: turn.dir,
       featureActorWorklogPath: feature.actorWorklogPath,
-      featureCriticFindingsPath: feature.criticFindingsPath,
       changedPaths
     });
     await writeText(join(turn.dir, "supervisor-summary.md"), `${summary}\n`);
@@ -2039,7 +2062,10 @@ export class Orchestrator {
       return null;
     }
     const decision = criticReviewDecision(await readTextIfExists(join(critic.dir, "review.md")));
-    return decision === "approved" || decision === "revision" ? critic : null;
+    if (decision !== "approved" && decision !== "revision") {
+      return null;
+    }
+    return await featureCriticCheckpointIsReusable(channel, decision) ? critic : null;
   }
 
   private async promptTurnContext(task: TaskSession, turn: TaskTurn) {

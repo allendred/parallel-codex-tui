@@ -57,10 +57,37 @@ describe("collaboration timeline", () => {
     ].join("\n"));
     await writeText(join(uiDir, "actor-replies.jsonl"), `${JSON.stringify({
       finding_id: "C-001",
+      status: "fixed",
       notes: "Board alignment fixed"
     })}\n`);
-    await writeText(join(engineDir, "critic-findings.jsonl"), "");
-    await writeText(join(engineDir, "actor-replies.jsonl"), "");
+    await writeJson(join(uiDir, "finding-resolution.json"), {
+      version: 1,
+      decision: "approved",
+      finding_ids: ["C-001"],
+      fixed_ids: ["C-001"],
+      unresolved_ids: [],
+      reply_count: 1,
+      updated_at: "2026-07-11T07:05:00.000Z"
+    });
+    await writeText(join(engineDir, "critic-findings.jsonl"), `${JSON.stringify({
+      id: "E-001",
+      summary: "Engine fix remains open"
+    })}\n`);
+    await writeText(join(engineDir, "actor-replies.jsonl"), `${JSON.stringify({
+      finding_id: "E-001",
+      status: "deferred",
+      notes: "Waiting for implementation"
+    })}\n`);
+    await writeJson(join(engineDir, "finding-resolution.json"), {
+      version: 1,
+      decision: "pending",
+      finding_ids: ["E-001"],
+      fixed_ids: [],
+      unresolved_ids: ["E-001"],
+      unknown_reply_ids: [],
+      reply_count: 1,
+      updated_at: "2026-07-11T07:04:00.000Z"
+    });
     await writeText(join(task.dir, "dialogue", "actor-critic.jsonl"), [
       JSON.stringify(dialogue("2026-07-11T07:00:00.000Z", "0001-ui", "feature.created", "actor", "Mailbox ready")),
       "{partial",
@@ -115,8 +142,10 @@ describe("collaboration timeline", () => {
         description: "",
         dependsOn: [],
         state: "revision_needed",
-        findings: 0,
-        replies: 0
+        findings: 1,
+        replies: 1,
+        resolvedFindings: 0,
+        unresolvedFindings: 1
       }),
       expect.objectContaining({
         id: "0001-ui",
@@ -126,6 +155,8 @@ describe("collaboration timeline", () => {
         state: "approved",
         findings: 1,
         replies: 1,
+        resolvedFindings: 1,
+        unresolvedFindings: 0,
         latestFinding: "Align board",
         latestReply: "Board alignment fixed"
       })
@@ -163,7 +194,8 @@ describe("collaboration timeline", () => {
       artifactRefs: expect.arrayContaining([
         { label: "status", path: join(uiDir, "status.json") },
         { label: "critic findings", path: join(uiDir, "critic-findings.jsonl") },
-        { label: "actor replies", path: join(uiDir, "actor-replies.jsonl") }
+        { label: "actor replies", path: join(uiDir, "actor-replies.jsonl") },
+        { label: "finding resolution", path: join(uiDir, "finding-resolution.json") }
       ])
     }));
     expect(timeline?.events.some((event) => event.type === "task.done")).toBe(false);

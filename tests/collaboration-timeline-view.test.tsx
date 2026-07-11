@@ -58,7 +58,7 @@ describe("CollaborationTimelineView", () => {
       terminalWidth: 90
     }));
     const frame = view.lastFrame() ?? "";
-    expect(frame).toContain("Game UI · approved · 3 events · 1 finding · 1 reply");
+    expect(frame).toContain("Game UI · approved · 3 events · 1 fixed · 0 open");
     expect(frame).not.toContain("Game Engine · revision pending");
     view.unmount();
   });
@@ -213,6 +213,8 @@ function fixture(): CollaborationTimeline {
         updatedAt: "2026-07-11T07:05:00.000Z",
         findings: 1,
         replies: 1,
+        resolvedFindings: 1,
+        unresolvedFindings: 0,
         artifactRefs: []
       }
     ],

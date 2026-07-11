@@ -200,6 +200,11 @@ describe("Orchestrator", () => {
     expect(await readTextIfExists(join(featureDir, "spec.md"))).toContain("实现 parallel coding worker 状态栏");
     expect(await readTextIfExists(join(featureDir, "actor-worklog.md"))).toContain("Mock actor");
     expect(await readTextIfExists(join(featureDir, "critic-findings.jsonl"))).toBe("");
+    expect(JSON.parse(await readTextIfExists(join(featureDir, "finding-resolution.json")))).toMatchObject({
+      decision: "approved",
+      finding_ids: [],
+      unresolved_ids: []
+    });
     expect(await readTextIfExists(join(featureDir, "decisions.md"))).toContain("APPROVED");
     expect(await readTextIfExists(join(taskDir, "actor-mock", "prompt.md"))).toContain(`Feature directory: ${featureDir}`);
     expect(await readTextIfExists(join(taskDir, "critic-mock", "prompt.md"))).toContain("critic-findings.jsonl");
@@ -451,6 +456,18 @@ describe("Orchestrator", () => {
     expect(structured?.sections.changes).toContain("alpha.txt");
     expect(structured?.sections.changes).toContain("beta.txt");
     expect(structured?.sections.verification).toContain("Wave 1");
+    await expect(readTextIfExists(join(
+      taskDir,
+      "features",
+      "0001-alpha",
+      "finding-resolution.json"
+    ))).resolves.toContain('"decision": "approved"');
+    await expect(readTextIfExists(join(
+      taskDir,
+      "features",
+      "0001-beta",
+      "finding-resolution.json"
+    ))).resolves.toContain('"decision": "approved"');
     expect(JSON.parse(await readTextIfExists(join(
       taskDir,
       "workspaces",
@@ -1382,6 +1399,106 @@ describe("Orchestrator", () => {
     expect(adapter.secondCriticSawCleanReviewClone).toBe(true);
     expect(await readTextIfExists(join(root, "fixed.txt"))).toBe("fixed\n");
     expect(await pathExists(join(root, "critic-only.txt"))).toBe(false);
+    expect(JSON.parse(await readTextIfExists(join(featureDir, "finding-resolution.json")))).toMatchObject({
+      version: 1,
+      decision: "approved",
+      finding_ids: ["C-001"],
+      fixed_ids: ["C-001"],
+      unresolved_ids: []
+    });
+    expect(parseTaskResultSummary(result.summary)?.sections.findings).toBe("");
+  });
+
+  it("rejects a revision request without structured Critic findings", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pct-orch-feature-missing-findings-"));
+    const config = mockConfig(root);
+    const manager = new SessionManager({
+      projectRoot: root,
+      dataDir: config.dataDir,
+      now: () => new Date("2026-06-30T03:30:00.000Z"),
+      randomId: () => "missing-findings"
+    });
+    const orchestrator = new Orchestrator(
+      config,
+      manager,
+      new Map([["mock", new RevisionWithoutFindingsAdapter()]])
+    );
+
+    await expect(orchestrator.handleRequest({
+      request: "实现必须按 finding 修订的功能",
+      cwd: root
+    })).rejects.toThrow("requested revision without valid critic findings");
+
+    expect(await pathExists(join(root, "revision-without-finding.txt"))).toBe(false);
+  });
+
+  it("rejects Actor revisions that do not acknowledge every Critic finding", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pct-orch-feature-missing-reply-"));
+    const config = mockConfig(root);
+    const manager = new SessionManager({
+      projectRoot: root,
+      dataDir: config.dataDir,
+      now: () => new Date("2026-06-30T03:30:00.000Z"),
+      randomId: () => "missing-reply"
+    });
+    const adapter = new RevisionWithoutReplyAdapter();
+    const orchestrator = new Orchestrator(config, manager, new Map([["mock", adapter]]));
+
+    await expect(orchestrator.handleRequest({
+      request: "实现必须确认修复结果的功能",
+      cwd: root
+    })).rejects.toThrow("Actor revision did not mark every Critic finding fixed: C-001");
+
+    expect(adapter.criticRuns).toBe(1);
+    expect(await pathExists(join(root, "unacknowledged-fix.txt"))).toBe(false);
+  });
+
+  it("rejects APPROVED reviews that leave unresolved blocking findings", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pct-orch-feature-inconsistent-approval-"));
+    const config = mockConfig(root);
+    const manager = new SessionManager({
+      projectRoot: root,
+      dataDir: config.dataDir,
+      now: () => new Date("2026-06-30T03:30:00.000Z"),
+      randomId: () => "inconsistent-approval"
+    });
+    const orchestrator = new Orchestrator(
+      config,
+      manager,
+      new Map([["mock", new ApprovedWithFindingAdapter()]])
+    );
+
+    await expect(orchestrator.handleRequest({
+      request: "实现必须一致审查的功能",
+      cwd: root
+    })).rejects.toThrow("Critic approved with unresolved blocking findings: C-001");
+
+    expect(await pathExists(join(root, "inconsistent-approval.txt"))).toBe(false);
+  });
+
+  it("reruns an incoherent Critic checkpoint on task retry", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pct-orch-feature-protocol-retry-"));
+    const config = mockConfig(root);
+    const manager = new SessionManager({
+      projectRoot: root,
+      dataDir: config.dataDir,
+      now: () => new Date("2026-06-30T03:30:00.000Z"),
+      randomId: () => "protocol-retry"
+    });
+    const adapter = new RepairingProtocolOnRetryAdapter();
+    const orchestrator = new Orchestrator(config, manager, new Map([["mock", adapter]]));
+    const taskId = "task-20260630-033000-protocol-retry";
+
+    await expect(orchestrator.handleRequest({
+      request: "实现可恢复的审查协议",
+      cwd: root
+    })).rejects.toThrow("Critic approved with unresolved blocking findings: C-001");
+
+    const result = await orchestrator.retryTask({ taskId, cwd: root });
+
+    expect(result.taskId).toBe(taskId);
+    expect(adapter.criticRuns).toBe(2);
+    expect(await readTextIfExists(join(root, "protocol-retry.txt"))).toBe("ready\n");
   });
 
   it("uses current feature worklog in supervisor summaries instead of stale actor worker artifacts", async () => {
@@ -3217,6 +3334,93 @@ class RevisionFindingAdapter extends MockWorkerAdapter {
         status: "fixed",
         notes: "Mock actor fixed the keyboard handling."
       });
+    }
+    return result;
+  }
+}
+
+class RevisionWithoutFindingsAdapter extends MockWorkerAdapter {
+  private criticRuns = 0;
+
+  async run(spec: WorkerRunSpec): Promise<WorkerResult> {
+    const result = await super.run(spec);
+    if (spec.role === "critic") {
+      this.criticRuns += 1;
+      if (this.criticRuns === 1) {
+        await writeText(join(spec.filesDir, "review.md"), "REVISION_REQUIRED\nWrite the missing file.\n");
+      }
+    }
+    if (spec.role === "actor" && spec.prompt.includes("Revision request:")) {
+      await writeText(join(spec.cwd, "revision-without-finding.txt"), "should not run\n");
+    }
+    return result;
+  }
+}
+
+class RevisionWithoutReplyAdapter extends MockWorkerAdapter {
+  criticRuns = 0;
+
+  async run(spec: WorkerRunSpec): Promise<WorkerResult> {
+    const result = await super.run(spec);
+    if (spec.role === "critic") {
+      this.criticRuns += 1;
+      if (this.criticRuns === 1) {
+        const featureDir = featureDirFromPrompt(spec.prompt);
+        await appendJsonLine(join(featureDir, "critic-findings.jsonl"), {
+          id: "C-001",
+          severity: "blocker",
+          summary: "The required file is missing"
+        });
+        await writeText(join(spec.filesDir, "review.md"), "REVISION_REQUIRED\nSee critic-findings.jsonl.\n");
+      }
+    }
+    if (spec.role === "actor" && spec.prompt.includes("Revision request:")) {
+      await writeText(join(spec.cwd, "unacknowledged-fix.txt"), "fixed without reply\n");
+    }
+    return result;
+  }
+}
+
+class ApprovedWithFindingAdapter extends MockWorkerAdapter {
+  async run(spec: WorkerRunSpec): Promise<WorkerResult> {
+    const result = await super.run(spec);
+    if (spec.role === "actor") {
+      await writeText(join(spec.cwd, "inconsistent-approval.txt"), "must not integrate\n");
+    }
+    if (spec.role === "critic") {
+      const featureDir = featureDirFromPrompt(spec.prompt);
+      await appendJsonLine(join(featureDir, "critic-findings.jsonl"), {
+        id: "C-001",
+        severity: "blocker",
+        summary: "Blocking issue still exists"
+      });
+      await writeText(join(spec.filesDir, "review.md"), "APPROVED\n");
+    }
+    return result;
+  }
+}
+
+class RepairingProtocolOnRetryAdapter extends MockWorkerAdapter {
+  criticRuns = 0;
+
+  async run(spec: WorkerRunSpec): Promise<WorkerResult> {
+    const result = await super.run(spec);
+    if (spec.role === "actor") {
+      await writeText(join(spec.cwd, "protocol-retry.txt"), "ready\n");
+    }
+    if (spec.role === "critic") {
+      this.criticRuns += 1;
+      const featureDir = featureDirFromPrompt(spec.prompt);
+      if (this.criticRuns === 1) {
+        await appendJsonLine(join(featureDir, "critic-findings.jsonl"), {
+          id: "C-001",
+          severity: "blocker",
+          summary: "Contradictory approved finding"
+        });
+      } else {
+        await writeText(join(featureDir, "critic-findings.jsonl"), "");
+      }
+      await writeText(join(spec.filesDir, "review.md"), "APPROVED\n");
     }
     return result;
   }

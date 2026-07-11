@@ -1,5 +1,6 @@
 import { join } from "node:path";
-import { appendJsonLine, ensureDir, pathExists, writeJson, writeText } from "../core/file-store.js";
+import { z } from "zod";
+import { appendJsonLine, ensureDir, pathExists, readTextIfExists, writeJson, writeText } from "../core/file-store.js";
 import type { TaskSession, TaskTurn } from "../core/session-manager.js";
 import type { FeatureState, WorkerRole } from "../domain/schemas.js";
 import type { FeatureDefinition } from "./feature-plan.js";
@@ -18,6 +19,7 @@ export interface FeatureChannel {
   actorWorklogPath: string;
   actorRepliesPath: string;
   criticFindingsPath: string;
+  findingResolutionPath: string;
   decisionsPath: string;
 }
 
@@ -44,6 +46,50 @@ export interface CreateFeatureChannelInput {
   resume?: boolean;
 }
 
+export interface CriticFindingRecord {
+  id: string;
+  severity?: string;
+  summary: string;
+}
+
+export interface ActorFindingReplyRecord {
+  finding_id: string;
+  status: "fixed" | "not_fixed" | "deferred";
+  notes?: string;
+}
+
+const CriticFindingRecordSchema = z.object({
+  id: z.string().trim().min(1),
+  severity: z.string().trim().optional(),
+  summary: z.string().trim().min(1).optional(),
+  message: z.string().trim().min(1).optional()
+}).passthrough().superRefine((record, context) => {
+  if (!record.summary && !record.message) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["summary"],
+      message: "summary or legacy message is required"
+    });
+  }
+}).transform((record) => ({
+  ...record,
+  summary: record.summary ?? record.message ?? ""
+}));
+
+const ActorFindingReplyRecordSchema = z.object({
+  finding_id: z.string().trim().min(1),
+  status: z.string().trim().toLowerCase().pipe(z.enum(["fixed", "not_fixed", "deferred"])).default("fixed"),
+  notes: z.string().trim().optional()
+}).passthrough();
+
+const ApprovedFindingResolutionSchema = z.object({
+  version: z.literal(1),
+  decision: z.literal("approved"),
+  finding_ids: z.array(z.string().min(1)),
+  fixed_ids: z.array(z.string().min(1)),
+  unresolved_ids: z.array(z.string().min(1)).length(0)
+});
+
 export async function createFeatureChannel(input: CreateFeatureChannelInput): Promise<FeatureChannel> {
   const id = input.feature
     ? `${input.turn.turnId}-${input.feature.id}`
@@ -64,6 +110,7 @@ export async function createFeatureChannel(input: CreateFeatureChannelInput): Pr
     actorWorklogPath: join(dir, "actor-worklog.md"),
     actorRepliesPath: join(dir, "actor-replies.jsonl"),
     criticFindingsPath: join(dir, "critic-findings.jsonl"),
+    findingResolutionPath: join(dir, "finding-resolution.json"),
     decisionsPath: join(dir, "decisions.md")
   };
 
@@ -161,6 +208,183 @@ export async function writeFeatureDecision(channel: FeatureChannel, summary: str
   );
 }
 
+export async function requireFeatureRevisionFindings(channel: FeatureChannel): Promise<string[]> {
+  const findings = await readFeatureCriticFindings(channel);
+  if (findings.length === 0) {
+    throw new Error(`Critic requested revision without valid critic findings for ${channel.id}.`);
+  }
+  const findingIds = findings.map((finding) => finding.id);
+  const replies = await readFeatureActorReplies(channel);
+  await writeFindingResolutionSnapshot(channel, "pending", findingIds, replies);
+  return findingIds;
+}
+
+export async function requireActorFindingReplies(
+  channel: FeatureChannel,
+  findingIds: readonly string[]
+): Promise<void> {
+  const replies = await readFeatureActorReplies(channel);
+  const resolution = await writeFindingResolutionSnapshot(channel, "pending", findingIds, replies);
+  const unknown = resolution.unknownReplyIds;
+  if (unknown.length > 0) {
+    throw new Error(`Actor replies reference unknown Critic findings: ${unknown.join(", ")}.`);
+  }
+  const unresolved = resolution.unresolvedIds;
+  if (unresolved.length > 0) {
+    throw new Error(`Actor revision did not mark every Critic finding fixed: ${unresolved.join(", ")}.`);
+  }
+}
+
+export async function recordApprovedFindingResolution(
+  channel: FeatureChannel,
+  revisionFindingIds: readonly string[] = [],
+  options: { allowLegacyResolvedFindings?: boolean } = {}
+): Promise<void> {
+  const findings = await readFeatureCriticFindings(channel);
+  const currentIds = [...new Set(findings.map((finding) => finding.id))];
+  const replies = await readFeatureActorReplies(channel);
+  const latestReplies = new Map(replies.map((reply) => [reply.finding_id, reply]));
+  const expectedIds = revisionFindingIds.length > 0
+    ? [...new Set(revisionFindingIds)]
+    : options.allowLegacyResolvedFindings
+      ? currentIds.filter((id) => latestReplies.get(id)?.status === "fixed")
+      : [];
+  const unexpected = currentIds.filter((id) => !expectedIds.includes(id));
+  if (unexpected.length > 0) {
+    await writeFindingResolutionRecord(channel, {
+      decision: "inconsistent",
+      findingIds: currentIds,
+      fixedIds: [],
+      unresolvedIds: currentIds,
+      unknownReplyIds: [...new Set(replies.map((reply) => reply.finding_id))]
+        .filter((id) => !currentIds.includes(id)),
+      replyCount: replies.length
+    });
+    throw new Error(`Critic approved with unresolved blocking findings: ${unexpected.join(", ")}.`);
+  }
+  await requireActorFindingReplies(channel, expectedIds);
+  await writeFindingResolutionRecord(channel, {
+    decision: "approved",
+    findingIds: expectedIds,
+    fixedIds: expectedIds,
+    unresolvedIds: [],
+    unknownReplyIds: [],
+    replyCount: replies.length
+  });
+}
+
+export async function featureCriticCheckpointIsReusable(
+  channel: FeatureChannel,
+  decision: "approved" | "revision"
+): Promise<boolean> {
+  try {
+    if (decision === "revision") {
+      return (await readFeatureCriticFindings(channel)).length > 0;
+    }
+    const resolutionText = await readTextIfExists(channel.findingResolutionPath);
+    if (resolutionText.trim()) {
+      return ApprovedFindingResolutionSchema.safeParse(JSON.parse(resolutionText)).success;
+    }
+    const findings = await readFeatureCriticFindings(channel);
+    const replies = await readFeatureActorReplies(channel);
+    if (findings.length === 0) {
+      return replies.length === 0;
+    }
+    const findingIds = new Set(findings.map((finding) => finding.id));
+    const latestReplies = new Map(replies.map((reply) => [reply.finding_id, reply]));
+    return [...latestReplies.keys()].every((id) => findingIds.has(id))
+      && [...findingIds].every((id) => latestReplies.get(id)?.status === "fixed");
+  } catch {
+    return false;
+  }
+}
+
+async function readFeatureCriticFindings(channel: FeatureChannel): Promise<CriticFindingRecord[]> {
+  return readMailboxJsonLines(channel.criticFindingsPath, CriticFindingRecordSchema, "Critic finding");
+}
+
+async function readFeatureActorReplies(channel: FeatureChannel): Promise<ActorFindingReplyRecord[]> {
+  return readMailboxJsonLines(channel.actorRepliesPath, ActorFindingReplyRecordSchema, "Actor finding reply");
+}
+
+async function writeFindingResolutionSnapshot(
+  channel: FeatureChannel,
+  decision: "pending" | "inconsistent",
+  findingIds: readonly string[],
+  replies: ActorFindingReplyRecord[]
+): Promise<{ fixedIds: string[]; unresolvedIds: string[]; unknownReplyIds: string[] }> {
+  const ids = [...new Set(findingIds)];
+  const expected = new Set(ids);
+  const latest = new Map(replies.map((reply) => [reply.finding_id, reply]));
+  const fixedIds = ids.filter((id) => latest.get(id)?.status === "fixed");
+  const unresolvedIds = ids.filter((id) => latest.get(id)?.status !== "fixed");
+  const unknownReplyIds = [...latest.keys()].filter((id) => !expected.has(id));
+  await writeFindingResolutionRecord(channel, {
+    decision,
+    findingIds: ids,
+    fixedIds,
+    unresolvedIds,
+    unknownReplyIds,
+    replyCount: replies.length
+  });
+  return { fixedIds, unresolvedIds, unknownReplyIds };
+}
+
+async function writeFindingResolutionRecord(
+  channel: FeatureChannel,
+  input: {
+    decision: "pending" | "approved" | "inconsistent";
+    findingIds: string[];
+    fixedIds: string[];
+    unresolvedIds: string[];
+    unknownReplyIds: string[];
+    replyCount: number;
+  }
+): Promise<void> {
+  await writeJson(channel.findingResolutionPath, {
+    version: 1,
+    decision: input.decision,
+    finding_ids: input.findingIds,
+    fixed_ids: input.fixedIds,
+    unresolved_ids: [
+      ...input.unresolvedIds,
+      ...input.unknownReplyIds.map((id) => `unknown:${id}`)
+    ],
+    unknown_reply_ids: input.unknownReplyIds,
+    reply_count: input.replyCount,
+    updated_at: new Date().toISOString()
+  });
+}
+
+async function readMailboxJsonLines<TSchema extends z.ZodTypeAny>(
+  path: string,
+  schema: TSchema,
+  label: string
+): Promise<Array<z.output<TSchema>>> {
+  const records: Array<z.output<TSchema>> = [];
+  const lines = (await readTextIfExists(path)).split(/\r?\n/);
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index]?.trim() ?? "";
+    if (!line) {
+      continue;
+    }
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(line);
+    } catch {
+      throw new Error(`${label} JSONL is invalid at line ${index + 1}: ${path}.`);
+    }
+    const result = schema.safeParse(parsed);
+    if (!result.success) {
+      const issue = result.error.issues[0];
+      const field = issue?.path.length ? ` field ${issue.path.join(".")}` : "";
+      throw new Error(`${label}${field} is invalid at line ${index + 1}: ${path}.`);
+    }
+    records.push(result.data);
+  }
+  return records;
+}
+
 function buildFeatureSpec(input: CreateFeatureChannelInput, channel: FeatureChannel): string {
   return [
     "# Feature Mailbox",
@@ -179,8 +403,8 @@ function buildFeatureSpec(input: CreateFeatureChannelInput, channel: FeatureChan
     "",
     "Protocol:",
     "- Actor writes implementation notes to actor-worklog.md.",
-    "- Critic writes one JSON object per blocking issue to critic-findings.jsonl.",
-    "- Actor replies to each critic finding in actor-replies.jsonl.",
+    '- Critic writes one JSON object per blocking issue to critic-findings.jsonl: {"id":"C-001","severity":"blocker","summary":"what must change"}.',
+    '- Actor replies to each fixed finding in actor-replies.jsonl: {"finding_id":"C-001","status":"fixed","notes":"what changed"}.',
     "- Supervisor writes the final decision summary to decisions.md.",
     ""
   ].join("\n");

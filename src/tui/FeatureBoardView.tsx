@@ -191,7 +191,9 @@ function featureBoardFeatureText(
 ): string {
   const marker = selected ? "> " : "  ";
   const state = humanizeFeatureState(feature.state);
-  const debt = Math.max(0, feature.findings - feature.replies);
+  const debt = typeof feature.unresolvedFindings === "number"
+    ? feature.unresolvedFindings
+    : Math.max(0, feature.findings - feature.replies);
   const review = debt > 0 ? `${debt} open ${debt === 1 ? "finding" : "findings"}` : "";
   const blocker = blocked.length > 0
     ? `blocked by ${blocked.map((item) => safeFeatureBoardText(item.title)).join(", ")}`

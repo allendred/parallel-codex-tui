@@ -112,7 +112,9 @@ function fixture(): CollaborationTimeline {
         state: "revision_needed",
         updatedAt: "2026-07-11T08:00:00.000Z",
         findings: 2,
-        replies: 1,
+        replies: 2,
+        resolvedFindings: 1,
+        unresolvedFindings: 1,
         latestFinding: "Board collision remains",
         artifactRefs: []
       },

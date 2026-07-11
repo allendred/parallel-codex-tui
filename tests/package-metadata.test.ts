@@ -185,6 +185,11 @@ describe("package metadata", () => {
     expect(readme).toContain("authoritative integrated changed paths, Critic review, verification evidence, and findings");
     expect(readme).toContain("Changed files come from the workspace integration result rather than an Actor claim");
     expect(readme).toContain("Multi-feature delivery uses the same result protocol");
+    expect(readme).toContain("Feature revision mailboxes are a checked protocol rather than prompt-only convention");
+    expect(readme).toContain("Missing, malformed, unacknowledged, or contradictory findings stop the task before live integration");
+    expect(readme).toContain("snapshots pending, inconsistent, and approved fixed/open state in `finding-resolution.json`");
+    expect(readme).toContain("uses resolution evidence instead of counting every reply as a fix");
+    expect(readme).toContain("shows verified `fixed`/`open` counts when resolution evidence exists");
     expect(readme).toContain("`Ctrl+D` toggles the focused result between full detail and its five-line compact summary");
     expect(readme).toContain("Result lookup follows the persisted task id");
     expect(readme).toContain("Restarting an existing task restores the latest persisted route evidence");
@@ -246,12 +251,12 @@ describe("package metadata", () => {
     expect(readme).toContain("`checkpoints kept · Ctrl+R resume`");
     expect(readme).toContain("Checkpoint load, reuse, and recovery events appear in the collaboration timeline");
     expect(readme).toContain("press `C` to open the file-backed Actor/Critic collaboration timeline");
-    expect(readme).toContain("`dialogue/actor-critic.jsonl`, feature status, Critic findings, Actor replies, and Wave events");
+    expect(readme).toContain("`dialogue/actor-critic.jsonl`, feature status, Critic findings, Actor replies, finding resolution, and Wave events");
     expect(readme).toContain("`Tab` cycles all features and each individual feature");
     expect(readme).toContain("Up/Down selects a collaboration event");
     expect(readme).toContain("`Enter` opens its complete event detail");
     expect(readme).toContain("`U` filters to unresolved feature evidence");
-    expect(readme).toContain("artifact paths from dialogue, status, Critic findings, and Actor replies");
+    expect(readme).toContain("artifact paths from dialogue, status, Critic findings, Actor replies, and finding resolution");
     expect(readme).toContain("`R` refreshes immediately");
     expect(readme).toContain("Up/Down, PageUp/PageDown, the mouse wheel, or `Tab` changes the selected worker");
     expect(readme).toContain("Enter or `Ctrl+W` opens its rendered log");

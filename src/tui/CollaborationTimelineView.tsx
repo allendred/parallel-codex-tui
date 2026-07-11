@@ -242,7 +242,10 @@ function collaborationEventsForFeature(
 }
 
 function collaborationFeatureIsUnresolved(feature: CollaborationFeature): boolean {
-  return feature.state !== "approved" || feature.findings > feature.replies;
+  return feature.state !== "approved"
+    || (typeof feature.unresolvedFindings === "number"
+      ? feature.unresolvedFindings > 0
+      : feature.findings > feature.replies);
 }
 
 function selectedCollaborationEvent(
@@ -270,11 +273,15 @@ function collaborationTimelineSummary(
   if (feature) {
     const findings = `${feature.findings} ${feature.findings === 1 ? "finding" : "findings"}`;
     const replies = `${feature.replies} ${feature.replies === 1 ? "reply" : "replies"}`;
+    const resolution = typeof feature.resolvedFindings === "number"
+      && typeof feature.unresolvedFindings === "number"
+      ? `${feature.resolvedFindings} fixed · ${feature.unresolvedFindings} open`
+      : `${findings} · ${replies}`;
     return fitCollaborationCandidates([
       ...(unresolvedOnly ? [
         `${safeCollaborationText(feature.title)} · ${humanizeState(feature.state)} · unresolved · ${eventCount} events`
       ] : []),
-      `${safeCollaborationText(feature.title)} · ${humanizeState(feature.state)} · ${eventCount} events · ${findings} · ${replies}`,
+      `${safeCollaborationText(feature.title)} · ${humanizeState(feature.state)} · ${eventCount} events · ${resolution}`,
       `${safeCollaborationText(feature.title)} · ${humanizeState(feature.state)} · ${eventCount} events`,
       `${safeCollaborationText(feature.title)} · ${humanizeState(feature.state)}`,
       safeCollaborationText(feature.id)
@@ -366,6 +373,17 @@ function collaborationEventDetailLayout(
       : []),
     ...(typeof event.replies === "number"
       ? collaborationDetailLines("replies", String(event.replies), width, "muted")
+      : []),
+    ...(typeof event.resolvedFindings === "number"
+      ? collaborationDetailLines("fixed", String(event.resolvedFindings), width, "success")
+      : []),
+    ...(typeof event.unresolvedFindings === "number"
+      ? collaborationDetailLines(
+          "open",
+          String(event.unresolvedFindings),
+          width,
+          event.unresolvedFindings > 0 ? "critic" : "muted"
+        )
       : []),
     ...(event.artifactRefs.length > 0
       ? event.artifactRefs.flatMap((artifact) => collaborationDetailLines(

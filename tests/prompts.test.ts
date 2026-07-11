@@ -39,6 +39,18 @@ describe("role prompts", () => {
     expect(prompt).toContain("Review workspace: /tmp/task/workspaces/reviews/ui");
     expect(prompt).toContain("disposable review copy");
     expect(prompt).toContain("discarded");
+    expect(prompt).toContain('{"id":"C-001","severity":"blocker","summary":"what must change"}');
+  });
+
+  it("gives Actor an exact finding reply record contract", () => {
+    const prompt = buildActorPrompt({
+      request: "修复 Critic finding",
+      taskDir: "/tmp/task",
+      judgeDir: "/tmp/task/turn",
+      workspaceDir: "/tmp/task/workspaces/feature"
+    });
+
+    expect(prompt).toContain('{"finding_id":"C-001","status":"fixed","notes":"what changed"}');
   });
 
   it("asks Judge for a bounded dependency-aware feature manifest", () => {
