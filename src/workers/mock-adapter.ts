@@ -16,9 +16,9 @@ export class MockWorkerAdapter implements WorkerAdapter {
     await appendText(spec.outputLogPath, `[mock:${spec.role}] started\n`);
 
     if (spec.role === "judge") {
-      await writeText(join(spec.filesDir, "requirements.md"), "# Requirements\n\n- Mock requirements derived from the user request.\n");
-      await writeText(join(spec.filesDir, "plan.md"), "# Plan\n\n1. Run Actor.\n2. Run Critic.\n");
-      await writeText(join(spec.filesDir, "acceptance.md"), "# Acceptance\n\n- Mock review approves the result.\n");
+      await writeText(join(spec.filesDir, "requirements.md"), "# Requirements\n\n- [R-001] Mock requirements derived from the user request.\n");
+      await writeText(join(spec.filesDir, "plan.md"), "# Plan\n\n1. [P-001] Implement the scoped change.\n2. [P-002] Run focused verification.\n");
+      await writeText(join(spec.filesDir, "acceptance.md"), "# Acceptance\n\n- [A-001] [R-001] Focused tests pass for the requested behavior.\n");
       await writeText(join(spec.filesDir, "actor-brief.md"), "# Actor Brief\n\nImplement the requested change and write a worklog.\n");
       await writeText(join(spec.filesDir, "critic-brief.md"), "# Critic Brief\n\nReview the Actor output against acceptance criteria.\n");
     }

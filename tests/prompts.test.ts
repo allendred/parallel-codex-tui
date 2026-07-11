@@ -68,6 +68,10 @@ describe("role prompts", () => {
     expect(prompt).toContain("Project workspace (read-only): /tmp/project");
     expect(prompt).toContain("Never put the absolute live workspace path into implementation instructions");
     expect(prompt).toContain("logical project root");
+    expect(prompt).toContain("- [R-001] one actionable requirement");
+    expect(prompt).toContain("1. [P-001] one concrete implementation step");
+    expect(prompt).toContain("- [A-001] [R-001] one observable check or command");
+    expect(prompt).toContain("Do not leave TODO, TBD, 待定, or placeholder-only content");
   });
 
   it("asks the Wave Critic to verify the combined workspace before live commit", () => {

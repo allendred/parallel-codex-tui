@@ -194,6 +194,15 @@ describe("Orchestrator", () => {
     expect(await readTextIfExists(join(taskDir, "turns", "0001", "user.md"))).toContain(
       "实现 parallel coding worker 状态栏"
     );
+    expect(JSON.parse(await readTextIfExists(join(taskDir, "turns", "0001", "judge-validation.json")))).toMatchObject({
+      version: 1,
+      state: "valid",
+      artifacts: {
+        "requirements.md": { state: "valid", item_count: 1 },
+        "plan.md": { state: "valid", item_count: 2 },
+        "acceptance.md": { state: "valid", item_count: 1 }
+      }
+    });
     expect(await readTextIfExists(join(taskDir, "actor-mock", "prompt.md"))).toContain("Current turn: 0001");
 
     const featureDir = join(taskDir, "features", "0001-parallel-coding-worker");
@@ -209,6 +218,38 @@ describe("Orchestrator", () => {
     expect(await readTextIfExists(join(taskDir, "actor-mock", "prompt.md"))).toContain(`Feature directory: ${featureDir}`);
     expect(await readTextIfExists(join(taskDir, "critic-mock", "prompt.md"))).toContain("critic-findings.jsonl");
     expect(await readTextIfExists(join(taskDir, "dialogue", "actor-critic.jsonl"))).toContain('"type":"critic.completed"');
+  });
+
+  it("stops before Actor when Judge artifacts are not executable", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pct-orch-judge-contract-"));
+    const config = mockConfig(root);
+    const manager = new SessionManager({
+      projectRoot: root,
+      dataDir: config.dataDir,
+      now: () => new Date("2026-06-30T03:30:01.000Z"),
+      randomId: () => "judge-contract"
+    });
+    const adapter = new InvalidJudgeContractAdapter();
+    const orchestrator = new Orchestrator(config, manager, new Map([["mock", adapter]]));
+
+    await expect(orchestrator.handleRequest({
+      request: "实现一项需要明确需求的功能",
+      cwd: root
+    })).rejects.toThrow("Judge artifacts failed validation");
+
+    const taskDir = join(root, ".parallel-codex", "sessions", "task-20260630-033001-judge-contract");
+    const report = JSON.parse(await readTextIfExists(join(taskDir, "turns", "0001", "judge-validation.json"))) as {
+      state: string;
+      issues: Array<{ file: string; code: string }>;
+    };
+    expect(report.state).toBe("invalid");
+    expect(report.issues).toContainEqual({
+      file: "requirements.md",
+      code: "missing_list_items",
+      message: "requirements.md must contain at least one Markdown list requirement."
+    });
+    expect(adapter.roles).toEqual(["judge"]);
+    expect(await pathExists(join(taskDir, "actor-mock"))).toBe(false);
   });
 
   it("publishes completion evidence before exposing the terminal done state", async () => {
@@ -2213,6 +2254,11 @@ describe("Orchestrator", () => {
     ).rejects.toThrow("actor-mock failed with exit code 2");
 
     const taskDir = join(root, ".parallel-codex", "sessions", taskId);
+    const turnDir = join(taskDir, "turns", "0001");
+    await writeText(join(turnDir, "requirements.md"), "# Requirements\n\n- Build the game.\n");
+    await writeText(join(turnDir, "plan.md"), "# Plan\n\n1. Implement the game.\n");
+    await writeText(join(turnDir, "acceptance.md"), "# Acceptance\n\n- The smoke test passes.\n");
+    await writeText(join(turnDir, "judge-validation.json"), "");
     await writeJson(join(taskDir, "latest-route.json"), RouteDecisionSchema.parse({
       mode: "simple",
       reason: "A later task question.",
@@ -2235,7 +2281,16 @@ describe("Orchestrator", () => {
     expect(meta.status).toBe("done");
     expect(latestRoute).toMatchObject({ mode: "complex", source: "forced" });
     expect(adapter.actorRuns).toBe(2);
+    expect(adapter.judgeRuns).toBe(1);
     expect(adapter.actorNativeSessions).toEqual([null, "retry-actor-session"]);
+    expect(JSON.parse(await readTextIfExists(join(turnDir, "judge-validation.json")))).toMatchObject({
+      state: "valid",
+      contract: {
+        requirements: [{ id: "R-001", text: "Build the game." }],
+        plan: [{ id: "P-001", text: "Implement the game." }],
+        acceptance: [{ id: "A-001", text: "The smoke test passes." }]
+      }
+    });
     expect(await pathExists(join(taskDir, "turns", "0002"))).toBe(false);
     expect(await readTextIfExists(join(taskDir, "actor-mock", "output.log"))).toContain("FIRST_ACTOR_FAILURE");
     expect(await readTextIfExists(join(taskDir, "events.jsonl"))).toContain("task.retrying");
@@ -2625,7 +2680,11 @@ describe("Orchestrator", () => {
       "const workerId = process.env.PARALLEL_CODEX_WORKER_ID;",
       "const filesDir = process.env.PARALLEL_CODEX_FILES_DIR;",
       "if (role === 'judge') {",
-      "  for (const file of ['requirements.md','plan.md','acceptance.md','actor-brief.md','critic-brief.md']) fs.writeFileSync(path.join(filesDir, file), file + '\\n');",
+      "  fs.writeFileSync(path.join(filesDir, 'requirements.md'), '# Requirements\\n\\n- [R-001] Implement alpha and beta.\\n');",
+      "  fs.writeFileSync(path.join(filesDir, 'plan.md'), '# Plan\\n\\n1. [P-001] Implement both features.\\n');",
+      "  fs.writeFileSync(path.join(filesDir, 'acceptance.md'), '# Acceptance\\n\\n- [A-001] [R-001] Both features are verified.\\n');",
+      "  fs.writeFileSync(path.join(filesDir, 'actor-brief.md'), '# Actor Brief\\n\\nImplement the assigned feature.\\n');",
+      "  fs.writeFileSync(path.join(filesDir, 'critic-brief.md'), '# Critic Brief\\n\\nVerify the assigned feature.\\n');",
       "  fs.writeFileSync(path.join(filesDir, 'features.json'), JSON.stringify({version:1,features:[",
       "    {id:'alpha',title:'Alpha',description:'Implement alpha',depends_on:[]},",
       "    {id:'beta',title:'Beta',description:'Implement beta',depends_on:[]}",
@@ -2715,9 +2774,12 @@ describe("Orchestrator", () => {
       "if (role === 'judge') {",
       "  const fs = require('node:fs');",
       "  const path = require('node:path');",
-      "  for (const file of ['requirements.md','plan.md','acceptance.md','actor-brief.md','critic-brief.md']) {",
-      "    fs.writeFileSync(path.join(process.env.PARALLEL_CODEX_FILES_DIR, file), file + '\\n');",
-      "  }",
+      "  const dir = process.env.PARALLEL_CODEX_FILES_DIR;",
+      "  fs.writeFileSync(path.join(dir, 'requirements.md'), '# Requirements\\n\\n- [R-001] Run a cancellable Actor.\\n');",
+      "  fs.writeFileSync(path.join(dir, 'plan.md'), '# Plan\\n\\n1. [P-001] Start the Actor.\\n');",
+      "  fs.writeFileSync(path.join(dir, 'acceptance.md'), '# Acceptance\\n\\n- [A-001] [R-001] Cancellation stops the Actor.\\n');",
+      "  fs.writeFileSync(path.join(dir, 'actor-brief.md'), '# Actor Brief\\n\\nImplement the requested behavior.\\n');",
+      "  fs.writeFileSync(path.join(dir, 'critic-brief.md'), '# Critic Brief\\n\\nVerify cancellation behavior.\\n');",
       "}",
       "if (role === 'actor') setInterval(() => {}, 1000);"
     ].join("");
@@ -2790,6 +2852,19 @@ class FailingJudgeAdapter implements WorkerAdapter {
   }
 }
 
+class InvalidJudgeContractAdapter extends MockWorkerAdapter {
+  readonly roles: string[] = [];
+
+  async run(spec: WorkerRunSpec): Promise<WorkerResult> {
+    this.roles.push(spec.role);
+    const result = await super.run(spec);
+    if (spec.role === "judge") {
+      await writeText(join(spec.filesDir, "requirements.md"), "# Requirements\n\nRequirements will be decided later.\n");
+    }
+    return result;
+  }
+}
+
 class MissingFeatureDecisionAdapter extends MockWorkerAdapter {
   async run(spec: WorkerRunSpec): Promise<WorkerResult> {
     if (spec.role === "actor") {
@@ -2851,10 +2926,14 @@ class SingleIsolationAdapter extends MockWorkerAdapter {
 }
 
 class RetryOnceActorAdapter extends MockWorkerAdapter {
+  judgeRuns = 0;
   actorRuns = 0;
   readonly actorNativeSessions: Array<string | null> = [];
 
   async run(spec: WorkerRunSpec): Promise<WorkerResult> {
+    if (spec.role === "judge") {
+      this.judgeRuns += 1;
+    }
     if (spec.role !== "actor") {
       return super.run(spec);
     }
@@ -3605,9 +3684,9 @@ class NoArtifactAdapter extends MockWorkerAdapter {
 class TurnRequirementsJudgeAdapter extends MockWorkerAdapter {
   async run(spec: WorkerRunSpec): Promise<WorkerResult> {
     if (spec.role === "judge") {
-      await writeText(join(turnDirFromPrompt(spec.prompt), "requirements.md"), "# Requirements\n\nTURN_ONLY_REQUIREMENTS\n");
-      await writeText(join(turnDirFromPrompt(spec.prompt), "plan.md"), "# Plan\n\nTurn-local plan.\n");
-      await writeText(join(turnDirFromPrompt(spec.prompt), "acceptance.md"), "# Acceptance\n\nTurn-local acceptance.\n");
+      await writeText(join(turnDirFromPrompt(spec.prompt), "requirements.md"), "# Requirements\n\n- [R-001] TURN_ONLY_REQUIREMENTS\n");
+      await writeText(join(turnDirFromPrompt(spec.prompt), "plan.md"), "# Plan\n\n1. [P-001] Execute the turn-local plan.\n");
+      await writeText(join(turnDirFromPrompt(spec.prompt), "acceptance.md"), "# Acceptance\n\n- [A-001] [R-001] Turn-local acceptance is verified.\n");
       await writeText(join(turnDirFromPrompt(spec.prompt), "actor-brief.md"), "# Actor Brief\n\nTurn-local actor brief.\n");
       await writeText(join(turnDirFromPrompt(spec.prompt), "critic-brief.md"), "# Critic Brief\n\nTurn-local critic brief.\n");
       return {

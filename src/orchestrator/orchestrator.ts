@@ -37,18 +37,18 @@ import {
   buildWaveCriticPrompt
 } from "./prompts.js";
 import { featureExecutionWaves, parseFeaturePlan, type FeatureDefinition, type FeaturePlan } from "./feature-plan.js";
+import {
+  JUDGE_REQUIRED_ARTIFACTS,
+  JUDGE_VALIDATION_FILE,
+  validateJudgeArtifacts,
+  type JudgeArtifactName,
+  type JudgeValidationReport
+} from "./judge-artifacts.js";
 import { buildSupervisorSummary } from "./supervisor-summary.js";
 import { ParallelWorkspaceManager } from "./workspace-sandbox.js";
 
 const PREVIOUS_TURN_SUMMARY_LIMIT = 5;
 const PREVIOUS_TURN_SUMMARY_LENGTH = 600;
-const JUDGE_REQUIRED_ARTIFACTS = [
-  "requirements.md",
-  "plan.md",
-  "acceptance.md",
-  "actor-brief.md",
-  "critic-brief.md"
-] as const;
 const JUDGE_ARTIFACTS = [
   ...JUDGE_REQUIRED_ARTIFACTS,
   "features.json"
@@ -569,29 +569,31 @@ export class Orchestrator {
         await writeText(join(turn.dir, file), await readTextIfExists(sourcePath));
       }
     }
-    if (!(await this.hasCompleteJudgeSnapshot(turn))) {
-      const missing: string[] = [];
-      for (const file of JUDGE_REQUIRED_ARTIFACTS) {
-        if (!(await readTextIfExists(join(turn.dir, file))).trim()) {
-          missing.push(file);
-        }
-      }
-      throw new Error(`Judge did not write required turn artifacts: ${missing.join(", ")}.`);
+    const report = await this.validateJudgeSnapshot(turn);
+    if (report.state !== "valid") {
+      throw new Error(judgeValidationError(turn, report));
     }
     return { ...judge, dir: turn.dir };
   }
 
   private async hasCompleteJudgeSnapshot(turn: TaskTurn): Promise<boolean> {
+    return (await this.validateJudgeSnapshot(turn)).state === "valid";
+  }
+
+  private async validateJudgeSnapshot(turn: TaskTurn): Promise<JudgeValidationReport> {
+    const artifacts: Partial<Record<JudgeArtifactName, string>> = {};
     for (const file of JUDGE_REQUIRED_ARTIFACTS) {
-      if (!(await readTextIfExists(join(turn.dir, file))).trim()) {
-        return false;
-      }
+      artifacts[file] = await readTextIfExists(join(turn.dir, file));
     }
-    return true;
+    const report = validateJudgeArtifacts(artifacts);
+    await writeJson(join(turn.dir, JUDGE_VALIDATION_FILE), report);
+    return report;
   }
 
   private async clearTurnJudgeArtifacts(turn: TaskTurn, preserveFeaturePlan = false): Promise<void> {
-    const files = preserveFeaturePlan ? JUDGE_ARTIFACTS : [...JUDGE_ARTIFACTS, "feature-plan.json"];
+    const files = preserveFeaturePlan
+      ? [...JUDGE_ARTIFACTS, JUDGE_VALIDATION_FILE]
+      : [...JUDGE_ARTIFACTS, JUDGE_VALIDATION_FILE, "feature-plan.json"];
     for (const file of files) {
       await removeIfExists(join(turn.dir, file));
     }
@@ -2624,6 +2626,17 @@ async function featureIsApproved(feature: FeatureChannel): Promise<boolean> {
   } catch {
     return false;
   }
+}
+
+function judgeValidationError(turn: TaskTurn, report: JudgeValidationReport): string {
+  const details = report.issues.slice(0, 5).map((item) => `${item.file}: ${item.message}`).join(" ");
+  const remaining = report.issues.length - Math.min(report.issues.length, 5);
+  return [
+    "Judge artifacts failed validation.",
+    details,
+    ...(remaining > 0 ? [`${remaining} more issue${remaining === 1 ? "" : "s"}.`] : []),
+    `See ${join(turn.dir, JUDGE_VALIDATION_FILE)}.`
+  ].filter(Boolean).join(" ");
 }
 
 function errorMessage(error: unknown): string {

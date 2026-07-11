@@ -161,6 +161,7 @@ The doctor output includes `preview:` and `semantic:` ANSI swatch rows so you ca
 - Complex requests create a session under `.parallel-codex/sessions/`.
 - Complex requests run Judge -> Actor -> Critic. Judge also writes a bounded `features.json` dependency plan.
 - Judge runs from its task-owned worker directory, reads the selected project without treating it as a write target, and snapshots `requirements.md`, `plan.md`, `acceptance.md`, role briefs, and `features.json` into each numbered turn.
+- Before Actor starts, the orchestrator parses the Judge Markdown into stable requirement, plan, and acceptance entries and writes `judge-validation.json`. Missing lists, placeholder-only content, duplicate ids, and unknown requirement references fail before implementation; valid legacy list snapshots are normalized during retry without rerunning Judge.
 - Independent features run as parallel Actor batches followed by parallel Critic batches. Dependent features start only after their prerequisite wave is approved and integrated.
 - Parallel Actor, Critic, and revision batches honor `[orchestration].maxParallelFeatures` (default `3`).
 - Each planned feature gets an isolated Actor implementation workspace, a disposable Critic review clone, worker directories, logs, status, native session ids, and a mailbox under `features/<turn>-<feature>`; the shared dialogue remains in `dialogue/actor-critic.jsonl`.
