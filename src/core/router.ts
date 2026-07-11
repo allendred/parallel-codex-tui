@@ -24,6 +24,7 @@ export interface CodexRouteRunnerResult {
 export type RouterExecutionPhase =
   | "dispatching"
   | "starting"
+  | "retrying"
   | "waiting-output"
   | "receiving-stderr"
   | "receiving-response"

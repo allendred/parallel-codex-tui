@@ -552,11 +552,11 @@ describe("ProcessWorkerAdapter", () => {
       outputLogPath,
       statusPath,
       prompt: "hello process",
-      idleTimeoutMs: 200
+      idleTimeoutMs: 1000
     });
 
     expect(result.exitCode).toBe(0);
-    expect(await readTextIfExists(outputLogPath)).toContain("Process idle timed out after 200ms");
+    expect(await readTextIfExists(outputLogPath)).toContain("Process idle timed out after 1000ms");
 
     const status = await readJson(statusPath, WorkerStatusSchema);
     expect(status.state).toBe("failed");
@@ -584,12 +584,12 @@ describe("ProcessWorkerAdapter", () => {
       outputLogPath,
       statusPath,
       prompt: "review this",
-      firstOutputTimeoutMs: 200,
-      idleTimeoutMs: 500
+      firstOutputTimeoutMs: 1000,
+      idleTimeoutMs: 2000
     });
 
     expect(result.exitCode).toBe(0);
-    expect(await readTextIfExists(outputLogPath)).toContain("Process produced no first output after 200ms");
+    expect(await readTextIfExists(outputLogPath)).toContain("Process produced no first output after 1000ms");
 
     const status = await readJson(statusPath, WorkerStatusSchema);
     expect(status.state).toBe("failed");

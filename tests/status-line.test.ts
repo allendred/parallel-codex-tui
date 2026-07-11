@@ -56,6 +56,12 @@ describe("formatStatusLine", () => {
     expect(formatRouteStatus).toBeTypeOf("function");
     expect(formatRouteStatus?.({ mode: "simple", source: "codex", duration_ms: 42 })).toBe("route simple · 42ms");
     expect(formatRouteStatus?.({
+      mode: "simple",
+      source: "codex",
+      duration_ms: 42,
+      router_attempt: 2
+    })).toBe("route simple · try 2 · 42ms");
+    expect(formatRouteStatus?.({
       mode: "complex",
       source: "fallback",
       reason: "Codex router failed: Codex router timed out after 120000ms. Codex router fallback forced complex.",
@@ -241,6 +247,26 @@ describe("formatStatusLine", () => {
       phase: "parsing",
       proxyConfigured: false
     }, 19900)).toBe("route parsing · direct · 19s / 20s");
+    expect(formatRoutePendingStatus?.({
+      scope: "initial",
+      mode: "auto",
+      timeoutMs: 30000,
+      phase: "retrying",
+      attempt: 2,
+      maxAttempts: 2,
+      retryDelayMs: 500,
+      proxyConfigured: true,
+      proxyEndpoint: "proxy.test:8443"
+    }, 300)).toBe("route retry 2/2 · via proxy.test:8443 · 500ms backoff");
+    expect(formatRoutePendingStatus?.({
+      scope: "initial",
+      mode: "auto",
+      timeoutMs: 30000,
+      phase: "starting",
+      attempt: 2,
+      maxAttempts: 2,
+      proxyConfigured: false
+    }, 300)).toBe("route starting · try 2 · direct · 0s / 30s");
     expect(formatRoutePendingStatus?.({ scope: "initial", mode: "complex", timeoutMs: 120000 })).toBe(
       "route complex · forced"
     );

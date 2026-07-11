@@ -169,12 +169,13 @@ describe("package metadata", () => {
     expect(readme).toContain("Router configuration and `router/routes.jsonl` remain shared under the app root");
     expect(readme).toContain("press `Ctrl+G` to open the global Router diagnostics view");
     expect(readme).toContain("`Tab` toggles between all workspaces and the current workspace");
-    expect(readme).toContain("all three watchdog limits, the triggered `first-output`/`idle`/`total` timeout kind, proxy-configured flag, normalized proxy source/variable, sanitized proxy host:port, and normalized failure kind");
+    expect(readme).toContain("all three watchdog limits, retry attempt limit/backoff, the triggered `first-output`/`idle`/`total` timeout kind");
     expect(readme).toContain("Successful Codex latency excludes fallback wait time");
     expect(readme).toContain("marks each timeout budget as healthy, tight, or high");
     expect(readme).toContain("at least three successful samples");
     expect(readme).toContain("Proxy context is correlation evidence, not proof that the proxy caused a failure");
     expect(readme).toContain("source, duration, fallback cause, scope, and workspace");
+    expect(readme).toContain("health row separates recovered automatic retries from terminal fallbacks");
     expect(readme).toContain("`Ctrl+G` refreshes it and `Esc` returns with the chat draft intact");
     expect(readme).toContain("Router classification only receives the user request");
     expect(readme).toContain("Valid `[router]` changes are reloaded before the next classification without restarting the TUI");
@@ -204,6 +205,9 @@ describe("package metadata", () => {
     expect(readme).toContain("normalized proxy source/variable, sanitized proxy host:port");
     expect(readme).toContain("`firstOutputTimeoutMs` stops a silent process");
     expect(readme).toContain("`idleTimeoutMs` resets after every stdout or stderr chunk");
+    expect(readme).toContain("`maxAttempts = 2` retries one transient classification failure after `retryDelayMs = 500`");
+    expect(readme).toContain("First-output and idle watchdogs plus explicit network/proxy failures are retryable");
+    expect(readme).toContain("router_fallback_resolution = \"auto-retry\"");
     expect(readme).toContain("the triggered `first-output`/`idle`/`total` timeout kind");
     expect(readme).toContain("Proxy URLs, credentials, paths, and query strings are never displayed or persisted");
     expect(readme).toContain("When semantic routing falls back inside the TUI, execution pauses");

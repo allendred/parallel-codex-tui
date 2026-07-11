@@ -82,6 +82,11 @@ export function formatRouteStatus(route: RouteDecision | null): string {
     details.push("user cancelled");
   } else if (route.router_fallback_resolution === "retry") {
     details.push("Router retry");
+  } else if (route.router_fallback_resolution === "auto-retry") {
+    details.push("auto retry");
+  }
+  if (typeof route.router_attempt === "number" && route.router_attempt > 1) {
+    details.push(`try ${route.router_attempt}`);
   }
   if (route.source === "fallback") {
     const cause = classifyRouterFailure(route.reason);
@@ -108,9 +113,21 @@ export function formatRoutePendingStatus(state: RouteStartInfo | null, elapsedMs
   if (state.mode !== "auto") {
     return `route ${state.mode} · forced`;
   }
-  const label = routePendingPhaseLabel(state);
   const path = routePendingPathLabel(state);
-  const details = [label, ...(path ? [path] : [])];
+  if (state.phase === "retrying") {
+    const details = [
+      `retry ${state.attempt}/${state.maxAttempts}`,
+      ...(path ? [path] : []),
+      `${formatRouteDuration(state.retryDelayMs ?? 0)} backoff`
+    ];
+    return `route ${details.join(" · ")}`;
+  }
+  const label = routePendingPhaseLabel(state);
+  const details = [
+    label,
+    ...(state.attempt > 1 ? [`try ${state.attempt}`] : []),
+    ...(path ? [path] : [])
+  ];
   if (typeof elapsedMs === "number") {
     const boundedElapsedMs = Math.min(state.timeoutMs, Math.max(0, elapsedMs));
     details.push(`${formatRouteElapsed(boundedElapsedMs)} / ${formatRouteDuration(state.timeoutMs)}`);

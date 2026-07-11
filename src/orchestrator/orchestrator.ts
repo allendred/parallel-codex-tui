@@ -4,7 +4,7 @@ import type { AppConfig } from "../core/config.js";
 import { appendJsonLine, ensureDir, pathExists, readJson, readTextIfExists, removeIfExists, writeJson, writeText } from "../core/file-store.js";
 import { claimTaskRunLease } from "../core/process-ownership.js";
 import { routerRuntimeDir } from "../core/paths.js";
-import { classifyRouterFailure } from "../core/router-audit.js";
+import { classifyRouterFailure, routerFallbackIsTransient } from "../core/router-audit.js";
 import {
   routeRequestWithCodex,
   routerProxyContext,
@@ -88,6 +88,9 @@ export interface RouteStartInfo {
   mode: AppConfig["router"]["defaultMode"];
   timeoutMs: number;
   phase: RouterExecutionPhase;
+  attempt: number;
+  maxAttempts: number;
+  retryDelayMs?: number;
   proxyConfigured: boolean;
   proxySource?: "router-config" | "environment";
   proxyVariable?: string;
@@ -1355,6 +1358,8 @@ export class Orchestrator {
         mode: router.defaultMode,
         timeoutMs: routeConfig.router.codex.timeoutMs,
         phase: "starting",
+        attempt,
+        maxAttempts: routeConfig.router.codex.maxAttempts,
         proxyConfigured: proxy.configured,
         ...(proxy.configured
           ? {
@@ -1380,6 +1385,35 @@ export class Orchestrator {
       if (route.source !== "fallback") {
         await this.appendRouterAuditRecord(request, workspace, scope, route, routeConfig, semanticRoute);
         return route;
+      }
+
+      if (
+        semanticRoute
+        && attempt < routeConfig.router.codex.maxAttempts
+        && routerFallbackIsTransient(route)
+      ) {
+        route = resolveRouterFallback(route, "auto-retry");
+        await this.appendRouterAuditRecord(request, workspace, scope, route, routeConfig, semanticRoute);
+        onRouteStart?.({
+          scope,
+          mode: router.defaultMode,
+          timeoutMs: routeConfig.router.codex.timeoutMs,
+          phase: "retrying",
+          attempt: attempt + 1,
+          maxAttempts: routeConfig.router.codex.maxAttempts,
+          retryDelayMs: routeConfig.router.codex.retryDelayMs,
+          proxyConfigured: proxy.configured,
+          ...(proxy.configured
+            ? {
+                proxySource: proxy.source,
+                proxyVariable: proxy.variable,
+                proxyEndpoint: proxy.endpoint
+              }
+            : {})
+        });
+        await waitForRouterRetry(routeConfig.router.codex.retryDelayMs, signal);
+        attempt += 1;
+        continue;
       }
 
       let choice: RouteFallbackChoice | "configured" = "configured";
@@ -1431,6 +1465,8 @@ export class Orchestrator {
             router_timeout_ms: routeConfig.router.codex.timeoutMs,
             router_first_output_timeout_ms: routeConfig.router.codex.firstOutputTimeoutMs,
             router_idle_timeout_ms: routeConfig.router.codex.idleTimeoutMs,
+            router_max_attempts: routeConfig.router.codex.maxAttempts,
+            router_retry_delay_ms: routeConfig.router.codex.retryDelayMs,
             ...(route.source === "fallback"
               ? { failure_kind: classifyRouterFailure(route.reason) ?? "unknown" }
               : {})
@@ -2113,7 +2149,7 @@ function ensureWorkerSuccess(result: WorkerResult): void {
 
 function resolveRouterFallback(
   route: RouteDecision,
-  choice: RouteFallbackChoice | "configured"
+  choice: RouteFallbackChoice | "configured" | "auto-retry"
 ): RouteDecision {
   const resolution: RouterFallbackResolution = choice === "cancel" ? "cancelled" : choice;
   const mode = choice === "main" ? "simple" : choice === "parallel" ? "complex" : route.mode;
@@ -2123,9 +2159,11 @@ function resolveRouterFallback(
       ? `${route.reason} User selected Parallel after Router fallback.`
       : choice === "retry"
         ? `${route.reason} User requested Router retry.`
-        : choice === "cancel"
-          ? `${route.reason} User cancelled after Router fallback.`
-          : route.reason;
+        : choice === "auto-retry"
+          ? `${route.reason} Automatic transient Router retry.`
+          : choice === "cancel"
+            ? `${route.reason} User cancelled after Router fallback.`
+            : route.reason;
   return {
     ...route,
     mode,
@@ -2133,6 +2171,29 @@ function resolveRouterFallback(
     suggested_roles: mode === "complex" ? ["judge", "actor", "critic"] : [],
     router_fallback_resolution: resolution
   };
+}
+
+async function waitForRouterRetry(delayMs: number, signal?: AbortSignal): Promise<void> {
+  if (signal?.aborted) {
+    throw cancellationError();
+  }
+  if (delayMs <= 0) {
+    return;
+  }
+  await new Promise<void>((resolve, reject) => {
+    const timeout = setTimeout(finish, delayMs);
+    const onAbort = () => finish(cancellationError());
+    function finish(error?: Error): void {
+      clearTimeout(timeout);
+      signal?.removeEventListener("abort", onAbort);
+      if (error) {
+        reject(error);
+      } else {
+        resolve();
+      }
+    }
+    signal?.addEventListener("abort", onAbort, { once: true });
+  });
 }
 
 function cancellationError(): Error {

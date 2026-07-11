@@ -28,6 +28,8 @@ describe("RouterDiagnosticsView", () => {
       timeoutMs: 30000,
       firstOutputTimeoutMs: 30000,
       idleTimeoutMs: 30000,
+      maxAttempts: 2,
+      retryDelayMs: 500,
       followUpTimeoutMs: 20000,
       fallback: "simple",
       proxyConfigured: false,
@@ -67,14 +69,14 @@ describe("RouterDiagnosticsView", () => {
 
     expect(frame).toContain("Router diagnostics");
     expect(frame).toContain("scope · all · 2/2 routes · 1 workspace");
-    expect(frame).toContain("health · codex 1 · fallback 1 · timeout 1");
+    expect(frame).toContain("health · codex 1 · fallback 0 · retry 1 · timeout 1");
     expect(frame).toContain("latency · success p50 9.7s · p95 9.7s · max 9.7s · n 1");
     expect(frame).toContain("budget · initial learning · 30s / p95 9.7s · n 1 · follow-up no data · 20s");
-    expect(frame).toContain("policy · auto · total 30s / 20s · first 30s · idle 30s · fallback simple");
+    expect(flattened).toContain("policy · auto · total 30s / 20s · first 30s · idle 30s · retry 2x / 500ms · fallback simple");
     expect(flattened).toContain("proxy · router config · HTTPS_PROXY · proxy.test:8443 · 1 recorded · context only");
-    expect(frame).toContain("tetris · initial · simple · codex · 9.7s · attempt 2");
+    expect(frame).toContain("tetris · initial · simple · codex · try 2 · 9.7s · attempt 2");
     expect(flattened).toContain("evidence · timeout · idle · after stderr · limit 30s · via 127.0.0.1:7890 · router config HTTPS_PROXY · cause unproven");
-    expect(flattened).toContain("resolved Parallel");
+    expect(flattened).toContain("automatic retry");
     expect(flattened).toContain("diagnosis · Router diagnostics stopped before a route response");
     expect(flattened).toContain("next · inspect the reason; retry Router or raise router.codex.idleTimeoutMs");
     expect(flattened).toContain("trace · dispatch 2ms · spawn 8ms · first stderr 24ms · process 30s · total 30s");
@@ -174,6 +176,8 @@ function policy() {
     timeoutMs: 30000,
     firstOutputTimeoutMs: 30000,
     idleTimeoutMs: 30000,
+    maxAttempts: 2,
+    retryDelayMs: 500,
     followUpTimeoutMs: 20000,
     fallback: "simple" as const,
     proxyConfigured: true,
@@ -225,6 +229,8 @@ function records(): RouterAuditRecord[] {
       router_timeout_ms: 30000,
       router_first_output_timeout_ms: 15000,
       router_idle_timeout_ms: 30000,
+      router_max_attempts: 2,
+      router_retry_delay_ms: 500,
       router_timeout_kind: "idle",
       proxy_configured: true,
       proxy_source: "router-config",
@@ -232,7 +238,7 @@ function records(): RouterAuditRecord[] {
       proxy_endpoint: "127.0.0.1:7890",
       failure_kind: "timeout",
       router_attempt: 1,
-      router_fallback_resolution: "parallel",
+      router_fallback_resolution: "auto-retry",
       router_failure_stage: "streaming",
       router_dispatch_ms: 2,
       router_spawn_ms: 8,

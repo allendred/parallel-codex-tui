@@ -48,6 +48,8 @@ describe("readRouterAudit", () => {
       router_timeout_ms: 30000,
       router_first_output_timeout_ms: 15000,
       router_idle_timeout_ms: 25000,
+      router_max_attempts: 2,
+      router_retry_delay_ms: 500,
       router_timeout_kind: "first-output",
       proxy_configured: true,
       proxy_source: "router-config",
@@ -81,6 +83,8 @@ describe("readRouterAudit", () => {
         router_timeout_ms: 30000,
         router_first_output_timeout_ms: 15000,
         router_idle_timeout_ms: 25000,
+        router_max_attempts: 2,
+        router_retry_delay_ms: 500,
         router_timeout_kind: "first-output",
         proxy_configured: true,
         proxy_source: "router-config",
@@ -178,6 +182,31 @@ describe("readRouterAudit", () => {
       summary: "Router process could not start",
       action: "run parallel-codex-tui --doctor and fix router.codex.command"
     });
+  });
+
+  it("limits automatic retries to failures likely to recover on another attempt", () => {
+    const routerFallbackIsTransient = (
+      routerAuditModule as typeof routerAuditModule & {
+        routerFallbackIsTransient?: (route: Record<string, unknown>) => boolean;
+      }
+    ).routerFallbackIsTransient;
+    const fallback = (reason: string, evidence: Record<string, unknown> = {}) => ({
+      mode: "simple",
+      source: "fallback",
+      reason,
+      ...evidence
+    });
+
+    expect(routerFallbackIsTransient).toBeTypeOf("function");
+    expect(routerFallbackIsTransient?.(fallback("silent", { router_timeout_kind: "first-output" }))).toBe(true);
+    expect(routerFallbackIsTransient?.(fallback("stalled", { router_timeout_kind: "idle" }))).toBe(true);
+    expect(routerFallbackIsTransient?.(fallback("hard ceiling", { router_timeout_kind: "total" }))).toBe(false);
+    expect(routerFallbackIsTransient?.(fallback("fetch failed: ECONNRESET"))).toBe(true);
+    expect(routerFallbackIsTransient?.(fallback("proxy connection refused"))).toBe(true);
+    expect(routerFallbackIsTransient?.(fallback("HTTP 401 Unauthorized"))).toBe(false);
+    expect(routerFallbackIsTransient?.(fallback("HTTP 429 rate limit"))).toBe(false);
+    expect(routerFallbackIsTransient?.(fallback("spawn ENOENT"))).toBe(false);
+    expect(routerFallbackIsTransient?.(fallback("No JSON object in Codex router output"))).toBe(false);
   });
 });
 

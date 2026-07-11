@@ -210,10 +210,20 @@ describe("CLI chat Markdown smoke", () => {
       await waitForScreenText(
         () => screenWrites,
         screen,
+        "route retry 2/2 · via 127.0.0.1:7890 · 500ms backoff"
+      );
+      await waitForScreenText(
+        () => screenWrites,
+        screen,
+        "route diagnostics · try 2 · via 127.0.0.1:7890"
+      );
+      await waitForScreenText(
+        () => screenWrites,
+        screen,
         "route failed · 1 Main · 2 Parallel · R retry · Esc cancel"
       );
       expect(screen.snapshot()).toContain(
-        "route simple · fallback · idle timeout after stderr · via 127.0.0.1:7890"
+        "route simple · fallback · try 2 · idle timeout after stderr · via 127.0.0.1:7890"
       );
       expect(screen.snapshot()).not.toContain("Fallback chat response");
       child.write("1");
@@ -221,12 +231,12 @@ describe("CLI chat Markdown smoke", () => {
       await waitForScreenText(
         () => screenWrites,
         screen,
-        "route simple · fallback · user Main · idle timeout after stderr · via 127.0.0.1:7890"
+        "route simple · fallback · user Main · try 2 · idle timeout after stderr · via 127.0.0.1:7890"
       );
 
       const snapshot = screen.snapshot();
       const routes = await readTextIfExists(join(appRoot, ".parallel-codex", "router", "routes.jsonl"));
-      expect(snapshot).toContain("route simple · fallback · user Main · idle timeout after stderr · via 127.0.0.1:7890");
+      expect(snapshot).toContain("route simple · fallback · user Main · try 2 · idle timeout after stderr · via 127.0.0.1:7890");
       expect(snapshot).not.toContain("Codex router failed:");
       expect(snapshot).not.toContain(routerScript);
       expect(routes).toContain("Router connection established");
@@ -238,11 +248,15 @@ describe("CLI chat Markdown smoke", () => {
       expect(routes).toContain('"router_timeout_ms":5000');
       expect(routes).toContain('"router_first_output_timeout_ms":1200');
       expect(routes).toContain('"router_idle_timeout_ms":1600');
+      expect(routes).toContain('"router_max_attempts":2');
+      expect(routes).toContain('"router_retry_delay_ms":500');
       expect(routes).toContain('"router_failure_stage":"streaming"');
       expect(routes).toContain('"router_first_output_ms":');
       expect(routes).toContain('"router_first_stderr_ms":');
       expect(routes).toContain('"router_stderr_bytes":');
       expect(routes).toContain('"router_attempt":1');
+      expect(routes).toContain('"router_fallback_resolution":"auto-retry"');
+      expect(routes).toContain('"router_attempt":2');
       expect(routes).toContain('"router_fallback_resolution":"main"');
     } finally {
       child.kill("SIGTERM");

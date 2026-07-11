@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { RouteDecisionSchema, type RouterFailureStage, type RouterTimeoutKind } from "../domain/schemas.js";
+import { RouteDecisionSchema, type RouteDecision, type RouterFailureStage, type RouterTimeoutKind } from "../domain/schemas.js";
 import { readTextIfExists } from "./file-store.js";
 
 export const RouterFailureKindSchema = z.enum([
@@ -23,6 +23,8 @@ export const RouterAuditRecordSchema = RouteDecisionSchema.extend({
   router_timeout_ms: z.number().int().positive().optional(),
   router_first_output_timeout_ms: z.number().int().positive().optional(),
   router_idle_timeout_ms: z.number().int().positive().optional(),
+  router_max_attempts: z.number().int().min(1).max(3).optional(),
+  router_retry_delay_ms: z.number().int().nonnegative().max(10000).optional(),
   proxy_configured: z.boolean().optional(),
   failure_kind: RouterFailureKindSchema.optional()
 });
@@ -85,6 +87,33 @@ export function classifyRouterFailure(reason: string): RouterFailureKind | null 
     return "input";
   }
   return null;
+}
+
+export function routerFallbackIsTransient(route: RouteDecision): boolean {
+  if (route.source !== "fallback") {
+    return false;
+  }
+  if (route.router_timeout_kind === "total") {
+    return false;
+  }
+  if (route.router_timeout_kind === "first-output" || route.router_timeout_kind === "idle") {
+    return true;
+  }
+
+  const kind = classifyRouterFailure(route.reason);
+  if (kind === "network" || kind === "proxy") {
+    return true;
+  }
+  if (kind === "timeout") {
+    return route.router_failure_stage !== "response";
+  }
+  if (kind === "input") {
+    return /\b(?:EPIPE|ECONNRESET|temporar(?:y|ily))\b/i.test(route.reason);
+  }
+  if (kind === "exit") {
+    return /\b(?:ECONNRESET|ETIMEDOUT|EAI_AGAIN|temporar(?:y|ily)|try again|connection reset)\b/i.test(route.reason);
+  }
+  return false;
 }
 
 export function diagnoseRouterFailure(evidence: RouterFailureEvidence): RouterFailureDiagnosis {

@@ -20,6 +20,8 @@ function mockConfig(root: string) {
   config.pairing.critic = "mock";
   config.pairing.main = "mock";
   config.router.defaultMode = "complex";
+  config.router.codex.maxAttempts = 1;
+  config.router.codex.retryDelayMs = 0;
   config.workers.mock.command = "mock";
   return config;
 }
@@ -931,6 +933,194 @@ describe("Orchestrator", () => {
     ]);
   });
 
+  it("automatically retries a transient Router stall before prompting the user", async () => {
+    const appRoot = await mkdtemp(join(tmpdir(), "pct-orch-router-auto-retry-app-"));
+    const workspaceRoot = await mkdtemp(join(tmpdir(), "pct-orch-router-auto-retry-workspace-"));
+    const routerCwdRoot = join(appRoot, ".parallel-codex", "router");
+    const config = mockConfig(appRoot);
+    config.router.defaultMode = "auto";
+    config.router.codex.maxAttempts = 2;
+    config.router.codex.retryDelayMs = 0;
+    let routeCalls = 0;
+    let prompts = 0;
+    const starts: Array<{ phase: string; attempt?: number; maxAttempts?: number }> = [];
+    const manager = new SessionManager({ projectRoot: workspaceRoot, dataDir: config.dataDir });
+    const orchestrator = new Orchestrator(
+      config,
+      manager,
+      new Map([["mock", new MockWorkerAdapter()]]),
+      async () => {
+        routeCalls += 1;
+        if (routeCalls === 1) {
+          throw Object.assign(new Error("Codex router idle timed out after 500ms"), {
+            routerTimeoutKind: "idle",
+            routerFailureStage: "streaming"
+          });
+        }
+        return JSON.stringify({ mode: "simple", reason: "Recovered Router response." });
+      },
+      routerCwdRoot
+    );
+
+    const result = await orchestrator.handleRequest({
+      request: "你好",
+      cwd: workspaceRoot,
+      onRouteStart: (state) => starts.push(state),
+      onRouteFallback: async () => {
+        prompts += 1;
+        return "parallel";
+      }
+    });
+    const records = (await readTextIfExists(join(routerCwdRoot, "routes.jsonl")))
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line) as Record<string, unknown>);
+
+    expect(result).toMatchObject({ mode: "simple", taskId: null });
+    expect(routeCalls).toBe(2);
+    expect(prompts).toBe(0);
+    expect(starts).toEqual([
+      expect.objectContaining({ phase: "starting", attempt: 1, maxAttempts: 2 }),
+      expect.objectContaining({ phase: "retrying", attempt: 2, maxAttempts: 2 }),
+      expect.objectContaining({ phase: "starting", attempt: 2, maxAttempts: 2 })
+    ]);
+    expect(records).toEqual([
+      expect.objectContaining({
+        source: "fallback",
+        router_attempt: 1,
+        router_fallback_resolution: "auto-retry",
+        router_timeout_kind: "idle"
+      }),
+      expect.objectContaining({ source: "codex", router_attempt: 2 })
+    ]);
+  });
+
+  it("prompts after the transient retry budget is exhausted", async () => {
+    const appRoot = await mkdtemp(join(tmpdir(), "pct-orch-router-auto-limit-app-"));
+    const workspaceRoot = await mkdtemp(join(tmpdir(), "pct-orch-router-auto-limit-workspace-"));
+    const routerCwdRoot = join(appRoot, ".parallel-codex", "router");
+    const config = mockConfig(appRoot);
+    config.router.defaultMode = "auto";
+    config.router.codex.maxAttempts = 2;
+    config.router.codex.retryDelayMs = 0;
+    let routeCalls = 0;
+    const promptAttempts: number[] = [];
+    const manager = new SessionManager({ projectRoot: workspaceRoot, dataDir: config.dataDir });
+    const orchestrator = new Orchestrator(
+      config,
+      manager,
+      new Map([["mock", new MockWorkerAdapter()]]),
+      async () => {
+        routeCalls += 1;
+        throw Object.assign(new Error("Codex router first output timed out after 500ms"), {
+          routerTimeoutKind: "first-output",
+          routerFailureStage: "waiting-output"
+        });
+      },
+      routerCwdRoot
+    );
+
+    const result = await orchestrator.handleRequest({
+      request: "实现功能",
+      cwd: workspaceRoot,
+      onRouteFallback: async ({ attempt }) => {
+        promptAttempts.push(attempt);
+        return "parallel";
+      }
+    });
+    const records = (await readTextIfExists(join(routerCwdRoot, "routes.jsonl")))
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line) as Record<string, unknown>);
+
+    expect(result.mode).toBe("complex");
+    expect(routeCalls).toBe(2);
+    expect(promptAttempts).toEqual([2]);
+    expect(records).toEqual([
+      expect.objectContaining({ router_attempt: 1, router_fallback_resolution: "auto-retry" }),
+      expect.objectContaining({ router_attempt: 2, router_fallback_resolution: "parallel" })
+    ]);
+  });
+
+  it("does not automatically retry authentication failures", async () => {
+    const appRoot = await mkdtemp(join(tmpdir(), "pct-orch-router-no-auth-retry-app-"));
+    const workspaceRoot = await mkdtemp(join(tmpdir(), "pct-orch-router-no-auth-retry-workspace-"));
+    const config = mockConfig(appRoot);
+    config.router.defaultMode = "auto";
+    config.router.codex.maxAttempts = 2;
+    config.router.codex.retryDelayMs = 0;
+    let routeCalls = 0;
+    const promptAttempts: number[] = [];
+    const manager = new SessionManager({ projectRoot: workspaceRoot, dataDir: config.dataDir });
+    const orchestrator = new Orchestrator(
+      config,
+      manager,
+      new Map([["mock", new MockWorkerAdapter()]]),
+      async () => {
+        routeCalls += 1;
+        throw new Error("HTTP 401 Unauthorized; run codex login");
+      }
+    );
+
+    await orchestrator.handleRequest({
+      request: "你好",
+      cwd: workspaceRoot,
+      onRouteFallback: async ({ attempt }) => {
+        promptAttempts.push(attempt);
+        return "main";
+      }
+    });
+
+    expect(routeCalls).toBe(1);
+    expect(promptAttempts).toEqual([1]);
+  });
+
+  it("cancels an automatic Router retry during backoff without spawning another attempt", async () => {
+    const appRoot = await mkdtemp(join(tmpdir(), "pct-orch-router-auto-cancel-app-"));
+    const workspaceRoot = await mkdtemp(join(tmpdir(), "pct-orch-router-auto-cancel-workspace-"));
+    const routerCwdRoot = join(appRoot, ".parallel-codex", "router");
+    const config = mockConfig(appRoot);
+    config.router.defaultMode = "auto";
+    config.router.codex.maxAttempts = 2;
+    config.router.codex.retryDelayMs = 5000;
+    const controller = new AbortController();
+    let routeCalls = 0;
+    const manager = new SessionManager({ projectRoot: workspaceRoot, dataDir: config.dataDir });
+    const orchestrator = new Orchestrator(
+      config,
+      manager,
+      new Map([["mock", new MockWorkerAdapter()]]),
+      async () => {
+        routeCalls += 1;
+        throw Object.assign(new Error("Codex router idle timed out after 500ms"), {
+          routerTimeoutKind: "idle",
+          routerFailureStage: "streaming"
+        });
+      },
+      routerCwdRoot
+    );
+
+    await expect(orchestrator.handleRequest({
+      request: "你好",
+      cwd: workspaceRoot,
+      signal: controller.signal,
+      onRouteStart: (state) => {
+        if (state.phase === "retrying") {
+          controller.abort();
+        }
+      }
+    })).rejects.toMatchObject({ name: "AbortError" });
+    const records = (await readTextIfExists(join(routerCwdRoot, "routes.jsonl")))
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line) as Record<string, unknown>);
+
+    expect(routeCalls).toBe(1);
+    expect(records).toEqual([
+      expect.objectContaining({ router_attempt: 1, router_fallback_resolution: "auto-retry" })
+    ]);
+  });
+
   it("records an interactive fallback cancellation without starting Main or task workers", async () => {
     const appRoot = await mkdtemp(join(tmpdir(), "pct-orch-router-cancel-app-"));
     const workspaceRoot = await mkdtemp(join(tmpdir(), "pct-orch-router-cancel-workspace-"));
@@ -1614,6 +1804,8 @@ describe("Orchestrator", () => {
       mode: "auto",
       timeoutMs: 20000,
       phase: "starting",
+      attempt: 1,
+      maxAttempts: 1,
       proxyConfigured: true,
       proxySource: "router-config",
       proxyVariable: "HTTPS_PROXY",

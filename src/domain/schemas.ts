@@ -15,6 +15,7 @@ export const RouterFallbackResolutionSchema = z.enum([
   "main",
   "parallel",
   "retry",
+  "auto-retry",
   "cancelled",
   "configured"
 ]);

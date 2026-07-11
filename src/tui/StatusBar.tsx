@@ -399,9 +399,12 @@ function compactRouteStatusValueToWidth(value: string, maxWidth: number): string
     ? [compactProgress, elapsed].filter((item): item is string => Boolean(item))
     : duration ? [duration] : [];
   const first = parts[0]?.toLowerCase() ?? "";
+  const retry = first.match(/^retry\s+(\d+\/\d+)$/);
   let candidates: string[];
 
-  if (first === "checking") {
+  if (retry) {
+    candidates = [compact, `retry ${retry[1]}`, retry[1] ?? "retry", "retry"];
+  } else if (first === "checking") {
     candidates = [compact, progressCandidates[0] ? `check ${progressCandidates[0]}` : "check", ...progressCandidates, "wait"];
   } else if (first === "follow-up") {
     candidates = [compact, progressCandidates[0] ? `follow ${progressCandidates[0]}` : "follow", ...progressCandidates, "wait"];
@@ -589,7 +592,7 @@ function parseStatusText(text: string, options: { hideTask?: boolean } = {}): Se
       segments.push({
         label: "ROUTE",
         value,
-        tone: /(?:^|\s·\s)fallback(?:\s·\s|$)|^(?:checking|follow-up|starting|waiting output|diagnostics|receiving|parsing)\b/i.test(value)
+        tone: /(?:^|\s·\s)fallback(?:\s·\s|$)|^(?:checking|follow-up|starting|retry|waiting output|diagnostics|receiving|parsing)\b/i.test(value)
           ? "wait"
           : undefined
       });

@@ -94,6 +94,11 @@ export async function runDoctor(
   }
 
   const includeRouter = config.router.defaultMode === "auto" || options.probeRouter === true;
+  if (includeRouter) {
+    lines.push(
+      `router retry: ${config.router.codex.maxAttempts} attempts; transient only; ${config.router.codex.retryDelayMs}ms backoff (TUI routing; live probe runs once)`
+    );
+  }
   for (const command of configuredCommands(config, includeRouter)) {
     if (await commandExists(command, env)) {
       lines.push(`${command}: ok`);

@@ -74,6 +74,7 @@ describe("CLI doctor", () => {
     expect(result.stdout).toContain("theme contrast: ok (minimum 4.59:1 across 16 rendered pairs)");
     expect(result.stdout).toContain("codex: ok");
     expect(result.stdout).toContain("claude: ok");
+    expect(result.stdout).toContain("router retry: 2 attempts; transient only; 500ms backoff (TUI routing; live probe runs once)");
     await expect(pathExists(workspace)).resolves.toBe(true);
   });
 

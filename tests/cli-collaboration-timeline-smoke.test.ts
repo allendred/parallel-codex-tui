@@ -109,6 +109,11 @@ describe("CLI collaboration timeline smoke", () => {
       child.write("c");
       await waitForScreenText(() => screenWrites, screen, "Collaboration timeline");
       await waitForScreenText(() => screenWrites, screen, "all · 2 features · approved 1 · revision 1 · 7 events");
+      await waitForScreenText(
+        () => screenWrites,
+        screen,
+        "timeline · Up/Dn event · Enter detail · Tab feature · U unresolved · R refresh · Esc workers"
+      );
       let snapshot = screen.snapshot();
       expect(snapshot.split("\n")[0]).toContain("timeline");
       expect(snapshot).toContain(

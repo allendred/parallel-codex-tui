@@ -23,6 +23,7 @@ describe("StatusBar", () => {
       ["checking-progress", "route checking · 7s / 30s"],
       ["diagnostics-progress", "route diagnostics · via proxy.test:8443 · 7s / 30s"],
       ["receiving-progress", "route receiving · direct · 7s / 30s"],
+      ["retrying", "route retry 2/2 · via proxy.test:8443 · 500ms backoff"],
       ["follow-up", "workers 3 | done 3 | route follow-up · 20s max"],
       ["wave", "wave 2/3 · verification 0/1 | workers 4 | run 1 done 3"],
       ["roles", "judge done | actor run | critic wait"],
@@ -119,6 +120,8 @@ describe("StatusBar", () => {
     expect(frame("workers 3 | done 3 | route simple · fallback · idle timeout after stderr · via proxy.test:8443 · 25s", 8)).toContain("r:i:to");
     expect(frame("route diagnostics · via proxy.test:8443 · 7s / 30s", 13)).toContain("r:diag 7s");
     expect(frame("route receiving · direct · 7s / 30s", 13)).toContain("r:recv 7s");
+    expect(frame("route retry 2/2 · via proxy.test:8443 · 500ms backoff", 8)).toContain("r:2/2");
+    expect(frame("route retry 2/2 · via proxy.test:8443 · 500ms backoff", 13)).toContain("r:retry 2/2");
     expect(frame("workers 3 | done 3 | route simple · fallback · proxy", 8)).toContain("r:pxy");
     expect(frame("workers 3 | done 3 | route simple · fallback · auth", 8)).toContain("r:auth");
     expect(frame("workers 3 | done 3 | route simple · fallback · rate limit", 8)).toContain("r:rate");

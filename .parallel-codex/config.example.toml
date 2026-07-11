@@ -9,6 +9,9 @@ timeoutMs = 30000
 firstOutputTimeoutMs = 30000
 # Reset after every stdout/stderr chunk; timeoutMs remains the hard ceiling.
 idleTimeoutMs = 30000
+# Retry one transient Router failure before asking the user; 1 disables automatic retry.
+maxAttempts = 2
+retryDelayMs = 500
 # Active-task follow-ups fail safely to Main after this shorter Codex timeout.
 followUpTimeoutMs = 20000
 # Non-interactive fallback; the TUI pauses and asks before executing it.

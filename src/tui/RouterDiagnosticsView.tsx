@@ -18,6 +18,8 @@ export interface RouterDiagnosticsPolicy {
   timeoutMs: number;
   firstOutputTimeoutMs: number;
   idleTimeoutMs: number;
+  maxAttempts: number;
+  retryDelayMs: number;
   followUpTimeoutMs: number;
   fallback: "simple" | "complex";
   proxyConfigured: boolean;
@@ -38,6 +40,8 @@ export function routerDiagnosticsPolicy(
     timeoutMs: router.codex.timeoutMs,
     firstOutputTimeoutMs: router.codex.firstOutputTimeoutMs,
     idleTimeoutMs: router.codex.idleTimeoutMs,
+    maxAttempts: router.codex.maxAttempts,
+    retryDelayMs: router.codex.retryDelayMs,
     followUpTimeoutMs: router.codex.followUpTimeoutMs,
     fallback: router.codex.fallback,
     proxyConfigured: proxy.configured,
@@ -129,7 +133,12 @@ export function routerDiagnosticsDisplayLines(
   const currentWorkspace = state.currentWorkspace ?? "";
   const visibleRecords = filterRouterAuditRecords(records, currentWorkspace, scope);
   const codexCount = visibleRecords.filter((record) => record.source === "codex").length;
-  const fallbackCount = visibleRecords.filter((record) => record.source === "fallback").length;
+  const retryCount = visibleRecords.filter((record) => (
+    record.source === "fallback" && record.router_fallback_resolution === "auto-retry"
+  )).length;
+  const fallbackCount = visibleRecords.filter((record) => (
+    record.source === "fallback" && record.router_fallback_resolution !== "auto-retry"
+  )).length;
   const forcedCount = visibleRecords.filter((record) => record.source === "forced").length;
   const timeoutCount = visibleRecords.filter((record) => routerAuditFailureKind(record) === "timeout").length;
   const workspaceCount = new Set(records.map((record) => normalizedWorkspace(record.workspace))).size;
@@ -138,6 +147,7 @@ export function routerDiagnosticsDisplayLines(
   const health = [
     `health · codex ${codexCount}`,
     `fallback ${fallbackCount}`,
+    ...(retryCount > 0 ? [`retry ${retryCount}`] : []),
     ...(forcedCount > 0 ? [`forced ${forcedCount}`] : []),
     ...(timeoutCount > 0 ? [`timeout ${timeoutCount}`] : [])
   ].join(" · ");
@@ -147,11 +157,11 @@ export function routerDiagnosticsDisplayLines(
       text: routerDiagnosticsScopeText(scope, currentWorkspace, visibleRecords.length, records.length, workspaceCount),
       tone: "text"
     },
-    { text: health, tone: fallbackCount > 0 ? "warning" : "success" },
+    { text: health, tone: fallbackCount > 0 || retryCount > 0 ? "warning" : "success" },
     { text: routerDiagnosticsLatencyText(visibleRecords), tone: "muted" },
     budget,
     {
-      text: `policy · ${policy.mode} · total ${formatDiagnosticDuration(policy.timeoutMs)} / ${formatDiagnosticDuration(policy.followUpTimeoutMs)} · first ${formatDiagnosticDuration(policy.firstOutputTimeoutMs)} · idle ${formatDiagnosticDuration(policy.idleTimeoutMs)} · fallback ${policy.fallback}`,
+      text: `policy · ${policy.mode} · total ${formatDiagnosticDuration(policy.timeoutMs)} / ${formatDiagnosticDuration(policy.followUpTimeoutMs)} · first ${formatDiagnosticDuration(policy.firstOutputTimeoutMs)} · idle ${formatDiagnosticDuration(policy.idleTimeoutMs)} · retry ${policy.maxAttempts}x / ${formatDiagnosticDuration(policy.retryDelayMs)} · fallback ${policy.fallback}`,
       tone: "muted"
     },
     {
@@ -528,6 +538,9 @@ function routerFallbackResolutionLabel(
   }
   if (resolution === "retry") {
     return "Router retry requested";
+  }
+  if (resolution === "auto-retry") {
+    return "automatic retry";
   }
   if (resolution === "cancelled") {
     return "cancelled by user";

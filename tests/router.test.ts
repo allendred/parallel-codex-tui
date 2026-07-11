@@ -348,9 +348,9 @@ describe("routeRequestWithCodex", () => {
     const config = defaultConfig(root);
     config.router.codex.command = process.execPath;
     config.router.codex.args = ["-e", "setInterval(()=>{},1000)"];
-    config.router.codex.timeoutMs = 500;
-    config.router.codex.firstOutputTimeoutMs = 100;
-    config.router.codex.idleTimeoutMs = 300;
+    config.router.codex.timeoutMs = 1200;
+    config.router.codex.firstOutputTimeoutMs = 250;
+    config.router.codex.idleTimeoutMs = 700;
 
     const route = await routeRequestWithCodex("你好", config, undefined, root);
 
@@ -361,9 +361,9 @@ describe("routeRequestWithCodex", () => {
       router_stdout_bytes: 0,
       router_stderr_bytes: 0
     });
-    expect(route.reason).toContain("first output timed out after 100ms");
-    expect(route.duration_ms).toBeGreaterThanOrEqual(70);
-    expect(route.duration_ms).toBeLessThan(400);
+    expect(route.reason).toContain("first output timed out after 250ms");
+    expect(route.duration_ms).toBeGreaterThanOrEqual(150);
+    expect(route.duration_ms).toBeLessThan(900);
   });
 
   it("stops a Router that becomes idle after emitting diagnostics", async () => {
@@ -374,9 +374,9 @@ describe("routeRequestWithCodex", () => {
       "-e",
       "process.stderr.write('connected\\n');setInterval(()=>{},1000)"
     ];
-    config.router.codex.timeoutMs = 600;
-    config.router.codex.firstOutputTimeoutMs = 300;
-    config.router.codex.idleTimeoutMs = 120;
+    config.router.codex.timeoutMs = 1800;
+    config.router.codex.firstOutputTimeoutMs = 1000;
+    config.router.codex.idleTimeoutMs = 200;
 
     const route = await routeRequestWithCodex("你好", config, undefined, root);
 
@@ -387,8 +387,8 @@ describe("routeRequestWithCodex", () => {
       router_stdout_bytes: 0,
       router_stderr_bytes: expect.any(Number)
     });
-    expect(route.reason).toContain("idle timed out after 120ms");
-    expect(route.duration_ms).toBeLessThan(500);
+    expect(route.reason).toContain("idle timed out after 200ms");
+    expect(route.duration_ms).toBeLessThan(1400);
   });
 
   it("resets the Router idle deadline whenever either output stream is active", async () => {
@@ -399,20 +399,20 @@ describe("routeRequestWithCodex", () => {
       "-e",
       [
         "process.stderr.write('phase-1\\n');",
-        "setTimeout(()=>process.stderr.write('phase-2\\n'),100);",
-        "setTimeout(()=>process.stderr.write('phase-3\\n'),200);",
-        "setTimeout(()=>process.stderr.write('phase-4\\n'),300);",
-        "setTimeout(()=>process.stdout.write(JSON.stringify({mode:'simple',reason:'active'})),400);"
+        "setTimeout(()=>process.stderr.write('phase-2\\n'),150);",
+        "setTimeout(()=>process.stderr.write('phase-3\\n'),300);",
+        "setTimeout(()=>process.stderr.write('phase-4\\n'),450);",
+        "setTimeout(()=>process.stdout.write(JSON.stringify({mode:'simple',reason:'active'})),600);"
       ].join("")
     ];
-    config.router.codex.timeoutMs = 1500;
-    config.router.codex.firstOutputTimeoutMs = 300;
-    config.router.codex.idleTimeoutMs = 180;
+    config.router.codex.timeoutMs = 2500;
+    config.router.codex.firstOutputTimeoutMs = 1000;
+    config.router.codex.idleTimeoutMs = 300;
 
     const route = await routeRequestWithCodex("你好", config, undefined, root);
 
     expect(route).toMatchObject({ mode: "simple", source: "codex", reason: "active" });
-    expect(route.duration_ms).toBeGreaterThanOrEqual(320);
+    expect(route.duration_ms).toBeGreaterThanOrEqual(500);
   });
 
   it("keeps the total Router timeout authoritative while output remains active", async () => {
@@ -421,11 +421,11 @@ describe("routeRequestWithCodex", () => {
     config.router.codex.command = process.execPath;
     config.router.codex.args = [
       "-e",
-      "process.stderr.write('start\\n');setInterval(()=>process.stderr.write('.'),50)"
+      "process.stderr.write('start\\n');setInterval(()=>process.stderr.write('.'),100)"
     ];
-    config.router.codex.timeoutMs = 250;
-    config.router.codex.firstOutputTimeoutMs = 150;
-    config.router.codex.idleTimeoutMs = 120;
+    config.router.codex.timeoutMs = 900;
+    config.router.codex.firstOutputTimeoutMs = 700;
+    config.router.codex.idleTimeoutMs = 300;
 
     const route = await routeRequestWithCodex("你好", config, undefined, root);
 
@@ -434,9 +434,9 @@ describe("routeRequestWithCodex", () => {
       router_failure_stage: "streaming",
       router_timeout_kind: "total"
     });
-    expect(route.reason).toContain("timed out after 250ms");
-    expect(route.duration_ms).toBeGreaterThanOrEqual(200);
-    expect(route.duration_ms).toBeLessThan(700);
+    expect(route.reason).toContain("timed out after 900ms");
+    expect(route.duration_ms).toBeGreaterThanOrEqual(750);
+    expect(route.duration_ms).toBeLessThan(1600);
   });
 
   it("ignores output that arrives only while a timed-out Router is terminating", async () => {
