@@ -149,6 +149,7 @@ describe("CLI worker layout smoke", () => {
     try {
       await waitForText(chunks, "ready");
       await waitForText(chunks, "1 worker");
+      await waitForScreenText(() => screenWrites, screen, "^W logs");
       child.write("\x17");
       await waitForText(chunks, "line 80");
       await waitForScreenText(() => screenWrites, screen, "1 worker");
@@ -391,6 +392,7 @@ describe("CLI worker layout smoke", () => {
       await waitForScreenText(() => screenWrites, screen, "ready");
       await waitForScreenText(() => screenWrites, screen, "w1");
       await waitForScreenText(() => screenWrites, screen, "d1");
+      await waitForScreenText(() => screenWrites, screen, "^O");
       child.write("\x0f");
       await waitForScreenText(() => screenWrites, screen, "no session · critic");
 
@@ -600,6 +602,7 @@ describe("CLI worker layout smoke", () => {
 
     try {
       await waitForScreenText(() => screenWrites, screen, "w1 d1");
+      await waitForScreenText(() => screenWrites, screen, "> | msg");
       child.write("\x17");
       await waitForScreenText(() => screenWrites, screen, "ok");
       await screenWrites;
@@ -658,6 +661,7 @@ describe("CLI worker layout smoke", () => {
     try {
       await waitForText(chunks, "ready");
       await waitForScreenText(() => screenWrites, screen, "1 worker · done");
+      await waitForScreenText(() => screenWrites, screen, "> | message · ^W · ^O");
       child.write("\x17");
       await waitForScreenText(() => screenWrites, screen, "logs · scroll · Tab · ^O attach · Esc");
 
