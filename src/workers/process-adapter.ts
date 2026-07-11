@@ -132,21 +132,20 @@ export class ProcessWorkerAdapter implements WorkerAdapter {
         stdio: ["pipe", "pipe", "pipe"],
         detached
       });
+      let processRecordError: unknown;
       const processRecordReady = typeof child.pid === "number"
         ? writeWorkerProcessRecord(runSpec.filesDir, {
             workerId: runSpec.workerId,
             pid: child.pid,
             command: this.command,
             ...(detached ? { processGroupId: child.pid } : {})
-          }).then(() => undefined, async (error: unknown) => {
-            await appendText(
-              runSpec.outputLogPath,
-              `Process ownership record failed: ${error instanceof Error ? error.message : String(error)}\n`
-            );
+          }).then(() => undefined, (error: unknown) => {
+            processRecordError = error;
           })
         : Promise.resolve();
 
       let settled = false;
+      let finishing = false;
       let timeout: NodeJS.Timeout | undefined;
       let idleTimeout: NodeJS.Timeout | undefined;
       let firstOutputTimeout: NodeJS.Timeout | undefined;
@@ -203,10 +202,27 @@ export class ProcessWorkerAdapter implements WorkerAdapter {
         terminateWithFallback();
       };
 
-      const finish = async (result: WorkerResult): Promise<void> => {
-        if (settled) {
+      const failForProcessOwnership = (): void => {
+        if (!processRecordError || settled || terminalState) {
           return;
         }
+        const detail = processRecordError instanceof Error
+          ? processRecordError.message
+          : String(processRecordError);
+        failAndTerminate(
+          "process-ownership-error",
+          `${this.command} process ownership could not be recorded: ${detail}`,
+          `\nProcess ownership record failed: ${detail}\n`
+        );
+      };
+
+      const finish = async (result: WorkerResult): Promise<void> => {
+        if (settled || finishing) {
+          return;
+        }
+        finishing = true;
+        await processRecordReady;
+        failForProcessOwnership();
         settled = true;
         clearRunTimers();
         if (abortListener) {
@@ -226,8 +242,9 @@ export class ProcessWorkerAdapter implements WorkerAdapter {
           summary,
           detectedNativeSessionId
         );
-        await processRecordReady;
-        await clearWorkerProcessRecord(runSpec.filesDir);
+        if (!processRecordError) {
+          await clearWorkerProcessRecord(runSpec.filesDir);
+        }
         const finalResult: WorkerResult = {
           ...result,
           ...(terminalState === "cancelled" ? { cancelled: true } : {}),
@@ -401,11 +418,17 @@ export class ProcessWorkerAdapter implements WorkerAdapter {
         }, runSpec.firstOutputTimeoutMs);
       }
 
-      if (runSpec.signal?.aborted) {
-        abortListener();
-      } else {
-        child.stdin.end(runSpec.prompt);
-      }
+      void processRecordReady.then(() => {
+        failForProcessOwnership();
+        if (processRecordError || settled || finishing || terminalState) {
+          return;
+        }
+        if (runSpec.signal?.aborted) {
+          abortListener?.();
+        } else {
+          child.stdin.end(runSpec.prompt);
+        }
+      });
     });
   }
 }

@@ -252,6 +252,8 @@ describe("package metadata", () => {
     expect(readme).toContain("Recovery atomically claims the same task lease");
     expect(readme).toContain("concurrent TUI startups cannot recover one task twice or race a new retry");
     expect(readme).toContain("persist `process.json` with their PID and OS process-start fingerprint");
+    expect(readme).toContain("the role prompt is sent only after that ownership evidence is durable");
+    expect(readme).toContain("the process group is terminated before it receives the prompt");
     expect(readme).toContain("A reused PID with a different start fingerprint is never signalled");
     expect(readme).toContain("Recovery commits cancellation only after every recorded process group is confirmed stopped");
     expect(readme).toContain("An unverifiable or still-running process blocks startup");
