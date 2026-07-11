@@ -111,6 +111,7 @@ export interface WorkerLogRef {
   label: string;
   logPath: string;
   statusPath: string;
+  runtimeStatus?: WorkerStatus;
 }
 
 export type RouterConfigLoader = () => Promise<AppConfig["router"]>;
@@ -341,7 +342,8 @@ export class Orchestrator {
         engine: status.engine,
         label: workerLabel(status.role, status.engine, status.feature_title ?? status.feature_id),
         logPath: join(dir, "output.log"),
-        statusPath
+        statusPath,
+        runtimeStatus: status
       });
     }
 

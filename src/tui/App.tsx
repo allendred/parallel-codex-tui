@@ -116,7 +116,7 @@ export function App({
   const [inputReady, setInputReady] = useState(false);
   const [messages, setMessages] = useState<Message[]>(() => [...initialMessages]);
   const [busy, setBusy] = useState(false);
-  const [status, setStatus] = useState<StatusLineState | null>(initialTaskId ? { taskId: initialTaskId } : null);
+  const [status, setStatus] = useState<StatusLineState | null>(() => restoredWorkerStatusLine(initialTaskId, initialWorkers));
   const [lastRoute, setLastRoute] = useState<RouteDecision | null>(initialRoute);
   const [routePending, setRoutePending] = useState<RouteStartInfo | null>(null);
   const [view, setView] = useState<"chat" | "worker" | "native">("chat");
@@ -304,6 +304,7 @@ export function App({
           return;
         }
         setWorkers(restored);
+        setStatus(restoredWorkerStatusLine(taskId, restored));
         selectedWorkerIndexRef.current = 0;
         autoSelectedFailedWorkerRef.current = false;
         userSelectedWorkerRef.current = false;
@@ -1831,6 +1832,36 @@ function upsertWorker(workers: WorkerLogRef[], worker: WorkerLogRef): WorkerLogR
     return workers.map((item, index) => (index === existingIndex ? worker : item));
   }
   return [...workers, worker];
+}
+
+function restoredWorkerStatusLine(
+  taskId: string | null,
+  workers: WorkerLogRef[] | undefined
+): StatusLineState | null {
+  if (!taskId) {
+    return null;
+  }
+
+  const state: StatusLineState = { taskId };
+  const restored = (workers ?? []).flatMap((worker) => {
+    if (!worker.runtimeStatus) {
+      return [];
+    }
+    return [{
+      role: worker.role,
+      label: worker.label,
+      status: formatWorkerRuntimeStatus(worker.runtimeStatus)
+    }];
+  });
+  if (restored.length === 0) {
+    return state;
+  }
+
+  state.workers = restored.map(({ label, status }) => ({ label, status }));
+  for (const worker of restored) {
+    state[worker.role] = worker.status;
+  }
+  return state;
 }
 
 function workerTitle(workers: WorkerLogRef[], selectedWorkerIndex: number): string {

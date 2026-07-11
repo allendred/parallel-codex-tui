@@ -630,6 +630,7 @@ describe("Orchestrator", () => {
 
     expect(workers.map((worker) => worker.id)).toEqual(["judge-mock", "actor-mock", "critic-mock"]);
     expect(workers.map((worker) => worker.label)).toEqual(["Judge (mock)", "Actor (mock)", "Critic (mock)"]);
+    expect(workers.map((worker) => worker.runtimeStatus?.state)).toEqual(["done", "done", "done"]);
     expect(workers[1].statusPath).toBe(join(root, ".parallel-codex", "sessions", result.taskId ?? "", "actor-mock", "status.json"));
   });
 

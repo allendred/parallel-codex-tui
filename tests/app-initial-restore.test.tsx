@@ -27,13 +27,23 @@ describe("App initial task restore", () => {
           engine: "codex",
           label: "Critic (codex)",
           logPath: "/tmp/preloaded-task/critic-codex/output.log",
-          statusPath: "/tmp/preloaded-task/critic-codex/status.json"
+          statusPath: "/tmp/preloaded-task/critic-codex/status.json",
+          runtimeStatus: {
+            worker_id: "critic-codex",
+            role: "critic",
+            engine: "codex",
+            state: "done",
+            phase: "process-exited",
+            last_event_at: "2026-07-07T03:37:20.000Z",
+            summary: "approved"
+          }
         }]}
         initialCanRetryTask={false}
       />
     );
 
     try {
+      expect(view.lastFrame()).toContain("1 worker · done");
       await settleEffects();
       testInput.send(view.stdin, "\x17");
       await waitForFrame(view.lastFrame, "· logs ·");
