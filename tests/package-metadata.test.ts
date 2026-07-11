@@ -290,6 +290,9 @@ describe("package metadata", () => {
     expect(readme).toContain("In worker-log views, scroll with the mouse wheel or PageUp/PageDown");
     expect(readme).toContain("In chat or worker-log views, press `Ctrl+O`");
     expect(readme).toContain("Native attach follows outer terminal resize");
+    expect(readme).toContain("Overlapping attach preparations keep only the latest request");
+    expect(readme).toContain("this and closing the outer App terminate the active PTY");
+    expect(readme).toContain("An attach preparation that finishes after App shutdown is discarded");
     expect(readme).toContain("Press `Ctrl+]` to return to worker logs");
     expect(readme).not.toContain("Press `Ctrl+]` to detach and return to worker logs");
     expect(readme).toContain("parallel-codex-tui --help");

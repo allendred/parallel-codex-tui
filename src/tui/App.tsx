@@ -262,7 +262,9 @@ export function App({
   } | null>(null);
   const { exit } = useApp();
   const { setRawMode, internal_eventEmitter: stdinEvents } = useStdin();
+  const mountedRef = useRef(true);
   const nativeAttachRef = useRef(nativeAttach);
+  const nativeAttachRequestSequenceRef = useRef(0);
   const messagesRef = useRef<Message[]>([...initialMessages]);
   const activeRunControllerRef = useRef<AbortController | null>(null);
   const activeTaskIdRef = useRef<string | null>(initialTaskId);
@@ -1410,6 +1412,7 @@ export function App({
 
       const update = applyNativeInputChunk(nativeInputRef.current, chunk, outputHeight - 1);
       if (update.exit) {
+        nativeAttachRequestSequenceRef.current += 1;
         nativeAttachRef.current?.process.kill();
         nativeAttachRef.current = null;
         nativeInputRef.current = "";
@@ -1449,11 +1452,18 @@ export function App({
     };
   }, [outputHeight, setRawMode, stdinEvents]);
 
-  useEffect(() => () => {
-    activeRunControllerRef.current?.abort();
-    collaborationLoadSequenceRef.current += 1;
-    routerLoadSequenceRef.current += 1;
-    taskSessionsLoadSequenceRef.current += 1;
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      nativeAttachRequestSequenceRef.current += 1;
+      nativeAttachRef.current?.process.kill();
+      nativeAttachRef.current = null;
+      activeRunControllerRef.current?.abort();
+      collaborationLoadSequenceRef.current += 1;
+      routerLoadSequenceRef.current += 1;
+      taskSessionsLoadSequenceRef.current += 1;
+    };
   }, []);
 
   useInput((inputKey, key) => {
@@ -1501,6 +1511,11 @@ export function App({
   }, { isActive: view === "worker" && !workerSearch.open });
 
   async function attachSelectedWorker(worker: WorkerLogRef) {
+    const requestSequence = nativeAttachRequestSequenceRef.current + 1;
+    nativeAttachRequestSequenceRef.current = requestSequence;
+    const attachIsCurrent = () => (
+      mountedRef.current && nativeAttachRequestSequenceRef.current === requestSequence
+    );
     setAttachError(null);
     try {
       const launch = await (prepareNativeAttach
@@ -1509,6 +1524,9 @@ export function App({
             config,
             worker
           }));
+      if (!attachIsCurrent()) {
+        return;
+      }
       const terminalCols = process.stdout.columns || 120;
       const nativeTerminalCols = nativeAttachTerminalColumns(terminalCols);
       const terminalRows = nativeAttachTerminalRows(
@@ -1527,7 +1545,13 @@ export function App({
       };
       const processRef = (startNativeAttach ?? startNativeAttachProcess)(sizedLaunch, {
         onOutput: (chunk) => {
+          if (!attachIsCurrent()) {
+            return;
+          }
           void screen.write(chunk).then(() => {
+            if (!attachIsCurrent()) {
+              return;
+            }
             setNativeAttach((current) =>
               current && current.screen === screen
                 ? {
@@ -1540,7 +1564,13 @@ export function App({
           });
         },
         onClose: (code) => {
+          if (!attachIsCurrent()) {
+            return;
+          }
           void screen.write(`\r\n${nativeAttachExitLine(code, screen.dimensions().cols)}\r\n`).then(() => {
+            if (!attachIsCurrent()) {
+              return;
+            }
             setNativeAttach((current) =>
               current && current.screen === screen
                 ? {
@@ -1554,21 +1584,31 @@ export function App({
           });
         },
         onError: (error) => {
-          setAttachError(error.message);
+          if (attachIsCurrent()) {
+            setAttachError(error.message);
+          }
         }
       });
-      setNativeAttach({
+      if (!attachIsCurrent()) {
+        processRef.kill();
+        return;
+      }
+      const nextNativeAttach = {
         hasOutput: false,
         launch: sizedLaunch,
         process: processRef,
         screen,
         snapshot: screen.snapshot(),
         closedCode: null
-      });
+      };
+      nativeAttachRef.current = nextNativeAttach;
+      setNativeAttach(nextNativeAttach);
       setNativeInput("");
       setView("native");
     } catch (error) {
-      setAttachError(error instanceof Error ? error.message : String(error));
+      if (attachIsCurrent()) {
+        setAttachError(error instanceof Error ? error.message : String(error));
+      }
     }
   }
 
