@@ -388,13 +388,23 @@ function compactRouteStatusValueToWidth(value: string, maxWidth: number): string
   const parts = value.split(/\s+·\s+/).map((part) => part.trim()).filter(Boolean);
   const duration = parts.find((part) => /^\d+(?:\.\d+)?(?:ms|s|m)(?:\s+max)?$/i.test(part))
     ?.replace(/\s+max$/i, "");
+  const progress = parts
+    .map((part) => part.match(/^(\d+(?:\.\d+)?s)\s*\/\s*(\d+(?:\.\d+)?(?:ms|s|m))$/i))
+    .find((match): match is RegExpMatchArray => match !== null);
+  const elapsed = progress?.[1];
+  const compactProgress = progress
+    ? `${elapsed?.replace(/s$/i, "")}/${progress[2]}`
+    : undefined;
+  const progressCandidates = compactProgress
+    ? [compactProgress, elapsed].filter((item): item is string => Boolean(item))
+    : duration ? [duration] : [];
   const first = parts[0]?.toLowerCase() ?? "";
   let candidates: string[];
 
   if (first === "checking") {
-    candidates = [compact, duration ? `check ${duration}` : "check", duration ?? "wait", "wait"];
+    candidates = [compact, progressCandidates[0] ? `check ${progressCandidates[0]}` : "check", ...progressCandidates, "wait"];
   } else if (first === "follow-up") {
-    candidates = [compact, duration ? `follow ${duration}` : "follow", duration ?? "wait", "wait"];
+    candidates = [compact, progressCandidates[0] ? `follow ${progressCandidates[0]}` : "follow", ...progressCandidates, "wait"];
   } else if (/(?:^|\s·\s)fallback(?:\s·\s|$)/i.test(value)) {
     candidates = [compact, ...compactRouteFailureAliases(compact), "wait"];
   } else {

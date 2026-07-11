@@ -118,7 +118,7 @@ describe("formatStatusLine", () => {
   it("formats the active router scope and maximum wait before a decision", () => {
     const formatRoutePendingStatus = (
       statusLineModule as typeof statusLineModule & {
-        formatRoutePendingStatus?: (state: Record<string, unknown> | null) => string;
+      formatRoutePendingStatus?: (state: Record<string, unknown> | null, elapsedMs?: number) => string;
       }
     ).formatRoutePendingStatus;
 
@@ -128,6 +128,12 @@ describe("formatStatusLine", () => {
     );
     expect(formatRoutePendingStatus?.({ scope: "follow-up", mode: "auto", timeoutMs: 20000 })).toBe(
       "route follow-up · 20s max"
+    );
+    expect(formatRoutePendingStatus?.({ scope: "initial", mode: "auto", timeoutMs: 30000 }, 7300)).toBe(
+      "route checking · 7s / 30s"
+    );
+    expect(formatRoutePendingStatus?.({ scope: "follow-up", mode: "auto", timeoutMs: 20000 }, 99999)).toBe(
+      "route follow-up · 20s / 20s"
     );
     expect(formatRoutePendingStatus?.({ scope: "initial", mode: "complex", timeoutMs: 120000 })).toBe(
       "route complex · forced"

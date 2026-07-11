@@ -45,6 +45,14 @@ describe("CLI router config reload smoke", () => {
       await writeFile(configPath, routerConfig("complex"), "utf8");
       child.write("实现热加载\r");
       await waitForScreenText(() => screenWrites, screen, "done · complex task completed");
+      await waitForIdleInput(() => screenWrites, screen);
+
+      const completedScreen = screen.snapshot().split("\n");
+      const summaryRow = completedScreen.findIndex((line) => line.includes("done · complex task completed"));
+      const inputRow = completedScreen.findIndex((line) => line.includes("> | message"));
+      expect(completedScreen[1]).toContain("> 你好");
+      expect(summaryRow).toBeGreaterThan(1);
+      expect(inputRow - summaryRow).toBeGreaterThan(5);
 
       const sessionsDir = join(workspace, ".parallel-codex", "sessions");
       const taskId = (await readdir(sessionsDir)).find((entry) => entry.startsWith("task-"));

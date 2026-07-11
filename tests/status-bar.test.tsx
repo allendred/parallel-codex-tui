@@ -17,6 +17,7 @@ describe("StatusBar", () => {
       ["auth", "workers 3 | done 3 | route simple · fallback · auth"],
       ["rate-limit", "workers 3 | done 3 | route simple · fallback · rate limit"],
       ["checking", "route checking · 30s max"],
+      ["checking-progress", "route checking · 7s / 30s"],
       ["follow-up", "workers 3 | done 3 | route follow-up · 20s max"],
       ["wave", "wave 2/3 · verification 0/1 | workers 4 | run 1 done 3"],
       ["roles", "judge done | actor run | critic wait"],
@@ -102,6 +103,8 @@ describe("StatusBar", () => {
 
     expect(frame("route checking · 30s max", 8)).toContain("r:30s");
     expect(frame("route checking · 30s max", 13)).toContain("r:check 30s");
+    expect(frame("route checking · 7s / 30s", 8)).toContain("r:7s");
+    expect(frame("route checking · 7s / 30s", 13)).toContain("r:7/30s");
     expect(frame("workers 3 | done 3 | route follow-up · 20s max", 8)).toContain("r:20s");
     expect(frame("workers 3 | done 3 | route complex · fallback · timeout · 120s", 8)).toContain("r:time");
     expect(frame("workers 3 | done 3 | route simple · fallback · timeout via proxy · 30s", 8)).toContain("r:p:to");

@@ -126,7 +126,7 @@ describe("CLI chat Markdown smoke", () => {
     }
   }, 10000);
 
-  it("shows the Router timeout cause after a real fallback reaches Main", async () => {
+  it("shows live Router wait progress and the timeout cause after fallback reaches Main", async () => {
     const workspace = await mkdtemp(join(tmpdir(), "pct-cli-router-timeout-"));
     const appRoot = await mkdtemp(join(tmpdir(), "pct-cli-router-timeout-app-"));
     const routerScript = join(appRoot, "stalled-router.cjs");
@@ -155,7 +155,7 @@ describe("CLI chat Markdown smoke", () => {
         "[router.codex]",
         `command = "${escapeToml(process.execPath)}"`,
         `args = ["${escapeToml(routerScript)}"]`,
-        "timeoutMs = 600",
+        "timeoutMs = 1600",
         'fallback = "simple"',
         "",
         "[workers.codex]",
@@ -192,7 +192,8 @@ describe("CLI chat Markdown smoke", () => {
     try {
       await waitForScreenText(() => screenWrites, screen, "> | message");
       child.write("hello\r");
-      await waitForScreenText(() => screenWrites, screen, "route checking · 600ms max");
+      await waitForScreenText(() => screenWrites, screen, "route checking · 0s / 1.6s");
+      await waitForScreenText(() => screenWrites, screen, "route checking · 1s / 1.6s");
       await waitForScreenText(() => screenWrites, screen, "Fallback chat response");
       await waitForScreenText(() => screenWrites, screen, "route simple · fallback · timeout via proxy");
 

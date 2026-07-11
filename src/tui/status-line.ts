@@ -85,7 +85,7 @@ export function formatRouteStatus(route: RouteDecision | null): string {
   return `route ${details.join(" · ")}`;
 }
 
-export function formatRoutePendingStatus(state: RouteStartInfo | null): string {
+export function formatRoutePendingStatus(state: RouteStartInfo | null, elapsedMs?: number): string {
   if (!state) {
     return "";
   }
@@ -93,6 +93,10 @@ export function formatRoutePendingStatus(state: RouteStartInfo | null): string {
     return `route ${state.mode} · forced`;
   }
   const label = state.scope === "follow-up" ? "follow-up" : "checking";
+  if (typeof elapsedMs === "number") {
+    const boundedElapsedMs = Math.min(state.timeoutMs, Math.max(0, elapsedMs));
+    return `route ${label} · ${formatRouteElapsed(boundedElapsedMs)} / ${formatRouteDuration(state.timeoutMs)}`;
+  }
   return `route ${label} · ${formatRouteDuration(state.timeoutMs)} max`;
 }
 
@@ -178,6 +182,10 @@ function formatRouteDuration(durationMs: number): string {
     return `${(durationMs / 1000).toFixed(1).replace(/\.0$/, "")}s`;
   }
   return `${Math.round(durationMs / 1000)}s`;
+}
+
+function formatRouteElapsed(durationMs: number): string {
+  return `${Math.floor(durationMs / 1000)}s`;
 }
 
 function humanizeWorkerPhase(phase: string): string {

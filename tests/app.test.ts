@@ -270,6 +270,47 @@ describe("ChatView", () => {
     expect(lines.slice(-2)).toEqual(["> 你好", "继续优化中。"]);
   });
 
+  it("top-aligns a completed complex task summary while preserving the viewport fill", () => {
+    const { lastFrame } = render(
+      React.createElement(ChatView, {
+        messages: [
+          { from: "user", text: "做个俄罗斯方块" },
+          {
+            from: "system",
+            text: [
+              "Complex task completed.",
+              "Requirements:",
+              "- Build the game.",
+              "Actor work:",
+              "- Implemented it.",
+              "Critic review:",
+              "APPROVED",
+              "Critic findings:",
+              "(empty)"
+            ].join("\n")
+          }
+        ],
+        cwd: "/tmp/project",
+        activeTaskId: "task-20260711-complete",
+        terminalWidth: 60,
+        viewportHeight: 10
+      })
+    );
+
+    const lines = (lastFrame() ?? "").split("\n");
+
+    expect(lines).toHaveLength(10);
+    expect(lines.slice(0, 6).map((line) => line.trim())).toEqual([
+      "> 做个俄罗斯方块",
+      "done · complex task completed",
+      "requirements · Build the game.",
+      "actor · Implemented it.",
+      "review · APPROVED",
+      "findings · none"
+    ]);
+    expect(lines.slice(6).every((line) => line.trim() === "")).toBe(true);
+  });
+
   it("omits the task row in the empty state when no task is active", () => {
     const { lastFrame } = render(
       React.createElement(ChatView, {

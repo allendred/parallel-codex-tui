@@ -89,6 +89,7 @@ type ChatLineTheme = Pick<TextProps, "backgroundColor" | "color">;
 type ChatSpanTheme = Pick<TextProps, "backgroundColor" | "bold" | "color" | "italic" | "underline">;
 type ChatEmptyStateTheme = Pick<TextProps, "backgroundColor" | "bold" | "color">;
 type ChatViewportBlankLineTheme = Pick<TextProps, "backgroundColor">;
+type PendingRouteInfo = RouteStartInfo & { startedAtMs: number };
 type NativeAttachStartingTheme = Pick<TextProps, "backgroundColor" | "color">;
 const NO_WORKERS_ATTACH_MESSAGE = "No workers yet · start a complex task before attaching";
 const NO_WORKERS_LOGS_MESSAGE = "No workers yet · start a complex task before opening logs";
@@ -118,7 +119,8 @@ export function App({
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState<StatusLineState | null>(() => restoredWorkerStatusLine(initialTaskId, initialWorkers));
   const [lastRoute, setLastRoute] = useState<RouteDecision | null>(initialRoute);
-  const [routePending, setRoutePending] = useState<RouteStartInfo | null>(null);
+  const [routePending, setRoutePending] = useState<PendingRouteInfo | null>(null);
+  const [routeElapsedMs, setRouteElapsedMs] = useState(0);
   const [view, setView] = useState<"chat" | "worker" | "native">("chat");
   const [workers, setWorkers] = useState<WorkerLogRef[]>(() => [...(initialWorkers ?? [])]);
   const [selectedWorkerIndex, setSelectedWorkerIndex] = useState(0);
@@ -177,7 +179,7 @@ export function App({
     ? ""
     : selectedWorkerStatus;
   const visibleRouteStatus = routePending
-    ? formatRoutePendingStatus(routePending)
+    ? formatRoutePendingStatus(routePending, routeElapsedMs)
     : formatRouteStatus(lastRoute);
   const visibleTaskStatus = routePending && !activeTaskId ? "" : formatStatusLine(status);
 
@@ -233,6 +235,20 @@ export function App({
     chatScrollOffsetRef.current = 0;
     setChatScrollOffset(0);
   }, [messages.length]);
+
+  useEffect(() => {
+    if (!routePending || routePending.mode !== "auto") {
+      setRouteElapsedMs(0);
+      return;
+    }
+
+    const updateElapsed = () => {
+      setRouteElapsedMs(Math.min(routePending.timeoutMs, Date.now() - routePending.startedAtMs));
+    };
+    updateElapsed();
+    const interval = setInterval(updateElapsed, 250);
+    return () => clearInterval(interval);
+  }, [routePending]);
 
   useEffect(() => {
     attachSelectedWorkerRef.current = attachSelectedWorker;
@@ -745,7 +761,10 @@ export function App({
   function createRunCallbacks(controller: AbortController) {
     return {
       signal: controller.signal,
-      onRouteStart: setRoutePending,
+      onRouteStart: (state: RouteStartInfo) => {
+        setRouteElapsedMs(0);
+        setRoutePending({ ...state, startedAtMs: Date.now() });
+      },
       onRoute: (route: RouteDecision) => {
         setRoutePending(null);
         setLastRoute(route);
@@ -1069,13 +1088,15 @@ export function ChatView({
   }
   const lines = viewport.lines;
   const spacerLines = chatViewportSpacerLineCount(lines.length, height);
+  const topAligned = chatCompletionIsTopAligned(messages);
 
   return (
     <Box flexDirection="column" height={height}>
-      <ChatViewportSpacerLines count={spacerLines} terminalWidth={terminalWidth} />
+      {!topAligned ? <ChatViewportSpacerLines count={spacerLines} terminalWidth={terminalWidth} /> : null}
       {lines.map((line, index) => (
         <ChatLine key={`${line.from}-${index}`} line={line} terminalWidth={terminalWidth} />
       ))}
+      {topAligned ? <ChatViewportSpacerLines count={spacerLines} terminalWidth={terminalWidth} /> : null}
     </Box>
   );
 }
@@ -1204,6 +1225,11 @@ function ChatViewportSpacerLines({ count, terminalWidth }: { count: number; term
 
 function chatViewportSpacerLineCount(contentLines: number, viewportHeight: number | undefined): number {
   return viewportHeight ? Math.max(0, viewportHeight - contentLines) : 0;
+}
+
+function chatCompletionIsTopAligned(messages: Message[]): boolean {
+  const latest = messages.at(-1);
+  return latest?.from === "system" && compactSupervisorSummaryForChat(latest.text) !== null;
 }
 
 function chatViewportBlankLineWidth(terminalWidth: number): number {
