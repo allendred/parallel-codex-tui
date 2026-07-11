@@ -326,6 +326,7 @@ function chatTaskPlaceholderDisplayValue(terminalWidth: number, scrollable = fal
     scrollable
       ? [
           "message · scroll · ^W logs · Tab · ^O attach",
+          "PgUp/Dn · ^W log · Tab · ^O attach",
           "PgUp/Dn · ^W logs · Tab · ^O",
           "message · Pg · ^W · ^O",
           "msg · Pg · ^W · ^O",
@@ -383,8 +384,11 @@ function workerInputHints(width: number): { label: string; detail: string } {
   if (width < 36) {
     return { label: "logs", detail: " · Pg · Tab · ^O · Esc" };
   }
-  if (width < 72) {
+  if (width < 40) {
     return { label: "logs", detail: " · scroll · Tab · ^O · Esc" };
+  }
+  if (width < 72) {
+    return { label: "logs", detail: " · scroll · Tab · ^O attach · Esc" };
   }
   return { label: "logs", detail: " · scroll · Tab · ^O attach · Esc chat" };
 }
@@ -400,11 +404,8 @@ function nativeInputHints(width: number, closed = false): { label: string; detai
     if (width < 24) {
       return { label: "closed", detail: " · ^]" };
     }
-    if (width < 36) {
+    if (width < 27) {
       return { label: "closed", detail: " · Pg · ^]" };
-    }
-    if (width < 56) {
-      return { label: "closed", detail: " · scroll · ^]" };
     }
     return { label: "closed", detail: " · scroll · ^] logs" };
   }
@@ -414,11 +415,8 @@ function nativeInputHints(width: number, closed = false): { label: string; detai
   if (width < 24) {
     return { label: "native", detail: " · ^]" };
   }
-  if (width < 36) {
+  if (width < 27) {
     return { label: "native", detail: " · Pg · ^]" };
-  }
-  if (width < 56) {
-    return { label: "native", detail: " · scroll · ^]" };
   }
   return { label: "native", detail: " · scroll · ^] logs" };
 }

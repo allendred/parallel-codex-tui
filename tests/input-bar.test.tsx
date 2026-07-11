@@ -278,7 +278,7 @@ describe("InputBar", () => {
       hasWorkers: true,
       hasActiveTask: true,
       maxScrollOffset: 20
-    })).toBe("PgUp/Dn · ^W logs · Tab · ^O");
+    })).toBe("PgUp/Dn · ^W log · Tab · ^O attach");
     expect(chatPlaceholderDisplayValue(24, {
       hasWorkers: true,
       hasActiveTask: true,
@@ -383,9 +383,9 @@ describe("InputBar", () => {
     );
 
     const frame = lastFrame() ?? "";
-    expect(frame).toContain("logs · scroll · Tab · ^O · Esc");
+    expect(frame).toContain("logs · scroll · Tab · ^O attach · Esc");
     expect(frame).not.toContain("wheel/Pg");
-    expect(frame).not.toContain("attach");
+    expect(frame).toContain("attach");
     expect(frame).not.toContain("read");
     expect(frame.split("\n")).toHaveLength(1);
     expect(displayWidth(frame)).toBeLessThanOrEqual(42);
@@ -461,9 +461,9 @@ describe("InputBar", () => {
     );
 
     const frame = lastFrame() ?? "";
-    expect(frame).toContain("native · scroll · ^]");
+    expect(frame).toContain("native · scroll · ^] logs");
     expect(frame).not.toContain("wheel/Pg");
-    expect(frame).not.toContain("logs");
+    expect(frame).toContain("logs");
     expect(frame).not.toContain("detach");
     expect(frame.split("\n")).toHaveLength(1);
   });
@@ -513,7 +513,7 @@ describe("InputBar", () => {
       <InputBar mode="native" value="" nativeClosed terminalWidth={42} onChange={() => {}} />
     );
     const narrowFrame = narrow.lastFrame() ?? "";
-    expect(narrowFrame).toContain("closed · scroll · ^]");
+    expect(narrowFrame).toContain("closed · scroll · ^] logs");
     expect(narrowFrame).not.toContain("wheel/Pg");
     expect(narrowFrame).not.toContain("back");
     expect(displayWidth(narrowFrame)).toBeLessThanOrEqual(42);
@@ -551,7 +551,7 @@ describe("InputBar", () => {
     );
 
     const frame = lastFrame() ?? "";
-    expect(frame).toContain("native · Pg · ^]");
+    expect(frame).toContain("native · scroll · ^] logs");
     expect(frame).not.toContain("detach");
     expect(frame.split("\n")).toHaveLength(1);
     expect(displayWidth(frame)).toBeLessThanOrEqual(30);

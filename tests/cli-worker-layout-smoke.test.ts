@@ -659,10 +659,10 @@ describe("CLI worker layout smoke", () => {
       await waitForText(chunks, "ready");
       await waitForScreenText(() => screenWrites, screen, "1 worker · done");
       child.write("\x17");
-      await waitForScreenText(() => screenWrites, screen, "logs · scroll · Tab · ^O · Esc");
+      await waitForScreenText(() => screenWrites, screen, "logs · scroll · Tab · ^O attach · Esc");
 
       const snapshot = screen.snapshot();
-      expect(snapshot).toContain("logs · scroll · Tab · ^O · Esc");
+      expect(snapshot).toContain("logs · scroll · Tab · ^O attach · Esc");
       expect(snapshot).not.toContain("logs · wheel/Pg");
       expect(snapshot).toContain("1 worker · done");
       expect(snapshot).not.toContain("w1");
