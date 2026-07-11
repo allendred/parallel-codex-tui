@@ -86,7 +86,7 @@ describe("CLI native layout smoke", () => {
       expect(nativeTitleLine?.chunks.some((chunk) => chunk.style.backgroundColor === TUI_THEME_PRESETS.codex.rail)).toBe(false);
       expect(nativeIdentityText).toContain("native actor/mock");
       expect(nativeMetadataText).toContain("native-layout");
-      expect(displayWidth(nativeTitleLineText)).toBe(137);
+      expect(displayWidth(nativeTitleLineText)).toBe(139);
     } finally {
       child.write("\x1d");
       child.kill("SIGTERM");
@@ -224,6 +224,7 @@ describe("CLI native layout smoke", () => {
       expect(outputIndex).toBeGreaterThanOrEqual(0);
       expect(inputIndex).toBeGreaterThan(outputIndex);
       expect(blankContentLines.length).toBeGreaterThan(0);
+      expect(displayWidth(nativeTitleLineText)).toBe(63);
       expect(blankContentLines.every((line) => displayWidth(line.chunks.map((chunk) => chunk.text).join("")) === displayWidth(nativeTitleLineText))).toBe(true);
       expect(blankContentLines.every((line) => line.chunks.every((chunk) => chunk.style.backgroundColor === TUI_THEME_PRESETS.codex.surface))).toBe(true);
     } finally {
@@ -282,6 +283,7 @@ describe("CLI native layout smoke", () => {
       const emptyLineText = emptyLine?.chunks.map((chunk) => chunk.text).join("") ?? "";
 
       expect(emptyLineText).toContain("waiting for output");
+      expect(displayWidth(nativeTitleLineText)).toBe(63);
       expect(displayWidth(emptyLineText)).toBe(displayWidth(nativeTitleLineText));
       expect(emptyLine?.chunks.every((chunk) => chunk.style.backgroundColor === TUI_THEME_PRESETS.codex.surface)).toBe(true);
     } finally {

@@ -1988,7 +1988,7 @@ function nativeAttachPanelRailWidth(terminalWidth: number): number {
   const renderWidth = typeof process.stdout.columns === "number"
     ? Math.max(1, Math.min(terminalWidth, process.stdout.columns))
     : terminalWidth;
-  return Math.max(1, renderWidth - 4);
+  return Math.max(1, renderWidth - 2);
 }
 
 export function nativeAttachTitleDisplay(
