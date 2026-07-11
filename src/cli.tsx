@@ -238,6 +238,12 @@ function startupRecoveryMessages(
     ? runtime.recoveredTasks.find((recovery) => recovery.taskId === activeTaskId)
     : null;
   if (active) {
+    if (active.previousState === "done") {
+      return [{
+        from: "system",
+        text: `Recovered incomplete task #${compactStartupTaskId(active.taskId)} · completion evidence missing · checkpoints kept · Ctrl+R rebuild`
+      }];
+    }
     const workerLabel = `${active.workersRecovered} ${active.workersRecovered === 1 ? "worker" : "workers"}`;
     return [{
       from: "system",

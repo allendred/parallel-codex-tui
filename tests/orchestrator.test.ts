@@ -5,9 +5,9 @@ import { describe, expect, it } from "vitest";
 import { defaultConfig } from "../src/core/config.js";
 import { appendJsonLine, appendText, pathExists, readJson, readTextIfExists, writeJson, writeText } from "../src/core/file-store.js";
 import { SessionIndex } from "../src/core/session-index.js";
-import { SessionManager } from "../src/core/session-manager.js";
+import { SessionManager, type TaskSession } from "../src/core/session-manager.js";
 import { claimTaskRunLease } from "../src/core/process-ownership.js";
-import { NativeSessionSchema, RouteDecisionSchema, TaskMetaSchema, WorkerStatusSchema } from "../src/domain/schemas.js";
+import { NativeSessionSchema, RouteDecisionSchema, TaskMetaSchema, WorkerStatusSchema, type TaskState } from "../src/domain/schemas.js";
 import { Orchestrator, type FeatureRunProgress } from "../src/orchestrator/orchestrator.js";
 import { MockWorkerAdapter } from "../src/workers/mock-adapter.js";
 import { ProcessWorkerAdapter } from "../src/workers/process-adapter.js";
@@ -209,6 +209,33 @@ describe("Orchestrator", () => {
     expect(await readTextIfExists(join(taskDir, "actor-mock", "prompt.md"))).toContain(`Feature directory: ${featureDir}`);
     expect(await readTextIfExists(join(taskDir, "critic-mock", "prompt.md"))).toContain("critic-findings.jsonl");
     expect(await readTextIfExists(join(taskDir, "dialogue", "actor-critic.jsonl"))).toContain('"type":"critic.completed"');
+  });
+
+  it("publishes completion evidence before exposing the terminal done state", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pct-orch-completion-order-"));
+    const config = mockConfig(root);
+    const manager = new CompletionOrderingSessionManager({
+      projectRoot: root,
+      dataDir: config.dataDir,
+      now: () => new Date("2026-06-30T03:30:00.000Z"),
+      randomId: () => "completion-order"
+    });
+    const orchestrator = new Orchestrator(
+      config,
+      manager,
+      new Map([["mock", new MockWorkerAdapter()]])
+    );
+
+    await orchestrator.handleRequest({
+      request: "build completion ordering",
+      cwd: root
+    });
+
+    expect(manager.doneEvidence).toEqual([{
+      summary: true,
+      decision: true,
+      featureApproved: true
+    }]);
   });
 
   it("requires an explicit decision from a Feature Critic", async () => {
@@ -2214,6 +2241,56 @@ describe("Orchestrator", () => {
     expect(await readTextIfExists(join(taskDir, "events.jsonl"))).toContain("task.retrying");
   });
 
+  it("rebuilds an incomplete legacy done task from its integrated checkpoint", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pct-orch-recover-incomplete-done-"));
+    const config = mockConfig(root);
+    const manager = new SessionManager({
+      projectRoot: root,
+      dataDir: config.dataDir,
+      now: () => new Date("2026-06-30T03:31:05.000Z"),
+      randomId: () => "incomplete-done"
+    });
+    const firstAdapter = new CapturingAdapter();
+    const firstOrchestrator = new Orchestrator(config, manager, new Map([["mock", firstAdapter]]));
+    const first = await firstOrchestrator.handleRequest({
+      request: "build recoverable completion",
+      cwd: root
+    });
+    const taskId = first.taskId ?? "";
+    const taskDir = join(root, config.dataDir, "sessions", taskId);
+    const featureDir = join(taskDir, "features", "0001-build-recoverable-completion");
+    await writeText(join(taskDir, "turns", "0001", "supervisor-summary.md"), "");
+    await writeText(join(featureDir, "decisions.md"), "");
+    const featureStatus = JSON.parse(await readTextIfExists(join(featureDir, "status.json")));
+    await writeJson(join(featureDir, "status.json"), { ...featureStatus, state: "integrating" });
+
+    const resumedManager = new SessionManager({
+      projectRoot: root,
+      dataDir: config.dataDir,
+      now: () => new Date("2026-06-30T03:31:15.000Z")
+    });
+    await expect(resumedManager.reconcileInterruptedTasks()).resolves.toEqual([
+      expect.objectContaining({ taskId, previousState: "done", featuresRecovered: 1 })
+    ]);
+    const resumedAdapter = new CapturingAdapter();
+    const resumedOrchestrator = new Orchestrator(
+      config,
+      resumedManager,
+      new Map([["mock", resumedAdapter]])
+    );
+
+    const recovered = await resumedOrchestrator.retryTask({ taskId, cwd: root });
+
+    expect(recovered.summary).toContain("Complex task completed.");
+    expect(resumedAdapter.runs).toHaveLength(0);
+    expect(await readTextIfExists(join(taskDir, "turns", "0001", "supervisor-summary.md"))).toContain(
+      "Complex task completed."
+    );
+    expect(await readTextIfExists(join(featureDir, "decisions.md"))).toContain("APPROVED");
+    expect(JSON.parse(await readTextIfExists(join(featureDir, "status.json"))).state).toBe("approved");
+    expect((await readJson(join(taskDir, "meta.json"), TaskMetaSchema)).status).toBe("done");
+  });
+
   it("rejects a concurrent retry while another TUI owns the task", async () => {
     const root = await mkdtemp(join(tmpdir(), "pct-orch-live-owner-"));
     const config = mockConfig(root);
@@ -2670,6 +2747,33 @@ describe("Orchestrator", () => {
     expect(await pathExists(join(taskDir, "critic-mock"))).toBe(false);
   });
 });
+
+class CompletionOrderingSessionManager extends SessionManager {
+  readonly doneEvidence: Array<{
+    summary: boolean;
+    decision: boolean;
+    featureApproved: boolean;
+  }> = [];
+
+  override async updateTaskStatus(task: TaskSession, status: TaskState): Promise<void> {
+    if (status === "done") {
+      const featureDir = join(task.dir, "features", "0001-build-completion-ordering");
+      const featureStatusText = await readTextIfExists(join(featureDir, "status.json"));
+      let featureApproved = false;
+      try {
+        featureApproved = JSON.parse(featureStatusText).state === "approved";
+      } catch {
+        featureApproved = false;
+      }
+      this.doneEvidence.push({
+        summary: Boolean((await readTextIfExists(join(task.dir, "turns", "0001", "supervisor-summary.md"))).trim()),
+        decision: Boolean((await readTextIfExists(join(featureDir, "decisions.md"))).trim()),
+        featureApproved
+      });
+    }
+    await super.updateTaskStatus(task, status);
+  }
+}
 
 class FailingJudgeAdapter implements WorkerAdapter {
   readonly name = "mock" as const;

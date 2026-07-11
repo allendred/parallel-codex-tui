@@ -239,7 +239,7 @@ export class SessionManager {
       }
       const task = this.taskFromId(entry.name);
       const meta = await readTaskMetaIfValid(task.metaPath);
-      if (!meta || TERMINAL_TASK_STATES.has(meta.status)) {
+      if (!meta || !(await this.taskNeedsRecovery(task, meta))) {
         continue;
       }
       let recoveryLease: TaskRunLease;
@@ -254,7 +254,7 @@ export class SessionManager {
 
       try {
         const claimedMeta = await readTaskMetaIfValid(task.metaPath);
-        if (!claimedMeta || TERMINAL_TASK_STATES.has(claimedMeta.status)) {
+        if (!claimedMeta || !(await this.taskNeedsRecovery(task, claimedMeta))) {
           continue;
         }
         const workers = await this.reconcileTaskWorkers(task);
@@ -262,8 +262,10 @@ export class SessionManager {
         await this.updateTaskStatus(task, "cancelled");
         await this.appendEvent(
           task,
-          "task.recovered_after_restart",
-          `Recovered interrupted task from ${claimedMeta.status}; ${workers.recovered} active workers and ${featuresRecovered} active features marked cancelled, checkpoints preserved`
+          claimedMeta.status === "done" ? "task.recovered_incomplete_done" : "task.recovered_after_restart",
+          claimedMeta.status === "done"
+            ? `Recovered incomplete done task; ${workers.recovered} active workers and ${featuresRecovered} active features marked cancelled, checkpoints preserved`
+            : `Recovered interrupted task from ${claimedMeta.status}; ${workers.recovered} active workers and ${featuresRecovered} active features marked cancelled, checkpoints preserved`
         );
         recovered.push({
           taskId: task.id,
@@ -371,9 +373,22 @@ export class SessionManager {
 
   async updateTaskStatus(task: TaskSession, status: TaskMeta["status"]): Promise<void> {
     const meta = await this.readMeta(task);
+    const completeEvidence = status === "done" || meta.status === "done"
+      ? await this.hasCompleteTaskEvidence(task)
+      : false;
+    if (status === "done" && !completeEvidence) {
+      throw new Error(`Task ${task.id} cannot move to done before latest-turn completion evidence is published.`);
+    }
+    if (meta.status === "done" && status !== "done" && completeEvidence) {
+      throw new Error(`Task ${task.id} is completely done and cannot move backward to ${status}.`);
+    }
+    if (meta.status === status) {
+      await this.index?.upsertTask(meta);
+      return;
+    }
     await writeJson(task.metaPath, TaskMetaSchema.parse({ ...meta, status }));
     await this.index?.upsertTask({ ...meta, status });
-    await this.appendEvent(task, `task.${status}`, `Task moved to ${status}`);
+    await this.appendEvent(task, `task.${status}`, `Task moved from ${meta.status} to ${status}`);
   }
 
   async initializeWorker(task: TaskSession, input: InitializeWorkerInput): Promise<WorkerFiles> {
@@ -477,6 +492,92 @@ export class SessionManager {
       return (await pathExists(join(task.dir, "user-request.md"))) ? "0002" : "0001";
     }
     return String(Number(latest.turnId) + 1).padStart(4, "0");
+  }
+
+  private async taskNeedsRecovery(task: TaskSession, meta: TaskMeta): Promise<boolean> {
+    if (!TERMINAL_TASK_STATES.has(meta.status)) {
+      return true;
+    }
+    return meta.status === "done"
+      && !(await this.hasCompleteTaskEvidence(task))
+      && await this.hasIntegratedLatestTurnCheckpoint(task);
+  }
+
+  private async hasIntegratedLatestTurnCheckpoint(task: TaskSession): Promise<boolean> {
+    const latestTurn = await this.latestTurn(task);
+    if (!latestTurn) {
+      return false;
+    }
+    const root = join(task.dir, "workspaces", `turn-${latestTurn.turnId}`);
+    if (!(await pathExists(root))) {
+      return false;
+    }
+    const entries = await readdir(root, { withFileTypes: true });
+    for (const entry of entries) {
+      if (!entry.isDirectory() || !/^wave-\d{4}$/.test(entry.name)) {
+        continue;
+      }
+      try {
+        const value: unknown = JSON.parse(await readTextIfExists(join(root, entry.name, "integration.json")));
+        if (
+          value
+          && typeof value === "object"
+          && !Array.isArray(value)
+          && (value as Record<string, unknown>).state === "integrated"
+        ) {
+          return true;
+        }
+      } catch {
+        // A corrupt integration record is not proof that live commit completed.
+      }
+    }
+    return false;
+  }
+
+  private async hasCompleteTaskEvidence(task: TaskSession): Promise<boolean> {
+    const latestTurn = await this.latestTurn(task);
+    if (!latestTurn) {
+      return false;
+    }
+    if (!(await readTextIfExists(join(latestTurn.dir, "supervisor-summary.md"))).trim()) {
+      return false;
+    }
+
+    const featuresRoot = join(task.dir, "features");
+    if (!(await pathExists(featuresRoot))) {
+      return true;
+    }
+    const entries = await readdir(featuresRoot, { withFileTypes: true });
+    for (const entry of entries) {
+      if (!entry.isDirectory()) {
+        continue;
+      }
+      const belongsToLatestTurn = entry.name === latestTurn.turnId
+        || entry.name.startsWith(`${latestTurn.turnId}-`);
+      const statusPath = join(featuresRoot, entry.name, "status.json");
+      try {
+        const status = await readJson(statusPath, FeatureStatusSchema);
+        const statusIsLatestTurn = status.turn_id === latestTurn.turnId;
+        if (belongsToLatestTurn !== statusIsLatestTurn) {
+          return false;
+        }
+        if (
+          statusIsLatestTurn
+          && (
+            status.feature_id !== entry.name
+            || status.task_id !== task.id
+            || status.state !== "approved"
+          )
+        ) {
+          return false;
+        }
+      } catch {
+        if (belongsToLatestTurn) {
+          return false;
+        }
+      }
+    }
+    return true;
   }
 
   private async reconcileTaskWorkers(task: TaskSession): Promise<{ recovered: number; terminated: number }> {

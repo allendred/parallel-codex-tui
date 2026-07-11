@@ -83,6 +83,68 @@ describe("CLI startup recovery smoke", () => {
       }
     }
   }, 12000);
+
+  it("explains an incomplete legacy done task as completion recovery", async () => {
+    const appRoot = await mkdtemp(join(tmpdir(), "pct-cli-incomplete-done-app-"));
+    const workspace = await mkdtemp(join(tmpdir(), "pct-cli-incomplete-done-workspace-"));
+    const initial = await createRuntime(appRoot, workspace);
+    const task = await initial.sessions.createTask({
+      request: "实现完成证据恢复",
+      cwd: workspace,
+      route: {
+        mode: "complex",
+        reason: "Project work.",
+        suggested_roles: ["judge", "actor", "critic"],
+        judge_engine: "mock",
+        actor_engine: "mock",
+        critic_engine: "mock"
+      }
+    });
+    const meta = await readJson(task.metaPath, TaskMetaSchema);
+    await writeJson(join(task.dir, "workspaces", "turn-0001", "wave-0001", "integration.json"), {
+      version: 1,
+      state: "integrated",
+      changed_paths: []
+    });
+    await writeJson(task.metaPath, { ...meta, status: "done" });
+    initial.index.close();
+
+    const screen = new NativeTerminalScreen({ cols: 100, rows: 20, scrollback: 500 });
+    const exits: number[] = [];
+    let screenWrites = Promise.resolve();
+    const child = spawn(
+      process.execPath,
+      ["./node_modules/.bin/tsx", "src/cli.tsx", "--app-root", appRoot, "--workspace", workspace],
+      {
+        cwd: process.cwd(),
+        cols: 100,
+        rows: 20,
+        name: "xterm-256color",
+        env: { ...process.env, TERM: "xterm-256color" }
+      }
+    );
+    child.onData((chunk) => {
+      screenWrites = screenWrites.then(() => screen.write(chunk));
+    });
+    child.onExit(({ exitCode }) => exits.push(exitCode));
+
+    try {
+      await waitForScreenText(() => screenWrites, screen, "Recovered incomplete task");
+      await waitForScreenText(() => screenWrites, screen, "completion evidence missing");
+      await waitForScreenText(() => screenWrites, screen, "checkpoints kept · Ctrl+R");
+      await waitForScreenText(() => screenWrites, screen, "rebuild");
+      await waitForScreenText(() => screenWrites, screen, "^R retry");
+      await expect(readJson(task.metaPath, TaskMetaSchema)).resolves.toMatchObject({ status: "cancelled" });
+
+      child.write("\x03");
+      await waitForExit(exits);
+      expect(exits[0]).toBe(0);
+    } finally {
+      if (exits.length === 0) {
+        child.kill("SIGTERM");
+      }
+    }
+  }, 12000);
 });
 
 async function waitForScreenText(

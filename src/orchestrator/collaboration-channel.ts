@@ -1,8 +1,8 @@
 import { join } from "node:path";
 import { z } from "zod";
-import { appendJsonLine, ensureDir, pathExists, readTextIfExists, writeJson, writeText } from "../core/file-store.js";
+import { appendJsonLine, ensureDir, pathExists, readJson, readTextIfExists, writeJson, writeText } from "../core/file-store.js";
 import type { TaskSession, TaskTurn } from "../core/session-manager.js";
-import type { FeatureState, WorkerRole } from "../domain/schemas.js";
+import { FeatureStatusSchema, type FeatureState, type WorkerRole } from "../domain/schemas.js";
 import type { FeatureDefinition } from "./feature-plan.js";
 
 export interface FeatureChannel {
@@ -162,6 +162,25 @@ export function featurePromptContext(channel: FeatureChannel): FeaturePromptCont
 }
 
 export async function updateFeatureStatus(channel: FeatureChannel, state: FeatureState): Promise<void> {
+  if (await pathExists(channel.statusPath)) {
+    try {
+      const current = await readJson(channel.statusPath, FeatureStatusSchema);
+      if (
+        current.state === state
+        && current.feature_id === channel.id
+        && current.task_id === channel.taskId
+        && current.turn_id === channel.turnId
+        && current.title === channel.title
+        && current.description === channel.description
+        && current.depends_on.length === channel.dependsOn.length
+        && current.depends_on.every((dependency, index) => dependency === channel.dependsOn[index])
+      ) {
+        return;
+      }
+    } catch {
+      // A corrupt status is rebuilt from the authoritative feature channel.
+    }
+  }
   await writeJson(channel.statusPath, {
     feature_id: channel.id,
     task_id: channel.taskId,

@@ -110,6 +110,108 @@ describe("SessionManager", () => {
     expect(turnRoute.mode).toBe("complex");
   });
 
+  it("records repeated task status transitions idempotently", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pct-task-status-idempotent-"));
+    const manager = new SessionManager({
+      projectRoot: root,
+      dataDir: ".parallel-codex",
+      now: () => new Date("2026-06-30T03:30:00.000Z"),
+      randomId: () => "idempotent"
+    });
+    const task = await manager.createTask({
+      request: "Build it.",
+      cwd: root,
+      route: {
+        mode: "complex",
+        reason: "Requires workers.",
+        suggested_roles: ["judge", "actor", "critic"],
+        judge_engine: "mock",
+        actor_engine: "mock",
+        critic_engine: "mock"
+      }
+    });
+
+    await manager.updateTaskStatus(task, "actor_running");
+    await manager.updateTaskStatus(task, "actor_running");
+
+    const events = await readTextIfExists(task.eventsPath);
+    expect(countOccurrences(events, '"type":"task.actor_running"')).toBe(1);
+    expect(events).toContain('"message":"Task moved from created to actor_running"');
+    await expect(readJson(task.metaPath, TaskMetaSchema)).resolves.toMatchObject({ status: "actor_running" });
+  });
+
+  it("rejects terminal done before the latest turn completion evidence is published", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pct-task-done-guard-"));
+    const manager = new SessionManager({
+      projectRoot: root,
+      dataDir: ".parallel-codex",
+      now: () => new Date("2026-06-30T03:30:00.000Z"),
+      randomId: () => "done-guard"
+    });
+    const task = await manager.createTask({
+      request: "Build it.",
+      cwd: root,
+      route: {
+        mode: "complex",
+        reason: "Requires workers.",
+        suggested_roles: ["judge", "actor", "critic"],
+        judge_engine: "mock",
+        actor_engine: "mock",
+        critic_engine: "mock"
+      }
+    });
+
+    await expect(manager.updateTaskStatus(task, "done")).rejects.toThrow(
+      `Task ${task.id} cannot move to done before latest-turn completion evidence is published`
+    );
+    await writeText(join(task.dir, "turns", "0001", "supervisor-summary.md"), "Complex task completed.\n");
+    await writeJson(join(task.dir, "features", "0001-mismatch", "status.json"), {
+      feature_id: "0001-mismatch",
+      task_id: task.id,
+      turn_id: "0000",
+      title: "Mismatched",
+      description: "Wrong turn evidence",
+      depends_on: [],
+      state: "approved",
+      updated_at: "2026-06-30T03:30:00.000Z"
+    });
+    await expect(manager.updateTaskStatus(task, "done")).rejects.toThrow(
+      `Task ${task.id} cannot move to done before latest-turn completion evidence is published`
+    );
+    await expect(readJson(task.metaPath, TaskMetaSchema)).resolves.toMatchObject({ status: "created" });
+    expect(await readTextIfExists(task.eventsPath)).not.toContain('"type":"task.done"');
+  });
+
+  it("protects complete done tasks from regression while allowing a new follow-up turn", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pct-task-done-regression-"));
+    const manager = new SessionManager({
+      projectRoot: root,
+      dataDir: ".parallel-codex",
+      now: () => new Date("2026-06-30T03:30:00.000Z"),
+      randomId: () => "done-regression"
+    });
+    const route = {
+      mode: "complex" as const,
+      reason: "Requires workers.",
+      suggested_roles: ["judge" as const, "actor" as const, "critic" as const],
+      judge_engine: "mock" as const,
+      actor_engine: "mock" as const,
+      critic_engine: "mock" as const
+    };
+    const task = await manager.createTask({ request: "Build it.", cwd: root, route });
+    await writeText(join(task.dir, "turns", "0001", "supervisor-summary.md"), "Complex task completed.\n");
+    await manager.updateTaskStatus(task, "done");
+
+    await expect(manager.updateTaskStatus(task, "failed")).rejects.toThrow(
+      `Task ${task.id} is completely done and cannot move backward to failed`
+    );
+    await expect(readJson(task.metaPath, TaskMetaSchema)).resolves.toMatchObject({ status: "done" });
+
+    await manager.appendTurn(task, { request: "Continue it.", route });
+    await expect(manager.updateTaskStatus(task, "judging")).resolves.toBeUndefined();
+    await expect(readJson(task.metaPath, TaskMetaSchema)).resolves.toMatchObject({ status: "judging" });
+  });
+
   it("appends follow-up turns", async () => {
     const root = await mkdtemp(join(tmpdir(), "pct-turns-"));
     const manager = new SessionManager({
@@ -1027,6 +1129,94 @@ describe("SessionManager", () => {
       expect.objectContaining({ id: task.id, status: "cancelled" })
     ]);
     index.close();
+  });
+
+  it("recovers an incomplete terminal done task instead of hiding missing completion evidence", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pct-reconcile-incomplete-done-"));
+    const manager = new SessionManager({
+      projectRoot: root,
+      dataDir: ".parallel-codex",
+      now: () => new Date("2026-07-11T14:30:10.000Z"),
+      randomId: () => "incomplete-done"
+    });
+    const task = await manager.createTask({
+      request: "Build completion evidence.",
+      cwd: root,
+      route: {
+        mode: "complex",
+        reason: "Project work.",
+        suggested_roles: ["judge", "actor", "critic"],
+        judge_engine: "mock",
+        actor_engine: "mock",
+        critic_engine: "mock"
+      }
+    });
+    const featureStatusPath = join(task.dir, "features", "0001-completion", "status.json");
+    await writeJson(featureStatusPath, {
+      feature_id: "0001-completion",
+      task_id: task.id,
+      turn_id: "0001",
+      title: "Completion",
+      description: "Publish completion evidence",
+      depends_on: [],
+      state: "integrating",
+      updated_at: "2026-07-11T14:30:00.000Z"
+    });
+    await writeJson(join(task.dir, "workspaces", "turn-0001", "wave-0001", "integration.json"), {
+      version: 1,
+      state: "integrated",
+      changed_paths: []
+    });
+    const legacyMeta = await readJson(task.metaPath, TaskMetaSchema);
+    await writeJson(task.metaPath, { ...legacyMeta, status: "done" });
+
+    await expect(manager.reconcileInterruptedTasks()).resolves.toEqual([{
+      taskId: task.id,
+      previousState: "done",
+      workersRecovered: 0,
+      featuresRecovered: 1,
+      processesTerminated: 0
+    }]);
+    await expect(readJson(task.metaPath, TaskMetaSchema)).resolves.toMatchObject({ status: "cancelled" });
+    expect(JSON.parse(await readTextIfExists(featureStatusPath))).toMatchObject({ state: "cancelled" });
+    expect(await readTextIfExists(task.eventsPath)).toContain("task.recovered_incomplete_done");
+  });
+
+  it("keeps an evidence-complete terminal done task untouched", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pct-reconcile-complete-done-"));
+    const manager = new SessionManager({
+      projectRoot: root,
+      dataDir: ".parallel-codex",
+      now: () => new Date("2026-07-11T14:30:20.000Z"),
+      randomId: () => "complete-done"
+    });
+    const task = await manager.createTask({
+      request: "Build complete evidence.",
+      cwd: root,
+      route: {
+        mode: "complex",
+        reason: "Project work.",
+        suggested_roles: ["judge", "actor", "critic"],
+        judge_engine: "mock",
+        actor_engine: "mock",
+        critic_engine: "mock"
+      }
+    });
+    await writeText(join(task.dir, "turns", "0001", "supervisor-summary.md"), "Complex task completed.\n");
+    await writeJson(join(task.dir, "features", "0001-complete", "status.json"), {
+      feature_id: "0001-complete",
+      task_id: task.id,
+      turn_id: "0001",
+      title: "Complete",
+      description: "Complete evidence",
+      depends_on: [],
+      state: "approved",
+      updated_at: "2026-07-11T14:30:19.000Z"
+    });
+    await manager.updateTaskStatus(task, "done");
+
+    await expect(manager.reconcileInterruptedTasks()).resolves.toEqual([]);
+    await expect(readJson(task.metaPath, TaskMetaSchema)).resolves.toMatchObject({ status: "done" });
   });
 
   it("allows only one startup process to reconcile the same interrupted task", async () => {

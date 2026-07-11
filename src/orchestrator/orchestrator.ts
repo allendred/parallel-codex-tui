@@ -1297,8 +1297,6 @@ export class Orchestrator {
     changedPaths: string[]
   ): Promise<HandleRequestResult> {
     throwIfCancelled(input.signal);
-    await this.sessions.updateTaskStatus(task, "done");
-    input.onStatus?.({ taskId: task.id, judge: "done", actor: "done", critic: "done" });
     const summary = await buildSupervisorSummary({
       judgeDir: judge.dir,
       actorDir: actor.dir,
@@ -1310,6 +1308,8 @@ export class Orchestrator {
     await writeText(join(turn.dir, "supervisor-summary.md"), `${summary}\n`);
     await writeFeatureDecision(feature, summary);
     await updateFeatureStatus(feature, "approved");
+    await this.sessions.updateTaskStatus(task, "done");
+    input.onStatus?.({ taskId: task.id, judge: "done", actor: "done", critic: "done" });
     return {
       mode: "complex",
       taskId: task.id,

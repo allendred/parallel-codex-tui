@@ -7,10 +7,32 @@ import {
   recordApprovedFindingResolution,
   requireActorFindingReplies,
   requireFeatureRevisionFindings,
+  updateFeatureStatus,
   type FeatureChannel
 } from "../src/orchestrator/collaboration-channel.js";
 
 describe("feature collaboration mailbox", () => {
+  it("keeps repeated feature state updates idempotent", async () => {
+    const channel = await featureChannel("state-idempotent");
+    await writeText(channel.statusPath, `${JSON.stringify({
+      feature_id: channel.id,
+      task_id: channel.taskId,
+      turn_id: channel.turnId,
+      title: channel.title,
+      description: channel.description,
+      depends_on: [],
+      state: "actor_running",
+      updated_at: "2026-07-11T00:00:00.000Z"
+    })}\n`);
+
+    await updateFeatureStatus(channel, "actor_running");
+
+    expect(JSON.parse(await readTextIfExists(channel.statusPath))).toMatchObject({
+      state: "actor_running",
+      updated_at: "2026-07-11T00:00:00.000Z"
+    });
+  });
+
   it("reports the exact malformed Critic finding row", async () => {
     const channel = await featureChannel("malformed");
     await writeText(channel.criticFindingsPath, [

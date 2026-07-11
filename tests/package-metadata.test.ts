@@ -248,6 +248,14 @@ describe("package metadata", () => {
     expect(readme).toContain("concurrent TUI startups cannot recover one task twice or race a new retry");
     expect(readme).toContain("persist `process.json` with their PID and OS process-start fingerprint");
     expect(readme).toContain("A reused PID with a different start fingerprint is never signalled");
+    expect(readme).toContain("Terminal completion is evidence-guarded");
+    expect(readme).toContain("duplicate task and feature state writes are idempotent");
+    expect(readme).toContain("every real task transition records its `from` and `to` state");
+    expect(readme).toContain("a complete `done` task cannot regress unless a new follow-up turn has first been created");
+    expect(readme).toContain("Startup also audits legacy `done` tasks");
+    expect(readme).toContain("have an integrated latest-turn checkpoint");
+    expect(readme).toContain("rebuilds final evidence without rerunning completed workers");
+    expect(readme).toContain("Legacy log-only `done` sessions without integration proof remain untouched");
     expect(readme).toContain("`checkpoints kept · Ctrl+R resume`");
     expect(readme).toContain("Checkpoint load, reuse, and recovery events appear in the collaboration timeline");
     expect(readme).toContain("press `C` to open the file-backed Actor/Critic collaboration timeline");
