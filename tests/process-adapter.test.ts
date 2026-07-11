@@ -444,7 +444,8 @@ describe("ProcessWorkerAdapter", () => {
       outputLogPath,
       statusPath,
       prompt: "force timeout",
-      timeoutMs: 200
+      // Give the child time to install its SIGTERM handler under parallel CI load.
+      timeoutMs: 750
     });
 
     expect(result.signal).toBe("SIGKILL");

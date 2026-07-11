@@ -147,6 +147,25 @@ describe("AppShell", () => {
     expect(header).toContain("project");
   });
 
+  it("labels the Worker overview independently from a selected log", () => {
+    const { lastFrame } = render(
+      <AppShell
+        view="workers"
+        cwd="/tmp/project"
+        taskId="task-1"
+        statusText="4 workers"
+        terminalWidth={80}
+        input={<TextLine text="workers · Up/Dn select · Enter logs · Esc back" />}
+      >
+        <TextLine text="Workers" />
+      </AppShell>
+    );
+
+    const header = (lastFrame() ?? "").split("\n")[0] ?? "";
+    expect(header).toContain("parallel-codex-tui · workers");
+    expect(header).not.toContain(" · logs · ");
+  });
+
   it("renders a structured worker interface with header, full-width content, input, and status", () => {
     const { lastFrame } = render(
       <AppShell

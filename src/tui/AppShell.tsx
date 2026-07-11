@@ -6,7 +6,7 @@ import { StatusBar } from "./StatusBar.js";
 import { compactEndByDisplayWidth, displayWidth } from "./display-width.js";
 import { TUI_THEME } from "./theme.js";
 
-export type AppView = "chat" | "worker" | "native" | "router";
+export type AppView = "chat" | "worker" | "workers" | "native" | "router";
 type AppShellErrorLineTheme = Pick<TextProps, "backgroundColor" | "color">;
 type AppShellContentGutterTheme = Pick<TextProps, "backgroundColor">;
 const APP_HEADER_ROOMY_SEPARATOR = " · ";
@@ -384,6 +384,9 @@ function shortcutHint(view: AppView): string {
 function shortViewLabel(view: AppView): string {
   if (view === "worker") {
     return "logs";
+  }
+  if (view === "workers") {
+    return "workers";
   }
   if (view === "native") {
     return "native";

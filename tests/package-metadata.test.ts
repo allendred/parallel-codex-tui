@@ -194,6 +194,9 @@ describe("package metadata", () => {
     expect(readme).toContain("Press `Ctrl+N` to preserve the current session and start a new task");
     expect(readme).toContain("the next complex request creates an independent task from turn `0001`");
     expect(readme).toContain("`Ctrl+W` to open worker logs");
+    expect(readme).toContain("`Ctrl+B` opens a live Worker overview without replacing the `Ctrl+W` log shortcut");
+    expect(readme).toContain("Up/Down, PageUp/PageDown, the mouse wheel, or `Tab` changes the selected worker");
+    expect(readme).toContain("Enter or `Ctrl+W` opens its rendered log");
     expect(readme).toContain("In worker-log views, scroll with the mouse wheel or PageUp/PageDown");
     expect(readme).toContain("In chat or worker-log views, press `Ctrl+O`");
     expect(readme).toContain("Native attach follows outer terminal resize");

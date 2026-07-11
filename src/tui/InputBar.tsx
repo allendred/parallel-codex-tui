@@ -4,7 +4,7 @@ import { compactEndByDisplayWidth, compactTailByDisplayWidth, displayWidth } fro
 import { TUI_THEME } from "./theme.js";
 
 export interface InputBarProps {
-  mode: "chat" | "worker" | "native" | "router";
+  mode: "chat" | "worker" | "workers" | "native" | "router";
   ready?: boolean;
   busy?: boolean;
   canRetry?: boolean;
@@ -38,6 +38,16 @@ export function InputBar({
 }: InputBarProps) {
   const terminalWidth = providedTerminalWidth ?? process.stdout.columns ?? 120;
   const fillRail = providedTerminalWidth !== undefined || typeof process.stdout.columns === "number";
+
+  if (mode === "workers") {
+    const hints = workerOverviewInputHints(terminalWidth);
+    return (
+      <InputRail terminalWidth={terminalWidth} textWidth={displayWidth(`${hints.label}${hints.detail}`)} fill={fillRail}>
+        <Text backgroundColor={TUI_THEME.rail} color={TUI_THEME.accent} bold>{hints.label}</Text>
+        {hints.detail ? <Text backgroundColor={TUI_THEME.rail} color={TUI_THEME.muted}>{hints.detail}</Text> : null}
+      </InputRail>
+    );
+  }
 
   if (mode === "worker") {
     const hints = workerInputHints(terminalWidth);
@@ -347,8 +357,8 @@ function chatHistoryPlaceholderDisplayValue(terminalWidth: number, offset: numbe
 function chatTaskPlaceholderDisplayValue(terminalWidth: number, scrollable = false, activeTask = false): string {
   if (activeTask && terminalWidth >= 72) {
     const active = scrollable
-      ? "message · scroll · ^N new · ^W logs · Tab · ^O attach · ^G routes"
-      : "message · ^N new · ^W logs · Tab · ^O attach · ^G routes";
+      ? "message · scroll · ^N new · ^W logs · ^B workers · Tab · ^O attach · ^G routes"
+      : "message · ^N new · ^W logs · ^B workers · Tab · ^O attach · ^G routes";
     if (displayWidth(active) <= chatPlaceholderValueWidth(terminalWidth)) {
       return active;
     }
@@ -357,6 +367,7 @@ function chatTaskPlaceholderDisplayValue(terminalWidth: number, scrollable = fal
     terminalWidth,
     scrollable
       ? [
+          "message · scroll · ^W logs · ^B workers · Tab · ^O attach · ^G routes",
           "message · scroll · ^W logs · Tab · ^O attach · ^G routes",
           "message · scroll · ^W logs · Tab · ^O attach",
           "PgUp/Dn · ^W log · Tab · ^O attach",
@@ -368,6 +379,7 @@ function chatTaskPlaceholderDisplayValue(terminalWidth: number, scrollable = fal
           "msg"
         ]
       : [
+          "message · ^W logs · ^B workers · Tab · ^O attach · ^G routes",
           "message · ^W logs · Tab · ^O attach · ^G routes",
           "message · ^W logs · Tab · ^O attach",
           "message · ^W · ^O",
@@ -428,10 +440,32 @@ function workerInputHints(width: number): { label: string; detail: string } {
   if (width < 40) {
     return { label: "logs", detail: " · scroll · Tab · ^O · Esc" };
   }
-  if (width < 72) {
+  if (width < 58) {
     return { label: "logs", detail: " · scroll · Tab · ^O attach · Esc" };
   }
-  return { label: "logs", detail: " · scroll · Tab · ^O attach · Esc chat" };
+  if (width < 72) {
+    return { label: "logs", detail: " · scroll · Tab · ^B workers · ^O · Esc" };
+  }
+  return { label: "logs", detail: " · scroll · Tab · ^B workers · ^O attach · Esc chat" };
+}
+
+function workerOverviewInputHints(width: number): { label: string; detail: string } {
+  if (width < 12) {
+    return { label: "wrk", detail: "" };
+  }
+  if (width < 18) {
+    return { label: "workers", detail: " · Esc" };
+  }
+  if (width < 28) {
+    return { label: "workers", detail: " · Up/Dn · Esc" };
+  }
+  if (width < 38) {
+    return { label: "workers", detail: " · Up/Dn · Enter · Esc" };
+  }
+  if (width < 58) {
+    return { label: "workers", detail: " · Up/Dn · Enter logs · ^O · Esc" };
+  }
+  return { label: "workers", detail: " · Up/Dn select · Enter logs · ^O attach · Esc back" };
 }
 
 function nativeInputHints(width: number, closed = false): { label: string; detail: string } {

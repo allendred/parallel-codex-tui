@@ -57,6 +57,19 @@ describe("keyboard shortcuts", () => {
     expect(isRouterDiagnosticsShortcut?.("g", { ctrl: false })).toBe(false);
   });
 
+  it("recognizes ctrl-b as the Worker overview shortcut", () => {
+    const isWorkerOverviewShortcut = (
+      keyboardModule as typeof keyboardModule & {
+        isWorkerOverviewShortcut?: (input: string, key: { ctrl?: boolean }) => boolean;
+      }
+    ).isWorkerOverviewShortcut;
+
+    expect(isWorkerOverviewShortcut).toBeTypeOf("function");
+    expect(isWorkerOverviewShortcut?.("b", { ctrl: true })).toBe(true);
+    expect(isWorkerOverviewShortcut?.("\u0002", { ctrl: false })).toBe(true);
+    expect(isWorkerOverviewShortcut?.("b", { ctrl: false })).toBe(false);
+  });
+
   it("does not treat plain letters as shortcuts", () => {
     expect(isLogsShortcut("w", { ctrl: false })).toBe(false);
     expect(isAttachShortcut("o", { ctrl: false })).toBe(false);
