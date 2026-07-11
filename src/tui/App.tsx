@@ -302,14 +302,6 @@ export function App({
   }, [selectedWorkerIndex]);
 
   useEffect(() => {
-    workerSearchRef.current = workerSearch;
-  }, [workerSearch]);
-
-  useEffect(() => {
-    workerNavigationTargetsRef.current = workerNavigationTargets;
-  }, [workerNavigationTargets]);
-
-  useEffect(() => {
     workerMaxScrollOffsetRef.current = workerMaxScrollOffset;
   }, [workerMaxScrollOffset]);
 

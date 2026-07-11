@@ -103,8 +103,10 @@ describe("CLI Worker log search smoke", () => {
 
       child.write("\x06");
       await waitForScreenText(() => screenWrites, screen, "/ |");
-      child.write("中文");
-      child.write("目标");
+      child.write("中");
+      child.write("文");
+      child.write("目");
+      child.write("标");
       await waitForScreenText(() => screenWrites, screen, "/ 中文目标|");
       await waitForScreenText(() => screenWrites, screen, "1/2");
       await waitForScreenText(() => screenWrites, screen, "find 1/2");
