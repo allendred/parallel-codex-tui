@@ -250,9 +250,12 @@ describe("package metadata", () => {
     expect(readme).toContain("A reused PID with a different start fingerprint is never signalled");
     expect(readme).toContain("Recovery commits cancellation only after every recorded process group is confirmed stopped");
     expect(readme).toContain("An unverifiable or still-running process blocks startup");
+    expect(readme).toContain("Session index rebuilding publishes either the previous complete snapshot or the new complete snapshot");
     expect(readme).toContain("Terminal completion is evidence-guarded");
     expect(readme).toContain("duplicate task and feature state writes are idempotent");
     expect(readme).toContain("every real task transition records its `from` and `to` state");
+    expect(readme).toContain("Each committed task state change carries a unique transition marker in `meta.json`");
+    expect(readme).toContain("startup repairs a missing event or SQLite projection from that marker");
     expect(readme).toContain("a complete `done` task cannot regress unless a new follow-up turn has first been created");
     expect(readme).toContain("Startup also audits legacy `done` tasks");
     expect(readme).toContain("have an integrated latest-turn checkpoint");

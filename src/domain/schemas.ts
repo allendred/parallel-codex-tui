@@ -50,6 +50,15 @@ export const TaskStateSchema = z.enum([
   "cancelled"
 ]);
 
+export const TaskStatusTransitionSchema = z.object({
+  id: z.string().min(1),
+  from: TaskStateSchema,
+  to: TaskStateSchema,
+  at: z.string().datetime()
+}).refine((transition) => transition.from !== transition.to, {
+  message: "Task status transition must change state"
+});
+
 export const WorkerStateSchema = z.enum([
   "idle",
   "starting",
@@ -111,7 +120,15 @@ export const TaskMetaSchema = z.object({
   created_at: z.string().datetime(),
   cwd: z.string().min(1),
   mode: RouteModeSchema,
-  status: TaskStateSchema
+  status: TaskStateSchema,
+  status_transition: TaskStatusTransitionSchema.optional().catch(undefined)
+}).transform((meta) => {
+  if (meta.status_transition && meta.status_transition.to !== meta.status) {
+    const nextMeta = { ...meta };
+    delete nextMeta.status_transition;
+    return nextMeta;
+  }
+  return meta;
 });
 
 export const WorkerStatusSchema = z.object({
@@ -173,7 +190,10 @@ export const EventRecordSchema = z.object({
   message: z.string().optional(),
   worker: z.string().optional(),
   engine: EngineNameSchema.optional(),
-  task_id: z.string().optional()
+  task_id: z.string().optional(),
+  transition_id: z.string().min(1).optional(),
+  from_state: TaskStateSchema.optional(),
+  to_state: TaskStateSchema.optional()
 });
 
 export type RouteMode = z.infer<typeof RouteModeSchema>;
@@ -184,6 +204,7 @@ export type RouterRecoveryTrigger = z.infer<typeof RouterRecoveryTriggerSchema>;
 export type EngineName = z.infer<typeof EngineNameSchema>;
 export type WorkerRole = z.infer<typeof WorkerRoleSchema>;
 export type TaskState = z.infer<typeof TaskStateSchema>;
+export type TaskStatusTransition = z.infer<typeof TaskStatusTransitionSchema>;
 export type WorkerState = z.infer<typeof WorkerStateSchema>;
 export type FeatureState = z.infer<typeof FeatureStateSchema>;
 export type RouterProxySource = z.infer<typeof RouterProxySourceSchema>;

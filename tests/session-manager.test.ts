@@ -1,8 +1,8 @@
 import { spawn } from "node:child_process";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, rename, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { appendText, pathExists, readJson, readTextIfExists, writeJson, writeText } from "../src/core/file-store.js";
 import { SessionIndex } from "../src/core/session-index.js";
 import { SessionManager, type TaskSession } from "../src/core/session-manager.js";
@@ -138,6 +138,87 @@ describe("SessionManager", () => {
     expect(countOccurrences(events, '"type":"task.actor_running"')).toBe(1);
     expect(events).toContain('"message":"Task moved from created to actor_running"');
     await expect(readJson(task.metaPath, TaskMetaSchema)).resolves.toMatchObject({ status: "actor_running" });
+  });
+
+  it("repairs a committed task transition after a transient index projection failure", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pct-task-status-projection-retry-"));
+    const initial = new SessionManager({
+      projectRoot: root,
+      dataDir: ".parallel-codex",
+      now: () => new Date("2026-06-30T03:30:00.000Z"),
+      randomId: () => "projection-retry"
+    });
+    const task = await initial.createTask({
+      request: "Build it.",
+      cwd: root,
+      route: {
+        mode: "complex",
+        reason: "Requires workers.",
+        suggested_roles: ["judge", "actor", "critic"],
+        judge_engine: "mock",
+        actor_engine: "mock",
+        critic_engine: "mock"
+      }
+    });
+    const upsertTask = vi.fn()
+      .mockRejectedValueOnce(new Error("index temporarily unavailable"))
+      .mockResolvedValue(undefined);
+    const manager = new SessionManager({
+      projectRoot: root,
+      dataDir: ".parallel-codex",
+      now: () => new Date("2026-06-30T03:31:00.000Z"),
+      index: { upsertTask } as unknown as SessionIndex
+    });
+
+    await expect(manager.updateTaskStatus(task, "actor_running")).rejects.toThrow("index temporarily unavailable");
+    await expect(readJson(task.metaPath, TaskMetaSchema)).resolves.toMatchObject({ status: "actor_running" });
+
+    await expect(manager.updateTaskStatus(task, "actor_running")).resolves.toBeUndefined();
+
+    const events = await readTextIfExists(task.eventsPath);
+    expect(countOccurrences(events, '"type":"task.actor_running"')).toBe(1);
+    expect(events).toContain('"message":"Task moved from created to actor_running"');
+    expect(upsertTask).toHaveBeenCalledTimes(2);
+  });
+
+  it("repairs the previous committed transition before recording a later failure", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pct-task-status-event-retry-"));
+    const manager = new SessionManager({
+      projectRoot: root,
+      dataDir: ".parallel-codex",
+      now: () => new Date("2026-06-30T03:32:00.000Z"),
+      randomId: () => "event-retry"
+    });
+    const task = await manager.createTask({
+      request: "Build it.",
+      cwd: root,
+      route: {
+        mode: "complex",
+        reason: "Requires workers.",
+        suggested_roles: ["judge", "actor", "critic"],
+        judge_engine: "mock",
+        actor_engine: "mock",
+        critic_engine: "mock"
+      }
+    });
+    const eventsBackup = `${task.eventsPath}.backup`;
+    await rename(task.eventsPath, eventsBackup);
+    await mkdir(task.eventsPath);
+
+    await expect(manager.updateTaskStatus(task, "actor_running")).rejects.toMatchObject({ code: "EISDIR" });
+    await expect(readJson(task.metaPath, TaskMetaSchema)).resolves.toMatchObject({
+      status: "actor_running",
+      status_transition: { from: "created", to: "actor_running" }
+    });
+
+    await rm(task.eventsPath, { recursive: true });
+    await rename(eventsBackup, task.eventsPath);
+    await manager.updateTaskStatus(task, "failed");
+
+    const events = await readTextIfExists(task.eventsPath);
+    expect(countOccurrences(events, '"type":"task.actor_running"')).toBe(1);
+    expect(countOccurrences(events, '"type":"task.failed"')).toBe(1);
+    expect(events.indexOf('"type":"task.actor_running"')).toBeLessThan(events.indexOf('"type":"task.failed"'));
   });
 
   it("rejects terminal done before the latest turn completion evidence is published", async () => {
@@ -1139,6 +1220,55 @@ describe("SessionManager", () => {
     expect(await pathExists(workerProcessRecordPath(worker.dir))).toBe(false);
     await expect(index.listTasks()).resolves.toEqual([
       expect.objectContaining({ id: task.id, status: "cancelled" })
+    ]);
+    index.close();
+  });
+
+  it("repairs a committed terminal transition projection during startup reconciliation", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pct-reconcile-status-transition-"));
+    const index = await SessionIndex.open(root, ".parallel-codex");
+    const manager = new SessionManager({
+      projectRoot: root,
+      dataDir: ".parallel-codex",
+      now: () => new Date("2026-07-11T14:29:30.000Z"),
+      randomId: () => "transition-repair",
+      index
+    });
+    const task = await manager.createTask({
+      request: "修复已提交状态投影",
+      cwd: root,
+      route: {
+        mode: "complex",
+        reason: "Project work.",
+        suggested_roles: ["judge", "actor", "critic"],
+        judge_engine: "mock",
+        actor_engine: "mock",
+        critic_engine: "mock"
+      }
+    });
+    await writeText(join(task.dir, "turns", "0001", "supervisor-summary.md"), "Complex task completed.\n");
+    const meta = await readJson(task.metaPath, TaskMetaSchema);
+    await writeJson(task.metaPath, TaskMetaSchema.parse({
+      ...meta,
+      status: "done",
+      status_transition: {
+        id: "transition-created-done",
+        from: "created",
+        to: "done",
+        at: "2026-07-11T14:29:15.000Z"
+      }
+    }));
+
+    await expect(manager.reconcileInterruptedTasks()).resolves.toEqual([]);
+    await expect(manager.reconcileInterruptedTasks()).resolves.toEqual([]);
+
+    const events = await readTextIfExists(task.eventsPath);
+    expect(countOccurrences(events, '"transition_id":"transition-created-done"')).toBe(1);
+    expect(events).toContain('"type":"task.done"');
+    expect(events).toContain('"from_state":"created"');
+    expect(events).toContain('"to_state":"done"');
+    await expect(index.listTasks()).resolves.toEqual([
+      expect.objectContaining({ id: task.id, status: "done" })
     ]);
     index.close();
   });

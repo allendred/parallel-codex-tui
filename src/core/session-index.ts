@@ -42,6 +42,8 @@ export class SessionIndex {
 
   initialize(): void {
     this.db.exec(`
+      PRAGMA busy_timeout = 5000;
+
       CREATE TABLE IF NOT EXISTS tasks (
         id TEXT PRIMARY KEY,
         title TEXT NOT NULL,
@@ -263,25 +265,34 @@ export class SessionIndex {
   }
 
   async rebuildFromFiles(): Promise<void> {
-    this.db.exec("DELETE FROM native_sessions; DELETE FROM workers; DELETE FROM turns; DELETE FROM tasks;");
-    const sessions = join(this.projectRoot, this.dataDir, "sessions");
-    if (!(await pathExists(sessions))) {
-      return;
-    }
-
-    const taskEntries = await readdir(sessions, { withFileTypes: true });
-    for (const taskEntry of taskEntries) {
-      if (!taskEntry.isDirectory()) {
-        continue;
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      this.db.exec("DELETE FROM native_sessions; DELETE FROM workers; DELETE FROM turns; DELETE FROM tasks;");
+      const sessions = join(this.projectRoot, this.dataDir, "sessions");
+      if (await pathExists(sessions)) {
+        const taskEntries = await readdir(sessions, { withFileTypes: true });
+        for (const taskEntry of taskEntries) {
+          if (!taskEntry.isDirectory()) {
+            continue;
+          }
+          if (taskEntry.name === "main") {
+            await this.rebuildWorkers(join(sessions, taskEntry.name), "main");
+            continue;
+          }
+          if (!taskEntry.name.startsWith("task-")) {
+            continue;
+          }
+          await this.rebuildTask(join(sessions, taskEntry.name), taskEntry.name);
+        }
       }
-      if (taskEntry.name === "main") {
-        await this.rebuildWorkers(join(sessions, taskEntry.name), "main");
-        continue;
+      this.db.exec("COMMIT");
+    } catch (error) {
+      try {
+        this.db.exec("ROLLBACK");
+      } catch {
+        // Preserve the filesystem or SQLite failure that interrupted rebuilding.
       }
-      if (!taskEntry.name.startsWith("task-")) {
-        continue;
-      }
-      await this.rebuildTask(join(sessions, taskEntry.name), taskEntry.name);
+      throw error;
     }
   }
 

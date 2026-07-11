@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { readdir } from "node:fs/promises";
 import { basename, dirname, join } from "node:path";
 import {
@@ -27,6 +28,7 @@ import {
   ChatRecordSchema,
   type EngineName,
   type EventRecord,
+  EventRecordSchema,
   FeatureStatusSchema,
   type NativeSession,
   NativeSessionSchema,
@@ -265,7 +267,12 @@ export class SessionManager {
       }
       const task = this.taskFromId(entry.name);
       const meta = await readTaskMetaIfValid(task.metaPath);
-      if (!meta || !(await this.taskNeedsRecovery(task, meta))) {
+      if (!meta) {
+        continue;
+      }
+      const needsTaskRecovery = await this.taskNeedsRecovery(task, meta);
+      const needsTransitionRepair = await this.taskStatusTransitionNeedsRepair(task, meta);
+      if (!needsTaskRecovery && !needsTransitionRepair) {
         continue;
       }
       let recoveryLease: TaskRunLease;
@@ -280,7 +287,18 @@ export class SessionManager {
 
       try {
         const claimedMeta = await readTaskMetaIfValid(task.metaPath);
-        if (!claimedMeta || !(await this.taskNeedsRecovery(task, claimedMeta))) {
+        if (!claimedMeta) {
+          continue;
+        }
+        const claimedNeedsTaskRecovery = await this.taskNeedsRecovery(task, claimedMeta);
+        const claimedNeedsTransitionRepair = await this.taskStatusTransitionNeedsRepair(task, claimedMeta);
+        if (!claimedNeedsTaskRecovery && !claimedNeedsTransitionRepair) {
+          continue;
+        }
+        if (claimedNeedsTransitionRepair) {
+          await this.syncTaskStatusTransition(task, claimedMeta);
+        }
+        if (!claimedNeedsTaskRecovery) {
           continue;
         }
         const workers = await this.reconcileTaskWorkers(task);
@@ -399,6 +417,9 @@ export class SessionManager {
 
   async updateTaskStatus(task: TaskSession, status: TaskMeta["status"]): Promise<void> {
     const meta = await this.readMeta(task);
+    if (meta.status !== status && await this.taskStatusTransitionNeedsRepair(task, meta)) {
+      await this.syncTaskStatusTransition(task, meta);
+    }
     const completeEvidence = status === "done" || meta.status === "done"
       ? await this.hasCompleteTaskEvidence(task)
       : false;
@@ -409,12 +430,21 @@ export class SessionManager {
       throw new Error(`Task ${task.id} is completely done and cannot move backward to ${status}.`);
     }
     if (meta.status === status) {
-      await this.index?.upsertTask(meta);
+      await this.syncTaskStatusTransition(task, meta);
       return;
     }
-    await writeJson(task.metaPath, TaskMetaSchema.parse({ ...meta, status }));
-    await this.index?.upsertTask({ ...meta, status });
-    await this.appendEvent(task, `task.${status}`, `Task moved from ${meta.status} to ${status}`);
+    const nextMeta = TaskMetaSchema.parse({
+      ...meta,
+      status,
+      status_transition: {
+        id: randomUUID(),
+        from: meta.status,
+        to: status,
+        at: this.now().toISOString()
+      }
+    });
+    await writeJson(task.metaPath, nextMeta);
+    await this.syncTaskStatusTransition(task, nextMeta);
   }
 
   async initializeWorker(task: TaskSession, input: InitializeWorkerInput): Promise<WorkerFiles> {
@@ -512,6 +542,41 @@ export class SessionManager {
     await appendJsonLine(join(task.dir, "events.jsonl"), event);
   }
 
+  private async syncTaskStatusTransition(task: TaskSession, meta: TaskMeta): Promise<void> {
+    const transition = meta.status_transition;
+    if (transition && !(await this.hasTaskStatusTransitionEvent(task, transition.id))) {
+      const event = EventRecordSchema.parse({
+        time: transition.at,
+        type: `task.${transition.to}`,
+        message: `Task moved from ${transition.from} to ${transition.to}`,
+        task_id: task.id,
+        transition_id: transition.id,
+        from_state: transition.from,
+        to_state: transition.to
+      });
+      await appendJsonLine(task.eventsPath, event);
+    }
+    await this.index?.upsertTask(meta);
+  }
+
+  private async hasTaskStatusTransitionEvent(task: TaskSession, transitionId: string): Promise<boolean> {
+    const events = await readTextIfExists(task.eventsPath);
+    for (const line of events.split(/\r?\n/)) {
+      if (!line.trim()) {
+        continue;
+      }
+      try {
+        const event = EventRecordSchema.safeParse(JSON.parse(line));
+        if (event.success && event.data.transition_id === transitionId) {
+          return true;
+        }
+      } catch {
+        // A corrupt audit row does not invalidate later transition evidence.
+      }
+    }
+    return false;
+  }
+
   private async nextTurnId(task: Pick<TaskSession, "id" | "dir">): Promise<string> {
     const latest = await this.latestTurn(task);
     if (!latest) {
@@ -527,6 +592,11 @@ export class SessionManager {
     return meta.status === "done"
       && !(await this.hasCompleteTaskEvidence(task))
       && await this.hasIntegratedLatestTurnCheckpoint(task);
+  }
+
+  private async taskStatusTransitionNeedsRepair(task: TaskSession, meta: TaskMeta): Promise<boolean> {
+    const transitionId = meta.status_transition?.id;
+    return Boolean(transitionId && !(await this.hasTaskStatusTransitionEvent(task, transitionId)));
   }
 
   private async hasIntegratedLatestTurnCheckpoint(task: TaskSession): Promise<boolean> {

@@ -1,4 +1,4 @@
-import { rm } from "node:fs/promises";
+import { rm, symlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { mkdtemp } from "node:fs/promises";
@@ -224,6 +224,143 @@ describe("SessionIndex", () => {
     await expect(index.countRows("turns")).resolves.toBe(1);
     await expect(index.countRows("workers")).resolves.toBe(1);
     await expect(index.countRows("native_sessions")).resolves.toBe(1);
+    index.close();
+  });
+
+  it("rolls back every index table when a filesystem error interrupts rebuilding", async () => {
+    if (process.platform === "win32") {
+      return;
+    }
+    const root = await mkdtemp(join(tmpdir(), "pct-index-rebuild-rollback-"));
+    const dataDir = ".parallel-codex";
+    const index = await SessionIndex.open(root, dataDir);
+    await index.upsertTask({
+      id: "task-stable",
+      title: "Stable task",
+      created_at: "2026-07-01T01:00:00.000Z",
+      cwd: root,
+      mode: "complex",
+      status: "failed"
+    });
+    await index.upsertTurn("task-stable", {
+      task_id: "task-stable",
+      turn_id: "0001",
+      created_at: "2026-07-01T01:00:00.000Z",
+      request_path: "turns/0001/user.md"
+    });
+    await index.upsertWorker("task-stable", {
+      worker_id: "actor-mock",
+      role: "actor",
+      engine: "mock",
+      state: "failed",
+      phase: "process-exited",
+      last_event_at: "2026-07-01T01:01:00.000Z",
+      summary: "failed",
+      native_session_id: "stable-native"
+    }, {
+      dir: join(root, dataDir, "sessions", "task-stable", "actor-mock"),
+      statusPath: join(root, dataDir, "sessions", "task-stable", "actor-mock", "status.json"),
+      outputLogPath: join(root, dataDir, "sessions", "task-stable", "actor-mock", "output.log")
+    });
+    await index.upsertNativeSession("task-stable", {
+      engine: "mock",
+      role: "actor",
+      worker_id: "actor-mock",
+      session_id: "stable-native",
+      scope: "task",
+      cwd: root,
+      created_at: "2026-07-01T01:00:00.000Z",
+      last_used_at: "2026-07-01T01:01:00.000Z",
+      source: "manual"
+    });
+    await index.setActiveTaskId("task-stable");
+
+    const brokenTaskDir = join(root, dataDir, "sessions", "task-broken");
+    await writeJson(join(brokenTaskDir, "meta.json"), TaskMetaSchema.parse({
+      id: "task-broken",
+      title: "Broken task",
+      created_at: "2026-07-02T01:00:00.000Z",
+      cwd: root,
+      mode: "complex",
+      status: "created"
+    }));
+    await symlink("turns", join(brokenTaskDir, "turns"));
+
+    await expect(index.rebuildFromFiles()).rejects.toMatchObject({ code: "ELOOP" });
+
+    await expect(index.listTasks()).resolves.toEqual([
+      expect.objectContaining({
+        id: "task-stable",
+        status: "failed",
+        turnCount: 1,
+        workerCount: 1,
+        nativeSessionCount: 1
+      })
+    ]);
+    await expect(index.countRows("tasks")).resolves.toBe(1);
+    await expect(index.countRows("turns")).resolves.toBe(1);
+    await expect(index.countRows("workers")).resolves.toBe(1);
+    await expect(index.countRows("native_sessions")).resolves.toBe(1);
+    await expect(index.activeTaskId()).resolves.toBe("task-stable");
+    index.close();
+  });
+
+  it("keeps the previous index visible to other connections until rebuilding commits", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pct-index-rebuild-visibility-"));
+    const dataDir = ".parallel-codex";
+    const index = await SessionIndex.open(root, dataDir);
+    const observer = await SessionIndex.open(root, dataDir);
+    await index.upsertTask({
+      id: "task-old",
+      title: "Old snapshot",
+      created_at: "2026-07-01T01:00:00.000Z",
+      cwd: root,
+      mode: "complex",
+      status: "failed"
+    });
+    await writeJson(join(root, dataDir, "sessions", "task-new", "meta.json"), TaskMetaSchema.parse({
+      id: "task-new",
+      title: "New snapshot",
+      created_at: "2026-07-02T01:00:00.000Z",
+      cwd: root,
+      mode: "complex",
+      status: "created"
+    }));
+
+    type RebuildInternals = {
+      rebuildTask(taskDir: string, taskId: string): Promise<void>;
+    };
+    const internals = index as unknown as RebuildInternals;
+    const originalRebuildTask = internals.rebuildTask.bind(index);
+    let enterRebuild = () => {};
+    const rebuildEntered = new Promise<void>((resolve) => {
+      enterRebuild = resolve;
+    });
+    let continueRebuild = () => {};
+    const rebuildGate = new Promise<void>((resolve) => {
+      continueRebuild = resolve;
+    });
+    internals.rebuildTask = async (taskDir, taskId) => {
+      enterRebuild();
+      await rebuildGate;
+      await originalRebuildTask(taskDir, taskId);
+    };
+
+    const rebuilding = index.rebuildFromFiles();
+    await rebuildEntered;
+    try {
+      await expect(observer.listTasks()).resolves.toEqual([
+        expect.objectContaining({ id: "task-old", title: "Old snapshot" })
+      ]);
+    } finally {
+      continueRebuild();
+    }
+    await rebuilding;
+
+    await expect(observer.listTasks()).resolves.toEqual([
+      expect.objectContaining({ id: "task-new", title: "New snapshot" })
+    ]);
+    observer.close();
     index.close();
   });
 

@@ -54,6 +54,50 @@ describe("domain schemas", () => {
     expect(result.status).toBe("created");
   });
 
+  it("validates committed task status transition markers", () => {
+    const base = {
+      id: "task-20260630-033000-a1b2",
+      title: "Implement wrapper",
+      created_at: "2026-06-30T03:30:00.000Z",
+      cwd: "/tmp/project",
+      mode: "complex" as const,
+      status: "actor_running" as const
+    };
+    const result = TaskMetaSchema.parse({
+      ...base,
+      status_transition: {
+        id: "transition-created-actor",
+        from: "created",
+        to: "actor_running",
+        at: "2026-06-30T03:31:00.000Z"
+      }
+    });
+
+    expect(result.status_transition?.to).toBe("actor_running");
+    expect(TaskMetaSchema.parse({
+      ...base,
+      status_transition: {
+        id: "transition-wrong-target",
+        from: "created",
+        to: "failed",
+        at: "2026-06-30T03:31:00.000Z"
+      }
+    }).status_transition).toBeUndefined();
+    expect(TaskMetaSchema.parse({
+      ...base,
+      status_transition: {
+        id: "transition-no-op",
+        from: "actor_running",
+        to: "actor_running",
+        at: "2026-06-30T03:31:00.000Z"
+      }
+    }).status_transition).toBeUndefined();
+    expect(TaskMetaSchema.parse({
+      ...base,
+      status_transition: { id: 42, from: "created" }
+    }).status_transition).toBeUndefined();
+  });
+
   it("validates worker status", () => {
     const result = WorkerStatusSchema.parse({
       worker_id: "actor-codex",
@@ -117,12 +161,15 @@ describe("domain schemas", () => {
   it("validates JSONL event records", () => {
     const result = EventRecordSchema.parse({
       time: "2026-06-30T03:30:00.000Z",
-      type: "worker.started",
-      message: "Judge started",
-      worker: "judge-codex",
-      engine: "codex"
+      type: "task.actor_running",
+      message: "Task moved from created to actor_running",
+      task_id: "task-20260630-033000-a1b2",
+      transition_id: "transition-created-actor",
+      from_state: "created",
+      to_state: "actor_running"
     });
 
-    expect(result.type).toBe("worker.started");
+    expect(result.type).toBe("task.actor_running");
+    expect(result.transition_id).toBe("transition-created-actor");
   });
 });
