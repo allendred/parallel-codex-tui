@@ -8,6 +8,36 @@ import { App } from "../src/tui/App.js";
 import type { NativeAttachLaunch, NativeAttachProcessRef } from "../src/workers/native-attach.js";
 
 describe("App native attach lifecycle", () => {
+  it("kills an active native attach when the outer shutdown signal fires", async () => {
+    const testInput = installTestInputStream();
+    const shutdown = new AbortController();
+    const worker = testWorker();
+    const processRef = testProcessRef();
+    const view = render(
+      <App
+        config={defaultConfig("/tmp/pct-native-signal-lifecycle")}
+        orchestrator={testOrchestrator(worker)}
+        cwd="/tmp/pct-native-workspace"
+        initialTaskId="task-native-signal-lifecycle"
+        initialWorkers={[worker]}
+        prepareNativeAttach={async () => testLaunch()}
+        startNativeAttach={() => processRef}
+        shutdownSignal={shutdown.signal}
+      />
+    );
+
+    try {
+      await openNativeAttach(view, testInput);
+      shutdown.abort();
+      await settleEffects();
+
+      expect(processRef.kill).toHaveBeenCalledOnce();
+    } finally {
+      view.unmount();
+      testInput.restore();
+    }
+  });
+
   it("kills an active native attach process when the outer App unmounts", async () => {
     const testInput = installTestInputStream();
     const worker = testWorker();

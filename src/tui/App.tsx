@@ -105,6 +105,7 @@ export interface AppProps {
       onError: (error: Error) => void;
     }
   ) => NativeAttachProcessRef;
+  shutdownSignal?: AbortSignal;
 }
 
 export interface ActivatedTaskSession {
@@ -187,7 +188,8 @@ export function App({
   loadCollaborationTimeline,
   activateTaskSession,
   prepareNativeAttach,
-  startNativeAttach
+  startNativeAttach,
+  shutdownSignal
 }: AppProps) {
   configureTuiTheme({
     theme: config.ui.theme,
@@ -1465,6 +1467,22 @@ export function App({
       taskSessionsLoadSequenceRef.current += 1;
     };
   }, []);
+
+  useEffect(() => {
+    if (!shutdownSignal) {
+      return;
+    }
+    const shutdown = () => {
+      activeRunControllerRef.current?.abort();
+      exitRef.current();
+    };
+    if (shutdownSignal.aborted) {
+      shutdown();
+      return;
+    }
+    shutdownSignal.addEventListener("abort", shutdown, { once: true });
+    return () => shutdownSignal.removeEventListener("abort", shutdown);
+  }, [shutdownSignal]);
 
   useInput((inputKey, key) => {
     if (view === "worker") {

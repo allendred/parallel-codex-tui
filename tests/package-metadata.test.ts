@@ -293,6 +293,8 @@ describe("package metadata", () => {
     expect(readme).toContain("Overlapping attach preparations keep only the latest request");
     expect(readme).toContain("this and closing the outer App terminate the active PTY");
     expect(readme).toContain("An attach preparation that finishes after App shutdown is discarded");
+    expect(readme).toContain("An operating-system SIGINT first asks the App to abort its Router or Worker and clean up any PTY");
+    expect(readme).toContain("a second SIGINT restores terminal modes and forces exit");
     expect(readme).toContain("Press `Ctrl+]` to return to worker logs");
     expect(readme).not.toContain("Press `Ctrl+]` to detach and return to worker logs");
     expect(readme).toContain("parallel-codex-tui --help");
