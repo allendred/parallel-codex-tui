@@ -218,12 +218,15 @@ function routerDiagnosticLineTheme(tone: RouterDiagnosticLineTone): Pick<TextPro
 
 function routerAuditStatus(record: RouterAuditRecord): string {
   const formatted = formatRouteStatus(record).replace(/^route\s+/, "");
-  if (record.source !== "codex") {
-    return formatted;
+  let status = formatted;
+  if (record.source === "codex") {
+    const parts = formatted.split(/\s+·\s+/);
+    parts.splice(1, 0, "codex");
+    status = parts.join(" · ");
   }
-  const parts = formatted.split(/\s+·\s+/);
-  parts.splice(1, 0, "codex");
-  return parts.join(" · ");
+  return record.router_attempt && record.router_attempt > 1
+    ? `${status} · attempt ${record.router_attempt}`
+    : status;
 }
 
 function routerDiagnosticsScopeText(
@@ -280,6 +283,10 @@ function routerAuditEvidence(record: RouterAuditRecord): string | null {
     parts.push("proxy configured", "cause unproven");
   } else if (record.proxy_configured === false) {
     parts.push("direct path");
+  }
+  const resolution = routerFallbackResolutionLabel(record.router_fallback_resolution);
+  if (resolution) {
+    parts.push(resolution);
   }
   parts.push(`fallback ${record.mode}`);
   return parts.join(" · ");
@@ -355,6 +362,27 @@ function routerFailureStageLabel(record: RouterAuditRecord): string | null {
     return "response parse";
   }
   return stage ?? null;
+}
+
+function routerFallbackResolutionLabel(
+  resolution: RouterAuditRecord["router_fallback_resolution"]
+): string | null {
+  if (resolution === "main") {
+    return "resolved Main";
+  }
+  if (resolution === "parallel") {
+    return "resolved Parallel";
+  }
+  if (resolution === "retry") {
+    return "Router retry requested";
+  }
+  if (resolution === "cancelled") {
+    return "cancelled by user";
+  }
+  if (resolution === "configured") {
+    return "configured fallback";
+  }
+  return null;
 }
 
 function normalizedWorkspace(workspace: string): string {

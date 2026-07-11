@@ -9,7 +9,14 @@ import type { RouterAuditRecord } from "../core/router-audit.js";
 import type { TaskIndexSummary } from "../core/session-index.js";
 import type { WorkspaceChoice } from "../core/workspace.js";
 import { WorkerStatusSchema, type RouteDecision } from "../domain/schemas.js";
-import type { Orchestrator, RouteStartInfo, WorkerLogRef, WorkerRunStatus } from "../orchestrator/orchestrator.js";
+import type {
+  Orchestrator,
+  RouteFallbackChoice,
+  RouteFallbackInfo,
+  RouteStartInfo,
+  WorkerLogRef,
+  WorkerRunStatus
+} from "../orchestrator/orchestrator.js";
 import {
   formatRoutePendingStatus,
   formatSelectedWorkerStatus,
@@ -171,6 +178,7 @@ export function App({
   const [lastRoute, setLastRoute] = useState<RouteDecision | null>(initialRoute);
   const [routePending, setRoutePending] = useState<PendingRouteInfo | null>(null);
   const [routeElapsedMs, setRouteElapsedMs] = useState(0);
+  const [routeFallbackPrompt, setRouteFallbackPrompt] = useState<RouteFallbackInfo | null>(null);
   const [view, setView] = useState<AppView | "workspace">("chat");
   const [workers, setWorkers] = useState<WorkerLogRef[]>(() => [...(initialWorkers ?? [])]);
   const [selectedWorkerIndex, setSelectedWorkerIndex] = useState(0);
@@ -228,6 +236,8 @@ export function App({
   const inputCursorRef = useRef(inputCursor);
   const viewRef = useRef(view);
   const busyRef = useRef(busy);
+  const routeFallbackPromptRef = useRef<RouteFallbackInfo | null>(null);
+  const routeFallbackResolverRef = useRef<((choice: RouteFallbackChoice) => void) | null>(null);
   const workersRef = useRef(workers);
   const selectedWorkerIndexRef = useRef(selectedWorkerIndex);
   const workerSearchRef = useRef(workerSearch);
@@ -662,6 +672,33 @@ export function App({
         return;
       }
       const currentView = viewRef.current;
+      if (currentView === "chat" && routeFallbackPromptRef.current) {
+        const fallbackChunks = tokenizeRawInput(chunk);
+        if (fallbackChunks.some((fallbackChunk) => isExitShortcut(fallbackChunk, {}))) {
+          activeRunControllerRef.current?.abort();
+          exitRef.current();
+          return;
+        }
+        for (const fallbackChunk of fallbackChunks) {
+          if (fallbackChunk === "\x1b") {
+            settleRouteFallbackChoice("cancel");
+            return;
+          }
+          if (fallbackChunk === "1" || fallbackChunk === "m" || fallbackChunk === "M") {
+            settleRouteFallbackChoice("main");
+            return;
+          }
+          if (fallbackChunk === "2" || fallbackChunk === "p" || fallbackChunk === "P") {
+            settleRouteFallbackChoice("parallel");
+            return;
+          }
+          if (fallbackChunk === "r" || fallbackChunk === "R") {
+            settleRouteFallbackChoice("retry");
+            return;
+          }
+        }
+        return;
+      }
       if (currentView === "workspace") {
         return;
       }
@@ -1242,6 +1279,7 @@ export function App({
         setRouteElapsedMs(0);
         setRoutePending({ ...state, startedAtMs: Date.now() });
       },
+      onRouteFallback: (fallback: RouteFallbackInfo) => requestRouteFallbackChoice(fallback, controller.signal),
       onRoute: (route: RouteDecision) => {
         setRoutePending(null);
         setLastRoute(route);
@@ -1258,6 +1296,49 @@ export function App({
         setWorkers((current) => upsertWorker(current, worker));
       }
     };
+  }
+
+  function requestRouteFallbackChoice(
+    fallback: RouteFallbackInfo,
+    signal: AbortSignal
+  ): Promise<RouteFallbackChoice> {
+    routeFallbackResolverRef.current?.("cancel");
+    setRoutePending(null);
+    setLastRoute(fallback.route);
+    routeFallbackPromptRef.current = fallback;
+    setRouteFallbackPrompt(fallback);
+    viewRef.current = "chat";
+    setView("chat");
+
+    return new Promise((resolve) => {
+      let settled = false;
+      const finish = (choice: RouteFallbackChoice) => {
+        if (settled) {
+          return;
+        }
+        settled = true;
+        signal.removeEventListener("abort", onAbort);
+        const current = routeFallbackPromptRef.current;
+        if (current === fallback) {
+          routeFallbackPromptRef.current = null;
+          routeFallbackResolverRef.current = null;
+          setRouteFallbackPrompt(null);
+          setLastRoute(previewRouteFallbackChoice(fallback.route, choice));
+        }
+        resolve(choice);
+      };
+      const onAbort = () => finish("cancel");
+      routeFallbackResolverRef.current = finish;
+      if (signal.aborted) {
+        finish("cancel");
+      } else {
+        signal.addEventListener("abort", onAbort, { once: true });
+      }
+    });
+  }
+
+  function settleRouteFallbackChoice(choice: RouteFallbackChoice): void {
+    routeFallbackResolverRef.current?.(choice);
   }
 
   async function appendVisibleMessage(message: Message, taskId?: string): Promise<void> {
@@ -1773,6 +1854,7 @@ export function App({
           mode={view === "worker" && workerSearch.open ? "worker-search" : view}
           ready={inputReady}
           busy={busy}
+          routeFallback={Boolean(routeFallbackPrompt)}
           canRetry={canRetryTask}
           hasWorkers={workers.length > 0}
           hasActiveTask={Boolean(activeTaskId)}
@@ -2772,6 +2854,16 @@ function sameWorkerNavigationTargets(
 
 function sameNumberArray(left: number[], right: number[]): boolean {
   return left.length === right.length && left.every((value, index) => value === right[index]);
+}
+
+function previewRouteFallbackChoice(route: RouteDecision, choice: RouteFallbackChoice): RouteDecision {
+  const mode = choice === "main" ? "simple" : choice === "parallel" ? "complex" : route.mode;
+  return {
+    ...route,
+    mode,
+    suggested_roles: mode === "complex" ? ["judge", "actor", "critic"] : [],
+    router_fallback_resolution: choice === "cancel" ? "cancelled" : choice
+  };
 }
 
 export function appContentHeight(rows: number, hasError = false, showStatusBar = true): number {

@@ -6,7 +6,7 @@ import { routerRuntimeDir } from "../core/paths.js";
 import { classifyRouterFailure } from "../core/router-audit.js";
 import { routeRequestWithCodex, routerProxyConfigured, type CodexRouteRunner } from "../core/router.js";
 import type { SessionManager, TaskSession, TaskTurn, WorkerFiles } from "../core/session-manager.js";
-import { RouteDecisionSchema, TaskMetaSchema, WorkerStatusSchema, type EngineName, type NativeSession, type RouteDecision, type WorkerRole, type WorkerStatus } from "../domain/schemas.js";
+import { RouteDecisionSchema, TaskMetaSchema, WorkerStatusSchema, type EngineName, type NativeSession, type RouteDecision, type RouterFallbackResolution, type WorkerRole, type WorkerStatus } from "../domain/schemas.js";
 import { getAdapter, type WorkerRegistry } from "../workers/registry.js";
 import type { WorkerResult, WorkerRunSpec } from "../workers/types.js";
 import {
@@ -49,6 +49,7 @@ export interface HandleRequestInput {
   signal?: AbortSignal;
   retry?: boolean;
   onRouteStart?: (state: RouteStartInfo) => void;
+  onRouteFallback?: (fallback: RouteFallbackInfo) => Promise<RouteFallbackChoice>;
   onRoute?: (route: RouteDecision) => void;
   onStatus?: (status: WorkerRunStatus) => void;
   onWorker?: (worker: WorkerLogRef) => void;
@@ -78,6 +79,14 @@ export interface RouteStartInfo {
   scope: "initial" | "follow-up";
   mode: AppConfig["router"]["defaultMode"];
   timeoutMs: number;
+}
+
+export type RouteFallbackChoice = "main" | "parallel" | "retry" | "cancel";
+
+export interface RouteFallbackInfo {
+  route: RouteDecision;
+  scope: "initial" | "follow-up";
+  attempt: number;
 }
 
 export interface HandleRequestResult {
@@ -149,7 +158,14 @@ export class Orchestrator {
   ) {}
 
   async handleRequest(input: HandleRequestInput): Promise<HandleRequestResult> {
-    const route = await this.routeRequest(input.request, input.cwd, input.signal, "initial", input.onRouteStart);
+    const route = await this.routeRequest(
+      input.request,
+      input.cwd,
+      input.signal,
+      "initial",
+      input.onRouteStart,
+      input.onRouteFallback
+    );
     input.onRoute?.(route);
     const workers: WorkerLogRef[] = [];
 
@@ -194,7 +210,8 @@ export class Orchestrator {
       input.cwd,
       input.signal,
       "follow-up",
-      input.onRouteStart
+      input.onRouteStart,
+      input.onRouteFallback
     );
     if (!input.route) {
       input.onRoute?.(route);
@@ -258,7 +275,8 @@ export class Orchestrator {
       input.cwd,
       input.signal,
       "follow-up",
-      input.onRouteStart
+      input.onRouteStart,
+      input.onRouteFallback
     );
     input.onRoute?.(route);
     await this.sessions.recordLatestRoute(task, route);
@@ -1038,7 +1056,8 @@ export class Orchestrator {
     workspace: string,
     signal?: AbortSignal,
     scope: "initial" | "follow-up" = "initial",
-    onRouteStart?: (state: RouteStartInfo) => void
+    onRouteStart?: (state: RouteStartInfo) => void,
+    onRouteFallback?: (fallback: RouteFallbackInfo) => Promise<RouteFallbackChoice>
   ): Promise<RouteDecision> {
     const router = this.routerConfigLoader
       ? await this.routerConfigLoader()
@@ -1060,13 +1079,64 @@ export class Orchestrator {
           }
         }
       : currentConfig;
-    onRouteStart?.({
-      scope,
-      mode: router.defaultMode,
-      timeoutMs: routeConfig.router.codex.timeoutMs
-    });
-    const route = await routeRequestWithCodex(request, routeConfig, this.routeRunner, this.routerCwd, signal);
     const semanticRoute = router.defaultMode === "auto";
+    let attempt = 1;
+
+    while (true) {
+      onRouteStart?.({
+        scope,
+        mode: router.defaultMode,
+        timeoutMs: routeConfig.router.codex.timeoutMs
+      });
+      const routed = await routeRequestWithCodex(request, routeConfig, this.routeRunner, this.routerCwd, signal);
+      let route: RouteDecision = {
+        ...routed,
+        ...(semanticRoute ? { router_attempt: attempt } : {})
+      };
+
+      if (route.source !== "fallback") {
+        await this.appendRouterAuditRecord(request, workspace, scope, route, routeConfig, semanticRoute);
+        return route;
+      }
+
+      let choice: RouteFallbackChoice | "configured" = "configured";
+      if (onRouteFallback) {
+        try {
+          choice = signal?.aborted
+            ? "cancel"
+            : await onRouteFallback({ route, scope, attempt });
+        } catch (error) {
+          if (!isCancellation(error, signal)) {
+            throw error;
+          }
+          choice = "cancel";
+        }
+      }
+      if (signal?.aborted) {
+        choice = "cancel";
+      }
+
+      route = resolveRouterFallback(route, choice);
+      await this.appendRouterAuditRecord(request, workspace, scope, route, routeConfig, semanticRoute);
+      if (choice === "retry") {
+        attempt += 1;
+        continue;
+      }
+      if (choice === "cancel") {
+        throw cancellationError();
+      }
+      return route;
+    }
+  }
+
+  private async appendRouterAuditRecord(
+    request: string,
+    workspace: string,
+    scope: "initial" | "follow-up",
+    route: RouteDecision,
+    routeConfig: AppConfig,
+    semanticRoute: boolean
+  ): Promise<void> {
     await appendJsonLine(join(this.routerCwd, "routes.jsonl"), {
       time: new Date().toISOString(),
       request,
@@ -1083,7 +1153,6 @@ export class Orchestrator {
           }
         : {})
     });
-    return route;
   }
 
   private async runMain(input: HandleRequestInput, workers: WorkerLogRef[], context?: string): Promise<string> {
@@ -1646,6 +1715,30 @@ function ensureWorkerSuccess(result: WorkerResult): void {
   if (result.exitCode !== 0) {
     throw new Error(`${result.workerId} failed with exit code ${result.exitCode}`);
   }
+}
+
+function resolveRouterFallback(
+  route: RouteDecision,
+  choice: RouteFallbackChoice | "configured"
+): RouteDecision {
+  const resolution: RouterFallbackResolution = choice === "cancel" ? "cancelled" : choice;
+  const mode = choice === "main" ? "simple" : choice === "parallel" ? "complex" : route.mode;
+  const reason = choice === "main"
+    ? `${route.reason} User selected Main after Router fallback.`
+    : choice === "parallel"
+      ? `${route.reason} User selected Parallel after Router fallback.`
+      : choice === "retry"
+        ? `${route.reason} User requested Router retry.`
+        : choice === "cancel"
+          ? `${route.reason} User cancelled after Router fallback.`
+          : route.reason;
+  return {
+    ...route,
+    mode,
+    reason,
+    suggested_roles: mode === "complex" ? ["judge", "actor", "critic"] : [],
+    router_fallback_resolution: resolution
+  };
 }
 
 function cancellationError(): Error {

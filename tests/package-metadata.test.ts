@@ -192,6 +192,10 @@ describe("package metadata", () => {
     expect(readme).toContain("spawn time, first-output time, process duration, stdout/stderr byte counts, and failure stage");
     expect(readme).toContain("`timeout waiting output`, `timeout after stdout`, or `timeout after stderr`");
     expect(readme).toContain("`proxy set` remains context, not a claim that the proxy caused the failure");
+    expect(readme).toContain("When semantic routing falls back inside the TUI, execution pauses");
+    expect(readme).toContain("`1` selects Main, `2` selects Parallel, `R` retries Codex routing, and `Esc` cancels");
+    expect(readme).toContain("`router_attempt` and `router_fallback_resolution`");
+    expect(readme).toContain("Active-task follow-ups use the same fallback choice");
     expect(readme).toContain("reports the loaded TUI theme, core palette values, ANSI swatch previews, and color override values");
     expect(readme).toContain("including any temporary `--theme` override");
     expect(readme).toContain('OPENAI_API_KEY = "{env:OPENAI_API_KEY}"');

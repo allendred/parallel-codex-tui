@@ -60,9 +60,10 @@ describe("RouterDiagnosticsView", () => {
     expect(frame).toContain("latency · p50 9.7s · p95 30s · max 30s");
     expect(frame).toContain("policy · auto · 30s / 20s · fallback simple");
     expect(frame).toContain("proxy · configured now · 1 recorded · context only");
-    expect(frame).toContain("tetris · initial · simple · codex · 9.7s");
+    expect(frame).toContain("tetris · initial · simple · codex · 9.7s · attempt 2");
     const flattened = frame.replace(/\s+/g, " ");
     expect(flattened).toContain("evidence · timeout · after stderr · limit 30s · proxy configured · cause unproven");
+    expect(flattened).toContain("resolved Parallel");
     expect(flattened).toContain("trace · spawn 8ms · first stderr 24ms · process 30s · stdout 0B · stderr 73B");
     expect(flattened).toContain("timeout after stderr · proxy set");
     expect(frame).toContain("做个俄罗斯方块");
@@ -148,7 +149,8 @@ function records(): RouterAuditRecord[] {
       actor_engine: "codex",
       critic_engine: "codex",
       source: "codex",
-      duration_ms: 9700
+      duration_ms: 9700,
+      router_attempt: 2
     },
     {
       time: "2026-07-11T07:01:00.000Z",
@@ -166,6 +168,8 @@ function records(): RouterAuditRecord[] {
       router_timeout_ms: 30000,
       proxy_configured: true,
       failure_kind: "timeout",
+      router_attempt: 1,
+      router_fallback_resolution: "parallel",
       router_failure_stage: "streaming",
       router_spawn_ms: 8,
       router_first_output_ms: 24,

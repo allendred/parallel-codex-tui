@@ -194,12 +194,23 @@ describe("CLI chat Markdown smoke", () => {
       child.write("hello\r");
       await waitForScreenText(() => screenWrites, screen, "route checking · 0s / 1.6s");
       await waitForScreenText(() => screenWrites, screen, "route checking · 1s / 1.6s");
+      await waitForScreenText(
+        () => screenWrites,
+        screen,
+        "route failed · 1 Main · 2 Parallel · R retry · Esc cancel"
+      );
+      expect(screen.snapshot()).not.toContain("Fallback chat response");
+      child.write("1");
       await waitForScreenText(() => screenWrites, screen, "Fallback chat response");
-      await waitForScreenText(() => screenWrites, screen, "route simple · fallback · timeout after stderr · proxy set");
+      await waitForScreenText(
+        () => screenWrites,
+        screen,
+        "route simple · fallback · user Main · timeout after stderr · proxy set"
+      );
 
       const snapshot = screen.snapshot();
       const routes = await readTextIfExists(join(appRoot, ".parallel-codex", "router", "routes.jsonl"));
-      expect(snapshot).toContain("route simple · fallback · timeout after stderr · proxy set");
+      expect(snapshot).toContain("route simple · fallback · user Main · timeout after stderr · proxy set");
       expect(snapshot).not.toContain("Codex router failed:");
       expect(snapshot).not.toContain(routerScript);
       expect(routes).toContain("Connecting through proxy http://***@127.0.0.1:7890");
@@ -208,6 +219,8 @@ describe("CLI chat Markdown smoke", () => {
       expect(routes).toContain('"router_first_output_ms":');
       expect(routes).toContain('"router_first_stderr_ms":');
       expect(routes).toContain('"router_stderr_bytes":');
+      expect(routes).toContain('"router_attempt":1');
+      expect(routes).toContain('"router_fallback_resolution":"main"');
     } finally {
       child.kill("SIGTERM");
     }

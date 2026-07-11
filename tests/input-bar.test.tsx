@@ -70,6 +70,27 @@ describe("InputBar", () => {
     expect(lastFrame()).not.toContain("Running...");
   });
 
+  it("shows a one-key Router fallback choice without overflowing", () => {
+    const roomy = render(
+      <InputBar mode="chat" busy routeFallback value="" terminalWidth={100} onChange={() => {}} />
+    );
+    expect(roomy.lastFrame()).toContain("route failed · 1 Main · 2 Parallel · R retry · Esc cancel");
+    roomy.unmount();
+
+    const overflow: string[] = [];
+    for (let width = 8; width <= 100; width += 1) {
+      const view = render(
+        <InputBar mode="chat" busy routeFallback value="" terminalWidth={width} onChange={() => {}} />
+      );
+      const frame = view.lastFrame() ?? "";
+      if (frame.split("\n").length > 1 || displayWidth(frame) > width) {
+        overflow.push(`${width}:${displayWidth(frame)}:${frame}`);
+      }
+      view.unmount();
+    }
+    expect(overflow).toEqual([]);
+  });
+
   it("hides actionable chat controls until the raw input listener is ready", () => {
     const { lastFrame } = render(
       <InputBar mode="chat" ready={false} value="" hasWorkers terminalWidth={40} onChange={() => {}} />

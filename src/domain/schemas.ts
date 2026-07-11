@@ -11,6 +11,13 @@ export const RouterFailureStageSchema = z.enum([
   "exit",
   "response"
 ]);
+export const RouterFallbackResolutionSchema = z.enum([
+  "main",
+  "parallel",
+  "retry",
+  "cancelled",
+  "configured"
+]);
 
 export const TaskStateSchema = z.enum([
   "created",
@@ -50,6 +57,8 @@ export const RouteDecisionSchema = z.object({
   router_stdout_bytes: z.number().int().nonnegative().optional(),
   router_stderr_bytes: z.number().int().nonnegative().optional(),
   router_failure_stage: RouterFailureStageSchema.optional(),
+  router_attempt: z.number().int().positive().optional(),
+  router_fallback_resolution: RouterFallbackResolutionSchema.optional(),
   suggested_roles: z.array(WorkerRoleSchema).default([]),
   judge_engine: EngineNameSchema.default("codex"),
   actor_engine: EngineNameSchema.default("codex"),
@@ -118,6 +127,7 @@ export const EventRecordSchema = z.object({
 
 export type RouteMode = z.infer<typeof RouteModeSchema>;
 export type RouterFailureStage = z.infer<typeof RouterFailureStageSchema>;
+export type RouterFallbackResolution = z.infer<typeof RouterFallbackResolutionSchema>;
 export type EngineName = z.infer<typeof EngineNameSchema>;
 export type WorkerRole = z.infer<typeof WorkerRoleSchema>;
 export type TaskState = z.infer<typeof TaskStateSchema>;

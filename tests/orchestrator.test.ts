@@ -814,7 +814,149 @@ describe("Orchestrator", () => {
       source: "fallback",
       router_timeout_ms: 30000,
       proxy_configured: true,
-      failure_kind: "timeout"
+      failure_kind: "timeout",
+      router_attempt: 1,
+      router_fallback_resolution: "configured"
+    });
+  });
+
+  it("lets an interactive fallback choose Parallel without keyword rules", async () => {
+    const appRoot = await mkdtemp(join(tmpdir(), "pct-orch-router-choice-app-"));
+    const workspaceRoot = await mkdtemp(join(tmpdir(), "pct-orch-router-choice-workspace-"));
+    const routerCwdRoot = join(appRoot, ".parallel-codex", "router");
+    const config = mockConfig(appRoot);
+    config.router.defaultMode = "auto";
+    config.router.codex.fallback = "simple";
+    const manager = new SessionManager({
+      projectRoot: workspaceRoot,
+      dataDir: config.dataDir,
+      now: () => new Date("2026-06-30T03:30:00.000Z"),
+      randomId: () => "choice"
+    });
+    const orchestrator = new Orchestrator(
+      config,
+      manager,
+      new Map([["mock", new MockWorkerAdapter()]]),
+      async () => {
+        throw new Error("Codex router timed out after 30000ms");
+      },
+      routerCwdRoot
+    );
+    const prompts: Array<{ attempt: number; scope: string; route: { mode: string } }> = [];
+
+    const result = await orchestrator.handleRequest({
+      request: "你好",
+      cwd: workspaceRoot,
+      onRouteFallback: async (fallback: { attempt: number; scope: string; route: { mode: string } }) => {
+        prompts.push(fallback);
+        return "parallel" as const;
+      }
+    });
+    const record = JSON.parse(
+      (await readTextIfExists(join(routerCwdRoot, "routes.jsonl"))).trim()
+    ) as Record<string, unknown>;
+
+    expect(result.mode).toBe("complex");
+    expect(result.taskId).toBe("task-20260630-033000-choice");
+    expect(prompts).toEqual([expect.objectContaining({
+      attempt: 1,
+      scope: "initial",
+      route: expect.objectContaining({ mode: "simple" })
+    })]);
+    expect(record).toMatchObject({
+      mode: "complex",
+      source: "fallback",
+      router_attempt: 1,
+      router_fallback_resolution: "parallel"
+    });
+    expect(record.reason).toContain("User selected Parallel after Router fallback");
+  });
+
+  it("records an interactive Router retry before accepting the next Codex decision", async () => {
+    const appRoot = await mkdtemp(join(tmpdir(), "pct-orch-router-retry-app-"));
+    const workspaceRoot = await mkdtemp(join(tmpdir(), "pct-orch-router-retry-workspace-"));
+    const routerCwdRoot = join(appRoot, ".parallel-codex", "router");
+    const config = mockConfig(appRoot);
+    config.router.defaultMode = "auto";
+    let routeCalls = 0;
+    const manager = new SessionManager({
+      projectRoot: workspaceRoot,
+      dataDir: config.dataDir
+    });
+    const orchestrator = new Orchestrator(
+      config,
+      manager,
+      new Map([["mock", new MockWorkerAdapter()]]),
+      async () => {
+        routeCalls += 1;
+        if (routeCalls === 1) {
+          throw new Error("Codex router timed out after 30000ms");
+        }
+        return JSON.stringify({ mode: "simple", reason: "Second Router attempt succeeded." });
+      },
+      routerCwdRoot
+    );
+
+    const result = await orchestrator.handleRequest({
+      request: "你好",
+      cwd: workspaceRoot,
+      onRouteFallback: async () => "retry"
+    });
+    const records = (await readTextIfExists(join(routerCwdRoot, "routes.jsonl")))
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line) as Record<string, unknown>);
+
+    expect(result).toMatchObject({ mode: "simple", taskId: null });
+    expect(routeCalls).toBe(2);
+    expect(records).toEqual([
+      expect.objectContaining({
+        source: "fallback",
+        router_attempt: 1,
+        router_fallback_resolution: "retry"
+      }),
+      expect.objectContaining({
+        source: "codex",
+        router_attempt: 2
+      })
+    ]);
+  });
+
+  it("records an interactive fallback cancellation without starting Main or task workers", async () => {
+    const appRoot = await mkdtemp(join(tmpdir(), "pct-orch-router-cancel-app-"));
+    const workspaceRoot = await mkdtemp(join(tmpdir(), "pct-orch-router-cancel-workspace-"));
+    const routerCwdRoot = join(appRoot, ".parallel-codex", "router");
+    const config = mockConfig(appRoot);
+    config.router.defaultMode = "auto";
+    const manager = new SessionManager({
+      projectRoot: workspaceRoot,
+      dataDir: config.dataDir
+    });
+    const adapter = new CapturingAdapter();
+    const orchestrator = new Orchestrator(
+      config,
+      manager,
+      new Map([["mock", adapter]]),
+      async () => {
+        throw new Error("Codex router timed out after 30000ms");
+      },
+      routerCwdRoot
+    );
+
+    await expect(orchestrator.handleRequest({
+      request: "你好",
+      cwd: workspaceRoot,
+      onRouteFallback: async () => "cancel"
+    })).rejects.toMatchObject({ name: "AbortError" });
+    const record = JSON.parse(
+      (await readTextIfExists(join(routerCwdRoot, "routes.jsonl"))).trim()
+    ) as Record<string, unknown>;
+
+    expect(adapter.runs).toHaveLength(0);
+    expect(record).toMatchObject({
+      source: "fallback",
+      router_attempt: 1,
+      router_fallback_resolution: "cancelled"
     });
   });
 
@@ -1466,6 +1608,60 @@ describe("Orchestrator", () => {
       }
     });
     expect(result.reason).toContain("fallback forced simple");
+  });
+
+  it("lets an active-task fallback choose a new Parallel turn instead of silently using Main", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pct-orch-follow-up-fallback-choice-"));
+    const config = mockConfig(root);
+    config.router.defaultMode = "auto";
+    config.router.codex.followUpTimeoutMs = 20000;
+    const manager = new SessionManager({
+      projectRoot: root,
+      dataDir: config.dataDir,
+      now: () => new Date("2026-06-30T03:30:00.000Z"),
+      randomId: () => "follow-choice"
+    });
+    const task = await manager.createTask({
+      request: "实现俄罗斯方块",
+      cwd: root,
+      route: {
+        mode: "complex",
+        reason: "Requires workers.",
+        suggested_roles: ["judge", "actor", "critic"],
+        judge_engine: "mock",
+        actor_engine: "mock",
+        critic_engine: "mock"
+      }
+    });
+    const orchestrator = new Orchestrator(
+      config,
+      manager,
+      new Map([["mock", new MockWorkerAdapter()]]),
+      async () => {
+        throw new Error("router transport unavailable");
+      }
+    );
+
+    const result = await orchestrator.routeTaskFollowUp({
+      taskId: task.id,
+      request: "改成不用 Docker",
+      cwd: root,
+      onRouteFallback: async () => "parallel"
+    });
+
+    expect(result).toMatchObject({
+      mode: "complex",
+      taskId: task.id,
+      route: {
+        mode: "complex",
+        source: "fallback",
+        router_fallback_resolution: "parallel"
+      }
+    });
+    await expect(readJson(join(task.dir, "latest-route.json"), RouteDecisionSchema)).resolves.toMatchObject({
+      mode: "complex",
+      router_fallback_resolution: "parallel"
+    });
   });
 
   it("answers a directly handled simple task turn through Main without appending a worker turn", async () => {

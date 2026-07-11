@@ -7,6 +7,7 @@ export interface InputBarProps {
   mode: "chat" | "worker" | "worker-search" | "workers" | "collaboration" | "native" | "router" | "sessions";
   ready?: boolean;
   busy?: boolean;
+  routeFallback?: boolean;
   canRetry?: boolean;
   hasWorkers?: boolean;
   hasActiveTask?: boolean;
@@ -26,6 +27,7 @@ export function InputBar({
   mode,
   ready = true,
   busy = false,
+  routeFallback = false,
   canRetry = false,
   hasWorkers = false,
   hasActiveTask = false,
@@ -126,6 +128,16 @@ export function InputBar({
     return (
       <InputRail terminalWidth={terminalWidth} textWidth={displayWidth(starting)} fill={fillRail}>
         <Text backgroundColor={TUI_THEME.rail} color={TUI_THEME.muted}>{starting}</Text>
+      </InputRail>
+    );
+  }
+
+  if (routeFallback) {
+    const hints = routeFallbackInputHints(terminalWidth);
+    return (
+      <InputRail terminalWidth={terminalWidth} textWidth={displayWidth(`${hints.label}${hints.detail}`)} fill={fillRail}>
+        <Text backgroundColor={TUI_THEME.rail} color={TUI_THEME.warning} bold>{hints.label}</Text>
+        {hints.detail ? <Text backgroundColor={TUI_THEME.rail} color={TUI_THEME.text}>{hints.detail}</Text> : null}
       </InputRail>
     );
   }
@@ -465,6 +477,31 @@ export function chatBusyDisplayValue(terminalWidth: number): string {
     return "working · Esc stop";
   }
   return "working";
+}
+
+function routeFallbackInputHints(width: number): { label: string; detail: string } {
+  if (width < 10) {
+    return { label: "route", detail: "" };
+  }
+  if (width < 14) {
+    return { label: "choose", detail: "" };
+  }
+  if (width < 20) {
+    return { label: "1M", detail: " · 2P" };
+  }
+  if (width < 28) {
+    return { label: "1 Main", detail: " · 2 Pair" };
+  }
+  if (width < 40) {
+    return { label: "1 Main", detail: " · 2 Parallel" };
+  }
+  if (width < 54) {
+    return { label: "route", detail: " · 1 Main · 2 Parallel · Esc" };
+  }
+  if (width < 75) {
+    return { label: "route failed", detail: " · 1 Main · 2 Parallel · R · Esc" };
+  }
+  return { label: "route failed", detail: " · 1 Main · 2 Parallel · R retry · Esc cancel" };
 }
 
 export function chatStartingDisplayValue(terminalWidth: number): string {

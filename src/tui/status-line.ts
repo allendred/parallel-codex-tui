@@ -74,6 +74,15 @@ export function formatRouteStatus(route: RouteDecision | null): string {
   if (route.source === "forced" || route.source === "fallback") {
     details.push(route.source);
   }
+  if (route.router_fallback_resolution === "main") {
+    details.push("user Main");
+  } else if (route.router_fallback_resolution === "parallel") {
+    details.push("user Parallel");
+  } else if (route.router_fallback_resolution === "cancelled") {
+    details.push("user cancelled");
+  } else if (route.router_fallback_resolution === "retry") {
+    details.push("Router retry");
+  }
   if (route.source === "fallback") {
     const cause = classifyRouterFailure(route.reason);
     if (cause) {

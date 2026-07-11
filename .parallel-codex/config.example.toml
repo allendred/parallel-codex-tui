@@ -7,6 +7,7 @@ args = ["exec", "--ephemeral", "--ignore-rules", "-c", "model_reasoning_effort=l
 timeoutMs = 30000
 # Active-task follow-ups fail safely to Main after this shorter Codex timeout.
 followUpTimeoutMs = 20000
+# Non-interactive fallback; the TUI pauses and asks before executing it.
 fallback = "simple"
 
 # Optional environment passed only to the Codex router process.
