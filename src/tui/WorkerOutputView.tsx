@@ -62,6 +62,13 @@ interface DisplayLine extends RenderLine {
   preformatted?: boolean;
 }
 
+export interface WorkerOutputNavigationTargets {
+  searchOffsets: number[];
+  searchLineIndexes: number[];
+  errorOffsets: number[];
+  diffOffsets: number[];
+}
+
 interface WorkerOutputContentState {
   key: string;
   lines: RenderLine[];
@@ -96,7 +103,44 @@ export interface WorkerOutputViewProps {
   scrollOffset?: number;
   height?: number;
   terminalWidth?: number;
+  searchQuery?: string;
+  searchMatchIndex?: number;
   onViewportChange?: (viewport: { offset: number; maxOffset: number }) => void;
+  onNavigationChange?: (targets: WorkerOutputNavigationTargets) => void;
+}
+
+export function workerOutputNavigationTargets(
+  lines: Array<Pick<RenderLine, "kind" | "text">>,
+  height: number,
+  query = ""
+): WorkerOutputNavigationTargets {
+  const viewportHeight = Math.max(1, Math.trunc(height));
+  const maxOffset = Math.max(0, lines.length - viewportHeight);
+  const normalizedQuery = query.trim().toLocaleLowerCase();
+  const searchOffsets: number[] = [];
+  const searchLineIndexes: number[] = [];
+  const errorOffsets: number[] = [];
+  const diffOffsets: number[] = [];
+
+  for (let index = lines.length - 1; index >= 0; index -= 1) {
+    const line = lines[index];
+    if (!line) {
+      continue;
+    }
+    const offset = Math.min(maxOffset, Math.max(0, lines.length - 1 - index));
+    if (normalizedQuery && line.text.toLocaleLowerCase().includes(normalizedQuery)) {
+      searchOffsets.push(offset);
+      searchLineIndexes.push(index);
+    }
+    if (line.kind === "error") {
+      errorOffsets.push(offset);
+    }
+    if (line.kind === "diff-file" || line.kind === "diff-hunk") {
+      diffOffsets.push(offset);
+    }
+  }
+
+  return { searchOffsets, searchLineIndexes, errorOffsets, diffOffsets };
 }
 
 export function WorkerOutputView({
@@ -106,7 +150,10 @@ export function WorkerOutputView({
   scrollOffset = 0,
   height = 24,
   terminalWidth = Number(process.stdout.columns) || 120,
-  onViewportChange
+  searchQuery = "",
+  searchMatchIndex = 0,
+  onViewportChange,
+  onNavigationChange
 }: WorkerOutputViewProps) {
   const nanoOutput = isNanoWorkerOutputWidth(terminalWidth);
   const contentKey = workerOutputContentKey(role, logPath, nanoOutput);
@@ -164,6 +211,13 @@ export function WorkerOutputView({
     contentWidth: nanoRender ? undefined : Math.max(1, panelWidth - 2),
     nano: nanoRender
   });
+  const navigationTargets = workerOutputNavigationTargets(displayLines, height, searchQuery);
+  const selectedSearchIndex = navigationTargets.searchLineIndexes.length > 0
+    ? Math.min(navigationTargets.searchLineIndexes.length - 1, Math.max(0, Math.trunc(searchMatchIndex)))
+    : -1;
+  const selectedSearchLineIndex = selectedSearchIndex >= 0
+    ? navigationTargets.searchLineIndexes[selectedSearchIndex] ?? -1
+    : -1;
   const selection = selectViewportLines(displayLines.map((line) => line.text).join("\n"), height, scrollOffset);
   const end = displayLines.length - selection.clampedOffset;
   const rawStart = Math.max(0, end - Math.max(1, height));
@@ -188,10 +242,24 @@ export function WorkerOutputView({
     });
   }, [onViewportChange, selection.clampedOffset, selection.maxOffset]);
 
+  useEffect(() => {
+    onNavigationChange?.(navigationTargets);
+  }, [
+    navigationTargets.diffOffsets.join(","),
+    navigationTargets.errorOffsets.join(","),
+    navigationTargets.searchLineIndexes.join(","),
+    navigationTargets.searchOffsets.join(","),
+    onNavigationChange
+  ]);
+
   const scrollLabel = workerOutputScrollDisplay(selection.clampedOffset, selection.maxOffset, terminalWidth);
+  const normalizedSearchQuery = searchQuery.trim();
+  const navigationLabel = normalizedSearchQuery
+    ? `find ${selectedSearchIndex >= 0 ? selectedSearchIndex + 1 : 0}/${navigationTargets.searchOffsets.length}`
+    : selection.maxOffset > 0 ? scrollLabel : null;
   const displayTitle = workerOutputHeaderDisplay(
     title,
-    selection.maxOffset > 0 ? scrollLabel : null,
+    navigationLabel,
     Math.max(1, panelWidth - 2)
   );
 
@@ -202,8 +270,19 @@ export function WorkerOutputView({
       {visibleLines.length > 0
         ? visibleLines.map((line, index) =>
           nanoRender
-            ? <WorkerOutputNanoLine key={index} fillWidth={panelWidth} line={line} width={terminalWidth} />
-            : <WorkerOutputLine key={index} line={line} width={panelWidth} />
+            ? <WorkerOutputNanoLine
+                key={index}
+                fillWidth={panelWidth}
+                line={line}
+                selected={start + index === selectedSearchLineIndex}
+                width={terminalWidth}
+              />
+            : <WorkerOutputLine
+                key={index}
+                line={line}
+                selected={start + index === selectedSearchLineIndex}
+                width={panelWidth}
+              />
         )
         : <Text {...workerOutputEmptyFallbackTheme()}>{EMPTY_WORKER_OUTPUT_TEXT}</Text>}
     </Box>
@@ -4950,14 +5029,14 @@ function formatFileUrlDisplay(url: string): string {
   return segments.slice(-2).join("/") || url;
 }
 
-function WorkerOutputLine({ line, width }: { line: DisplayLine; width: number }) {
+function WorkerOutputLine({ line, selected, width }: { line: DisplayLine; selected: boolean; width: number }) {
   const theme = workerOutputLineTheme(line.kind);
   const fillBackground = workerOutputLineFillTheme(line.kind);
   if (line.kind === "blank") {
     return <WorkerOutputBlankLine width={width} />;
   }
   if (line.kind === "group") {
-    const body = ` ${line.text} `;
+    const body = `${selected ? ">" : " "}${line.text} `;
     return (
       <Box>
         <Text {...theme}>{body}</Text>
@@ -4970,7 +5049,7 @@ function WorkerOutputLine({ line, width }: { line: DisplayLine; width: number })
     const body = line.text || " ";
     return (
       <Box>
-        <WorkerOutputIndent backgroundColor={fillBackground} />
+        <WorkerOutputIndent backgroundColor={fillBackground} selected={selected} />
         <Text {...theme} wrap="truncate-end">{body}</Text>
         <WorkerOutputTrailingFill backgroundColor={fillBackground} width={width} usedWidth={2 + displayWidth(body)} />
       </Box>
@@ -4981,7 +5060,7 @@ function WorkerOutputLine({ line, width }: { line: DisplayLine; width: number })
   if (line.kind === "code") {
     return (
       <Box>
-        <WorkerOutputIndent backgroundColor={fillBackground} />
+        <WorkerOutputIndent backgroundColor={fillBackground} selected={selected} />
         <Text {...theme} wrap="wrap">{line.text || " "}</Text>
         <WorkerOutputTrailingFill backgroundColor={fillBackground} width={width} usedWidth={2 + displayWidth(line.text || " ")} />
       </Box>
@@ -4994,7 +5073,7 @@ function WorkerOutputLine({ line, width }: { line: DisplayLine; width: number })
       const usedWidth = 2 + displayWidth(sourceParts.gutter) + displayWidth(sourceParts.code || " ");
       return (
         <Box>
-          <WorkerOutputIndent backgroundColor={fillBackground} />
+          <WorkerOutputIndent backgroundColor={fillBackground} selected={selected} />
           <Text backgroundColor={TUI_THEME.surface} color={TUI_THEME.muted}>{sourceParts.gutter}</Text>
           <Text backgroundColor={TUI_THEME.surface} color={TUI_THEME.text} wrap="truncate-end">{sourceParts.code}</Text>
           <WorkerOutputTrailingFill backgroundColor={fillBackground} width={width} usedWidth={usedWidth} />
@@ -5004,7 +5083,7 @@ function WorkerOutputLine({ line, width }: { line: DisplayLine; width: number })
     const body = line.text || " ";
     return (
       <Box>
-        <WorkerOutputIndent backgroundColor={fillBackground} />
+        <WorkerOutputIndent backgroundColor={fillBackground} selected={selected} />
         <Text {...theme}>{body}</Text>
         <WorkerOutputTrailingFill backgroundColor={fillBackground} width={width} usedWidth={2 + displayWidth(body)} />
       </Box>
@@ -5015,7 +5094,7 @@ function WorkerOutputLine({ line, width }: { line: DisplayLine; width: number })
     const body = line.text || " ";
     return (
       <Box>
-        <WorkerOutputIndent backgroundColor={fillBackground} />
+        <WorkerOutputIndent backgroundColor={fillBackground} selected={selected} />
         <Text {...theme} wrap="truncate-end">{body}</Text>
         <WorkerOutputTrailingFill backgroundColor={fillBackground} width={width} usedWidth={2 + displayWidth(body)} />
       </Box>
@@ -5028,7 +5107,7 @@ function WorkerOutputLine({ line, width }: { line: DisplayLine; width: number })
     const code = diffCodeLine.code || " ";
     return (
       <Box>
-        <WorkerOutputIndent backgroundColor={fillBackground} />
+        <WorkerOutputIndent backgroundColor={fillBackground} selected={selected} />
         <Text {...theme}>{prefix}</Text>
         <Text {...theme} wrap="wrap">{code}</Text>
         <WorkerOutputTrailingFill backgroundColor={fillBackground} width={width} usedWidth={2 + displayWidth(prefix) + displayWidth(code)} />
@@ -5040,7 +5119,7 @@ function WorkerOutputLine({ line, width }: { line: DisplayLine; width: number })
   const body = layout.body || " ";
   return (
     <Box>
-      <WorkerOutputIndent backgroundColor={fillBackground} />
+      <WorkerOutputIndent backgroundColor={fillBackground} selected={selected} />
       {gutter ? <Text {...theme}>{gutter}</Text> : null}
       <Text {...theme} wrap="truncate-end">{body}</Text>
       <WorkerOutputTrailingFill backgroundColor={fillBackground} width={width} usedWidth={2 + displayWidth(gutter) + displayWidth(body)} />
@@ -5048,7 +5127,16 @@ function WorkerOutputLine({ line, width }: { line: DisplayLine; width: number })
   );
 }
 
-function WorkerOutputIndent({ backgroundColor }: { backgroundColor: NonNullable<TextProps["backgroundColor"]> | null }) {
+function WorkerOutputIndent({
+  backgroundColor,
+  selected
+}: {
+  backgroundColor: NonNullable<TextProps["backgroundColor"]> | null;
+  selected: boolean;
+}) {
+  if (selected) {
+    return <Text backgroundColor={backgroundColor ?? TUI_THEME.surface} color={TUI_THEME.accent} bold>{"> "}</Text>;
+  }
   return backgroundColor
     ? <Text backgroundColor={backgroundColor}>  </Text>
     : <Text color={TUI_THEME.muted}>  </Text>;
@@ -5080,10 +5168,23 @@ function shouldRenderWorkerOutputRailFill(): boolean {
   return process.stdout.isTTY === true && typeof process.stdout.columns === "number";
 }
 
-function WorkerOutputNanoLine({ fillWidth, line, width }: { fillWidth: number; line: DisplayLine; width: number }) {
+function WorkerOutputNanoLine({
+  fillWidth,
+  line,
+  selected,
+  width
+}: {
+  fillWidth: number;
+  line: DisplayLine;
+  selected: boolean;
+  width: number;
+}) {
   const theme = workerOutputLineTheme(line.kind);
   const fillBackground = workerOutputLineFillTheme(line.kind);
-  const text = compactEndByDisplayWidth(workerOutputNanoLineText(line), Math.max(1, width));
+  const text = compactEndByDisplayWidth(
+    `${selected ? "> " : ""}${workerOutputNanoLineText(line)}`,
+    Math.max(1, width)
+  );
   const body = text || " ";
   return (
     <Box>

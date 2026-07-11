@@ -98,6 +98,7 @@ describe("CLI Task sessions smoke", () => {
     try {
       const firstMarker = compactTaskMarker(firstTaskId);
       await waitForScreenText(secondRun, `#${firstMarker}`);
+      await waitForScreenText(secondRun, "^T tasks");
       secondRun.child.write("\x14");
       await waitForScreenText(secondRun, "Task sessions");
       await waitForScreenText(secondRun, "> * 第一个会话标记");
@@ -105,6 +106,7 @@ describe("CLI Task sessions smoke", () => {
       await waitForScreenText(secondRun, "parallel-codex-tui · chat");
       secondRun.child.write("\x0e");
       await waitForScreenText(secondRun, "new task · ready");
+      await waitForHeaderWithoutTaskMarker(secondRun);
       secondRun.child.write("\x03");
       await waitForExit(secondRun.exits);
       expect(secondRun.exits[0]).toBe(0);
@@ -225,6 +227,18 @@ async function waitForScreenText(run: ReturnType<typeof startCli>, text: string)
     await new Promise((resolve) => setTimeout(resolve, 50));
   }
   throw new Error(`Timed out waiting for ${text}\nSnapshot:\n${run.screen.snapshot()}`);
+}
+
+async function waitForHeaderWithoutTaskMarker(run: ReturnType<typeof startCli>): Promise<void> {
+  for (let attempt = 0; attempt < 240; attempt += 1) {
+    await run.screenWrites();
+    const header = run.screen.snapshot().split("\n")[0] ?? "";
+    if (header.includes("parallel-codex-tui · chat") && !header.includes("#")) {
+      return;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+  throw new Error(`Timed out waiting for an empty task header\nSnapshot:\n${run.screen.snapshot()}`);
 }
 
 async function waitForExit(exits: number[]): Promise<void> {

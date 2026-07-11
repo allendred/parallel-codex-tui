@@ -83,6 +83,30 @@ describe("keyboard shortcuts", () => {
     expect(isTaskSessionsShortcut?.("t", { ctrl: false })).toBe(false);
   });
 
+  it("recognizes worker log search and semantic jump shortcuts", () => {
+    const isWorkerSearchShortcut = (
+      keyboardModule as typeof keyboardModule & {
+        isWorkerSearchShortcut?: (input: string, key: { ctrl?: boolean }) => boolean;
+      }
+    ).isWorkerSearchShortcut;
+    const workerLogJumpKind = (
+      keyboardModule as typeof keyboardModule & {
+        workerLogJumpKind?: (input: string) => "error" | "diff" | null;
+      }
+    ).workerLogJumpKind;
+
+    expect(isWorkerSearchShortcut).toBeTypeOf("function");
+    expect(isWorkerSearchShortcut?.("f", { ctrl: true })).toBe(true);
+    expect(isWorkerSearchShortcut?.("\u0006", { ctrl: false })).toBe(true);
+    expect(isWorkerSearchShortcut?.("f", { ctrl: false })).toBe(false);
+    expect(workerLogJumpKind).toBeTypeOf("function");
+    expect(workerLogJumpKind?.("e")).toBe("error");
+    expect(workerLogJumpKind?.("E")).toBe("error");
+    expect(workerLogJumpKind?.("d")).toBe("diff");
+    expect(workerLogJumpKind?.("D")).toBe("diff");
+    expect(workerLogJumpKind?.("plain")).toBeNull();
+  });
+
   it("does not treat plain letters as shortcuts", () => {
     expect(isLogsShortcut("w", { ctrl: false })).toBe(false);
     expect(isAttachShortcut("o", { ctrl: false })).toBe(false);

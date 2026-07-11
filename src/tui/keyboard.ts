@@ -38,6 +38,20 @@ export function isTaskSessionsShortcut(input: string, key: KeyboardKey): boolean
   return (key.ctrl === true && input.toLowerCase() === "t") || input === "\u0014";
 }
 
+export function isWorkerSearchShortcut(input: string, key: KeyboardKey): boolean {
+  return (key.ctrl === true && input.toLowerCase() === "f") || input === "\u0006";
+}
+
+export function workerLogJumpKind(input: string): "error" | "diff" | null {
+  if (input === "e" || input === "E") {
+    return "error";
+  }
+  if (input === "d" || input === "D") {
+    return "diff";
+  }
+  return null;
+}
+
 export function scrollDelta(input: string, key: KeyboardKey, pageSize: number): number {
   if (key.pageUp || (key.ctrl === true && input.toLowerCase() === "u")) {
     return pageSize;

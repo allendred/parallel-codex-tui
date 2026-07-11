@@ -23,3 +23,10 @@ export function createRawInputDecoder(): RawInputDecoder {
     }
   };
 }
+
+export function tokenizeRawInput(input: string): string[] {
+  return Array.from(
+    input.matchAll(/\x1b\[M[\s\S]{3}|\x1b\[[0-?]*[ -/]*[@-~]|\x1bO[\s\S]|\x1b[^\x00-\x1f\x7f]|[\s\S]/gu),
+    (match) => match[0]
+  );
+}

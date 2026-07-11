@@ -4,7 +4,7 @@ import { compactEndByDisplayWidth, compactTailByDisplayWidth, displayWidth } fro
 import { TUI_THEME } from "./theme.js";
 
 export interface InputBarProps {
-  mode: "chat" | "worker" | "workers" | "native" | "router" | "sessions";
+  mode: "chat" | "worker" | "worker-search" | "workers" | "native" | "router" | "sessions";
   ready?: boolean;
   busy?: boolean;
   canRetry?: boolean;
@@ -13,6 +13,8 @@ export interface InputBarProps {
   chatScrollOffset?: number;
   chatMaxScrollOffset?: number;
   nativeClosed?: boolean;
+  searchMatchIndex?: number;
+  searchMatchCount?: number;
   value: string;
   cursor?: number;
   terminalWidth?: number;
@@ -30,6 +32,8 @@ export function InputBar({
   chatScrollOffset = 0,
   chatMaxScrollOffset = 0,
   nativeClosed = false,
+  searchMatchIndex = 0,
+  searchMatchCount = 0,
   value,
   cursor,
   terminalWidth: providedTerminalWidth,
@@ -38,6 +42,24 @@ export function InputBar({
 }: InputBarProps) {
   const terminalWidth = providedTerminalWidth ?? process.stdout.columns ?? 120;
   const fillRail = providedTerminalWidth !== undefined || typeof process.stdout.columns === "number";
+
+  if (mode === "worker-search") {
+    const suffix = workerSearchInputSuffix(terminalWidth, searchMatchIndex, searchMatchCount);
+    const prefix = terminalWidth < 4 ? "/" : "/ ";
+    const textBudget = Math.max(1, terminalWidth - (terminalWidth > 1 ? 2 : 0));
+    const valueWidth = Math.max(1, textBudget - displayWidth(prefix) - 1 - displayWidth(suffix));
+    const display = chatInputDisplayParts(value, cursor ?? Array.from(value).length, valueWidth + 6);
+    const textWidth = displayWidth(`${prefix}${display.before}|${display.after}${suffix}`);
+    return (
+      <InputRail terminalWidth={terminalWidth} textWidth={textWidth} fill={fillRail}>
+        <Text backgroundColor={TUI_THEME.rail} color={TUI_THEME.accent} bold>{prefix}</Text>
+        <Text backgroundColor={TUI_THEME.rail} color={TUI_THEME.text}>{display.before}</Text>
+        <Text backgroundColor={TUI_THEME.rail} color={TUI_THEME.accent} bold>|</Text>
+        <Text backgroundColor={TUI_THEME.rail} color={TUI_THEME.text}>{display.after}</Text>
+        {suffix ? <Text backgroundColor={TUI_THEME.rail} color={TUI_THEME.muted}>{suffix}</Text> : null}
+      </InputRail>
+    );
+  }
 
   if (mode === "sessions") {
     const hints = taskSessionsInputHints(terminalWidth);
@@ -465,9 +487,12 @@ function workerInputHints(width: number): { label: string; detail: string } {
     return { label: "logs", detail: " · scroll · Tab · ^O attach · Esc" };
   }
   if (width < 72) {
-    return { label: "logs", detail: " · scroll · Tab · ^B workers · ^O · Esc" };
+    return { label: "logs", detail: " · scroll · ^F find · Tab · ^O · Esc" };
   }
-  return { label: "logs", detail: " · scroll · Tab · ^B workers · ^O attach · Esc chat" };
+  if (width < 96) {
+    return { label: "logs", detail: " · scroll · ^F find · E err · D diff · Tab · ^B · ^O · Esc" };
+  }
+  return { label: "logs", detail: " · scroll · ^F find · E err · D diff · Tab · ^B workers · ^O attach · Esc chat" };
 }
 
 function workerOverviewInputHints(width: number): { label: string; detail: string } {
@@ -506,6 +531,27 @@ function taskSessionsInputHints(width: number): { label: string; detail: string 
     return { label: "sessions", detail: " · Up/Dn · Enter restore · ^N · Esc" };
   }
   return { label: "sessions", detail: " · Up/Dn select · Enter restore · ^N new · Esc back" };
+}
+
+function workerSearchInputSuffix(width: number, matchIndex: number, matchCount: number): string {
+  const count = Math.max(0, Math.trunc(matchCount));
+  const index = count > 0
+    ? Math.min(count - 1, Math.max(0, Math.trunc(matchIndex))) + 1
+    : 0;
+  const position = `${index}/${count}`;
+  if (width < 16) {
+    return "";
+  }
+  if (width < 24) {
+    return ` · ${position}`;
+  }
+  if (width < 36) {
+    return ` · ${position} · Esc`;
+  }
+  if (width < 52) {
+    return ` · ${position} · Enter · Esc`;
+  }
+  return ` · ${position} · Enter next · Up/Dn · Esc logs`;
 }
 
 function nativeInputHints(width: number, closed = false): { label: string; detail: string } {

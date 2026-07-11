@@ -28,10 +28,10 @@ import { nextScrollOffset } from "./scrolling.js";
 import { chooseSubmitTarget, newTaskMemoryState, nextSubmitMemoryState, shouldClearWorkersForSubmit } from "./task-memory.js";
 import { TerminalOutput } from "./TerminalOutput.js";
 import { NativeTerminalScreen } from "./terminal-screen.js";
-import { WorkerOutputView } from "./WorkerOutputView.js";
+import { WorkerOutputView, type WorkerOutputNavigationTargets } from "./WorkerOutputView.js";
 import { compactEndByDisplayWidth, displayWidth, wrapByDisplayWidth } from "./display-width.js";
-import { isAttachShortcut, isExitShortcut, isLogsShortcut, isNewTaskShortcut, isRouterDiagnosticsShortcut, isTaskSessionsShortcut, isWorkerOverviewShortcut, isWorkspaceShortcut, mouseScrollDelta, rawHistoryDelta, rawPageScrollDelta, scrollDelta } from "./keyboard.js";
-import { createRawInputDecoder } from "./raw-input-decoder.js";
+import { isAttachShortcut, isExitShortcut, isLogsShortcut, isNewTaskShortcut, isRouterDiagnosticsShortcut, isTaskSessionsShortcut, isWorkerOverviewShortcut, isWorkerSearchShortcut, isWorkspaceShortcut, mouseScrollDelta, rawHistoryDelta, rawPageScrollDelta, scrollDelta, workerLogJumpKind } from "./keyboard.js";
+import { createRawInputDecoder, tokenizeRawInput } from "./raw-input-decoder.js";
 import { decodeHtmlEntities } from "./markdown-text.js";
 import { configureTuiTheme, TUI_THEME } from "./theme.js";
 import { WorkspacePicker } from "../cli-workspace-picker.js";
@@ -116,10 +116,22 @@ type ChatSpanTheme = Pick<TextProps, "backgroundColor" | "bold" | "color" | "ita
 type ChatEmptyStateTheme = Pick<TextProps, "backgroundColor" | "bold" | "color">;
 type ChatViewportBlankLineTheme = Pick<TextProps, "backgroundColor">;
 type PendingRouteInfo = RouteStartInfo & { startedAtMs: number };
+interface WorkerSearchState {
+  open: boolean;
+  query: string;
+  cursor: number;
+  matchIndex: number;
+}
 type NativeAttachStartingTheme = Pick<TextProps, "backgroundColor" | "color">;
 const NO_WORKERS_ATTACH_MESSAGE = "No workers yet · start a complex task before attaching";
 const NO_WORKERS_LOGS_MESSAGE = "No workers yet · start a complex task before opening logs";
 const NO_WORKERS_OVERVIEW_MESSAGE = "No workers yet · start a complex task before opening overview";
+const EMPTY_WORKER_NAVIGATION_TARGETS: WorkerOutputNavigationTargets = {
+  searchOffsets: [],
+  searchLineIndexes: [],
+  errorOffsets: [],
+  diffOffsets: []
+};
 
 export function App({
   config,
@@ -163,6 +175,15 @@ export function App({
   const [nativeInput, setNativeInput] = useState("");
   const [workerScrollOffset, setWorkerScrollOffset] = useState(0);
   const [workerMaxScrollOffset, setWorkerMaxScrollOffset] = useState(0);
+  const [workerSearch, setWorkerSearch] = useState<WorkerSearchState>({
+    open: false,
+    query: "",
+    cursor: 0,
+    matchIndex: 0
+  });
+  const [workerNavigationTargets, setWorkerNavigationTargets] = useState<WorkerOutputNavigationTargets>(
+    EMPTY_WORKER_NAVIGATION_TARGETS
+  );
   const [chatScrollOffset, setChatScrollOffset] = useState(0);
   const [chatMaxScrollOffset, setChatMaxScrollOffset] = useState(0);
   const [routerRecords, setRouterRecords] = useState<RouterAuditRecord[]>([]);
@@ -196,6 +217,9 @@ export function App({
   const busyRef = useRef(busy);
   const workersRef = useRef(workers);
   const selectedWorkerIndexRef = useRef(selectedWorkerIndex);
+  const workerSearchRef = useRef(workerSearch);
+  const workerNavigationTargetsRef = useRef(workerNavigationTargets);
+  const workerJumpIndexRef = useRef({ error: -1, diff: -1 });
   const workerMaxScrollOffsetRef = useRef(workerMaxScrollOffset);
   const chatScrollOffsetRef = useRef(chatScrollOffset);
   const chatMaxScrollOffsetRef = useRef(chatMaxScrollOffset);
@@ -276,6 +300,14 @@ export function App({
   useEffect(() => {
     selectedWorkerIndexRef.current = selectedWorkerIndex;
   }, [selectedWorkerIndex]);
+
+  useEffect(() => {
+    workerSearchRef.current = workerSearch;
+  }, [workerSearch]);
+
+  useEffect(() => {
+    workerNavigationTargetsRef.current = workerNavigationTargets;
+  }, [workerNavigationTargets]);
 
   useEffect(() => {
     workerMaxScrollOffsetRef.current = workerMaxScrollOffset;
@@ -573,6 +605,34 @@ export function App({
       setTaskSessionsError(null);
       setSelectedTaskSessionIndex(nextIndex);
     };
+    const commitWorkerSearch = (next: WorkerSearchState) => {
+      workerSearchRef.current = next;
+      setWorkerSearch(next);
+    };
+    const closeWorkerSearch = () => {
+      commitWorkerSearch({ ...workerSearchRef.current, open: false });
+    };
+    const cycleWorkerSearch = (delta: number) => {
+      const offsets = workerNavigationTargetsRef.current.searchOffsets;
+      if (offsets.length === 0) {
+        return;
+      }
+      const current = workerSearchRef.current;
+      const nextIndex = ((current.matchIndex + delta) % offsets.length + offsets.length) % offsets.length;
+      commitWorkerSearch({ ...current, matchIndex: nextIndex });
+      setWorkerScrollOffset(offsets[nextIndex] ?? 0);
+    };
+    const jumpWorkerLog = (kind: "error" | "diff") => {
+      const offsets = kind === "error"
+        ? workerNavigationTargetsRef.current.errorOffsets
+        : workerNavigationTargetsRef.current.diffOffsets;
+      if (offsets.length === 0) {
+        return;
+      }
+      const nextIndex = (workerJumpIndexRef.current[kind] + 1) % offsets.length;
+      workerJumpIndexRef.current[kind] = nextIndex;
+      setWorkerScrollOffset(offsets[nextIndex] ?? 0);
+    };
     const handleRawInput = (data: unknown) => {
       const chunk = rawInputDecoderRef.current.write(Buffer.isBuffer(data) ? data : String(data ?? ""));
       if (!chunk) {
@@ -719,40 +779,77 @@ export function App({
         return;
       }
       if (currentView === "worker") {
-        if (isExitShortcut(chunk, {})) {
-          activeRunControllerRef.current?.abort();
-          exitRef.current();
-          return;
-        }
-        if (isNewTaskShortcut(chunk, {}) && !busyRef.current) {
-          void newTaskRef.current();
-          return;
-        }
-        if (isWorkspaceShortcut(chunk, {}) && !busyRef.current) {
-          openWorkspacePickerRef.current();
-          return;
-        }
-        if (isRouterDiagnosticsShortcut(chunk, {})) {
-          void openRouterDiagnosticsRef.current();
-          return;
-        }
-        if (isTaskSessionsShortcut(chunk, {}) && !busyRef.current) {
-          void openTaskSessionsRef.current();
-          return;
-        }
-        if (isWorkerOverviewShortcut(chunk, {})) {
-          openWorkerOverviewRef.current();
-          return;
-        }
-        if (chunk === "\x1b") {
-          userSelectedWorkerRef.current = true;
-          setAttachError(null);
-          setView("chat");
-          return;
-        }
-        const delta = mouseScrollDelta(chunk, 3);
-        if (delta !== 0) {
-          setWorkerScrollOffset((current) => nextScrollOffset(current, delta, workerMaxScrollOffsetRef.current));
+        for (const workerChunk of tokenizeRawInput(chunk)) {
+          if (isExitShortcut(workerChunk, {})) {
+            activeRunControllerRef.current?.abort();
+            exitRef.current();
+            return;
+          }
+          if (workerSearchRef.current.open) {
+            if (isWorkerSearchShortcut(workerChunk, {}) || workerChunk === "\x1b") {
+              closeWorkerSearch();
+              continue;
+            }
+            if (workerChunk === "\r" || workerChunk === "\n") {
+              cycleWorkerSearch(1);
+              continue;
+            }
+            const searchHistoryDelta = rawHistoryDelta(workerChunk);
+            if (searchHistoryDelta !== 0) {
+              cycleWorkerSearch(-searchHistoryDelta);
+              continue;
+            }
+            const current = workerSearchRef.current;
+            const update = applyChatInputChunk(current.query, workerChunk, current.cursor);
+            const query = update.submit ?? update.value;
+            const cursor = update.submit === null ? update.cursor : Array.from(query).length;
+            commitWorkerSearch({
+              open: true,
+              query,
+              cursor,
+              matchIndex: query === current.query ? current.matchIndex : 0
+            });
+            continue;
+          }
+          if (isWorkerSearchShortcut(workerChunk, {})) {
+            commitWorkerSearch({ ...workerSearchRef.current, open: true });
+            continue;
+          }
+          const jumpKind = workerLogJumpKind(workerChunk);
+          if (jumpKind) {
+            jumpWorkerLog(jumpKind);
+            continue;
+          }
+          if (isNewTaskShortcut(workerChunk, {}) && !busyRef.current) {
+            void newTaskRef.current();
+            return;
+          }
+          if (isWorkspaceShortcut(workerChunk, {}) && !busyRef.current) {
+            openWorkspacePickerRef.current();
+            return;
+          }
+          if (isRouterDiagnosticsShortcut(workerChunk, {})) {
+            void openRouterDiagnosticsRef.current();
+            return;
+          }
+          if (isTaskSessionsShortcut(workerChunk, {}) && !busyRef.current) {
+            void openTaskSessionsRef.current();
+            return;
+          }
+          if (isWorkerOverviewShortcut(workerChunk, {})) {
+            openWorkerOverviewRef.current();
+            return;
+          }
+          if (workerChunk === "\x1b") {
+            userSelectedWorkerRef.current = true;
+            setAttachError(null);
+            setView("chat");
+            return;
+          }
+          const delta = mouseScrollDelta(workerChunk, 3);
+          if (delta !== 0) {
+            setWorkerScrollOffset((current) => nextScrollOffset(current, delta, workerMaxScrollOffsetRef.current));
+          }
         }
         return;
       }
@@ -985,7 +1082,7 @@ export function App({
       }
       void attachSelectedWorker(worker);
     }
-  }, { isActive: view === "worker" });
+  }, { isActive: view === "worker" && !workerSearch.open });
 
   async function attachSelectedWorker(worker: WorkerLogRef) {
     setAttachError(null);
@@ -1435,6 +1532,33 @@ export function App({
     }
   }
 
+  function updateWorkerNavigationTargets(next: WorkerOutputNavigationTargets): void {
+    const previous = workerNavigationTargetsRef.current;
+    workerNavigationTargetsRef.current = next;
+    if (!sameNumberArray(previous.errorOffsets, next.errorOffsets)) {
+      workerJumpIndexRef.current.error = -1;
+    }
+    if (!sameNumberArray(previous.diffOffsets, next.diffOffsets)) {
+      workerJumpIndexRef.current.diff = -1;
+    }
+    if (!sameWorkerNavigationTargets(previous, next)) {
+      setWorkerNavigationTargets(next);
+    }
+
+    const search = workerSearchRef.current;
+    const matchIndex = next.searchOffsets.length > 0
+      ? Math.min(next.searchOffsets.length - 1, Math.max(0, search.matchIndex))
+      : 0;
+    if (matchIndex !== search.matchIndex) {
+      const updated = { ...search, matchIndex };
+      workerSearchRef.current = updated;
+      setWorkerSearch(updated);
+    }
+    if (search.open && search.query.trim() && next.searchOffsets.length > 0) {
+      setWorkerScrollOffset(next.searchOffsets[matchIndex] ?? 0);
+    }
+  }
+
   function openWorkerOverview(): void {
     const currentView = viewRef.current;
     if (currentView !== "chat" && currentView !== "worker") {
@@ -1505,7 +1629,7 @@ export function App({
       showStatusBar={config.ui.showStatusBar}
       input={
         <InputBar
-          mode={view}
+          mode={view === "worker" && workerSearch.open ? "worker-search" : view}
           ready={inputReady}
           busy={busy}
           canRetry={canRetryTask}
@@ -1514,8 +1638,14 @@ export function App({
           chatScrollOffset={chatScrollOffset}
           chatMaxScrollOffset={chatMaxScrollOffset}
           nativeClosed={view === "native" && nativeAttach?.closedCode !== null}
-          value={view === "native" || view === "router" || view === "workers" || view === "sessions" ? "" : input}
-          cursor={view === "chat" ? inputCursor : undefined}
+          searchMatchIndex={workerSearch.matchIndex}
+          searchMatchCount={workerNavigationTargets.searchOffsets.length}
+          value={workerSearch.open && view === "worker"
+            ? workerSearch.query
+            : view === "native" || view === "router" || view === "workers" || view === "sessions" ? "" : input}
+          cursor={workerSearch.open && view === "worker"
+            ? workerSearch.cursor
+            : view === "chat" ? inputCursor : undefined}
           terminalWidth={terminalWidth}
           onChange={view === "native" ? setNativeInput : setInput}
           onSubmit={view === "native" ? undefined : submit}
@@ -1582,8 +1712,11 @@ export function App({
             role={workers[selectedWorkerIndex]?.role}
             logPath={workers[selectedWorkerIndex]?.logPath ?? null}
             scrollOffset={workerScrollOffset}
+            searchQuery={workerSearch.open ? workerSearch.query : ""}
+            searchMatchIndex={workerSearch.matchIndex}
             height={Math.max(1, outputHeight - 1)}
             terminalWidth={terminalWidth}
+            onNavigationChange={updateWorkerNavigationTargets}
             onViewportChange={({ offset, maxOffset }) => {
               setWorkerMaxScrollOffset(maxOffset);
               if (offset !== workerScrollOffset) {
@@ -2465,6 +2598,20 @@ function sameWorkerRuntimeStatus(
     left.last_event_at === right.last_event_at &&
     left.summary === right.summary &&
     left.native_session_id === right.native_session_id;
+}
+
+function sameWorkerNavigationTargets(
+  left: WorkerOutputNavigationTargets,
+  right: WorkerOutputNavigationTargets
+): boolean {
+  return sameNumberArray(left.searchOffsets, right.searchOffsets) &&
+    sameNumberArray(left.searchLineIndexes, right.searchLineIndexes) &&
+    sameNumberArray(left.errorOffsets, right.errorOffsets) &&
+    sameNumberArray(left.diffOffsets, right.diffOffsets);
+}
+
+function sameNumberArray(left: number[], right: number[]): boolean {
+  return left.length === right.length && left.every((value, index) => value === right[index]);
 }
 
 export function appContentHeight(rows: number, hasError = false, showStatusBar = true): number {

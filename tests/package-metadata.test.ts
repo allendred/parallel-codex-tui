@@ -202,6 +202,10 @@ describe("package metadata", () => {
     expect(readme).toContain("The selected active task is stored in `session-index.sqlite`");
     expect(readme).toContain("Restoring a task reloads its route, workers, retry state, and recorded native session ids");
     expect(readme).toContain("`Ctrl+N` persists an intentionally empty active-task context");
+    expect(readme).toContain("`Ctrl+F` searches the final rendered Worker log");
+    expect(readme).toContain("Enter moves to the next match and Up/Down moves backward or forward");
+    expect(readme).toContain("The current match is marked with `>` without shifting Diff or source line-number columns");
+    expect(readme).toContain("press `E` to cycle rendered error lines or `D` to cycle Diff files and hunks");
     expect(readme).toContain("In worker-log views, scroll with the mouse wheel or PageUp/PageDown");
     expect(readme).toContain("In chat or worker-log views, press `Ctrl+O`");
     expect(readme).toContain("Native attach follows outer terminal resize");

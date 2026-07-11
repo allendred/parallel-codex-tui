@@ -397,6 +397,9 @@ describe("InputBar", () => {
     expect(frame).toContain("Tab");
     expect(frame).toContain("^O attach");
     expect(frame).toContain("^B workers");
+    expect(frame).toContain("^F find");
+    expect(frame).toContain("E err");
+    expect(frame).toContain("D diff");
     expect(frame).not.toContain("Tab worker");
     expect(frame).not.toContain("wheel/Pg");
     expect(frame).not.toContain("read");
@@ -465,6 +468,46 @@ describe("InputBar", () => {
     expect(narrowFrame.split("\n")).toHaveLength(1);
     expect(displayWidth(narrowFrame)).toBeLessThanOrEqual(24);
     narrow.unmount();
+  });
+
+  it("renders a Unicode Worker log search cursor and match position", () => {
+    const roomy = render(
+      <InputBar
+        mode="worker-search"
+        value="中文目标"
+        cursor={2}
+        searchMatchIndex={1}
+        searchMatchCount={3}
+        terminalWidth={80}
+        onChange={() => {}}
+      />
+    );
+    const roomyFrame = roomy.lastFrame() ?? "";
+    expect(roomyFrame).toContain("/ 中文|目标 · 2/3 · Enter next · Up/Dn · Esc logs");
+    expect(roomyFrame.split("\n")).toHaveLength(1);
+    expect(displayWidth(roomyFrame)).toBeLessThanOrEqual(80);
+    roomy.unmount();
+
+    const overflow: string[] = [];
+    for (let width = 8; width <= 100; width += 1) {
+      const view = render(
+        <InputBar
+          mode="worker-search"
+          value="很长的中文搜索目标和EnglishQuery"
+          cursor={8}
+          searchMatchIndex={0}
+          searchMatchCount={0}
+          terminalWidth={width}
+          onChange={() => {}}
+        />
+      );
+      const frame = view.lastFrame() ?? "";
+      if (frame.split("\n").length !== 1 || displayWidth(frame) > width) {
+        overflow.push(`${width}:${displayWidth(frame)}:${frame}`);
+      }
+      view.unmount();
+    }
+    expect(overflow).toEqual([]);
   });
 
   it("keeps worker guidance compact in narrow terminals", () => {
