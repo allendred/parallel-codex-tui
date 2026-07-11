@@ -165,6 +165,10 @@ export function routerDiagnosticsDisplayLines(
       if (evidence) {
         logical.push({ text: evidence, tone: "warning" });
       }
+      const trace = routerAuditTrace(record);
+      if (trace) {
+        logical.push({ text: trace, tone: "muted" });
+      }
       logical.push({ text: `reason · ${boundedDiagnosticText(record.reason)}`, tone: "muted" });
     }
   }
@@ -262,6 +266,10 @@ function routerAuditEvidence(record: RouterAuditRecord): string | null {
   }
   const kind = routerAuditFailureKind(record) ?? "unknown";
   const parts = [`evidence · ${routerFailureKindLabel(kind)}`];
+  const stage = routerFailureStageLabel(record);
+  if (stage) {
+    parts.push(stage);
+  }
   if (kind === "timeout") {
     const timeoutMs = record.router_timeout_ms ?? record.duration_ms;
     if (typeof timeoutMs === "number") {
@@ -277,6 +285,43 @@ function routerAuditEvidence(record: RouterAuditRecord): string | null {
   return parts.join(" · ");
 }
 
+function routerAuditTrace(record: RouterAuditRecord): string | null {
+  const parts = [
+    ...(typeof record.router_spawn_ms === "number"
+      ? [`spawn ${formatDiagnosticDuration(record.router_spawn_ms)}`]
+      : []),
+    ...routerFirstOutputTraceParts(record),
+    ...(typeof record.router_process_ms === "number"
+      ? [`process ${formatDiagnosticDuration(record.router_process_ms)}`]
+      : []),
+    ...(typeof record.router_stdout_bytes === "number"
+      ? [`stdout ${formatDiagnosticBytes(record.router_stdout_bytes)}`]
+      : []),
+    ...(typeof record.router_stderr_bytes === "number"
+      ? [`stderr ${formatDiagnosticBytes(record.router_stderr_bytes)}`]
+      : [])
+  ];
+  return parts.length > 0 ? `trace · ${parts.join(" · ")}` : null;
+}
+
+function routerFirstOutputTraceParts(record: RouterAuditRecord): string[] {
+  const streams = [
+    ...(typeof record.router_first_stdout_ms === "number"
+      ? [`first stdout ${formatDiagnosticDuration(record.router_first_stdout_ms)}`]
+      : []),
+    ...(typeof record.router_first_stderr_ms === "number"
+      ? [`first stderr ${formatDiagnosticDuration(record.router_first_stderr_ms)}`]
+      : [])
+  ];
+  if (streams.length > 0) {
+    return streams;
+  }
+  if (typeof record.router_first_output_ms === "number") {
+    return [`first output ${formatDiagnosticDuration(record.router_first_output_ms)}`];
+  }
+  return record.router_failure_stage === "waiting-output" ? ["first output none"] : [];
+}
+
 function routerAuditFailureKind(record: RouterAuditRecord): RouterFailureKind | null {
   return record.failure_kind ?? classifyRouterFailure(record.reason);
 }
@@ -290,6 +335,26 @@ function routerAuditHasProxyContext(record: RouterAuditRecord): boolean {
 
 function routerFailureKindLabel(kind: RouterFailureKind): string {
   return kind.replaceAll("-", " ");
+}
+
+function routerFailureStageLabel(record: RouterAuditRecord): string | null {
+  const stage = record.router_failure_stage;
+  if (stage === "waiting-output") {
+    return "waiting output";
+  }
+  if (stage === "streaming") {
+    if (record.router_stdout_bytes && record.router_stdout_bytes > 0) {
+      return "after stdout";
+    }
+    if (record.router_stderr_bytes && record.router_stderr_bytes > 0) {
+      return "after stderr";
+    }
+    return "after output";
+  }
+  if (stage === "response") {
+    return "response parse";
+  }
+  return stage ?? null;
 }
 
 function normalizedWorkspace(workspace: string): string {
@@ -323,6 +388,13 @@ function formatDiagnosticDuration(durationMs: number): string {
     return `${Math.round(durationMs)}ms`;
   }
   return `${(durationMs / 1000).toFixed(durationMs % 1000 === 0 ? 0 : 1)}s`;
+}
+
+function formatDiagnosticBytes(bytes: number): string {
+  if (bytes < 1024) {
+    return `${Math.round(bytes)}B`;
+  }
+  return `${(bytes / 1024).toFixed(bytes < 10 * 1024 ? 1 : 0)}KB`;
 }
 
 function routerDiagnosticsContentWidth(terminalWidth: number): number {

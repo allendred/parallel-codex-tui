@@ -189,6 +189,9 @@ describe("package metadata", () => {
     expect(readme).toContain("proxy host/port reachability as a local-endpoint check");
     expect(readme).toContain("parallel-codex-tui --doctor --probe-router");
     expect(readme).toContain("one real classification through the configured Codex Router");
+    expect(readme).toContain("spawn time, first-output time, process duration, stdout/stderr byte counts, and failure stage");
+    expect(readme).toContain("`timeout waiting output`, `timeout after stdout`, or `timeout after stderr`");
+    expect(readme).toContain("`proxy set` remains context, not a claim that the proxy caused the failure");
     expect(readme).toContain("reports the loaded TUI theme, core palette values, ANSI swatch previews, and color override values");
     expect(readme).toContain("including any temporary `--theme` override");
     expect(readme).toContain('OPENAI_API_KEY = "{env:OPENAI_API_KEY}"');

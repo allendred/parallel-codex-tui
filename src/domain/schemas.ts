@@ -3,6 +3,14 @@ import { z } from "zod";
 export const RouteModeSchema = z.enum(["simple", "complex"]);
 export const EngineNameSchema = z.enum(["codex", "claude", "mock"]);
 export const WorkerRoleSchema = z.enum(["main", "judge", "actor", "critic"]);
+export const RouterFailureStageSchema = z.enum([
+  "spawn",
+  "input",
+  "waiting-output",
+  "streaming",
+  "exit",
+  "response"
+]);
 
 export const TaskStateSchema = z.enum([
   "created",
@@ -34,6 +42,14 @@ export const RouteDecisionSchema = z.object({
   reason: z.string().min(1),
   source: z.enum(["codex", "forced", "fallback"]).optional(),
   duration_ms: z.number().nonnegative().optional(),
+  router_spawn_ms: z.number().nonnegative().optional(),
+  router_first_output_ms: z.number().nonnegative().optional(),
+  router_first_stdout_ms: z.number().nonnegative().optional(),
+  router_first_stderr_ms: z.number().nonnegative().optional(),
+  router_process_ms: z.number().nonnegative().optional(),
+  router_stdout_bytes: z.number().int().nonnegative().optional(),
+  router_stderr_bytes: z.number().int().nonnegative().optional(),
+  router_failure_stage: RouterFailureStageSchema.optional(),
   suggested_roles: z.array(WorkerRoleSchema).default([]),
   judge_engine: EngineNameSchema.default("codex"),
   actor_engine: EngineNameSchema.default("codex"),
@@ -101,6 +117,7 @@ export const EventRecordSchema = z.object({
 });
 
 export type RouteMode = z.infer<typeof RouteModeSchema>;
+export type RouterFailureStage = z.infer<typeof RouterFailureStageSchema>;
 export type EngineName = z.infer<typeof EngineNameSchema>;
 export type WorkerRole = z.infer<typeof WorkerRoleSchema>;
 export type TaskState = z.infer<typeof TaskStateSchema>;

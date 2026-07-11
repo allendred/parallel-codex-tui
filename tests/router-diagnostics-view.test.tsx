@@ -61,8 +61,10 @@ describe("RouterDiagnosticsView", () => {
     expect(frame).toContain("policy · auto · 30s / 20s · fallback simple");
     expect(frame).toContain("proxy · configured now · 1 recorded · context only");
     expect(frame).toContain("tetris · initial · simple · codex · 9.7s");
-    expect(frame).toContain("evidence · timeout · limit 30s · proxy configured · cause unproven");
-    expect(frame).toContain("timeout via proxy");
+    const flattened = frame.replace(/\s+/g, " ");
+    expect(flattened).toContain("evidence · timeout · after stderr · limit 30s · proxy configured · cause unproven");
+    expect(flattened).toContain("trace · spawn 8ms · first stderr 24ms · process 30s · stdout 0B · stderr 73B");
+    expect(flattened).toContain("timeout after stderr · proxy set");
     expect(frame).toContain("做个俄罗斯方块");
     expect(frame).not.toContain("user:secret");
     view.unmount();
@@ -163,7 +165,14 @@ function records(): RouterAuditRecord[] {
       duration_ms: 30000,
       router_timeout_ms: 30000,
       proxy_configured: true,
-      failure_kind: "timeout"
+      failure_kind: "timeout",
+      router_failure_stage: "streaming",
+      router_spawn_ms: 8,
+      router_first_output_ms: 24,
+      router_first_stderr_ms: 24,
+      router_process_ms: 30000,
+      router_stdout_bytes: 0,
+      router_stderr_bytes: 73
     }
   ];
 }

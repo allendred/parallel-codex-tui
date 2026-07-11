@@ -77,7 +77,7 @@ export function formatRouteStatus(route: RouteDecision | null): string {
   if (route.source === "fallback") {
     const cause = classifyRouterFailure(route.reason);
     if (cause) {
-      details.push(routeFailureKindLabel(cause, route.reason));
+      details.push(routeFailureKindLabel(cause, route));
     }
   }
   if (typeof route.duration_ms === "number") {
@@ -101,9 +101,21 @@ export function formatRoutePendingStatus(state: RouteStartInfo | null, elapsedMs
   return `route ${label} · ${formatRouteDuration(state.timeoutMs)} max`;
 }
 
-function routeFailureKindLabel(kind: NonNullable<ReturnType<typeof classifyRouterFailure>>, reason: string): string {
-  if (kind === "timeout" && /\bproxy\b|代理/i.test(reason)) {
-    return "timeout via proxy";
+function routeFailureKindLabel(
+  kind: NonNullable<ReturnType<typeof classifyRouterFailure>>,
+  route: RouteDecision
+): string {
+  if (kind === "timeout") {
+    const stage = route.router_failure_stage === "waiting-output"
+      ? "timeout waiting output"
+      : route.router_failure_stage === "streaming"
+        ? route.router_stdout_bytes && route.router_stdout_bytes > 0
+          ? "timeout after stdout"
+          : route.router_stderr_bytes && route.router_stderr_bytes > 0
+            ? "timeout after stderr"
+            : "timeout after output"
+        : "timeout";
+    return /\bproxy\b|代理/i.test(route.reason) ? `${stage} · proxy set` : stage;
   }
   return kind.replaceAll("-", " ");
 }

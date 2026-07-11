@@ -47,7 +47,12 @@ describe("readRouterAudit", () => {
       ...routeRecord("timeout", "fallback"),
       router_timeout_ms: 30000,
       proxy_configured: true,
-      failure_kind: "timeout"
+      failure_kind: "timeout",
+      router_failure_stage: "waiting-output",
+      router_spawn_ms: 12,
+      router_process_ms: 30000,
+      router_stdout_bytes: 0,
+      router_stderr_bytes: 0
     })}\n`);
 
     expect(classifyRouterFailure).toBeTypeOf("function");
@@ -58,7 +63,12 @@ describe("readRouterAudit", () => {
       expect.objectContaining({
         router_timeout_ms: 30000,
         proxy_configured: true,
-        failure_kind: "timeout"
+        failure_kind: "timeout",
+        router_failure_stage: "waiting-output",
+        router_spawn_ms: 12,
+        router_process_ms: 30000,
+        router_stdout_bytes: 0,
+        router_stderr_bytes: 0
       })
     ]);
   });

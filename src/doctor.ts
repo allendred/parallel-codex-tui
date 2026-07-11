@@ -10,6 +10,7 @@ import { ensureDir, pathExists } from "./core/file-store.js";
 import { routerRuntimeDir } from "./core/paths.js";
 import { routeRequestWithCodex, type CodexRouteRunner } from "./core/router.js";
 import { prepareWorkspace } from "./core/workspace.js";
+import type { RouteDecision } from "./domain/schemas.js";
 import { auditTuiThemeContrast, TUI_THEME_MIN_CONTRAST_RATIO, type TuiThemeContrastAudit } from "./tui/theme-contrast.js";
 import { formatTuiThemePreview } from "./tui/theme-preview.js";
 import { resolveTuiTheme } from "./tui/theme.js";
@@ -205,14 +206,16 @@ async function runRouterProbe(
   try {
     const route = await routeRequestWithCodex("hello", probeConfig, runner, cwd);
     if (route.source === "codex") {
+      const trace = formatRouterProbeTrace(route, false);
       return {
         ok: true,
-        line: `router live probe: ok (${route.mode} in ${Math.round(route.duration_ms ?? 0)}ms)`
+        line: `router live probe: ok (${route.mode} in ${Math.round(route.duration_ms ?? 0)}ms${trace ? `; ${trace}` : ""})`
       };
     }
+    const trace = formatRouterProbeTrace(route, true);
     return {
       ok: false,
-      line: `router live probe: failed (${sanitizeDiagnosticText(route.reason)})`
+      line: `router live probe: failed (${sanitizeDiagnosticText(route.reason)}${trace ? `; ${trace}` : ""})`
     };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
@@ -221,6 +224,42 @@ async function runRouterProbe(
       line: `router live probe: failed (${sanitizeDiagnosticText(message)})`
     };
   }
+}
+
+function formatRouterProbeTrace(route: RouteDecision, includeStage: boolean): string {
+  return [
+    ...(includeStage && route.router_failure_stage ? [`stage ${route.router_failure_stage}`] : []),
+    ...(typeof route.router_spawn_ms === "number" ? [`spawn ${Math.round(route.router_spawn_ms)}ms`] : []),
+    ...formatRouterProbeFirstOutput(route),
+    ...(typeof route.router_process_ms === "number" ? [`process ${Math.round(route.router_process_ms)}ms`] : []),
+    ...(typeof route.router_stdout_bytes === "number" ? [`stdout ${formatRouterProbeBytes(route.router_stdout_bytes)}`] : []),
+    ...(typeof route.router_stderr_bytes === "number" ? [`stderr ${formatRouterProbeBytes(route.router_stderr_bytes)}`] : [])
+  ].join("; ");
+}
+
+function formatRouterProbeFirstOutput(route: RouteDecision): string[] {
+  const streams = [
+    ...(typeof route.router_first_stdout_ms === "number"
+      ? [`first stdout ${Math.round(route.router_first_stdout_ms)}ms`]
+      : []),
+    ...(typeof route.router_first_stderr_ms === "number"
+      ? [`first stderr ${Math.round(route.router_first_stderr_ms)}ms`]
+      : [])
+  ];
+  if (streams.length > 0) {
+    return streams;
+  }
+  if (typeof route.router_first_output_ms === "number") {
+    return [`first output ${Math.round(route.router_first_output_ms)}ms`];
+  }
+  return route.router_failure_stage === "waiting-output" ? ["first output none"] : [];
+}
+
+function formatRouterProbeBytes(bytes: number): string {
+  if (bytes < 1024) {
+    return `${Math.round(bytes)}B`;
+  }
+  return `${(bytes / 1024).toFixed(bytes < 10 * 1024 ? 1 : 0)}KB`;
 }
 
 function sanitizeDiagnosticText(value: string): string {

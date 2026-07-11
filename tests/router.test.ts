@@ -246,6 +246,17 @@ describe("routeRequestWithCodex", () => {
     expect(route.reason).not.toContain("user:secret");
     expect(route.duration_ms).toBeGreaterThanOrEqual(150);
     expect(route.duration_ms).toBeLessThan(1000);
+    expect(route).toMatchObject({
+      router_failure_stage: "streaming",
+      router_spawn_ms: expect.any(Number),
+      router_first_output_ms: expect.any(Number),
+      router_first_stderr_ms: expect.any(Number),
+      router_process_ms: expect.any(Number),
+      router_stdout_bytes: 0,
+      router_stderr_bytes: expect.any(Number)
+    });
+    expect(route.router_stderr_bytes).toBeGreaterThan(0);
+    expect(route.router_first_stdout_ms).toBeUndefined();
   });
 
   it("records configured proxy context when a stalled router is silent", async () => {
@@ -262,6 +273,34 @@ describe("routeRequestWithCodex", () => {
 
     expect(route.reason).toContain("timed out after 200ms with proxy configured");
     expect(route.reason).not.toContain("user:secret");
+    expect(route).toMatchObject({
+      router_failure_stage: "waiting-output",
+      router_spawn_ms: expect.any(Number),
+      router_process_ms: expect.any(Number),
+      router_stdout_bytes: 0,
+      router_stderr_bytes: 0
+    });
+    expect(route.router_first_output_ms).toBeUndefined();
+  });
+
+  it("records response-stage telemetry when a successful process returns invalid output", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pct-router-invalid-response-"));
+    const config = defaultConfig(root);
+    config.router.codex.command = process.execPath;
+    config.router.codex.args = ["-e", "process.stdout.write('not json')"];
+
+    const route = await routeRequestWithCodex("你好", config, undefined, root);
+
+    expect(route).toMatchObject({
+      source: "fallback",
+      router_failure_stage: "response",
+      router_spawn_ms: expect.any(Number),
+      router_first_output_ms: expect.any(Number),
+      router_first_stdout_ms: expect.any(Number),
+      router_process_ms: expect.any(Number),
+      router_stdout_bytes: 8,
+      router_stderr_bytes: 0
+    });
   });
 
   it("redacts proxy credentials from arbitrary Router failures before audit persistence", async () => {
@@ -291,6 +330,12 @@ describe("routeRequestWithCodex", () => {
     });
     expect(route.reason).toContain("Codex router input failed");
     expect(route.duration_ms).toBeLessThan(1500);
+    expect(route).toMatchObject({
+      router_failure_stage: "input",
+      router_process_ms: expect.any(Number),
+      router_stdout_bytes: 0,
+      router_stderr_bytes: 0
+    });
   }, 5000);
 
   it("passes configured environment variables to the router process", async () => {
@@ -311,8 +356,16 @@ describe("routeRequestWithCodex", () => {
     expect(route).toMatchObject({
       mode: "simple",
       source: "codex",
-      reason: "proxy environment reached router"
+      reason: "proxy environment reached router",
+      router_spawn_ms: expect.any(Number),
+      router_first_output_ms: expect.any(Number),
+      router_first_stdout_ms: expect.any(Number),
+      router_process_ms: expect.any(Number),
+      router_stdout_bytes: expect.any(Number),
+      router_stderr_bytes: 0
     });
+    expect(route.router_stdout_bytes).toBeGreaterThan(0);
+    expect(route.router_first_stderr_ms).toBeUndefined();
   });
 
   it("summarizes noisy Codex router process errors before adding fallback reason", async () => {

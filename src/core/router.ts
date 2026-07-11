@@ -1,9 +1,34 @@
 import { spawn } from "node:child_process";
 import type { AppConfig } from "./config.js";
-import type { RouteDecision } from "../domain/schemas.js";
+import type { RouteDecision, RouterFailureStage } from "../domain/schemas.js";
 import { RouteDecisionSchema } from "../domain/schemas.js";
 
-export type CodexRouteRunner = (prompt: string, config: AppConfig, cwd: string, signal?: AbortSignal) => Promise<string>;
+export interface RouterExecutionTelemetry {
+  router_spawn_ms?: number;
+  router_first_output_ms?: number;
+  router_first_stdout_ms?: number;
+  router_first_stderr_ms?: number;
+  router_process_ms?: number;
+  router_stdout_bytes?: number;
+  router_stderr_bytes?: number;
+}
+
+export interface CodexRouteRunnerResult {
+  output: string;
+  telemetry?: RouterExecutionTelemetry;
+}
+
+export type CodexRouteRunner = (
+  prompt: string,
+  config: AppConfig,
+  cwd: string,
+  signal?: AbortSignal
+) => Promise<string | CodexRouteRunnerResult>;
+
+interface RouterExecutionError extends Error {
+  routerTelemetry?: RouterExecutionTelemetry;
+  routerFailureStage?: RouterFailureStage;
+}
 
 export async function routeRequestWithCodex(
   request: string,
@@ -25,16 +50,25 @@ export async function routeRequestWithCodex(
   }
 
   try {
-    const output = await runner(buildCodexRouterPrompt(request, config), config, cwd, signal);
-    const route = parseCodexRoute(output, config);
-    return annotateRoute(RouteDecisionSchema.parse(route), "codex", startedAt);
+    const result = normalizeRouterRunnerResult(
+      await runner(buildCodexRouterPrompt(request, config), config, cwd, signal)
+    );
+    let route: RouteDecision;
+    try {
+      route = parseCodexRoute(result.output, config);
+    } catch (error) {
+      throw routerExecutionError(error, result.telemetry, "response");
+    }
+    return annotateRoute(RouteDecisionSchema.parse(route), "codex", startedAt, result.telemetry);
   } catch (error) {
     if (signal?.aborted || isAbortError(error)) {
       throw cancellationError();
     }
-    const fallback = annotateRoute(fallbackRoute(config), "fallback", startedAt);
+    const context = routerExecutionErrorContext(error);
+    const fallback = annotateRoute(fallbackRoute(config), "fallback", startedAt, context.telemetry);
     return {
       ...fallback,
+      ...(context.stage ? { router_failure_stage: context.stage } : {}),
       reason: `Codex router failed: ${summarizeRouterError(error)}. ${fallback.reason}`
     };
   }
@@ -43,10 +77,12 @@ export async function routeRequestWithCodex(
 function annotateRoute(
   route: RouteDecision,
   source: NonNullable<RouteDecision["source"]>,
-  startedAt: number
+  startedAt: number,
+  telemetry?: RouterExecutionTelemetry
 ): RouteDecision {
   return {
     ...route,
+    ...normalizeRouterTelemetry(telemetry),
     source,
     duration_ms: Math.max(0, Date.now() - startedAt)
   };
@@ -57,7 +93,7 @@ export async function runCodexRouterProcess(
   config: AppConfig,
   cwd = config.projectRoot,
   signal?: AbortSignal
-): Promise<string> {
+): Promise<CodexRouteRunnerResult> {
   const { command, args, timeoutMs } = config.router.codex;
 
   if (signal?.aborted) {
@@ -71,7 +107,8 @@ export async function runCodexRouterProcess(
   };
   const proxyConfigured = hasConfiguredProxy(env);
 
-  return new Promise<string>((resolve, reject) => {
+  return new Promise<CodexRouteRunnerResult>((resolve, reject) => {
+    const processStartedAt = Date.now();
     const child = spawn(command, args, {
       cwd,
       env,
@@ -79,11 +116,31 @@ export async function runCodexRouterProcess(
     });
     let stdout = "";
     let stderr = "";
+    let stdoutBytes = 0;
+    let stderrBytes = 0;
+    let spawnMs: number | undefined;
+    let firstOutputMs: number | undefined;
+    let firstStdoutMs: number | undefined;
+    let firstStderrMs: number | undefined;
     let settled = false;
     let timeout: NodeJS.Timeout | undefined;
     let abortListener: (() => void) | undefined;
 
-    const finish = (error: Error | null, output = stdout): void => {
+    const telemetry = (): RouterExecutionTelemetry => ({
+      ...(typeof spawnMs === "number" ? { router_spawn_ms: spawnMs } : {}),
+      ...(typeof firstOutputMs === "number" ? { router_first_output_ms: firstOutputMs } : {}),
+      ...(typeof firstStdoutMs === "number" ? { router_first_stdout_ms: firstStdoutMs } : {}),
+      ...(typeof firstStderrMs === "number" ? { router_first_stderr_ms: firstStderrMs } : {}),
+      router_process_ms: Math.max(0, Date.now() - processStartedAt),
+      router_stdout_bytes: stdoutBytes,
+      router_stderr_bytes: stderrBytes
+    });
+
+    const finish = (
+      error: Error | null,
+      output = stdout,
+      stage?: RouterFailureStage
+    ): void => {
       if (settled) {
         return;
       }
@@ -95,9 +152,9 @@ export async function runCodexRouterProcess(
         signal?.removeEventListener("abort", abortListener);
       }
       if (error) {
-        reject(error);
+        reject(stage ? routerExecutionError(error, telemetry(), stage) : error);
       } else {
-        resolve(output);
+        resolve({ output, telemetry: telemetry() });
       }
     };
 
@@ -114,6 +171,10 @@ export async function runCodexRouterProcess(
     };
     signal?.addEventListener("abort", abortListener, { once: true });
 
+    child.once("spawn", () => {
+      spawnMs = Math.max(0, Date.now() - processStartedAt);
+    });
+
     if (timeoutMs > 0) {
       timeout = setTimeout(() => {
         terminate();
@@ -121,20 +182,31 @@ export async function runCodexRouterProcess(
         const proxyContext = proxyConfigured && !/\bproxy\b|代理/i.test(detail)
           ? " with proxy configured"
           : "";
-        finish(new Error(`Codex router timed out after ${timeoutMs}ms${proxyContext}${detail ? `: ${detail}` : ""}`));
+        const stage = stdoutBytes + stderrBytes === 0 ? "waiting-output" : "streaming";
+        finish(
+          new Error(`Codex router timed out after ${timeoutMs}ms${proxyContext}${detail ? `: ${detail}` : ""}`),
+          stdout,
+          stage
+        );
       }, timeoutMs);
     }
 
     child.stdout.on("data", (chunk: Buffer) => {
+      stdoutBytes += chunk.byteLength;
+      firstOutputMs ??= Math.max(0, Date.now() - processStartedAt);
+      firstStdoutMs ??= Math.max(0, Date.now() - processStartedAt);
       stdout += chunk.toString("utf8");
     });
 
     child.stderr.on("data", (chunk: Buffer) => {
+      stderrBytes += chunk.byteLength;
+      firstOutputMs ??= Math.max(0, Date.now() - processStartedAt);
+      firstStderrMs ??= Math.max(0, Date.now() - processStartedAt);
       stderr += chunk.toString("utf8");
     });
 
     child.on("error", (error) => {
-      finish(error);
+      finish(error, stdout, "spawn");
     });
 
     child.on("close", (code, signal) => {
@@ -147,17 +219,77 @@ export async function runCodexRouterProcess(
       finish(
         new Error(
           `Codex router exited with ${signal ? `signal ${signal}` : `code ${code ?? 1}`}${detail ? `: ${detail}` : ""}`
-        )
+        ),
+        stdout,
+        "exit"
       );
     });
 
     child.stdin.once("error", (error) => {
       terminate();
-      finish(new Error(`Codex router input failed: ${error.message}`));
+      finish(new Error(`Codex router input failed: ${error.message}`), stdout, "input");
     });
 
     child.stdin.end(prompt);
   });
+}
+
+function normalizeRouterRunnerResult(result: string | CodexRouteRunnerResult): CodexRouteRunnerResult {
+  return typeof result === "string"
+    ? { output: result }
+    : { output: result.output, telemetry: normalizeRouterTelemetry(result.telemetry) };
+}
+
+function normalizeRouterTelemetry(
+  telemetry: RouterExecutionTelemetry | undefined
+): RouterExecutionTelemetry | undefined {
+  if (!telemetry) {
+    return undefined;
+  }
+  const normalized: RouterExecutionTelemetry = {};
+  for (const key of [
+    "router_spawn_ms",
+    "router_first_output_ms",
+    "router_first_stdout_ms",
+    "router_first_stderr_ms",
+    "router_process_ms",
+    "router_stdout_bytes",
+    "router_stderr_bytes"
+  ] as const) {
+    const value = telemetry[key];
+    if (typeof value !== "number" || !Number.isFinite(value) || value < 0) {
+      continue;
+    }
+    normalized[key] = key.endsWith("_bytes") ? Math.trunc(value) : value;
+  }
+  return normalized;
+}
+
+function routerExecutionError(
+  error: unknown,
+  telemetry: RouterExecutionTelemetry | undefined,
+  stage: RouterFailureStage
+): RouterExecutionError {
+  const source = error instanceof Error ? error : new Error(String(error));
+  const wrapped = new Error(source.message) as RouterExecutionError;
+  wrapped.name = source.name;
+  wrapped.routerTelemetry = normalizeRouterTelemetry(telemetry);
+  wrapped.routerFailureStage = stage;
+  return wrapped;
+}
+
+function routerExecutionErrorContext(error: unknown): {
+  telemetry?: RouterExecutionTelemetry;
+  stage?: RouterFailureStage;
+} {
+  if (!(error instanceof Error)) {
+    return {};
+  }
+  const executionError = error as RouterExecutionError;
+  return {
+    ...(executionError.routerTelemetry ? { telemetry: executionError.routerTelemetry } : {}),
+    ...(executionError.routerFailureStage ? { stage: executionError.routerFailureStage } : {})
+  };
 }
 
 function routerEnvironment(

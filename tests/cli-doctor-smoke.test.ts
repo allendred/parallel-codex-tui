@@ -99,7 +99,7 @@ describe("CLI doctor", () => {
 
     expect(result.exitCode).toBe(0);
     expect(result.stderr).toBe("");
-    expect(result.stdout).toMatch(/router live probe: ok \(simple in \d+ms\)/);
+    expect(result.stdout).toMatch(/router live probe: ok \(simple in \d+ms; spawn \d+ms; first stdout \d+ms; process \d+ms; stdout \d+B; stderr 0B\)/);
   });
 
   it("fails an explicit live Router probe with a useful authentication reason", async () => {
@@ -124,6 +124,8 @@ describe("CLI doctor", () => {
     expect(result.stderr).toBe("");
     expect(result.stdout).toContain("router live probe: failed");
     expect(result.stdout).toContain("HTTP 401 Unauthorized: sign in required");
+    expect(result.stdout).toContain("stage exit");
+    expect(result.stdout).toMatch(/spawn \d+ms; first stderr \d+ms; process \d+ms; stdout 0B; stderr \d+B/);
   });
 
   it("accepts equals-style workspace values in command mode", async () => {
