@@ -348,14 +348,17 @@ describe("routeRequestWithCodex", () => {
         `writeFileSync(${JSON.stringify(cleanupPath)},'done');`,
         "process.exit(0);",
         "},120));",
+        "process.stderr.write('ready\\n');",
         "setInterval(()=>{},1000);"
       ].join("")
     ];
-    config.router.codex.timeoutMs = 100;
+    config.router.codex.timeoutMs = 2000;
+    config.router.codex.firstOutputTimeoutMs = 1000;
+    config.router.codex.idleTimeoutMs = 100;
 
     const route = await routeRequestWithCodex("你好", config, undefined, root);
 
-    expect(route).toMatchObject({ source: "fallback", router_timeout_kind: "total" });
+    expect(route).toMatchObject({ source: "fallback", router_timeout_kind: "idle" });
     await expect(readFile(cleanupPath, "utf8")).resolves.toBe("done");
     expect(route.duration_ms).toBeGreaterThanOrEqual(180);
   });
@@ -375,17 +378,20 @@ describe("routeRequestWithCodex", () => {
         "const {writeFileSync}=require('node:fs');",
         `writeFileSync(${JSON.stringify(pidPath)},String(process.pid));`,
         "process.on('SIGTERM',()=>{});",
+        "process.stderr.write('ready\\n');",
         "setInterval(()=>{},1000);"
       ].join("")
     ];
-    config.router.codex.timeoutMs = 100;
+    config.router.codex.timeoutMs = 2000;
+    config.router.codex.firstOutputTimeoutMs = 1000;
+    config.router.codex.idleTimeoutMs = 100;
 
     let pid = 0;
     try {
       const route = await routeRequestWithCodex("你好", config, undefined, root);
       pid = Number(await readFile(pidPath, "utf8"));
 
-      expect(route).toMatchObject({ source: "fallback", router_timeout_kind: "total" });
+      expect(route).toMatchObject({ source: "fallback", router_timeout_kind: "idle" });
       expect(processIsAlive(pid)).toBe(false);
     } finally {
       killProcessGroupIfAlive(pid);
@@ -505,10 +511,13 @@ describe("routeRequestWithCodex", () => {
       [
         "const {writeFileSync}=require('node:fs');",
         `writeFileSync(${JSON.stringify(pidPath)},String(process.pid));`,
+        "process.stderr.write('ready\\n');",
         "setInterval(()=>{},1000);"
       ].join("")
     ];
-    config.router.codex.timeoutMs = 150;
+    config.router.codex.timeoutMs = 2000;
+    config.router.codex.firstOutputTimeoutMs = 1000;
+    config.router.codex.idleTimeoutMs = 100;
     const originalKill = process.kill.bind(process);
     const killSpy = vi.spyOn(process, "kill").mockImplementation((pid, signal) => {
       if (typeof pid === "number" && pid < 0 && signal === "SIGTERM") {
@@ -526,7 +535,7 @@ describe("routeRequestWithCodex", () => {
       pid = Number(await readFile(pidPath, "utf8"));
 
       expect(error).toMatchObject({
-        name: "RouterProcessCleanupError",
+        name: "ProcessTreeCleanupError",
         message: expect.stringContaining(`Could not terminate Codex router process ${pid}`)
       });
       expect(error).not.toMatchObject({ source: "fallback" });

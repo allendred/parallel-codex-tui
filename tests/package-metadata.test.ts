@@ -274,6 +274,10 @@ describe("package metadata", () => {
     expect(readme).toContain("persist `process.json` with their PID and OS process-start fingerprint");
     expect(readme).toContain("the role prompt is sent only after that ownership evidence is durable");
     expect(readme).toContain("the process group is terminated before it receives the prompt");
+    expect(readme).toContain("Worker cleanup is shown as `running/process-stopping`");
+    expect(readme).toContain("normal parent exit also terminates any remaining descendants");
+    expect(readme).toContain("`process-cleanup-error` and keeps `process.json`");
+    expect(readme).toContain("A `process-cleanup-error` or `process-ownership-error` always blocks native-session fallback");
     expect(readme).toContain("A reused PID with a different start fingerprint is never signalled");
     expect(readme).toContain("Recovery commits cancellation only after every recorded process group is confirmed stopped");
     expect(readme).toContain("An unverifiable or still-running process blocks startup");

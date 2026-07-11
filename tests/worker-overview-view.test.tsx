@@ -139,6 +139,20 @@ describe("WorkerOverviewView", () => {
       text: "activity · no output for 5m 5s · idle timeout overdue 5s",
       tone: "danger"
     });
+    expect(activityLine?.(
+      worker({
+        id: "stopping",
+        label: "Actor (codex)",
+        state: "running",
+        phase: "process-stopping",
+        summary: "stopping process tree"
+      }),
+      Date.parse("2026-07-11T08:00:02.000Z"),
+      { idleTimeoutMs: 5 * 60 * 1000 }
+    )).toEqual({
+      text: "activity · stopping process tree · 2s elapsed",
+      tone: "warning"
+    });
     expect(activityLine?.(workers()[0]!, Date.parse("2026-07-11T08:10:00.000Z"), {
       idleTimeoutMs: 5 * 60 * 1000
     })).toBeNull();

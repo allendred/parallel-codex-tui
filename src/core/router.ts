@@ -1,13 +1,10 @@
-import { spawn, type ChildProcess } from "node:child_process";
+import { spawn } from "node:child_process";
 import { performance } from "node:perf_hooks";
 import type { AppConfig } from "./config.js";
 import type { RouteDecision, RouterFailureStage, RouterProxySource, RouterTimeoutKind } from "../domain/schemas.js";
 import { RouteDecisionSchema } from "../domain/schemas.js";
+import { ProcessTreeCleanupError, terminateProcessTree } from "./process-tree.js";
 import { sanitizeRouterText } from "./router-redaction.js";
-
-const ROUTER_TERM_GRACE_MS = 250;
-const ROUTER_KILL_WAIT_MS = 500;
-const ROUTER_EXIT_POLL_MS = 20;
 
 export interface RouterExecutionTelemetry {
   router_dispatch_ms?: number;
@@ -65,13 +62,6 @@ interface RouterExecutionError extends Error {
   routerTimeoutKind?: RouterTimeoutKind;
 }
 
-class RouterProcessCleanupError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = "RouterProcessCleanupError";
-  }
-}
-
 export async function routeRequestWithCodex(
   request: string,
   config: AppConfig,
@@ -118,7 +108,7 @@ export async function routeRequestWithCodex(
       router_parse_ms: Math.max(0, performance.now() - parseStartedAt)
     }), proxyContext);
   } catch (error) {
-    if (error instanceof RouterProcessCleanupError) {
+    if (error instanceof ProcessTreeCleanupError) {
       throw error;
     }
     if (signal?.aborted || isAbortError(error)) {
@@ -268,12 +258,18 @@ export async function runCodexRouterProcess(
         signal?.removeEventListener("abort", abortListener);
         abortListener = undefined;
       }
-      void terminateRouterProcess(child, detached).then(
+      void terminateProcessTree(child, {
+        processGroup: detached,
+        label: "Codex router process",
+        termGraceMs: 250,
+        killWaitMs: 500,
+        pollMs: 20
+      }).then(
         () => finish(error, output, stage, timeoutKind),
         (cleanupError: unknown) => finish(
-          cleanupError instanceof RouterProcessCleanupError
+          cleanupError instanceof ProcessTreeCleanupError
             ? cleanupError
-            : new RouterProcessCleanupError(`Codex router cleanup failed: ${errorMessage(cleanupError)}`)
+            : new ProcessTreeCleanupError(`Codex router cleanup failed: ${errorMessage(cleanupError)}`)
         )
       );
     };
@@ -408,91 +404,8 @@ export async function runCodexRouterProcess(
   });
 }
 
-async function terminateRouterProcess(child: ChildProcess, processGroup: boolean): Promise<void> {
-  const pid = child.pid;
-  if (!pid) {
-    return;
-  }
-  try {
-    signalRouterProcess(pid, "SIGTERM", processGroup);
-    if (await waitForRouterProcessExit(child, processGroup, ROUTER_TERM_GRACE_MS)) {
-      return;
-    }
-    signalRouterProcess(pid, "SIGKILL", processGroup);
-    if (await waitForRouterProcessExit(child, processGroup, ROUTER_KILL_WAIT_MS)) {
-      return;
-    }
-  } catch (error) {
-    throw new RouterProcessCleanupError(
-      `Could not terminate Codex router process ${pid}: ${errorMessage(error)}`
-    );
-  }
-  throw new RouterProcessCleanupError(
-    `Codex router process group ${pid} remained alive after SIGKILL.`
-  );
-}
-
-async function waitForRouterProcessExit(
-  child: ChildProcess,
-  processGroup: boolean,
-  timeoutMs: number
-): Promise<boolean> {
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
-    if (!routerProcessTargetIsAlive(child, processGroup)) {
-      return true;
-    }
-    await delay(ROUTER_EXIT_POLL_MS);
-  }
-  return !routerProcessTargetIsAlive(child, processGroup);
-}
-
-function routerProcessTargetIsAlive(child: ChildProcess, processGroup: boolean): boolean {
-  const pid = child.pid;
-  if (!pid) {
-    return false;
-  }
-  if (processGroup && signalTargetIsAlive(-pid)) {
-    return true;
-  }
-  if (child.exitCode !== null || child.signalCode !== null) {
-    return false;
-  }
-  return signalTargetIsAlive(pid);
-}
-
-function signalTargetIsAlive(pid: number): boolean {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch (error) {
-    return (error as NodeJS.ErrnoException).code === "EPERM";
-  }
-}
-
-async function delay(milliseconds: number): Promise<void> {
-  await new Promise((resolve) => setTimeout(resolve, milliseconds));
-}
-
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
-}
-
-function signalRouterProcess(
-  pid: number | undefined,
-  signal: NodeJS.Signals,
-  processGroup: boolean
-): void {
-  if (!pid) {
-    return;
-  }
-  try {
-    process.kill(processGroup ? -pid : pid, signal);
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== "ESRCH") {
-      throw error;
-    }
-  }
 }
 
 function normalizeRouterRunnerResult(result: string | CodexRouteRunnerResult): CodexRouteRunnerResult {

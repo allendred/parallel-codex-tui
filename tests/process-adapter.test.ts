@@ -1,7 +1,7 @@
-import { mkdtemp } from "node:fs/promises";
+import { mkdtemp, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { pathExists, readJson, readTextIfExists, writeText } from "../src/core/file-store.js";
 import { processIsAlive, workerProcessRecordPath } from "../src/core/process-ownership.js";
 import { WorkerStatusSchema } from "../src/domain/schemas.js";
@@ -462,6 +462,10 @@ describe("ProcessWorkerAdapter", () => {
 
     await waitForStatusPhase(statusPath, "process-output");
     controller.abort();
+    await expect(waitForStatusPhase(statusPath, "process-stopping")).resolves.toMatchObject({
+      state: "running",
+      phase: "process-stopping"
+    });
     const result = await running;
 
     expect(result.cancelled).toBe(true);
@@ -542,6 +546,182 @@ describe("ProcessWorkerAdapter", () => {
       state: "failed",
       phase: "process-timeout"
     });
+  }, 5000);
+
+  it("does not finish a timed-out worker while a descendant remains alive", async () => {
+    if (process.platform === "win32") {
+      return;
+    }
+
+    const root = await mkdtemp(join(tmpdir(), "pct-process-descendant-timeout-"));
+    const filesDir = join(root, "actor-mock");
+    const promptPath = join(filesDir, "prompt.md");
+    const outputLogPath = join(filesDir, "output.log");
+    const statusPath = join(filesDir, "status.json");
+    const parentPidPath = join(root, "parent.pid");
+    const childPidPath = join(root, "child.pid");
+    const descendantScript = [
+      "const {writeFileSync}=require('node:fs');",
+      `writeFileSync(${JSON.stringify(childPidPath)},String(process.pid));`,
+      "process.on('SIGTERM',()=>{});",
+      "process.send?.('ready');",
+      "setInterval(()=>{},1000);"
+    ].join("");
+    const script = [
+      "const {spawn}=require('node:child_process');",
+      "const {writeFileSync}=require('node:fs');",
+      `writeFileSync(${JSON.stringify(parentPidPath)},String(process.pid));`,
+      `const child=spawn(process.execPath,['-e',${JSON.stringify(descendantScript)}],{stdio:['ignore','ignore','ignore','ipc']});`,
+      "child.once('message',()=>console.log('descendant ready'));",
+      "setInterval(()=>{},1000);"
+    ].join("");
+    const adapter = new ProcessWorkerAdapter(process.execPath, ["-e", script]);
+
+    let parentPid = 0;
+    let childPid = 0;
+    try {
+      const result = await adapter.run({
+        workerId: "actor-descendant-timeout",
+        role: "actor",
+        engine: "mock",
+        cwd: root,
+        filesDir,
+        promptPath,
+        outputLogPath,
+        statusPath,
+        prompt: "stop every descendant",
+        timeoutMs: 2000,
+        idleTimeoutMs: 150
+      });
+      parentPid = Number(await readFile(parentPidPath, "utf8"));
+      childPid = Number(await readFile(childPidPath, "utf8"));
+
+      expect(result.failure?.phase).toBe("process-idle-timeout");
+      expect(processIsAlive(parentPid)).toBe(false);
+      expect(processIsAlive(childPid)).toBe(false);
+      expect(await pathExists(workerProcessRecordPath(filesDir))).toBe(false);
+    } finally {
+      killProcessGroupIfAlive(parentPid, childPid);
+    }
+  }, 5000);
+
+  it("cleans up Worker descendants after a successful parent exit", async () => {
+    if (process.platform === "win32") {
+      return;
+    }
+
+    const root = await mkdtemp(join(tmpdir(), "pct-process-descendant-success-"));
+    const filesDir = join(root, "actor-mock");
+    const promptPath = join(filesDir, "prompt.md");
+    const outputLogPath = join(filesDir, "output.log");
+    const statusPath = join(filesDir, "status.json");
+    const parentPidPath = join(root, "parent.pid");
+    const childPidPath = join(root, "child.pid");
+    const descendantScript = [
+      "const {writeFileSync}=require('node:fs');",
+      `writeFileSync(${JSON.stringify(childPidPath)},String(process.pid));`,
+      "process.on('SIGTERM',()=>{});",
+      "process.send?.('ready');",
+      "process.disconnect?.();",
+      "setInterval(()=>{},1000);"
+    ].join("");
+    const script = [
+      "const {spawn}=require('node:child_process');",
+      "const {writeFileSync}=require('node:fs');",
+      `writeFileSync(${JSON.stringify(parentPidPath)},String(process.pid));`,
+      `const child=spawn(process.execPath,['-e',${JSON.stringify(descendantScript)}],{stdio:['ignore','ignore','ignore','ipc']});`,
+      "child.once('message',()=>{console.log('parent done');process.exit(0)});"
+    ].join("");
+    const adapter = new ProcessWorkerAdapter(process.execPath, ["-e", script]);
+
+    let parentPid = 0;
+    let childPid = 0;
+    try {
+      const result = await adapter.run({
+        workerId: "actor-descendant-success",
+        role: "actor",
+        engine: "mock",
+        cwd: root,
+        filesDir,
+        promptPath,
+        outputLogPath,
+        statusPath,
+        prompt: "finish cleanly",
+        timeoutMs: 2000
+      });
+      parentPid = Number(await readFile(parentPidPath, "utf8"));
+      childPid = Number(await readFile(childPidPath, "utf8"));
+
+      expect(result.exitCode).toBe(0);
+      expect(result.failure).toBeUndefined();
+      expect(processIsAlive(parentPid)).toBe(false);
+      expect(processIsAlive(childPid)).toBe(false);
+      expect(await pathExists(workerProcessRecordPath(filesDir))).toBe(false);
+    } finally {
+      killProcessGroupIfAlive(parentPid, childPid);
+    }
+  }, 5000);
+
+  it("fails closed and keeps ownership evidence when Worker cleanup is denied", async () => {
+    if (process.platform === "win32") {
+      return;
+    }
+
+    const root = await mkdtemp(join(tmpdir(), "pct-process-cleanup-denied-"));
+    const filesDir = join(root, "actor-mock");
+    const promptPath = join(filesDir, "prompt.md");
+    const outputLogPath = join(filesDir, "output.log");
+    const statusPath = join(filesDir, "status.json");
+    const pidPath = join(root, "worker.pid");
+    const script = [
+      "const {writeFileSync}=require('node:fs');",
+      `writeFileSync(${JSON.stringify(pidPath)},String(process.pid));`,
+      "console.log('ready');",
+      "setInterval(()=>{},1000);"
+    ].join("");
+    const adapter = new ProcessWorkerAdapter(process.execPath, ["-e", script]);
+    const originalKill = process.kill.bind(process);
+    const killSpy = vi.spyOn(process, "kill").mockImplementation((pid, signal) => {
+      if (typeof pid === "number" && pid < 0 && signal === "SIGTERM") {
+        const error = new Error("operation not permitted") as NodeJS.ErrnoException;
+        error.code = "EPERM";
+        throw error;
+      }
+      return originalKill(pid, signal);
+    });
+
+    let pid = 0;
+    try {
+      const result = await adapter.run({
+        workerId: "actor-cleanup-denied",
+        role: "actor",
+        engine: "mock",
+        cwd: root,
+        filesDir,
+        promptPath,
+        outputLogPath,
+        statusPath,
+        prompt: "fail closed",
+        timeoutMs: 2000,
+        idleTimeoutMs: 150
+      });
+      pid = Number(await readFile(pidPath, "utf8"));
+
+      expect(result.failure).toMatchObject({
+        phase: "process-cleanup-error",
+        summary: expect.stringContaining(`Could not terminate ${process.execPath} worker process ${pid}`)
+      });
+      await expect(readJson(statusPath, WorkerStatusSchema)).resolves.toMatchObject({
+        state: "failed",
+        phase: "process-cleanup-error"
+      });
+      expect(await pathExists(workerProcessRecordPath(filesDir))).toBe(true);
+      expect(processIsAlive(pid)).toBe(true);
+      expect(await readTextIfExists(outputLogPath)).toContain("Process tree cleanup failed");
+    } finally {
+      killSpy.mockRestore();
+      killProcessGroupIfAlive(pid, pid);
+    }
   }, 5000);
 
   it("fails cleanly when a worker closes stdin before receiving the prompt", async () => {
@@ -1090,6 +1270,89 @@ describe("ProcessWorkerAdapter", () => {
     expect(output).not.toContain("normal should not run");
   });
 
+  it("does not start a fresh native session after process cleanup fails", async () => {
+    if (process.platform === "win32") {
+      return;
+    }
+
+    const root = await mkdtemp(join(tmpdir(), "pct-process-resume-cleanup-failure-"));
+    const filesDir = join(root, "actor-mock");
+    const promptPath = join(filesDir, "prompt.md");
+    const outputLogPath = join(filesDir, "output.log");
+    const statusPath = join(filesDir, "status.json");
+    const pidsPath = join(root, "worker-pids.txt");
+    const script = [
+      "const {appendFileSync}=require('node:fs');",
+      `appendFileSync(${JSON.stringify(pidsPath)},String(process.pid)+'\\n');`,
+      "console.error('ERROR: context window is full; start a new thread');",
+      "setInterval(()=>{},1000);"
+    ].join("");
+    const retired: string[] = [];
+    const originalKill = process.kill.bind(process);
+    const killSpy = vi.spyOn(process, "kill").mockImplementation((pid, signal) => {
+      if (typeof pid === "number" && pid < 0 && signal === "SIGTERM") {
+        const error = new Error("operation not permitted") as NodeJS.ErrnoException;
+        error.code = "EPERM";
+        throw error;
+      }
+      return originalKill(pid, signal);
+    });
+
+    await writeText(promptPath, "resume prompt");
+    const adapter = new ProcessWorkerAdapter(process.execPath, ["-e", script]);
+    let pids: number[] = [];
+    try {
+      const result = await adapter.run({
+        workerId: "actor-cleanup-failed-resume",
+        role: "actor",
+        engine: "mock",
+        cwd: root,
+        filesDir,
+        promptPath,
+        outputLogPath,
+        statusPath,
+        prompt: "resume prompt",
+        timeoutMs: 2000,
+        idleTimeoutMs: 150,
+        nativeSession: {
+          engine: "mock",
+          role: "actor",
+          worker_id: "actor-cleanup-failed-resume",
+          session_id: "abc123",
+          scope: "task",
+          cwd: root,
+          created_at: "2026-06-30T03:30:00.000Z",
+          last_used_at: "2026-06-30T03:30:00.000Z",
+          source: "manual"
+        },
+        nativeSessionConfig: {
+          enabled: true,
+          resumeArgs: ["-e", script, "{sessionId}"],
+          detectSessionId: true,
+          fallback: "new"
+        },
+        onNativeSessionRetired: (sessionId) => {
+          retired.push(sessionId);
+        }
+      });
+      pids = (await readFile(pidsPath, "utf8"))
+        .trim()
+        .split(/\s+/)
+        .map(Number)
+        .filter((pid) => pid > 0);
+
+      expect(result.failure?.phase).toBe("process-cleanup-error");
+      expect(pids).toHaveLength(1);
+      expect(retired).toEqual([]);
+      expect(await readTextIfExists(outputLogPath)).not.toContain("starting a fresh native session");
+    } finally {
+      killSpy.mockRestore();
+      for (const pid of pids) {
+        killProcessGroupIfAlive(pid, pid);
+      }
+    }
+  }, 5000);
+
   it("injects configured model provider args and env into worker processes", async () => {
     const root = await mkdtemp(join(tmpdir(), "pct-process-model-provider-"));
     const filesDir = join(root, "actor-mock");
@@ -1251,4 +1514,17 @@ async function waitForPath(path: string): Promise<void> {
     await new Promise((resolve) => setTimeout(resolve, 10));
   }
   throw new Error(`Timed out waiting for path ${path}`);
+}
+
+function killProcessGroupIfAlive(parentPid: number, childPid: number): void {
+  if (parentPid > 0 && processIsAlive(childPid)) {
+    try {
+      process.kill(-parentPid, "SIGKILL");
+    } catch {
+      // Fall through to the descendant PID when the original group is gone.
+    }
+  }
+  if (childPid > 0 && processIsAlive(childPid)) {
+    process.kill(childPid, "SIGKILL");
+  }
 }

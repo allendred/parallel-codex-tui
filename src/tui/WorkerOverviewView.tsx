@@ -139,6 +139,12 @@ export function workerOverviewActivityLine(
     return null;
   }
   const ageMs = Math.max(0, nowMs - lastEventMs);
+  if (status.phase === "process-stopping") {
+    return {
+      text: `activity · stopping process tree · ${formatWorkerActivityDuration(ageMs)} elapsed`,
+      tone: "warning"
+    };
+  }
   const starting = status.state === "starting";
   const limitMs = starting ? policy.firstOutputTimeoutMs : policy.idleTimeoutMs;
   const activity = starting ? "started" : "output";

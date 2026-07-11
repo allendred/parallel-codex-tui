@@ -1,6 +1,7 @@
 import { spawn } from "node:child_process";
 import { appendText, writeJson } from "../core/file-store.js";
 import { clearWorkerProcessRecord, writeWorkerProcessRecord } from "../core/process-ownership.js";
+import { terminateProcessTree } from "../core/process-tree.js";
 import type { EngineName, WorkerStatus } from "../domain/schemas.js";
 import { detectNativeSessionId } from "./native-session-detection.js";
 import type { WorkerAdapter, WorkerModelRunConfig, WorkerResult, WorkerRunSpec } from "./types.js";
@@ -149,7 +150,7 @@ export class ProcessWorkerAdapter implements WorkerAdapter {
       let timeout: NodeJS.Timeout | undefined;
       let idleTimeout: NodeJS.Timeout | undefined;
       let firstOutputTimeout: NodeJS.Timeout | undefined;
-      let abortKillTimeout: NodeJS.Timeout | undefined;
+      let processTreeCleanup: Promise<void> | undefined;
       let abortListener: (() => void) | undefined;
       let terminalPhase: string | undefined;
       let terminalSummary: string | undefined;
@@ -173,20 +174,28 @@ export class ProcessWorkerAdapter implements WorkerAdapter {
           clearTimeout(firstOutputTimeout);
           firstOutputTimeout = undefined;
         }
-        if (abortKillTimeout) {
-          clearTimeout(abortKillTimeout);
-          abortKillTimeout = undefined;
-        }
       };
 
-      const terminateWithFallback = (): void => {
-        signalChildProcess(child.pid, "SIGTERM", detached);
-        abortKillTimeout = setTimeout(() => {
-          if (!settled) {
-            signalChildProcess(child.pid, "SIGKILL", detached);
-          }
-        }, 1500);
-        abortKillTimeout.unref();
+      const ensureProcessTreeStopped = (): Promise<void> => {
+        processTreeCleanup ??= terminateProcessTree(child, {
+          processGroup: detached,
+          label: `${this.command} worker process`,
+          termGraceMs: 1500,
+          killWaitMs: 500,
+          pollMs: 20
+        });
+        return processTreeCleanup;
+      };
+
+      const terminalFallbackResult = (): WorkerResult => ({
+        workerId: runSpec.workerId,
+        exitCode: terminalState === "cancelled" ? 130 : 1,
+        signal: null,
+        ...(terminalState === "cancelled" ? { cancelled: true } : {})
+      });
+
+      const finishAfterCleanupFailure = (error: unknown): void => {
+        void finish(terminalFallbackResult(), error);
       };
 
       const failAndTerminate = (phase: string, summary: string, logLine: string): void => {
@@ -197,9 +206,17 @@ export class ProcessWorkerAdapter implements WorkerAdapter {
         terminalPhase = phase;
         terminalSummary = summary;
         clearRunTimers();
-        outputWrites = outputWrites.then(() => appendText(runSpec.outputLogPath, logLine));
-        void setStatus(runSpec, "failed", phase, summary, detectedNativeSessionId);
-        terminateWithFallback();
+        outputWrites = outputWrites.then(async () => {
+          await appendText(runSpec.outputLogPath, logLine);
+          await setStatus(
+            runSpec,
+            "running",
+            "process-stopping",
+            `${summary}; stopping process tree`,
+            detectedNativeSessionId
+          );
+        });
+        void ensureProcessTreeStopped().catch(finishAfterCleanupFailure);
       };
 
       const failForProcessOwnership = (): void => {
@@ -216,19 +233,46 @@ export class ProcessWorkerAdapter implements WorkerAdapter {
         );
       };
 
-      const finish = async (result: WorkerResult): Promise<void> => {
+      const finish = async (result: WorkerResult, knownCleanupError?: unknown): Promise<void> => {
         if (settled || finishing) {
           return;
         }
         finishing = true;
-        await processRecordReady;
-        failForProcessOwnership();
-        settled = true;
         clearRunTimers();
         if (abortListener) {
           runSpec.signal?.removeEventListener("abort", abortListener);
+          abortListener = undefined;
         }
+        await processRecordReady;
+        failForProcessOwnership();
+        let cleanupError = knownCleanupError;
+        if (!cleanupError) {
+          try {
+            await ensureProcessTreeStopped();
+          } catch (error) {
+            cleanupError = error;
+          }
+        }
+        settled = true;
         await outputWrites;
+        if (cleanupError) {
+          const detail = cleanupError instanceof Error ? cleanupError.message : String(cleanupError);
+          const phase = "process-cleanup-error";
+          const summary = `${this.command} process tree cleanup failed: ${detail}`;
+          await appendText(runSpec.outputLogPath, `\nProcess tree cleanup failed: ${detail}\n`);
+          await setStatus(runSpec, "failed", phase, summary, detectedNativeSessionId);
+          resolve({
+            result: {
+              workerId: runSpec.workerId,
+              exitCode: result.exitCode || 1,
+              signal: result.signal,
+              failure: { phase, summary }
+            },
+            output: outputChunks.join(""),
+            launch
+          });
+          return;
+        }
         const phase = terminalPhase ?? (launch.isResume && result.exitCode !== 0 ? "native-resume-failed" : "process-exited");
         const summary =
           terminalSummary ??
@@ -288,6 +332,9 @@ export class ProcessWorkerAdapter implements WorkerAdapter {
       };
 
       const recordOutput = (chunk: Buffer): void => {
+        if (settled || finishing) {
+          return;
+        }
         sawOutput = true;
         if (firstOutputTimeout) {
           clearTimeout(firstOutputTimeout);
@@ -385,9 +432,17 @@ export class ProcessWorkerAdapter implements WorkerAdapter {
         terminalPhase = "process-cancelled";
         terminalSummary = `${this.command} cancelled by user`;
         clearRunTimers();
-        outputWrites = outputWrites.then(() => appendText(runSpec.outputLogPath, "\nProcess cancelled by user\n"));
-        void setStatus(runSpec, "cancelled", terminalPhase, terminalSummary, detectedNativeSessionId);
-        terminateWithFallback();
+        outputWrites = outputWrites.then(async () => {
+          await appendText(runSpec.outputLogPath, "\nProcess cancelled by user\n");
+          await setStatus(
+            runSpec,
+            "running",
+            "process-stopping",
+            `${terminalSummary}; stopping process tree`,
+            detectedNativeSessionId
+          );
+        });
+        void ensureProcessTreeStopped().catch(finishAfterCleanupFailure);
       };
       runSpec.signal?.addEventListener("abort", abortListener, { once: true });
 
@@ -618,6 +673,12 @@ function shouldFallbackToNewNativeSession(
   attempt: ProcessAttemptResult,
   nativeSessionConfig: WorkerRunSpec["nativeSessionConfig"]
 ): boolean {
+  if (
+    attempt.result.failure?.phase === "process-cleanup-error"
+    || attempt.result.failure?.phase === "process-ownership-error"
+  ) {
+    return false;
+  }
   return (
     attempt.launch.isResume &&
     !attempt.result.cancelled &&
@@ -664,28 +725,6 @@ function summarizeOutput(text: string): string {
     .filter(Boolean);
   const summary = lines.at(-1) ?? "Worker produced output";
   return summary.length > 160 ? `${summary.slice(0, 157)}...` : summary;
-}
-
-function signalChildProcess(pid: number | undefined, signal: NodeJS.Signals, processGroup: boolean): void {
-  if (!pid) {
-    return;
-  }
-  try {
-    process.kill(processGroup ? -pid : pid, signal);
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== "ESRCH") {
-      throw error;
-    }
-    if (processGroup) {
-      try {
-        process.kill(pid, signal);
-      } catch (fallbackError) {
-        if ((fallbackError as NodeJS.ErrnoException).code !== "ESRCH") {
-          throw fallbackError;
-        }
-      }
-    }
-  }
 }
 
 async function setStatus(
