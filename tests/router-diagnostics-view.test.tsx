@@ -26,8 +26,8 @@ describe("RouterDiagnosticsView", () => {
     expect(routerDiagnosticsPolicy?.(router, {})).toEqual({
       mode: "auto",
       timeoutMs: 30000,
-      firstOutputTimeoutMs: 30000,
-      idleTimeoutMs: 30000,
+      firstOutputTimeoutMs: 15000,
+      idleTimeoutMs: 15000,
       maxAttempts: 2,
       retryDelayMs: 500,
       followUpTimeoutMs: 20000,
@@ -72,7 +72,7 @@ describe("RouterDiagnosticsView", () => {
     expect(frame).toContain("health · codex 1 · recovered 1 · fallback 0 · retry 1 · timeout 1");
     expect(frame).toContain("latency · successful attempts p50 9.7s · p95 9.7s · max 9.7s · n 1");
     expect(frame).toContain("budget · initial learning · 30s / p95 9.7s · n 1 · follow-up no data · 20s");
-    expect(flattened).toContain("policy · auto · total 30s / 20s · first 30s · idle 30s · retry 2x / 500ms · fallback simple");
+    expect(flattened).toContain("policy · auto · total 30s / 20s · first 15s · idle 15s · retry 2x / 500ms · fallback simple");
     expect(flattened).toContain("proxy · router config · HTTPS_PROXY · proxy.test:8443 · 1 recorded · context only");
     expect(flattened).toContain("tetris · initial · simple · codex · auto recovered idle timeout · try 2 · 40s total");
     expect(flattened).toContain("evidence · timeout · idle · after stderr · limit 30s · via 127.0.0.1:7890 · router config HTTPS_PROXY · cause unproven");
@@ -174,8 +174,8 @@ function policy() {
   return {
     mode: "auto" as const,
     timeoutMs: 30000,
-    firstOutputTimeoutMs: 30000,
-    idleTimeoutMs: 30000,
+    firstOutputTimeoutMs: 15000,
+    idleTimeoutMs: 15000,
     maxAttempts: 2,
     retryDelayMs: 500,
     followUpTimeoutMs: 20000,

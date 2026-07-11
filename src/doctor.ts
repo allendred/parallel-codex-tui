@@ -98,6 +98,9 @@ export async function runDoctor(
     lines.push(
       `router retry: ${config.router.codex.maxAttempts} attempts; transient only; ${config.router.codex.retryDelayMs}ms backoff (TUI routing; live probe runs once)`
     );
+    lines.push(
+      `router budget: total ${config.router.codex.timeoutMs}ms; follow-up ${config.router.codex.followUpTimeoutMs}ms; first output ${config.router.codex.firstOutputTimeoutMs}ms; idle ${config.router.codex.idleTimeoutMs}ms`
+    );
   }
   for (const command of configuredCommands(config, includeRouter)) {
     if (await commandExists(command, env)) {

@@ -5,10 +5,10 @@ defaultMode = "auto"
 command = "codex"
 args = ["exec", "--ephemeral", "--ignore-rules", "-c", "model_reasoning_effort=low", "--skip-git-repo-check", "--sandbox", "read-only", "--color", "never", "-"]
 timeoutMs = 30000
-# Stop a silent Router early when timeoutMs is raised above the default.
-firstOutputTimeoutMs = 30000
+# Stop a silent Router before the total ceiling so one transient retry stays bounded.
+firstOutputTimeoutMs = 15000
 # Reset after every stdout/stderr chunk; timeoutMs remains the hard ceiling.
-idleTimeoutMs = 30000
+idleTimeoutMs = 15000
 # Retry one transient Router failure before asking the user; 1 disables automatic retry.
 maxAttempts = 2
 retryDelayMs = 500

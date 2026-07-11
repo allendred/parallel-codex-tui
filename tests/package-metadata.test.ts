@@ -216,6 +216,8 @@ describe("package metadata", () => {
     expect(readme).toContain("normalized proxy source/variable, sanitized proxy host:port");
     expect(readme).toContain("`firstOutputTimeoutMs` stops a silent process");
     expect(readme).toContain("`idleTimeoutMs` resets after every stdout or stderr chunk");
+    expect(readme).toContain("The 15-second first-output and idle defaults stay below the 30-second total ceiling");
+    expect(readme).toContain("Two repeated silent starts settle in about 30.5 seconds");
     expect(readme).toContain("`maxAttempts = 2` retries one transient classification failure after `retryDelayMs = 500`");
     expect(readme).toContain("First-output and idle watchdogs plus explicit network/proxy failures are retryable");
     expect(readme).toContain("router_fallback_resolution = \"auto-retry\"");

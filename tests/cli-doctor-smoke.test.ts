@@ -75,6 +75,7 @@ describe("CLI doctor", () => {
     expect(result.stdout).toContain("codex: ok");
     expect(result.stdout).toContain("claude: ok");
     expect(result.stdout).toContain("router retry: 2 attempts; transient only; 500ms backoff (TUI routing; live probe runs once)");
+    expect(result.stdout).toContain("router budget: total 30000ms; follow-up 20000ms; first output 15000ms; idle 15000ms");
     await expect(pathExists(workspace)).resolves.toBe(true);
   });
 

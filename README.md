@@ -205,15 +205,15 @@ defaultMode = "auto"
 command = "codex"
 args = ["exec", "--ephemeral", "--ignore-rules", "-c", "model_reasoning_effort=low", "--skip-git-repo-check", "--sandbox", "read-only", "--color", "never", "-"]
 timeoutMs = 30000
-firstOutputTimeoutMs = 30000
-idleTimeoutMs = 30000
+firstOutputTimeoutMs = 15000
+idleTimeoutMs = 15000
 maxAttempts = 2
 retryDelayMs = 500
 followUpTimeoutMs = 20000
 fallback = "simple"
 ```
 
-Set `defaultMode = "simple"` / `defaultMode = "complex"` to force one path. In `auto` mode, routing is semantic through an ephemeral, low-reasoning Codex run. Only `simple` and `complex` are accepted route modes; harmless casing and surrounding whitespace are normalized, while invalid JSON or an unknown mode uses the configured fallback and appears as `invalid output` in the status bar. `fallback = "simple"` or `fallback = "complex"` supplies the non-interactive fallback path; the safe default is `simple` and there is no keyword-only router. `firstOutputTimeoutMs` stops a silent process, `idleTimeoutMs` resets after every stdout or stderr chunk, and `timeoutMs` remains the hard ceiling even while output continues. A watchdog only runs separately when its limit is lower than the active initial or follow-up total timeout, avoiding competing timers at the same deadline.
+Set `defaultMode = "simple"` / `defaultMode = "complex"` to force one path. In `auto` mode, routing is semantic through an ephemeral, low-reasoning Codex run. Only `simple` and `complex` are accepted route modes; harmless casing and surrounding whitespace are normalized, while invalid JSON or an unknown mode uses the configured fallback and appears as `invalid output` in the status bar. `fallback = "simple"` or `fallback = "complex"` supplies the non-interactive fallback path; the safe default is `simple` and there is no keyword-only router. `firstOutputTimeoutMs` stops a silent process, `idleTimeoutMs` resets after every stdout or stderr chunk, and `timeoutMs` remains the hard ceiling even while output continues. The 15-second first-output and idle defaults stay below the 30-second total ceiling, so their failure kinds remain visible. Two repeated silent starts settle in about 30.5 seconds instead of two full 30-second waits; an idle deadline begins after the latest output, while the hard ceiling still bounds every attempt. A watchdog only runs separately when its limit is lower than the active initial or follow-up total timeout, avoiding competing timers at the same deadline.
 
 On POSIX systems the Router command runs in its own process group. Timeout, cancellation, and stdin failure terminate the complete command tree, with a delayed `SIGKILL` fallback, so shell wrappers and third-party launchers cannot leave a classifier process running after the TUI has moved on.
 

@@ -28,8 +28,8 @@ describe("config", () => {
       "-"
     ]);
     expect(config.router.codex.timeoutMs).toBe(30000);
-    expect(config.router.codex.firstOutputTimeoutMs).toBe(30000);
-    expect(config.router.codex.idleTimeoutMs).toBe(30000);
+    expect(config.router.codex.firstOutputTimeoutMs).toBe(15000);
+    expect(config.router.codex.idleTimeoutMs).toBe(15000);
     expect(config.router.codex.maxAttempts).toBe(2);
     expect(config.router.codex.retryDelayMs).toBe(500);
     expect(config.router.codex.fallback).toBe("simple");

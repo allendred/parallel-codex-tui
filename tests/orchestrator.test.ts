@@ -869,8 +869,8 @@ describe("Orchestrator", () => {
       reason: "Greeting needs Main only.",
       source: "codex",
       router_timeout_ms: 30000,
-      router_first_output_timeout_ms: 30000,
-      router_idle_timeout_ms: 30000,
+      router_first_output_timeout_ms: 15000,
+      router_idle_timeout_ms: 15000,
       proxy_configured: expect.any(Boolean),
       router_dispatch_ms: expect.any(Number),
       router_parse_ms: expect.any(Number)
@@ -955,8 +955,8 @@ describe("Orchestrator", () => {
     expect(record).toMatchObject({
       source: "fallback",
       router_timeout_ms: 30000,
-      router_first_output_timeout_ms: 30000,
-      router_idle_timeout_ms: 30000,
+      router_first_output_timeout_ms: 15000,
+      router_idle_timeout_ms: 15000,
       proxy_configured: true,
       failure_kind: "timeout",
       router_attempt: 1,
