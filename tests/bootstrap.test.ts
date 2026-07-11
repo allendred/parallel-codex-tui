@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import { createRuntime } from "../src/bootstrap.js";
-import { pathExists, readJson, writeJson, writeText } from "../src/core/file-store.js";
+import { pathExists, readJson, readTextIfExists, writeJson, writeText } from "../src/core/file-store.js";
 import { workerProcessRecordPath } from "../src/core/process-ownership.js";
 import { SessionIndex } from "../src/core/session-index.js";
 import { NativeSessionSchema, TaskMetaSchema, WorkerStatusSchema } from "../src/domain/schemas.js";
@@ -141,6 +141,61 @@ describe("createRuntime", () => {
     });
     await expect(restarted.orchestrator.canRetryTask(task.id)).resolves.toBe(true);
     restarted.index.close();
+  });
+
+  it("recovers an interrupted Main session before exposing the runtime", async () => {
+    const appRoot = await mkdtemp(join(tmpdir(), "pct-reconcile-main-app-root-"));
+    const workspaceRoot = await mkdtemp(join(tmpdir(), "pct-reconcile-main-worker-root-"));
+    const firstRuntime = await createRuntime(appRoot, workspaceRoot);
+    const mainDir = firstRuntime.sessions.mainSessionDir();
+    const workerDir = join(mainDir, "main-mock");
+    const statusPath = join(workerDir, "status.json");
+    const outputLogPath = join(workerDir, "output.log");
+    await writeJson(statusPath, WorkerStatusSchema.parse({
+      worker_id: "main-mock",
+      role: "main",
+      engine: "mock",
+      state: "running",
+      phase: "process-output",
+      last_event_at: "2026-07-11T14:00:00.000Z",
+      summary: "Main worker running",
+      native_session_id: "main-native-session"
+    }));
+    await writeText(outputLogPath, "Main output before restart\n");
+    await writeJson(join(workerDir, "native-session.json"), NativeSessionSchema.parse({
+      engine: "mock",
+      role: "main",
+      worker_id: "main-mock",
+      session_id: "main-native-session",
+      scope: "main",
+      cwd: workspaceRoot,
+      created_at: "2026-07-11T13:59:00.000Z",
+      last_used_at: "2026-07-11T14:00:00.000Z",
+      source: "output-detected"
+    }));
+    await writeJson(workerProcessRecordPath(workerDir), {
+      version: 1,
+      worker_id: "main-mock",
+      pid: 2147483647,
+      owner_pid: 2147483647,
+      command: process.execPath,
+      started_at: "2026-07-11T14:00:00.000Z"
+    });
+    firstRuntime.index.close();
+
+    const restarted = await createRuntime(appRoot, workspaceRoot);
+    try {
+      await expect(readJson(statusPath, WorkerStatusSchema)).resolves.toMatchObject({
+        state: "cancelled",
+        phase: "orphaned-after-restart",
+        native_session_id: "main-native-session"
+      });
+      expect(await pathExists(workerProcessRecordPath(workerDir))).toBe(false);
+      expect(await pathExists(join(mainDir, "run-owner.json"))).toBe(false);
+      expect(await readTextIfExists(join(mainDir, "events.jsonl"))).toContain("main.recovered_after_restart");
+    } finally {
+      restarted.index.close();
+    }
   });
 
   it("closes the session index when startup recovery blocks runtime creation", async () => {

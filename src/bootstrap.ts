@@ -36,6 +36,7 @@ export async function createRuntime(appRoot: string, workspaceRoot = appRoot): P
       dataDir: config.dataDir,
       index
     });
+    await sessions.reconcileInterruptedMainSession();
     await sessions.reconcileNativeSessionState();
     const recoveredTasks = await sessions.reconcileInterruptedTasks();
     const workers = createWorkerRegistry(config);

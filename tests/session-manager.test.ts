@@ -1085,8 +1085,13 @@ describe("SessionManager", () => {
     const lease = await claimTaskRunLease(mainDir, { ownerId: "live-main-owner" });
 
     try {
+      await expect(manager.reconcileInterruptedMainSession()).resolves.toBeNull();
       await expect(manager.reconcileNativeSessionState()).resolves.toBe(0);
       expect(await pathExists(nativePath)).toBe(true);
+      await expect(readJson(join(workerDir, "status.json"), WorkerStatusSchema)).resolves.toMatchObject({
+        state: "running",
+        phase: "process-output"
+      });
     } finally {
       await lease.release();
     }
@@ -1504,6 +1509,122 @@ describe("SessionManager", () => {
       expect.objectContaining({ id: task.id, status: "cancelled" })
     ]);
     index.close();
+  });
+
+  it("terminates and records an orphaned Main worker before a new runtime starts", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pct-reconcile-main-orphan-"));
+    const manager = new SessionManager({
+      projectRoot: root,
+      dataDir: ".parallel-codex",
+      now: () => new Date("2026-07-11T14:30:00.000Z")
+    });
+    const mainDir = manager.mainSessionDir();
+    const workerDir = join(mainDir, "main-mock");
+    const statusPath = join(workerDir, "status.json");
+    const outputLogPath = join(workerDir, "output.log");
+    await mkdir(workerDir, { recursive: true });
+    await writeJson(statusPath, WorkerStatusSchema.parse({
+      worker_id: "main-mock",
+      role: "main",
+      engine: "mock",
+      state: "running",
+      phase: "process-output",
+      last_event_at: "2026-07-11T14:29:00.000Z",
+      summary: "answering a question",
+      native_session_id: "main-native-session"
+    }));
+    await writeText(outputLogPath, "Main output before hard exit\n");
+    await writeJson(taskRunOwnerPath(mainDir), {
+      version: 1,
+      owner_id: "dead-main-tui",
+      pid: 2147483647,
+      acquired_at: "2026-07-11T14:28:00.000Z",
+      process_start_token: "dead-token"
+    });
+    const detached = process.platform !== "win32";
+    const orphan = spawn(process.execPath, ["-e", "setInterval(()=>{},1000)"], {
+      detached,
+      stdio: "ignore"
+    });
+    orphan.unref();
+    const orphanPid = orphan.pid ?? 0;
+    if (!orphanPid) {
+      throw new Error("Main orphan process did not receive a pid");
+    }
+    await writeWorkerProcessRecord(workerDir, {
+      workerId: "main-mock",
+      pid: orphanPid,
+      command: process.execPath,
+      ...(detached ? { processGroupId: orphanPid } : {})
+    });
+
+    try {
+      const recovery = await (manager as SessionManager & {
+        reconcileInterruptedMainSession(): Promise<{
+          workersRecovered: number;
+          processesTerminated: number;
+        } | null>;
+      }).reconcileInterruptedMainSession();
+
+      expect(recovery).toEqual({ workersRecovered: 1, processesTerminated: 1 });
+      expect(processIsAlive(orphanPid)).toBe(false);
+      await expect(readJson(statusPath, WorkerStatusSchema)).resolves.toMatchObject({
+        state: "cancelled",
+        phase: "orphaned-after-restart",
+        native_session_id: "main-native-session"
+      });
+      expect(await readTextIfExists(outputLogPath)).toContain("Recovered after previous TUI exit");
+      expect(await pathExists(workerProcessRecordPath(workerDir))).toBe(false);
+      expect(await pathExists(taskRunOwnerPath(mainDir))).toBe(false);
+    } finally {
+      if (processIsAlive(orphanPid)) {
+        try {
+          process.kill(detached ? -orphanPid : orphanPid, "SIGKILL");
+        } catch {
+          // Best-effort cleanup for a failed recovery assertion.
+        }
+      }
+    }
+  });
+
+  it("blocks Main recovery when a recorded process identity is unverifiable", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pct-reconcile-main-unverifiable-"));
+    const manager = new SessionManager({
+      projectRoot: root,
+      dataDir: ".parallel-codex",
+      now: () => new Date("2026-07-11T14:30:00.000Z")
+    });
+    const mainDir = manager.mainSessionDir();
+    const workerDir = join(mainDir, "main-mock");
+    const statusPath = join(workerDir, "status.json");
+    await writeJson(statusPath, WorkerStatusSchema.parse({
+      worker_id: "main-mock",
+      role: "main",
+      engine: "mock",
+      state: "running",
+      phase: "process-output",
+      last_event_at: "2026-07-11T14:29:00.000Z",
+      summary: "answering a question"
+    }));
+    await writeJson(workerProcessRecordPath(workerDir), {
+      version: 1,
+      worker_id: "main-mock",
+      pid: process.pid,
+      owner_pid: 2147483647,
+      command: process.execPath,
+      started_at: "2026-07-11T14:29:00.000Z"
+    });
+
+    await expect(manager.reconcileInterruptedMainSession()).rejects.toThrow(
+      "Startup recovery blocked for Main session"
+    );
+
+    await expect(readJson(statusPath, WorkerStatusSchema)).resolves.toMatchObject({
+      state: "running",
+      phase: "process-output"
+    });
+    expect(await pathExists(workerProcessRecordPath(workerDir))).toBe(true);
+    expect(await pathExists(taskRunOwnerPath(mainDir))).toBe(false);
   });
 
   it("repairs a committed terminal transition projection during startup reconciliation", async () => {

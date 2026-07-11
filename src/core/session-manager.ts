@@ -113,6 +113,11 @@ export interface InterruptedTaskRecovery {
   processesTerminated: number;
 }
 
+export interface InterruptedMainSessionRecovery {
+  workersRecovered: number;
+  processesTerminated: number;
+}
+
 type BlockingProcessTermination = Extract<WorkerProcessTermination, "unverifiable" | "still-running">;
 
 export interface InterruptedTaskRecoveryBlock {
@@ -124,14 +129,16 @@ export interface InterruptedTaskRecoveryBlock {
 export class InterruptedTaskRecoveryBlockedError extends Error {
   constructor(
     readonly taskId: string,
-    readonly blocks: InterruptedTaskRecoveryBlock[]
+    readonly blocks: InterruptedTaskRecoveryBlock[],
+    subject = `task ${taskId}`
   ) {
     const details = blocks
       .map((block) => `${block.workerId} (${block.reason}; ${block.processPath})`)
       .join(", ");
+    const stateLabel = subject === `task ${taskId}` ? "Task" : subject;
     super(
-      `Startup recovery blocked for task ${taskId}: ${details}. `
-      + "Task state and checkpoints were left unchanged to prevent concurrent workers. "
+      `Startup recovery blocked for ${subject}: ${details}. `
+      + `${stateLabel} state and checkpoints were left unchanged to prevent concurrent workers. `
       + "Verify or stop each recorded process, then restart parallel-codex-tui."
     );
     this.name = "InterruptedTaskRecoveryBlockedError";
@@ -196,6 +203,41 @@ export class SessionManager {
 
   mainSessionDir(): string {
     return join(this.projectRoot, this.dataDir, "sessions", "main");
+  }
+
+  async reconcileInterruptedMainSession(): Promise<InterruptedMainSessionRecovery | null> {
+    const main = this.taskFromId("main");
+    if (!(await pathExists(main.dir))) {
+      return null;
+    }
+
+    let recoveryLease: TaskRunLease;
+    try {
+      recoveryLease = await claimTaskRunLease(main.dir);
+    } catch (error) {
+      if (error instanceof TaskRunLeaseConflictError) {
+        return null;
+      }
+      throw error;
+    }
+
+    try {
+      const workers = await this.reconcileTaskWorkers(main, "Main session");
+      if (workers.recovered === 0 && workers.terminated === 0) {
+        return null;
+      }
+      await this.appendEvent(
+        main,
+        "main.recovered_after_restart",
+        `Recovered interrupted Main session; ${workers.recovered} active workers marked cancelled and ${workers.terminated} processes terminated`
+      );
+      return {
+        workersRecovered: workers.recovered,
+        processesTerminated: workers.terminated
+      };
+    } finally {
+      await recoveryLease.release();
+    }
   }
 
   async appendChatMessage(input: AppendChatMessageInput): Promise<void> {
@@ -750,7 +792,10 @@ export class SessionManager {
     return true;
   }
 
-  private async reconcileTaskWorkers(task: TaskSession): Promise<{ recovered: number; terminated: number }> {
+  private async reconcileTaskWorkers(
+    task: TaskSession,
+    recoverySubject = `task ${task.id}`
+  ): Promise<{ recovered: number; terminated: number }> {
     const entries = await readdir(task.dir, { withFileTypes: true });
     const workerDirs = entries
       .filter((entry) => entry.isDirectory())
@@ -774,10 +819,10 @@ export class SessionManager {
     if (blocks.length > 0) {
       await this.appendEvent(
         task,
-        "task.recovery_blocked",
-        `Startup recovery blocked by ${blocks.map((block) => `${block.workerId}:${block.reason}`).join(", ")}; task state left unchanged`
+        task.id === "main" ? "main.recovery_blocked" : "task.recovery_blocked",
+        `Startup recovery blocked by ${blocks.map((block) => `${block.workerId}:${block.reason}`).join(", ")}; ${recoverySubject} state left unchanged`
       );
-      throw new InterruptedTaskRecoveryBlockedError(task.id, blocks);
+      throw new InterruptedTaskRecoveryBlockedError(task.id, blocks, recoverySubject);
     }
 
     let recovered = 0;
