@@ -14,6 +14,7 @@ interface Segment {
   label: string;
   value: string;
   tone?: StatusTone;
+  hideLabel?: boolean;
 }
 
 export type StatusTone = "idle" | "run" | "done" | "fail" | "wait";
@@ -28,10 +29,11 @@ export function StatusBar({ text, terminalWidth: providedTerminalWidth, showTask
   }
 
   const segments = omitTinyCurrentSegment(
-    parsedSegments,
+    readableCompletedRouteSegments(parsedSegments, terminalWidth),
     terminalWidth
   );
-  const compact = shouldUseCompactStatus(segments, terminalWidth);
+  const compact = !segments.some((segment) => segment.hideLabel)
+    && shouldUseCompactStatus(segments, terminalWidth);
   const fittedSegments = fitStatusSegments(segments, terminalWidth, compact);
 
   if (isIdleStatus(fittedSegments)) {
@@ -104,6 +106,30 @@ function shouldUseCompactStatus(segments: Segment[], terminalWidth: number): boo
   }
   const roomyDisplays = segments.map((segment) => statusSegmentDisplay(segment, false));
   return statusSegmentsDisplayWidth(roomyDisplays, false) > Math.max(1, terminalWidth - 2);
+}
+
+function readableCompletedRouteSegments(segments: Segment[], terminalWidth: number): Segment[] {
+  if (terminalWidth < 35 || terminalWidth >= 56) {
+    return segments;
+  }
+  const routeIndex = segments.findIndex((segment) => (
+    segment.label.toLowerCase() === "route"
+    && !segment.tone
+    && /^(?:simple|complex)(?:\s+·\s+|$)/i.test(segment.value)
+  ));
+  const completed = segments.some((segment) => segment.label.toLowerCase() === "workers")
+    && segments.some((segment) => segment.tone === "done")
+    && !segments.some((segment) => segment.tone === "run" || segment.tone === "fail" || segment.tone === "wait");
+  if (!completed || routeIndex < 0) {
+    return segments;
+  }
+
+  const readable = segments.map((segment, index) => (
+    index === routeIndex ? { ...segment, hideLabel: true } : segment
+  ));
+  return statusSegmentsWidth(readable, false) <= Math.max(1, terminalWidth - 2)
+    ? readable
+    : segments;
 }
 
 function isIdleStatus(segments: Segment[]): boolean {
@@ -281,6 +307,9 @@ function workerIdentityRole(text: string): string | null {
 }
 
 function statusSegmentDisplay(segment: Segment, compact: boolean): { label: string; separator: string; value: string } {
+  if (segment.hideLabel) {
+    return { label: "", separator: "", value: segment.value };
+  }
   const label = segment.label.toLowerCase();
   if (label === "task") {
     return { label: "", separator: "", value: segment.value };

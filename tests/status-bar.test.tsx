@@ -58,6 +58,20 @@ describe("StatusBar", () => {
     expect(missing).toEqual([]);
   });
 
+  it("keeps a successful completed-task route readable at compact widths", () => {
+    const view = render(
+      <StatusBar
+        text="workers 3 | done 3 | route simple · 13s"
+        terminalWidth={40}
+      />
+    );
+    const frame = view.lastFrame() ?? "";
+
+    expect(frame.trim()).toBe("3 workers · 3 done · simple · 13s");
+    expect(displayWidth(frame)).toBeLessThanOrEqual(40);
+    view.unmount();
+  });
+
   it("uses intentional route abbreviations and atomic worker identities in nano terminals", () => {
     const frame = (text: string, terminalWidth: number): string => {
       const view = render(<StatusBar text={text} terminalWidth={terminalWidth} />);
