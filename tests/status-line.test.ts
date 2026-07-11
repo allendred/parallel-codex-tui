@@ -85,6 +85,25 @@ describe("formatStatusLine", () => {
       router_failure_stage: "waiting-output"
     })).toBe("route simple · fallback · timeout waiting output · proxy set · 30s");
     expect(formatRouteStatus?.({
+      mode: "simple",
+      source: "fallback",
+      reason: "Codex router timed out after 30000ms.",
+      duration_ms: 30000,
+      router_failure_stage: "waiting-output",
+      proxy_configured: true,
+      proxy_source: "router-config",
+      proxy_variable: "HTTPS_PROXY",
+      proxy_endpoint: "proxy.test:8443"
+    })).toBe("route simple · fallback · timeout waiting output · via proxy.test:8443 · 30s");
+    expect(formatRouteStatus?.({
+      mode: "complex",
+      source: "fallback",
+      reason: "Codex router timed out after 30000ms.",
+      duration_ms: 30000,
+      router_failure_stage: "waiting-output",
+      proxy_configured: false
+    })).toBe("route complex · fallback · timeout waiting output · direct · 30s");
+    expect(formatRouteStatus?.({
       mode: "complex",
       source: "fallback",
       reason: "Codex router timed out after 30000ms. User selected Parallel after Router fallback.",
@@ -160,6 +179,36 @@ describe("formatStatusLine", () => {
     expect(formatRoutePendingStatus?.({ scope: "follow-up", mode: "auto", timeoutMs: 20000 }, 99999)).toBe(
       "route follow-up · 20s / 20s"
     );
+    expect(formatRoutePendingStatus?.({
+      scope: "initial",
+      mode: "auto",
+      timeoutMs: 30000,
+      phase: "waiting-output",
+      proxyConfigured: true,
+      proxyEndpoint: "proxy.test:8443"
+    }, 7300)).toBe("route waiting output · via proxy.test:8443 · 7s / 30s");
+    expect(formatRoutePendingStatus?.({
+      scope: "initial",
+      mode: "auto",
+      timeoutMs: 30000,
+      phase: "receiving-stderr",
+      proxyConfigured: true,
+      proxyEndpoint: "proxy.test:8443"
+    }, 7300)).toBe("route diagnostics · via proxy.test:8443 · 7s / 30s");
+    expect(formatRoutePendingStatus?.({
+      scope: "initial",
+      mode: "auto",
+      timeoutMs: 30000,
+      phase: "receiving-response",
+      proxyConfigured: false
+    }, 7300)).toBe("route receiving · direct · 7s / 30s");
+    expect(formatRoutePendingStatus?.({
+      scope: "follow-up",
+      mode: "auto",
+      timeoutMs: 20000,
+      phase: "parsing",
+      proxyConfigured: false
+    }, 19900)).toBe("route parsing · direct · 19s / 20s");
     expect(formatRoutePendingStatus?.({ scope: "initial", mode: "complex", timeoutMs: 120000 })).toBe(
       "route complex · forced"
     );

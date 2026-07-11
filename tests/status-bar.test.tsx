@@ -13,11 +13,14 @@ describe("StatusBar", () => {
       ["mixed", "workers 12 | fail 2 run 3 wait 1 done 6 | critic/claude done"],
       ["fallback", "workers 3 | done 3 | route complex · fallback · timeout · 120s"],
       ["proxy-timeout", "workers 3 | done 3 | route simple · fallback · timeout via proxy · 30s"],
+      ["structured-proxy-timeout", "workers 3 | done 3 | route simple · fallback · timeout waiting output · via proxy.test:8443 · 30s"],
       ["proxy", "workers 3 | done 3 | route simple · fallback · proxy"],
       ["auth", "workers 3 | done 3 | route simple · fallback · auth"],
       ["rate-limit", "workers 3 | done 3 | route simple · fallback · rate limit"],
       ["checking", "route checking · 30s max"],
       ["checking-progress", "route checking · 7s / 30s"],
+      ["diagnostics-progress", "route diagnostics · via proxy.test:8443 · 7s / 30s"],
+      ["receiving-progress", "route receiving · direct · 7s / 30s"],
       ["follow-up", "workers 3 | done 3 | route follow-up · 20s max"],
       ["wave", "wave 2/3 · verification 0/1 | workers 4 | run 1 done 3"],
       ["roles", "judge done | actor run | critic wait"],
@@ -108,6 +111,10 @@ describe("StatusBar", () => {
     expect(frame("workers 3 | done 3 | route follow-up · 20s max", 8)).toContain("r:20s");
     expect(frame("workers 3 | done 3 | route complex · fallback · timeout · 120s", 8)).toContain("r:time");
     expect(frame("workers 3 | done 3 | route simple · fallback · timeout via proxy · 30s", 8)).toContain("r:p:to");
+    expect(frame("workers 3 | done 3 | route simple · fallback · timeout waiting output · via proxy.test:8443 · 30s", 8)).toContain("r:w:to");
+    expect(frame("workers 3 | done 3 | route simple · fallback · timeout after stderr · via proxy.test:8443 · 30s", 8)).toContain("r:e:to");
+    expect(frame("route diagnostics · via proxy.test:8443 · 7s / 30s", 13)).toContain("r:diag 7s");
+    expect(frame("route receiving · direct · 7s / 30s", 13)).toContain("r:recv 7s");
     expect(frame("workers 3 | done 3 | route simple · fallback · proxy", 8)).toContain("r:pxy");
     expect(frame("workers 3 | done 3 | route simple · fallback · auth", 8)).toContain("r:auth");
     expect(frame("workers 3 | done 3 | route simple · fallback · rate limit", 8)).toContain("r:rate");

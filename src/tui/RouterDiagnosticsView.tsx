@@ -8,7 +8,7 @@ import {
   type RouterAuditRecord,
   type RouterFailureKind
 } from "../core/router-audit.js";
-import { routerProxyConfigured } from "../core/router.js";
+import { routerProxyContext } from "../core/router.js";
 import { displayWidth, wrapByDisplayWidth } from "./display-width.js";
 import { formatRouteStatus } from "./status-line.js";
 import { TUI_THEME } from "./theme.js";
@@ -19,6 +19,9 @@ export interface RouterDiagnosticsPolicy {
   followUpTimeoutMs: number;
   fallback: "simple" | "complex";
   proxyConfigured: boolean;
+  proxySource: "router-config" | "environment" | null;
+  proxyVariable: string | null;
+  proxyEndpoint: string | null;
 }
 
 export type RouterDiagnosticsScope = "all" | "workspace";
@@ -27,12 +30,16 @@ export function routerDiagnosticsPolicy(
   router: AppConfig["router"],
   env: NodeJS.ProcessEnv = process.env
 ): RouterDiagnosticsPolicy {
+  const proxy = routerProxyContext(router.codex.env, env);
   return {
     mode: router.defaultMode,
     timeoutMs: router.codex.timeoutMs,
     followUpTimeoutMs: router.codex.followUpTimeoutMs,
     fallback: router.codex.fallback,
-    proxyConfigured: routerProxyConfigured(router.codex.env, env)
+    proxyConfigured: proxy.configured,
+    proxySource: proxy.configured ? proxy.source : null,
+    proxyVariable: proxy.configured ? proxy.variable : null,
+    proxyEndpoint: proxy.configured ? proxy.endpoint : null
   };
 }
 
@@ -144,7 +151,7 @@ export function routerDiagnosticsDisplayLines(
       tone: "muted"
     },
     {
-      text: `proxy · ${policy.proxyConfigured ? "configured now" : "direct now"} · ${proxyRecordCount} recorded · context only`,
+      text: routerDiagnosticsProxyPolicy(policy, proxyRecordCount),
       tone: policy.proxyConfigured || proxyRecordCount > 0 ? "warning" : "muted"
     },
     { text: "Recent routes", tone: "heading" }
@@ -367,7 +374,14 @@ function routerAuditEvidence(record: RouterAuditRecord): string | null {
     }
   }
   if (routerAuditHasProxyContext(record)) {
-    parts.push("proxy configured", "cause unproven");
+    parts.push(record.proxy_endpoint ? `via ${record.proxy_endpoint}` : "proxy configured");
+    if (record.proxy_source || record.proxy_variable) {
+      parts.push([
+        record.proxy_source ? routerProxySourceLabel(record.proxy_source) : "proxy",
+        record.proxy_variable
+      ].filter(Boolean).join(" "));
+    }
+    parts.push("cause unproven");
   } else if (record.proxy_configured === false) {
     parts.push("direct path");
   }
@@ -442,6 +456,24 @@ function routerAuditHasProxyContext(record: RouterAuditRecord): boolean {
     return record.proxy_configured;
   }
   return /\bproxy\b|代理/i.test(record.reason);
+}
+
+function routerDiagnosticsProxyPolicy(policy: RouterDiagnosticsPolicy, recorded: number): string {
+  if (!policy.proxyConfigured) {
+    return `proxy · direct now · ${recorded} recorded · context only`;
+  }
+  return [
+    "proxy",
+    policy.proxySource ? routerProxySourceLabel(policy.proxySource) : "configured now",
+    policy.proxyVariable,
+    policy.proxyEndpoint,
+    `${recorded} recorded`,
+    "context only"
+  ].filter(Boolean).join(" · ");
+}
+
+function routerProxySourceLabel(source: "router-config" | "environment"): string {
+  return source === "router-config" ? "router config" : "environment";
 }
 
 function routerFailureKindLabel(kind: RouterFailureKind): string {

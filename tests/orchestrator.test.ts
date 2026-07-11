@@ -1555,6 +1555,9 @@ describe("Orchestrator", () => {
     config.router.defaultMode = "auto";
     config.router.codex.timeoutMs = 120000;
     config.router.codex.followUpTimeoutMs = 20000;
+    config.router.codex.env = {
+      HTTPS_PROXY: "http://user:secret@127.0.0.1:7890"
+    };
     const manager = new SessionManager({
       projectRoot: root,
       dataDir: config.dataDir,
@@ -1576,6 +1579,7 @@ describe("Orchestrator", () => {
     let seenTimeout = 0;
     let seenFallback = "";
     let routeStart: unknown;
+    const routeProgress: string[] = [];
     const orchestrator = new Orchestrator(
       config,
       manager,
@@ -1593,6 +1597,9 @@ describe("Orchestrator", () => {
       cwd: root,
       onRouteStart: (state: unknown) => {
         routeStart = state;
+      },
+      onRouteProgress: (state: { phase: string }) => {
+        routeProgress.push(state.phase);
       }
     });
 
@@ -1601,15 +1608,25 @@ describe("Orchestrator", () => {
     expect(routeStart).toEqual({
       scope: "follow-up",
       mode: "auto",
-      timeoutMs: 20000
+      timeoutMs: 20000,
+      phase: "starting",
+      proxyConfigured: true,
+      proxySource: "router-config",
+      proxyVariable: "HTTPS_PROXY",
+      proxyEndpoint: "127.0.0.1:7890"
     });
+    expect(routeProgress).toEqual(["dispatching"]);
     expect(result).toMatchObject({
       mode: "simple",
       taskId: null,
       route: {
         mode: "simple",
         source: "fallback",
-        suggested_roles: []
+        suggested_roles: [],
+        proxy_configured: true,
+        proxy_source: "router-config",
+        proxy_variable: "HTTPS_PROXY",
+        proxy_endpoint: "127.0.0.1:7890"
       }
     });
     expect(result.reason).toContain("fallback forced simple");

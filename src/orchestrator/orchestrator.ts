@@ -5,7 +5,13 @@ import { appendJsonLine, ensureDir, pathExists, readJson, readTextIfExists, remo
 import { claimTaskRunLease } from "../core/process-ownership.js";
 import { routerRuntimeDir } from "../core/paths.js";
 import { classifyRouterFailure } from "../core/router-audit.js";
-import { routeRequestWithCodex, routerProxyConfigured, type CodexRouteRunner } from "../core/router.js";
+import {
+  routeRequestWithCodex,
+  routerProxyContext,
+  type CodexRouteRunner,
+  type RouterExecutionPhase,
+  type RouterExecutionProgress
+} from "../core/router.js";
 import type { SessionManager, TaskSession, TaskTurn, WorkerFiles } from "../core/session-manager.js";
 import { RouteDecisionSchema, TaskMetaSchema, WorkerStatusSchema, type EngineName, type NativeSession, type RouteDecision, type RouterFallbackResolution, type WorkerRole, type WorkerStatus } from "../domain/schemas.js";
 import { getAdapter, type WorkerRegistry } from "../workers/registry.js";
@@ -50,6 +56,7 @@ export interface HandleRequestInput {
   signal?: AbortSignal;
   retry?: boolean;
   onRouteStart?: (state: RouteStartInfo) => void;
+  onRouteProgress?: (state: RouterExecutionProgress) => void;
   onRouteFallback?: (fallback: RouteFallbackInfo) => Promise<RouteFallbackChoice>;
   onRoute?: (route: RouteDecision) => void;
   onStatus?: (status: WorkerRunStatus) => void;
@@ -80,6 +87,11 @@ export interface RouteStartInfo {
   scope: "initial" | "follow-up";
   mode: AppConfig["router"]["defaultMode"];
   timeoutMs: number;
+  phase: RouterExecutionPhase;
+  proxyConfigured: boolean;
+  proxySource?: "router-config" | "environment";
+  proxyVariable?: string;
+  proxyEndpoint?: string;
 }
 
 export type RouteFallbackChoice = "main" | "parallel" | "retry" | "cancel";
@@ -186,7 +198,8 @@ export class Orchestrator {
       input.signal,
       "initial",
       input.onRouteStart,
-      input.onRouteFallback
+      input.onRouteFallback,
+      input.onRouteProgress
     );
     input.onRoute?.(route);
     const workers: WorkerLogRef[] = [];
@@ -233,7 +246,8 @@ export class Orchestrator {
       input.signal,
       "follow-up",
       input.onRouteStart,
-      input.onRouteFallback
+      input.onRouteFallback,
+      input.onRouteProgress
     );
     if (!input.route) {
       input.onRoute?.(route);
@@ -336,7 +350,8 @@ export class Orchestrator {
       input.signal,
       "follow-up",
       input.onRouteStart,
-      input.onRouteFallback
+      input.onRouteFallback,
+      input.onRouteProgress
     );
     input.onRoute?.(route);
     await this.sessions.recordLatestRoute(task, route);
@@ -1307,7 +1322,8 @@ export class Orchestrator {
     signal?: AbortSignal,
     scope: "initial" | "follow-up" = "initial",
     onRouteStart?: (state: RouteStartInfo) => void,
-    onRouteFallback?: (fallback: RouteFallbackInfo) => Promise<RouteFallbackChoice>
+    onRouteFallback?: (fallback: RouteFallbackInfo) => Promise<RouteFallbackChoice>,
+    onRouteProgress?: (state: RouterExecutionProgress) => void
   ): Promise<RouteDecision> {
     const router = this.routerConfigLoader
       ? await this.routerConfigLoader()
@@ -1333,12 +1349,29 @@ export class Orchestrator {
     let attempt = 1;
 
     while (true) {
+      const proxy = routerProxyContext(routeConfig.router.codex.env);
       onRouteStart?.({
         scope,
         mode: router.defaultMode,
-        timeoutMs: routeConfig.router.codex.timeoutMs
+        timeoutMs: routeConfig.router.codex.timeoutMs,
+        phase: "starting",
+        proxyConfigured: proxy.configured,
+        ...(proxy.configured
+          ? {
+              proxySource: proxy.source,
+              proxyVariable: proxy.variable,
+              proxyEndpoint: proxy.endpoint
+            }
+          : {})
       });
-      const routed = await routeRequestWithCodex(request, routeConfig, this.routeRunner, this.routerCwd, signal);
+      const routed = await routeRequestWithCodex(
+        request,
+        routeConfig,
+        this.routeRunner,
+        this.routerCwd,
+        signal,
+        onRouteProgress
+      );
       let route: RouteDecision = {
         ...routed,
         ...(semanticRoute ? { router_attempt: attempt } : {})
@@ -1396,7 +1429,6 @@ export class Orchestrator {
       ...(semanticRoute
         ? {
             router_timeout_ms: routeConfig.router.codex.timeoutMs,
-            proxy_configured: routerProxyConfigured(routeConfig.router.codex.env),
             ...(route.source === "fallback"
               ? { failure_kind: classifyRouterFailure(route.reason) ?? "unknown" }
               : {})

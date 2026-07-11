@@ -374,7 +374,7 @@ function compactRouteStatusValue(value: string, compact: boolean): string {
   if (compact && /(?:^|\s·\s)fallback(?:\s·\s|$)/i.test(value)) {
     const cause = value
       .split(/\s+·\s+/)
-      .find((part) => /^(?:timeout via proxy|proxy|auth|rate limit|network|timeout|unavailable|invalid output|exit)$/i.test(part));
+      .find((part) => /^(?:timeout(?: via proxy| waiting output| after (?:stdout|stderr|output))?|proxy|auth|rate limit|network|unavailable|invalid output|exit)$/i.test(part));
     if (cause) {
       return cause.toLowerCase() === "invalid output" ? "invalid" : cause.toLowerCase();
     }
@@ -405,6 +405,16 @@ function compactRouteStatusValueToWidth(value: string, maxWidth: number): string
     candidates = [compact, progressCandidates[0] ? `check ${progressCandidates[0]}` : "check", ...progressCandidates, "wait"];
   } else if (first === "follow-up") {
     candidates = [compact, progressCandidates[0] ? `follow ${progressCandidates[0]}` : "follow", ...progressCandidates, "wait"];
+  } else if (routeProgressStatusAlias(first)) {
+    const alias = routeProgressStatusAlias(first)!;
+    candidates = [
+      compact,
+      ...(compactProgress ? [`${alias} ${compactProgress}`] : []),
+      ...(elapsed ? [`${alias} ${elapsed}`] : []),
+      alias,
+      ...progressCandidates,
+      "wait"
+    ];
   } else if (/(?:^|\s·\s)fallback(?:\s·\s|$)/i.test(value)) {
     candidates = [compact, ...compactRouteFailureAliases(compact), "wait"];
   } else {
@@ -429,6 +439,18 @@ function compactRouteFailureAliases(value: string): string[] {
   if (value === "timeout") {
     return ["time"];
   }
+  if (value === "timeout waiting output") {
+    return ["wait:to", "w:to", "time"];
+  }
+  if (value === "timeout after stderr") {
+    return ["err:to", "e:to", "time"];
+  }
+  if (value === "timeout after stdout") {
+    return ["out:to", "o:to", "time"];
+  }
+  if (value === "timeout after output") {
+    return ["out:to", "o:to", "time"];
+  }
   if (value === "network") {
     return ["net"];
   }
@@ -442,6 +464,25 @@ function compactRouteFailureAliases(value: string): string[] {
     return ["fall"];
   }
   return [value];
+}
+
+function routeProgressStatusAlias(value: string): string | null {
+  if (value === "starting") {
+    return "start";
+  }
+  if (value === "waiting output") {
+    return "wait";
+  }
+  if (value === "diagnostics") {
+    return "diag";
+  }
+  if (value === "receiving") {
+    return "recv";
+  }
+  if (value === "parsing") {
+    return "parse";
+  }
+  return null;
 }
 
 function compactWaveStatusValue(value: string): string {
@@ -539,7 +580,9 @@ function parseStatusText(text: string, options: { hideTask?: boolean } = {}): Se
       segments.push({
         label: "ROUTE",
         value,
-        tone: /(?:^|\s·\s)fallback(?:\s·\s|$)|^(?:checking|follow-up)\b/i.test(value) ? "wait" : undefined
+        tone: /(?:^|\s·\s)fallback(?:\s·\s|$)|^(?:checking|follow-up|starting|waiting output|diagnostics|receiving|parsing)\b/i.test(value)
+          ? "wait"
+          : undefined
       });
       continue;
     }

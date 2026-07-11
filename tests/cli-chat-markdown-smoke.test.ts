@@ -131,13 +131,13 @@ describe("CLI chat Markdown smoke", () => {
     const appRoot = await mkdtemp(join(tmpdir(), "pct-cli-router-timeout-app-"));
     const routerScript = join(appRoot, "stalled-router.cjs");
     const mainScript = join(appRoot, "fake-main.cjs");
-    const screen = new NativeTerminalScreen({ cols: 100, rows: 12, scrollback: 1000 });
+    const screen = new NativeTerminalScreen({ cols: 120, rows: 12, scrollback: 1000 });
     let screenWrites = Promise.resolve();
 
     await mkdir(join(appRoot, ".parallel-codex"), { recursive: true });
     await writeFile(
       routerScript,
-      "process.stderr.write('Connecting through proxy http://user:secret@127.0.0.1:7890\\n'); setInterval(() => {}, 1000);\n"
+      "process.stderr.write('Router connection established\\n'); setInterval(() => {}, 1000);\n"
     );
     await writeFile(
       mainScript,
@@ -158,6 +158,9 @@ describe("CLI chat Markdown smoke", () => {
         "timeoutMs = 1600",
         'fallback = "simple"',
         "",
+        "[router.codex.env]",
+        'HTTPS_PROXY = "http://user:secret@127.0.0.1:7890"',
+        "",
         "[workers.codex]",
         `command = "${escapeToml(process.execPath)}"`,
         `args = ["${escapeToml(mainScript)}"]`,
@@ -175,7 +178,7 @@ describe("CLI chat Markdown smoke", () => {
       ["./node_modules/.bin/tsx", "src/cli.tsx", "--app-root", appRoot, "--workspace", workspace],
       {
         cwd: process.cwd(),
-        cols: 100,
+        cols: 120,
         rows: 12,
         name: "xterm-256color",
         env: {
@@ -192,12 +195,23 @@ describe("CLI chat Markdown smoke", () => {
     try {
       await waitForScreenText(() => screenWrites, screen, "> | message");
       child.write("hello\r");
-      await waitForScreenText(() => screenWrites, screen, "route checking · 0s / 1.6s");
-      await waitForScreenText(() => screenWrites, screen, "route checking · 1s / 1.6s");
+      await waitForScreenText(
+        () => screenWrites,
+        screen,
+        "route diagnostics · via 127.0.0.1:7890 · 0s / 1.6s"
+      );
+      await waitForScreenText(
+        () => screenWrites,
+        screen,
+        "route diagnostics · via 127.0.0.1:7890 · 1s / 1.6s"
+      );
       await waitForScreenText(
         () => screenWrites,
         screen,
         "route failed · 1 Main · 2 Parallel · R retry · Esc cancel"
+      );
+      expect(screen.snapshot()).toContain(
+        "route simple · fallback · timeout after stderr · via 127.0.0.1:7890"
       );
       expect(screen.snapshot()).not.toContain("Fallback chat response");
       child.write("1");
@@ -205,16 +219,19 @@ describe("CLI chat Markdown smoke", () => {
       await waitForScreenText(
         () => screenWrites,
         screen,
-        "route simple · fallback · user Main · timeout after stderr · proxy set"
+        "route simple · fallback · user Main · timeout after stderr · via 127.0.0.1:7890"
       );
 
       const snapshot = screen.snapshot();
       const routes = await readTextIfExists(join(appRoot, ".parallel-codex", "router", "routes.jsonl"));
-      expect(snapshot).toContain("route simple · fallback · user Main · timeout after stderr · proxy set");
+      expect(snapshot).toContain("route simple · fallback · user Main · timeout after stderr · via 127.0.0.1:7890");
       expect(snapshot).not.toContain("Codex router failed:");
       expect(snapshot).not.toContain(routerScript);
-      expect(routes).toContain("Connecting through proxy http://***@127.0.0.1:7890");
+      expect(routes).toContain("Router connection established");
       expect(routes).not.toContain("user:secret");
+      expect(routes).toContain('"proxy_source":"router-config"');
+      expect(routes).toContain('"proxy_variable":"HTTPS_PROXY"');
+      expect(routes).toContain('"proxy_endpoint":"127.0.0.1:7890"');
       expect(routes).toContain('"router_failure_stage":"streaming"');
       expect(routes).toContain('"router_first_output_ms":');
       expect(routes).toContain('"router_first_stderr_ms":');

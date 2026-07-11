@@ -6,6 +6,7 @@ import type { AppConfig } from "../core/config.js";
 import type { CollaborationTimeline } from "../core/collaboration-timeline.js";
 import { readJson } from "../core/file-store.js";
 import type { RouterAuditRecord } from "../core/router-audit.js";
+import type { RouterExecutionProgress } from "../core/router.js";
 import type { TaskIndexSummary } from "../core/session-index.js";
 import type { WorkspaceChoice } from "../core/workspace.js";
 import { WorkerStatusSchema, type RouteDecision } from "../domain/schemas.js";
@@ -1531,6 +1532,9 @@ export function App({
       onRouteStart: (state: RouteStartInfo) => {
         setRouteElapsedMs(0);
         setRoutePending({ ...state, startedAtMs: Date.now() });
+      },
+      onRouteProgress: (progress: RouterExecutionProgress) => {
+        setRoutePending((current) => current ? { ...current, phase: progress.phase } : current);
       },
       onRouteFallback: (fallback: RouteFallbackInfo) => requestRouteFallbackChoice(fallback, controller.signal),
       onRoute: (route: RouteDecision) => {

@@ -12,6 +12,41 @@ describe("routeRequestWithCodex", () => {
     expect("routeRequest" in router).toBe(false);
   });
 
+  it("describes the effective Router proxy without exposing credentials", () => {
+    const routerProxyContext = (
+      router as typeof router & {
+        routerProxyContext?: (
+          configured: Record<string, string>,
+          env?: NodeJS.ProcessEnv
+        ) => Record<string, unknown>;
+      }
+    ).routerProxyContext;
+
+    expect(routerProxyContext).toBeTypeOf("function");
+    expect(routerProxyContext?.(
+      { HTTPS_PROXY: "{env:PRIVATE_PROXY}" },
+      { PRIVATE_PROXY: "https://user:secret@proxy.test:8443/private?token=hidden" }
+    )).toEqual({
+      configured: true,
+      source: "router-config",
+      variable: "HTTPS_PROXY",
+      endpoint: "proxy.test:8443"
+    });
+    expect(routerProxyContext?.({}, {
+      ALL_PROXY: "socks5://name:secret@127.0.0.1:1080"
+    })).toEqual({
+      configured: true,
+      source: "environment",
+      variable: "ALL_PROXY",
+      endpoint: "127.0.0.1:1080"
+    });
+    expect(routerProxyContext?.({}, {})).toEqual({ configured: false });
+    expect(JSON.stringify(routerProxyContext?.(
+      { HTTPS_PROXY: "{env:PRIVATE_PROXY}" },
+      { PRIVATE_PROXY: "https://user:secret@proxy.test:8443/private?token=hidden" }
+    ))).not.toMatch(/user|secret|private|hidden/);
+  });
+
   it("honors forced simple mode", () => {
     const config = defaultConfig("/tmp/project");
     config.router.defaultMode = "simple";
@@ -271,7 +306,23 @@ describe("routeRequestWithCodex", () => {
       HTTPS_PROXY: "http://user:secret@127.0.0.1:7890"
     };
 
-    const route = await routeRequestWithCodex("你好", config, undefined, root);
+    const progress: string[] = [];
+    const routeWithProgress = routeRequestWithCodex as unknown as (
+      request: string,
+      config: ReturnType<typeof defaultConfig>,
+      runner: undefined,
+      cwd: string,
+      signal: undefined,
+      onProgress: (event: { phase: string }) => void
+    ) => ReturnType<typeof routeRequestWithCodex>;
+    const route = await routeWithProgress(
+      "你好",
+      config,
+      undefined,
+      root,
+      undefined,
+      (event) => progress.push(event.phase)
+    );
 
     expect(route.reason).toContain("timed out after 200ms with proxy configured");
     expect(route.reason).not.toContain("user:secret");
@@ -281,10 +332,54 @@ describe("routeRequestWithCodex", () => {
       router_spawn_ms: expect.any(Number),
       router_process_ms: expect.any(Number),
       router_stdout_bytes: 0,
-      router_stderr_bytes: 0
+      router_stderr_bytes: 0,
+      proxy_configured: true,
+      proxy_source: "router-config",
+      proxy_variable: "HTTPS_PROXY",
+      proxy_endpoint: "127.0.0.1:7890"
     });
+    expect(progress).toEqual(["dispatching", "starting", "waiting-output"]);
     expect(route.router_first_output_ms).toBeUndefined();
     expect(route.router_parse_ms).toBeUndefined();
+  });
+
+  it("ignores output that arrives only while a timed-out Router is terminating", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pct-router-late-output-"));
+    const config = defaultConfig(root);
+    config.router.codex.command = process.execPath;
+    config.router.codex.args = [
+      "-e",
+      [
+        "process.on('SIGTERM',()=>{",
+        "process.stdout.write(JSON.stringify({mode:'simple',reason:'too late'}));",
+        "setTimeout(()=>process.exit(0),20);",
+        "});",
+        "setInterval(()=>{},1000);"
+      ].join("")
+    ];
+    config.router.codex.timeoutMs = 100;
+    const progress: string[] = [];
+    const routeWithProgress = routeRequestWithCodex as unknown as (
+      request: string,
+      config: ReturnType<typeof defaultConfig>,
+      runner: undefined,
+      cwd: string,
+      signal: undefined,
+      onProgress: (event: { phase: string }) => void
+    ) => ReturnType<typeof routeRequestWithCodex>;
+
+    const route = await routeWithProgress(
+      "你好",
+      config,
+      undefined,
+      root,
+      undefined,
+      (event) => progress.push(event.phase)
+    );
+    await new Promise((resolve) => setTimeout(resolve, 80));
+
+    expect(route).toMatchObject({ source: "fallback", router_failure_stage: "waiting-output" });
+    expect(progress).toEqual(["dispatching", "starting", "waiting-output"]);
   });
 
   it("records response-stage telemetry when a successful process returns invalid output", async () => {
@@ -358,7 +453,23 @@ describe("routeRequestWithCodex", () => {
       ROUTER_REASON: "proxy environment reached router"
     };
 
-    const route = await routeRequestWithCodex("你好", config, undefined, root);
+    const progress: string[] = [];
+    const routeWithProgress = routeRequestWithCodex as unknown as (
+      request: string,
+      config: ReturnType<typeof defaultConfig>,
+      runner: undefined,
+      cwd: string,
+      signal: undefined,
+      onProgress: (event: { phase: string }) => void
+    ) => ReturnType<typeof routeRequestWithCodex>;
+    const route = await routeWithProgress(
+      "你好",
+      config,
+      undefined,
+      root,
+      undefined,
+      (event) => progress.push(event.phase)
+    );
 
     expect(route).toMatchObject({
       mode: "simple",
@@ -376,6 +487,13 @@ describe("routeRequestWithCodex", () => {
     expect(route.duration_ms).toBeGreaterThanOrEqual(route.router_process_ms ?? 0);
     expect(route.router_stdout_bytes).toBeGreaterThan(0);
     expect(route.router_first_stderr_ms).toBeUndefined();
+    expect(progress).toEqual([
+      "dispatching",
+      "starting",
+      "waiting-output",
+      "receiving-response",
+      "parsing"
+    ]);
   });
 
   it("summarizes noisy Codex router process errors before adding fallback reason", async () => {

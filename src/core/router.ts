@@ -1,7 +1,7 @@
 import { spawn } from "node:child_process";
 import { performance } from "node:perf_hooks";
 import type { AppConfig } from "./config.js";
-import type { RouteDecision, RouterFailureStage } from "../domain/schemas.js";
+import type { RouteDecision, RouterFailureStage, RouterProxySource } from "../domain/schemas.js";
 import { RouteDecisionSchema } from "../domain/schemas.js";
 
 export interface RouterExecutionTelemetry {
@@ -21,11 +21,35 @@ export interface CodexRouteRunnerResult {
   telemetry?: RouterExecutionTelemetry;
 }
 
+export type RouterExecutionPhase =
+  | "dispatching"
+  | "starting"
+  | "waiting-output"
+  | "receiving-stderr"
+  | "receiving-response"
+  | "parsing";
+
+export interface RouterExecutionProgress {
+  phase: RouterExecutionPhase;
+}
+
+export type RouterProgressListener = (progress: RouterExecutionProgress) => void;
+
+export type RouterProxyContext =
+  | { configured: false }
+  | {
+      configured: true;
+      source: RouterProxySource;
+      variable: string;
+      endpoint: string;
+    };
+
 export type CodexRouteRunner = (
   prompt: string,
   config: AppConfig,
   cwd: string,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  onProgress?: RouterProgressListener
 ) => Promise<string | CodexRouteRunnerResult>;
 
 interface RouterExecutionError extends Error {
@@ -38,7 +62,8 @@ export async function routeRequestWithCodex(
   config: AppConfig,
   runner: CodexRouteRunner = runCodexRouterProcess,
   cwd = config.projectRoot,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  onProgress?: RouterProgressListener
 ): Promise<RouteDecision> {
   const startedAt = Date.now();
   const telemetryStartedAt = performance.now();
@@ -54,14 +79,17 @@ export async function routeRequestWithCodex(
     return annotateRoute(complexRoute("Forced complex mode from config.", config), "forced", startedAt);
   }
 
+  const proxyContext = routerProxyContext(config.router.codex.env);
   try {
     const prompt = buildCodexRouterPrompt(request, config);
     dispatchMs = Math.max(0, performance.now() - telemetryStartedAt);
+    emitRouterProgress(onProgress, "dispatching");
     const result = normalizeRouterRunnerResult(
-      await runner(prompt, config, cwd, signal)
+      await runner(prompt, config, cwd, signal, onProgress)
     );
     let route: RouteDecision;
     const parseStartedAt = performance.now();
+    emitRouterProgress(onProgress, "parsing");
     try {
       route = RouteDecisionSchema.parse(parseCodexRoute(result.output, config));
     } catch (error) {
@@ -73,7 +101,7 @@ export async function routeRequestWithCodex(
     return annotateRoute(route, "codex", startedAt, mergeRouterTelemetry(result.telemetry, {
       router_dispatch_ms: dispatchMs,
       router_parse_ms: Math.max(0, performance.now() - parseStartedAt)
-    }));
+    }), proxyContext);
   } catch (error) {
     if (signal?.aborted || isAbortError(error)) {
       throw cancellationError();
@@ -81,7 +109,7 @@ export async function routeRequestWithCodex(
     const context = routerExecutionErrorContext(error);
     const fallback = annotateRoute(fallbackRoute(config), "fallback", startedAt, mergeRouterTelemetry(context.telemetry, {
       router_dispatch_ms: dispatchMs
-    }));
+    }), proxyContext);
     return {
       ...fallback,
       ...(context.stage ? { router_failure_stage: context.stage } : {}),
@@ -94,11 +122,13 @@ function annotateRoute(
   route: RouteDecision,
   source: NonNullable<RouteDecision["source"]>,
   startedAt: number,
-  telemetry?: RouterExecutionTelemetry
+  telemetry?: RouterExecutionTelemetry,
+  proxyContext?: RouterProxyContext
 ): RouteDecision {
   return {
     ...route,
     ...normalizeRouterTelemetry(telemetry),
+    ...routerProxyRouteFields(proxyContext),
     source,
     duration_ms: Math.max(0, Date.now() - startedAt)
   };
@@ -108,7 +138,8 @@ export async function runCodexRouterProcess(
   prompt: string,
   config: AppConfig,
   cwd = config.projectRoot,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  onProgress?: RouterProgressListener
 ): Promise<CodexRouteRunnerResult> {
   const { command, args, timeoutMs } = config.router.codex;
 
@@ -122,6 +153,15 @@ export async function runCodexRouterProcess(
     ...configuredEnvironment
   };
   const proxyConfigured = hasConfiguredProxy(env);
+  let progressPhase: RouterExecutionPhase | undefined;
+  const reportProgress = (phase: RouterExecutionPhase): void => {
+    if (progressPhase === phase) {
+      return;
+    }
+    progressPhase = phase;
+    emitRouterProgress(onProgress, phase);
+  };
+  reportProgress("starting");
 
   return new Promise<CodexRouteRunnerResult>((resolve, reject) => {
     const processStartedAt = Date.now();
@@ -189,6 +229,7 @@ export async function runCodexRouterProcess(
 
     child.once("spawn", () => {
       spawnMs = Math.max(0, Date.now() - processStartedAt);
+      reportProgress("waiting-output");
     });
 
     if (timeoutMs > 0) {
@@ -208,17 +249,27 @@ export async function runCodexRouterProcess(
     }
 
     child.stdout.on("data", (chunk: Buffer) => {
+      if (settled) {
+        return;
+      }
       stdoutBytes += chunk.byteLength;
       firstOutputMs ??= Math.max(0, Date.now() - processStartedAt);
       firstStdoutMs ??= Math.max(0, Date.now() - processStartedAt);
       stdout += chunk.toString("utf8");
+      reportProgress("receiving-response");
     });
 
     child.stderr.on("data", (chunk: Buffer) => {
+      if (settled) {
+        return;
+      }
       stderrBytes += chunk.byteLength;
       firstOutputMs ??= Math.max(0, Date.now() - processStartedAt);
       firstStderrMs ??= Math.max(0, Date.now() - processStartedAt);
       stderr += chunk.toString("utf8");
+      if (stdoutBytes === 0) {
+        reportProgress("receiving-stderr");
+      }
     });
 
     child.on("error", (error) => {
@@ -336,16 +387,96 @@ export function routerProxyConfigured(
   configured: Record<string, string>,
   env: NodeJS.ProcessEnv = process.env
 ): boolean {
-  return hasConfiguredProxy({
+  return routerProxyContext(configured, env).configured;
+}
+
+export function routerProxyContext(
+  configured: Record<string, string>,
+  env: NodeJS.ProcessEnv = process.env
+): RouterProxyContext {
+  const configuredEnvironment = routerEnvironment(configured, env);
+  const configuredProxy = preferredProxyEntry(configuredEnvironment);
+  if (configuredProxy) {
+    return {
+      configured: true,
+      source: "router-config",
+      variable: configuredProxy.name,
+      endpoint: safeProxyEndpoint(configuredProxy.value)
+    };
+  }
+
+  const inheritedProxy = preferredProxyEntry({
     ...env,
-    ...routerEnvironment(configured, env)
+    ...configuredEnvironment
   });
+  if (!inheritedProxy) {
+    return { configured: false };
+  }
+  return {
+    configured: true,
+    source: "environment",
+    variable: inheritedProxy.name,
+    endpoint: safeProxyEndpoint(inheritedProxy.value)
+  };
 }
 
 function hasConfiguredProxy(env: NodeJS.ProcessEnv): boolean {
   return Object.entries(env).some(([name, value]) => (
     /^(?:HTTP|HTTPS|ALL)_PROXY$/i.test(name) && Boolean(value?.trim())
   ));
+}
+
+function preferredProxyEntry(env: NodeJS.ProcessEnv): { name: string; value: string } | null {
+  const candidates = Object.entries(env)
+    .filter((entry): entry is [string, string] => (
+      /^(?:HTTP|HTTPS|ALL)_PROXY$/i.test(entry[0]) && Boolean(entry[1]?.trim())
+    ))
+    .sort((left, right) => {
+      const priority = proxyVariablePriority(left[0]) - proxyVariablePriority(right[0]);
+      return priority || left[0].localeCompare(right[0]);
+    });
+  const selected = candidates[0];
+  return selected ? { name: selected[0], value: selected[1].trim() } : null;
+}
+
+function proxyVariablePriority(name: string): number {
+  const normalized = name.toUpperCase();
+  return normalized === "HTTPS_PROXY" ? 0 : normalized === "ALL_PROXY" ? 1 : 2;
+}
+
+function safeProxyEndpoint(value: string): string {
+  try {
+    const normalized = /^[A-Za-z][A-Za-z0-9+.-]*:\/\//.test(value)
+      ? value
+      : `http://${value}`;
+    const parsed = new URL(normalized);
+    return parsed.host || "custom";
+  } catch {
+    return "custom";
+  }
+}
+
+function routerProxyRouteFields(proxyContext: RouterProxyContext | undefined): Partial<RouteDecision> {
+  if (!proxyContext) {
+    return {};
+  }
+  if (!proxyContext.configured) {
+    return { proxy_configured: false };
+  }
+  return {
+    proxy_configured: true,
+    proxy_source: proxyContext.source,
+    proxy_variable: proxyContext.variable,
+    proxy_endpoint: proxyContext.endpoint
+  };
+}
+
+function emitRouterProgress(listener: RouterProgressListener | undefined, phase: RouterExecutionPhase): void {
+  try {
+    listener?.({ phase });
+  } catch {
+    // UI progress listeners must never change Router execution semantics.
+  }
 }
 
 function cancellationError(): Error {

@@ -18,6 +18,7 @@ export const RouterFallbackResolutionSchema = z.enum([
   "cancelled",
   "configured"
 ]);
+export const RouterProxySourceSchema = z.enum(["router-config", "environment"]);
 
 export const TaskStateSchema = z.enum([
   "created",
@@ -73,6 +74,10 @@ export const RouteDecisionSchema = z.object({
   router_failure_stage: RouterFailureStageSchema.optional(),
   router_attempt: z.number().int().positive().optional(),
   router_fallback_resolution: RouterFallbackResolutionSchema.optional(),
+  proxy_configured: z.boolean().optional(),
+  proxy_source: RouterProxySourceSchema.optional(),
+  proxy_variable: z.string().regex(/^(?:HTTP|HTTPS|ALL)_PROXY$/i).optional(),
+  proxy_endpoint: z.string().min(1).max(255).optional(),
   suggested_roles: z.array(WorkerRoleSchema).default([]),
   judge_engine: EngineNameSchema.default("codex"),
   actor_engine: EngineNameSchema.default("codex"),
@@ -158,6 +163,7 @@ export type WorkerRole = z.infer<typeof WorkerRoleSchema>;
 export type TaskState = z.infer<typeof TaskStateSchema>;
 export type WorkerState = z.infer<typeof WorkerStateSchema>;
 export type FeatureState = z.infer<typeof FeatureStateSchema>;
+export type RouterProxySource = z.infer<typeof RouterProxySourceSchema>;
 export type RouteDecision = z.infer<typeof RouteDecisionSchema>;
 export type TaskMeta = z.infer<typeof TaskMetaSchema>;
 export type WorkerStatus = z.infer<typeof WorkerStatusSchema>;

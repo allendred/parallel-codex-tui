@@ -88,6 +88,12 @@ export function formatRouteStatus(route: RouteDecision | null): string {
     if (cause) {
       details.push(routeFailureKindLabel(cause, route));
     }
+    const proxy = routeProxyStatus(route, cause);
+    if (proxy) {
+      details.push(proxy);
+    }
+  } else if (route.proxy_configured && route.proxy_endpoint) {
+    details.push(`via ${route.proxy_endpoint}`);
   }
   if (typeof route.duration_ms === "number") {
     details.push(formatRouteDuration(route.duration_ms));
@@ -102,12 +108,16 @@ export function formatRoutePendingStatus(state: RouteStartInfo | null, elapsedMs
   if (state.mode !== "auto") {
     return `route ${state.mode} · forced`;
   }
-  const label = state.scope === "follow-up" ? "follow-up" : "checking";
+  const label = routePendingPhaseLabel(state);
+  const path = routePendingPathLabel(state);
+  const details = [label, ...(path ? [path] : [])];
   if (typeof elapsedMs === "number") {
     const boundedElapsedMs = Math.min(state.timeoutMs, Math.max(0, elapsedMs));
-    return `route ${label} · ${formatRouteElapsed(boundedElapsedMs)} / ${formatRouteDuration(state.timeoutMs)}`;
+    details.push(`${formatRouteElapsed(boundedElapsedMs)} / ${formatRouteDuration(state.timeoutMs)}`);
+    return `route ${details.join(" · ")}`;
   }
-  return `route ${label} · ${formatRouteDuration(state.timeoutMs)} max`;
+  details.push(`${formatRouteDuration(state.timeoutMs)} max`);
+  return `route ${details.join(" · ")}`;
 }
 
 function routeFailureKindLabel(
@@ -124,9 +134,48 @@ function routeFailureKindLabel(
             ? "timeout after stderr"
             : "timeout after output"
         : "timeout";
-    return /\bproxy\b|代理/i.test(route.reason) ? `${stage} · proxy set` : stage;
+    return stage;
   }
   return kind.replaceAll("-", " ");
+}
+
+function routeProxyStatus(
+  route: RouteDecision,
+  cause: ReturnType<typeof classifyRouterFailure>
+): string | null {
+  if (route.proxy_configured === true) {
+    return route.proxy_endpoint ? `via ${route.proxy_endpoint}` : "via proxy";
+  }
+  if (route.proxy_configured === false) {
+    return "direct";
+  }
+  return cause === "timeout" && /\bproxy\b|代理/i.test(route.reason) ? "proxy set" : null;
+}
+
+function routePendingPhaseLabel(state: RouteStartInfo): string {
+  if (state.phase === "dispatching" || state.phase === "starting") {
+    return "starting";
+  }
+  if (state.phase === "waiting-output") {
+    return "waiting output";
+  }
+  if (state.phase === "receiving-stderr") {
+    return "diagnostics";
+  }
+  if (state.phase === "receiving-response") {
+    return "receiving";
+  }
+  if (state.phase === "parsing") {
+    return "parsing";
+  }
+  return state.scope === "follow-up" ? "follow-up" : "checking";
+}
+
+function routePendingPathLabel(state: RouteStartInfo): string | null {
+  if (state.proxyConfigured === true) {
+    return state.proxyEndpoint ? `via ${state.proxyEndpoint}` : "via proxy";
+  }
+  return state.proxyConfigured === false ? "direct" : null;
 }
 
 export function formatSelectedWorkerStatus(state: StatusLineState | null, selectedIndex: number): string {
