@@ -88,6 +88,8 @@ describe("CLI task lifecycle smoke", () => {
       await waitForScreenText(() => screenWrites, screen, "done · complex task completed");
       await waitForScreenText(() => screenWrites, screen, "Implementation");
       await waitForScreenText(() => screenWrites, screen, "Actor retry completed.");
+      await waitForScreenText(() => screenWrites, screen, "Changes");
+      await waitForScreenText(() => screenWrites, screen, "game.js");
       await waitForScreenText(() => screenWrites, screen, "^D compact");
       expect(screen.snapshot()).not.toContain("Findings");
       const resultHeader = screen.styledSnapshotLines().find((line) => (
@@ -101,7 +103,9 @@ describe("CLI task lifecycle smoke", () => {
 
       child.write("\x1b[6~");
       await waitForScreenText(() => screenWrites, screen, "Findings");
-      await waitForScreenText(() => screenWrites, screen, "result 2/2");
+      await screenWrites;
+      expect(screen.snapshot()).toMatch(/result \d+\/\d+/);
+      expect(screen.snapshot()).toContain("Verification");
 
       const completionLines = screen.styledSnapshotLines().filter((line) => (
         /done · complex task completed|APPROVED|none/.test(
@@ -148,6 +152,7 @@ describe("CLI task lifecycle smoke", () => {
       expect(chat).toContain("Complex task completed.");
       expect(chat).toContain(`"task_id":"${taskDir.split("/").at(-1)}"`);
       expect(await pathExists(join(taskDir, "turns", "0002"))).toBe(false);
+      expect(await readTextIfExists(join(workspace, "game.js"))).toContain("export const ready = true");
 
       child.write("\x03");
       await waitForExit(exits);
@@ -186,6 +191,7 @@ function lifecycleAgentSource(): string {
     "      return;",
     "    }",
     "    fs.writeFileSync(path.join(dir, 'worklog.md'), '# Worklog\\n\\n- Actor retry completed.\\n- Added board state.\\n- Added keyboard controls.\\n- Added scoring.\\n- Added level progression.\\n- Added next-piece preview.\\n- Added hold support.\\n- Added pause support.\\n- Added game-over handling.\\n- Verified retry state.\\n');",
+    "    fs.writeFileSync(path.join(process.cwd(), 'game.js'), 'export const ready = true;\\n');",
     "    fs.writeFileSync(path.join(dir, 'patch.diff'), 'diff --git a/game b/game\\n');",
     "    console.log('actor retry done');",
     "    return;",

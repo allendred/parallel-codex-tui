@@ -82,4 +82,16 @@ describe("task result parsing", () => {
     expect(approved?.outcome).toBe("approved");
     expect(revision?.outcome).toBe("revision-required");
   });
+
+  it("parses changed files and verification from newer summaries", () => {
+    const result = parseTaskResultSummary(
+      FIRST_RESULT
+        .replace("\nCritic review:", "\nChanged files:\n- src/game.ts\n- tests/game.test.ts\n\nCritic review:")
+        .replace("\nCritic findings:", "\nVerification:\nCritic decision: APPROVED\n- npm test passed\n\nCritic findings:")
+    );
+
+    expect(result?.sections.changes).toContain("src/game.ts");
+    expect(result?.sections.changes).toContain("tests/game.test.ts");
+    expect(result?.sections.verification).toContain("npm test passed");
+  });
 });

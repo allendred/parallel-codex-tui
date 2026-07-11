@@ -632,6 +632,7 @@ export class Orchestrator {
     const channels = new Map(plan.features.map((definition, index) => [definition.id, features[index]]));
     const summaries: FeatureSummary[] = [];
     const waveReviews: WaveSummary[] = [];
+    const changedPaths = new Set<string>();
     const featureWaves = featureExecutionWaves(plan);
     const concurrency = this.config.orchestration.maxParallelFeatures;
     const workspaceManager = new ParallelWorkspaceManager({
@@ -669,6 +670,7 @@ export class Orchestrator {
       if (checkpoint) {
         summaries.push(...checkpoint.summaries);
         waveReviews.push({ wave: waveNumber, review: checkpoint.review });
+        checkpoint.changedPaths.forEach((path) => changedPaths.add(path));
         await this.sessions.appendEvent(
           task,
           checkpoint.recovered ? "feature.wave_checkpoint_recovered" : "feature.wave_checkpoint_reused",
@@ -1008,6 +1010,7 @@ export class Orchestrator {
 
       await this.sessions.updateTaskStatus(task, "integrating");
       const integration = await workspaceManager.commitWave(workspaceWave);
+      integration.changedPaths.forEach((path) => changedPaths.add(path));
       await writeJson(join(workspaceWave.rootDir, "verification.json"), {
         version: 1,
         state: "approved",
@@ -1030,7 +1033,11 @@ export class Orchestrator {
     }
 
     throwIfCancelled(input.signal);
-    const summary = multiFeatureSummary(summaries, waveReviews);
+    const turnRequirements = await readTextIfExists(join(turn.dir, "requirements.md"));
+    const summary = multiFeatureSummary(summaries, waveReviews, {
+      requirements: turnRequirements || await readTextIfExists(join(judge.dir, "requirements.md")),
+      changedPaths: [...changedPaths]
+    });
     await writeText(join(turn.dir, "supervisor-summary.md"), `${summary}\n`);
     await this.sessions.updateTaskStatus(task, "done");
     input.onStatus?.({ taskId: task.id, judge: "done", actor: "done", critic: "done" });
@@ -1090,7 +1097,8 @@ export class Orchestrator {
         this.workerFiles(task, `critic-${route.critic_engine}`),
         feature,
         input,
-        workers
+        workers,
+        await integratedWaveChangedPaths(workspaceRootDir)
       );
     }
     const restoredWave = input.retry ? await workspaceManager.restoreWave(workspaceInput) : null;
@@ -1241,7 +1249,7 @@ export class Orchestrator {
       critic: "done",
       featureProgress: { wave: 1, waves: 1, phase: "integration", completed: 0, total: 1 }
     });
-    await workspaceManager.integrateWave(workspaceWave);
+    const integration = await workspaceManager.integrateWave(workspaceWave);
     input.onStatus?.({
       taskId: task.id,
       judge: "done",
@@ -1250,7 +1258,7 @@ export class Orchestrator {
       featureProgress: { wave: 1, waves: 1, phase: "integration", completed: 1, total: 1 }
     });
 
-    return this.completeTask(task, turn, judge, actor, critic, feature, input, workers);
+    return this.completeTask(task, turn, judge, actor, critic, feature, input, workers, integration.changedPaths);
   }
 
   private async completeTask(
@@ -1261,7 +1269,8 @@ export class Orchestrator {
     critic: WorkerFiles,
     feature: FeatureChannel,
     input: HandleRequestInput,
-    workers: WorkerLogRef[]
+    workers: WorkerLogRef[],
+    changedPaths: string[]
   ): Promise<HandleRequestResult> {
     throwIfCancelled(input.signal);
     await this.sessions.updateTaskStatus(task, "done");
@@ -1272,7 +1281,8 @@ export class Orchestrator {
       criticDir: critic.dir,
       turnDir: turn.dir,
       featureActorWorklogPath: feature.actorWorklogPath,
-      featureCriticFindingsPath: feature.criticFindingsPath
+      featureCriticFindingsPath: feature.criticFindingsPath,
+      changedPaths
     });
     await writeText(join(turn.dir, "supervisor-summary.md"), `${summary}\n`);
     await writeFeatureDecision(feature, summary);
@@ -2390,27 +2400,112 @@ async function mapWithConcurrency<T, Result>(
   return results as Result[];
 }
 
-function multiFeatureSummary(features: FeatureSummary[], waves: WaveSummary[] = []): string {
+function multiFeatureSummary(
+  features: FeatureSummary[],
+  waves: WaveSummary[] = [],
+  evidence: { requirements: string; changedPaths: string[] }
+): string {
+  const findings = features.flatMap((feature) => {
+    const value = supervisorSummarySection(feature.summary, "Critic findings:");
+    return value && value !== "(empty)"
+      ? [`## ${feature.title} (${feature.id})`, "", escapeMultiSummarySection(value), ""]
+      : [];
+  });
   return [
+    "Complex task completed.",
+    "",
+    "Requirements:",
+    boundedMultiSummaryText(evidence.requirements),
+    "",
+    "Actor work:",
+    `Delivered ${features.length} features across ${waves.length} verified ${waves.length === 1 ? "wave" : "waves"}.`,
+    "",
     "# Parallel feature delivery",
     "",
     ...features.flatMap((feature) => [
       `## ${feature.title} (${feature.id})`,
       "",
-      feature.summary.trim(),
+      escapeMultiSummarySection(supervisorSummarySection(feature.summary, "Actor work:")) || "(empty)",
       ""
     ]),
+    "Changed files:",
+    changedPathsMarkdown(evidence.changedPaths),
+    "",
+    "Critic review:",
+    "APPROVED",
+    "",
+    `${features.length} feature reviews and ${waves.length} combined wave ${waves.length === 1 ? "review" : "reviews"} approved.`,
+    "",
+    "Verification:",
     ...(waves.length > 0 ? [
       "# Combined verification",
       "",
       ...waves.flatMap((wave) => [
         `## Wave ${wave.wave}`,
         "",
-        wave.review.trim(),
+        escapeMultiSummarySection(wave.review.trim()),
         ""
       ])
-    ] : [])
+    ] : ["(empty)"]),
+    "",
+    "Critic findings:",
+    ...(findings.length > 0 ? findings : ["(empty)"])
   ].join("\n").trim();
+}
+
+function supervisorSummarySection(summary: string, heading: string): string {
+  const lines = summary.split(/\r?\n/);
+  const start = lines.findIndex((line) => line.trim() === heading);
+  if (start < 0) {
+    return "";
+  }
+  const headings = new Set([
+    "Requirements:",
+    "Actor work:",
+    "Changed files:",
+    "Critic review:",
+    "Verification:",
+    "Critic findings:"
+  ]);
+  let end = lines.length;
+  for (let index = start + 1; index < lines.length; index += 1) {
+    if (headings.has(lines[index]?.trim() ?? "")) {
+      end = index;
+      break;
+    }
+  }
+  return lines.slice(start + 1, end).join("\n").trim();
+}
+
+function changedPathsMarkdown(paths: string[]): string {
+  const unique = [...new Set(paths.map((path) => (
+    path.replace(/[\u0000-\u001f\u007f]/g, "").trim()
+  )).filter(Boolean))].sort();
+  if (unique.length === 0) {
+    return "(empty)";
+  }
+  const visible = unique.slice(0, 50);
+  return [
+    ...visible.map((path) => `- ${path}`),
+    ...(unique.length > visible.length ? [`- ... and ${unique.length - visible.length} more`] : [])
+  ].join("\n");
+}
+
+function boundedMultiSummaryText(text: string): string {
+  const trimmed = escapeMultiSummarySection(text).trim();
+  if (!trimmed) {
+    return "(empty)";
+  }
+  const codePoints = Array.from(trimmed);
+  return codePoints.length > 1600 ? `${codePoints.slice(0, 1597).join("")}...` : trimmed;
+}
+
+function escapeMultiSummarySection(text: string): string {
+  return text.split(/\r?\n/).map((line) => (
+    /^(?:Requirements|Actor work|Changed files|Critic review|Verification|Critic findings):\s*$/i.test(line.trim())
+      ? `> ${line.trim()}`
+      : line
+  )).join("\n");
 }
 
 async function loadIntegratedWaveCheckpoint(
@@ -2419,7 +2514,7 @@ async function loadIntegratedWaveCheckpoint(
   wave: number,
   definitions: FeatureDefinition[],
   channels: FeatureChannel[]
-): Promise<{ summaries: FeatureSummary[]; review: string; recovered: boolean } | null> {
+): Promise<{ summaries: FeatureSummary[]; review: string; changedPaths: string[]; recovered: boolean } | null> {
   const approved = await Promise.all(channels.map(featureIsApproved));
   const allApproved = approved.every(Boolean);
   const rootDir = join(task.dir, "workspaces", `turn-${turn.turnId}`, `wave-${String(wave).padStart(4, "0")}`);
@@ -2438,7 +2533,19 @@ async function loadIntegratedWaveCheckpoint(
   })));
   const review = (await readTextIfExists(join(rootDir, "verification-review.md"))).trim()
     || "APPROVED\n\nRestored from the integrated wave checkpoint.";
-  return { summaries, review, recovered: !allApproved };
+  return {
+    summaries,
+    review,
+    changedPaths: await integratedWaveChangedPaths(rootDir),
+    recovered: !allApproved
+  };
+}
+
+async function integratedWaveChangedPaths(rootDir: string): Promise<string[]> {
+  const integration = await readJsonObjectIfValid(join(rootDir, "integration.json"));
+  return Array.isArray(integration?.changed_paths)
+    ? integration.changed_paths.filter((path): path is string => typeof path === "string")
+    : [];
 }
 
 async function waveIntegrationCheckpointMatches(

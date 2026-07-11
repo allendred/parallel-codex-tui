@@ -3116,14 +3116,20 @@ function expandedSupervisorSummaryForChat(text: string): ChatMarkdownLine[] | nu
   const sections: Array<{
     key: keyof TaskResultSections;
     title: string;
+    optional?: boolean;
   }> = [
     { key: "requirements", title: "Requirements" },
     { key: "implementation", title: "Implementation" },
+    { key: "changes", title: "Changes", optional: true },
     { key: "review", title: "Review" },
+    { key: "verification", title: "Verification", optional: true },
     { key: "findings", title: "Findings" }
   ];
 
   for (const section of sections) {
+    if (section.optional && !result.sections[section.key].trim()) {
+      continue;
+    }
     lines.push({
       spans: [{ text: section.title, tone: "heading" }],
       background: "rail",
@@ -3158,9 +3164,10 @@ function taskResultSectionMarkdownLines(
     .filter((line) => !chatMarkdownLineIsBlank(line))
     .map((line) => {
       const text = chatSpanText(line.spans).trim();
-      const semanticTone = section === "review" && /^APPROVED\b/i.test(text)
+      const decisionSection = section === "review" || section === "verification";
+      const semanticTone = decisionSection && /^(?:Critic decision:\s*)?APPROVED\b/i.test(text)
         ? "success"
-        : section === "review" && /^(?:REVISION_REQUIRED|REJECTED|FAILED)\b/i.test(text)
+        : decisionSection && /^(?:Critic decision:\s*)?(?:REVISION_REQUIRED|REJECTED|FAILED)\b/i.test(text)
           ? "danger"
           : section === "findings" && outcome === "revision-required"
             ? "warning"
@@ -3184,31 +3191,23 @@ function taskResultOutcomeDisplay(outcome: TaskResultOutcome): {
 }
 
 function compactSupervisorSummaryForChat(text: string): string[] | null {
-  const rawLines = text.split(/\r?\n/);
-  if (!/^Complex task completed\.$/i.test((rawLines[0] ?? "").trim())) {
+  const result = parseTaskResultSummary(text);
+  if (!result) {
     return null;
   }
 
   const sections = [
-    { label: "requirements", heading: "Requirements:" },
-    { label: "actor", heading: "Actor work:" },
-    { label: "review", heading: "Critic review:" },
-    { label: "findings", heading: "Critic findings:" }
-  ];
-  const indexes = sections.map((section) => rawLines.findIndex((line) => line.trim() === section.heading));
-  if (indexes.every((index) => index < 0)) {
-    return null;
-  }
+    { label: "requirements", value: result.sections.requirements },
+    { label: "actor", value: result.sections.implementation },
+    { label: "review", value: result.sections.review },
+    { label: "findings", value: result.sections.findings }
+  ] as const;
 
   return [
     "done · complex task completed",
-    ...sections.map((section, index) => {
-      const start = indexes[index] ?? -1;
-      const nextStarts = indexes.slice(index + 1).filter((item) => item > start);
-      const end = nextStarts.length > 0 ? Math.min(...nextStarts) : rawLines.length;
-      const value = start >= 0 ? chatSummarySectionValue(rawLines.slice(start + 1, end)) : "none";
-      return `${section.label} · ${value}`;
-    })
+    ...sections.map((section) => (
+      `${section.label} · ${chatSummarySectionValue(section.value.split(/\r?\n/))}`
+    ))
   ];
 }
 
@@ -3236,7 +3235,7 @@ function cleanChatSummaryLine(line: string): string {
 }
 
 function isChatSummaryHeading(line: string): boolean {
-  return /^(?:requirements|actor work|worklog|critic review|review|critic findings)$/i.test(line);
+  return /^(?:requirements|actor work|worklog|changed files|critic review|review|verification|critic findings):?$/i.test(line);
 }
 
 function isCompactChatSummaryLine(line: string): boolean {

@@ -182,6 +182,9 @@ describe("package metadata", () => {
     expect(readme).toContain("Worker, pairing, role, orchestration, data-directory, and UI changes still require a restart");
     expect(readme).toContain("While classification is running, it follows the real subprocess");
     expect(readme).toContain("Completed complex tasks open as a structured result at the top of the chat viewport");
+    expect(readme).toContain("authoritative integrated changed paths, Critic review, verification evidence, and findings");
+    expect(readme).toContain("Changed files come from the workspace integration result rather than an Actor claim");
+    expect(readme).toContain("Multi-feature delivery uses the same result protocol");
     expect(readme).toContain("`Ctrl+D` toggles the focused result between full detail and its five-line compact summary");
     expect(readme).toContain("Result lookup follows the persisted task id");
     expect(readme).toContain("Restarting an existing task restores the latest persisted route evidence");

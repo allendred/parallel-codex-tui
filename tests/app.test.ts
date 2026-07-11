@@ -653,6 +653,37 @@ describe("ChatView", () => {
     ]);
   });
 
+  it("does not treat evidence section headings as compact summary values", () => {
+    const lines = chatMessageDisplayLines(
+      [{
+        from: "system",
+        text: [
+          "Complex task completed.",
+          "Requirements:",
+          "- Build gameplay.",
+          "Actor work:",
+          "Changed files:",
+          "- src/game.ts",
+          "Critic review:",
+          "Verification:",
+          "- npm test passed",
+          "Critic findings:",
+          "(empty)"
+        ].join("\n")
+      }],
+      80,
+      8
+    );
+
+    expect(lines.map((line) => line.text)).toEqual([
+      "done · complex task completed",
+      "requirements · Build gameplay.",
+      "actor · none",
+      "review · none",
+      "findings · none"
+    ]);
+  });
+
   it("expands the active task result into structured full-width sections", () => {
     const lines = chatMessageDisplayLines(
       [
@@ -791,6 +822,44 @@ describe("ChatView", () => {
     expect(last.clampedOffset).toBe(first.maxOffset);
     expect(last.lines.some((line) => line.text === "Findings")).toBe(true);
     expect(last.lines.some((line) => line.text === "  none")).toBe(true);
+  });
+
+  it("renders changed files and verification as optional result sections", () => {
+    const text = [
+      "Complex task completed.",
+      "Requirements:",
+      "- Build gameplay.",
+      "Actor work:",
+      "- Added gameplay.",
+      "Changed files:",
+      "- src/game.ts",
+      "- tests/game.test.ts",
+      "Critic review:",
+      "APPROVED",
+      "Verification:",
+      "Critic decision: APPROVED",
+      "- npm test passed",
+      "Critic findings:",
+      "(empty)"
+    ].join("\n");
+    const lines = chatMessageDisplayLines(
+      [{ from: "system", text, taskId: "task-evidence" }],
+      60,
+      30,
+      { expandedTaskResult: true, taskId: "task-evidence" }
+    );
+
+    expect(lines.map((line) => line.text)).toEqual(expect.arrayContaining([
+      "Changes",
+      "  • src/game.ts",
+      "  • tests/game.test.ts",
+      "Verification",
+      "  Critic decision: APPROVED",
+      "  • npm test passed"
+    ]));
+    expect(lines.filter((line) => line.background === "rail").map((line) => line.text)).toEqual(
+      expect.arrayContaining(["Changes", "Verification"])
+    );
   });
 
   it("indents wrapped complex summary continuations in narrow chat views", () => {

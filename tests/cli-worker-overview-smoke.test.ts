@@ -59,6 +59,7 @@ describe("CLI Worker overview smoke", () => {
       child.write("\x02");
       await waitForScreenText(() => screenWrites, screen, "Workers");
       await waitForScreenText(() => screenWrites, screen, "Judge (mock)");
+      await waitForScreenText(() => screenWrites, screen, "workers · Up/Dn select · Enter logs");
       let snapshot = screen.snapshot();
       expect(snapshot.split("\n")[0]).toContain("workers");
       expect(snapshot).toContain("workers · Up/Dn select · Enter logs");

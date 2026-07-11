@@ -11,6 +11,7 @@ import { NativeSessionSchema, RouteDecisionSchema, TaskMetaSchema, WorkerStatusS
 import { Orchestrator, type FeatureRunProgress } from "../src/orchestrator/orchestrator.js";
 import { MockWorkerAdapter } from "../src/workers/mock-adapter.js";
 import { ProcessWorkerAdapter } from "../src/workers/process-adapter.js";
+import { parseTaskResultSummary } from "../src/tui/task-result.js";
 import type { WorkerAdapter, WorkerResult, WorkerRunSpec } from "../src/workers/types.js";
 
 function mockConfig(root: string) {
@@ -445,6 +446,11 @@ describe("Orchestrator", () => {
     ))).writable_dirs).toEqual(adapter.waveCriticWritableDirs);
     expect(result.summary).toContain("# Combined verification");
     expect(result.summary).toContain("## Wave 1");
+    expect(result.summary.startsWith("Complex task completed.")).toBe(true);
+    const structured = parseTaskResultSummary(result.summary);
+    expect(structured?.sections.changes).toContain("alpha.txt");
+    expect(structured?.sections.changes).toContain("beta.txt");
+    expect(structured?.sections.verification).toContain("Wave 1");
     expect(JSON.parse(await readTextIfExists(join(
       taskDir,
       "workspaces",

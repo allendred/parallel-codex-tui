@@ -3,7 +3,9 @@ export type TaskResultOutcome = "approved" | "revision-required" | "completed";
 export interface TaskResultSections {
   requirements: string;
   implementation: string;
+  changes: string;
   review: string;
+  verification: string;
   findings: string;
 }
 
@@ -21,7 +23,9 @@ export interface TaskResultMessage {
 const RESULT_SECTIONS = [
   { key: "requirements", heading: "Requirements:", redundantHeading: /^(?:requirements|scope)$/i },
   { key: "implementation", heading: "Actor work:", redundantHeading: /^(?:actor work|worklog|implementation)$/i },
+  { key: "changes", heading: "Changed files:", redundantHeading: /^(?:changed files|changes)$/i },
   { key: "review", heading: "Critic review:", redundantHeading: /^(?:critic review|review)$/i },
+  { key: "verification", heading: "Verification:", redundantHeading: /^(?:verification|checks)$/i },
   { key: "findings", heading: "Critic findings:", redundantHeading: /^(?:critic findings|findings)$/i }
 ] as const;
 
@@ -52,8 +56,10 @@ export function parseTaskResultSummary(text: string): TaskResultSummary | null {
   const sections: TaskResultSections = {
     requirements: values[0] ?? "",
     implementation: values[1] ?? "",
-    review: values[2] ?? "",
-    findings: values[3] ?? ""
+    changes: values[2] ?? "",
+    review: values[3] ?? "",
+    verification: values[4] ?? "",
+    findings: values[5] ?? ""
   };
 
   return {
