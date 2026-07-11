@@ -4,6 +4,7 @@ import { render } from "ink";
 import { ZodError } from "zod";
 import { parseCliArgs, validateCliArgs } from "./cli-args.js";
 import { selectWorkspaceForCli } from "./cli-workspace.js";
+import { WorkspaceSelectionCancelledError } from "./cli-workspace-picker.js";
 import { createRuntime } from "./bootstrap.js";
 import { prepareAppRoot } from "./core/app-root.js";
 import { formatConfigErrorMessage } from "./core/config-errors.js";
@@ -17,6 +18,9 @@ import { configureTuiTheme } from "./tui/theme.js";
 import { version } from "./version.js";
 
 main().catch((error) => {
+  if (error instanceof WorkspaceSelectionCancelledError) {
+    return;
+  }
   process.stderr.write(`${formatStartupError(error)}\n`);
   process.exit(1);
 });

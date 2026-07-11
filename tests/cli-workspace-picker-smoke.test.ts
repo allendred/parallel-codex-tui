@@ -180,6 +180,46 @@ describe("CLI workspace picker smoke", () => {
       }
     }
   }, 10000);
+
+  it("exits cleanly when the user cancels workspace selection", async () => {
+    const appRoot = await mkdtemp(join(tmpdir(), "pct-cli-workspace-picker-cancel-"));
+    const screen = new NativeTerminalScreen({ cols: 80, rows: 18, scrollback: 1000 });
+    const chunks: string[] = [];
+    const exits: number[] = [];
+    let screenWrites = Promise.resolve();
+    const child = spawn(
+      process.execPath,
+      ["./node_modules/.bin/tsx", "src/cli.tsx", "--app-root", appRoot],
+      {
+        cwd: process.cwd(),
+        cols: 80,
+        rows: 18,
+        name: "xterm-256color",
+        env: { ...process.env, TERM: "xterm-256color" }
+      }
+    );
+
+    child.onData((chunk) => {
+      chunks.push(chunk);
+      screenWrites = screenWrites.then(() => screen.write(chunk));
+    });
+    child.onExit(({ exitCode }) => exits.push(exitCode));
+
+    try {
+      await waitForScreenText(() => screenWrites, screen, "Workspace path");
+      child.write("\x03");
+      await waitForExit(exits);
+      await screenWrites;
+
+      expect(exits[0]).toBe(0);
+      expect(chunks.join("")).not.toContain("Startup error");
+      expect(chunks.join("")).not.toContain("Workspace selection cancelled");
+    } finally {
+      if (exits.length === 0) {
+        child.kill("SIGTERM");
+      }
+    }
+  }, 10000);
 });
 
 function lineText(line: ReturnType<NativeTerminalScreen["styledSnapshotLines"]>[number] | undefined): string {

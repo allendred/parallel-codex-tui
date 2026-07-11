@@ -33,6 +33,13 @@ interface WorkspacePickerOption {
 
 const WORKSPACE_SHORTCUT_DELAY_MS = 500;
 
+export class WorkspaceSelectionCancelledError extends Error {
+  constructor() {
+    super("Workspace selection cancelled.");
+    this.name = "WorkspaceSelectionCancelledError";
+  }
+}
+
 export async function promptForWorkspaceTui(input: WorkspacePickerInput): Promise<string> {
   let resolveSelection: (workspace: string) => void = () => undefined;
   let rejectSelection: (error: Error) => void = () => undefined;
@@ -47,7 +54,7 @@ export async function promptForWorkspaceTui(input: WorkspacePickerInput): Promis
       invalidExplicitWorkspace={input.invalidExplicitWorkspace}
       terminalHeight={input.stdout.rows ?? 24}
       terminalWidth={input.stdout.columns ?? 80}
-      onCancel={() => rejectSelection(new Error("Workspace selection cancelled."))}
+      onCancel={() => rejectSelection(new WorkspaceSelectionCancelledError())}
       onSelect={resolveSelection}
     />,
     {
