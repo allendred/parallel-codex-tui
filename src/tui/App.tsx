@@ -50,7 +50,13 @@ import {
   type RouterDiagnosticsScope
 } from "./RouterDiagnosticsView.js";
 import { moveWorkerSelection, WorkerOverviewView } from "./WorkerOverviewView.js";
-import { CollaborationTimelineView, nextCollaborationFeatureIndex } from "./CollaborationTimelineView.js";
+import {
+  CollaborationTimelineView,
+  collaborationSelectionScrollOffset,
+  collaborationTimelineEvents,
+  moveCollaborationEventSelection,
+  nextCollaborationFeatureIndex
+} from "./CollaborationTimelineView.js";
 import { moveTaskSessionSelection, TaskSessionsView } from "./TaskSessionsView.js";
 import {
   buildNativeAttachLaunch,
@@ -215,6 +221,9 @@ export function App({
   const [collaborationLoading, setCollaborationLoading] = useState(false);
   const [collaborationError, setCollaborationError] = useState<string | null>(null);
   const [collaborationFeatureIndex, setCollaborationFeatureIndex] = useState(-1);
+  const [collaborationSelectedEventId, setCollaborationSelectedEventId] = useState<string | null>(null);
+  const [collaborationDetailOpen, setCollaborationDetailOpen] = useState(false);
+  const [collaborationUnresolvedOnly, setCollaborationUnresolvedOnly] = useState(false);
   const [collaborationScrollOffset, setCollaborationScrollOffset] = useState(0);
   const [collaborationMaxScrollOffset, setCollaborationMaxScrollOffset] = useState(0);
   const [nativeAttach, setNativeAttach] = useState<{
@@ -252,6 +261,9 @@ export function App({
   const taskSessionsLoadingRef = useRef(taskSessionsLoading);
   const collaborationTimelineRef = useRef<CollaborationTimeline | null>(null);
   const collaborationFeatureIndexRef = useRef(-1);
+  const collaborationSelectedEventIdRef = useRef<string | null>(null);
+  const collaborationDetailOpenRef = useRef(false);
+  const collaborationUnresolvedOnlyRef = useRef(false);
   const collaborationMaxScrollOffsetRef = useRef(0);
   const autoSelectedFailedWorkerRef = useRef(false);
   const userSelectedWorkerRef = useRef(false);
@@ -357,6 +369,18 @@ export function App({
   useEffect(() => {
     taskSessionsLoadingRef.current = taskSessionsLoading;
   }, [taskSessionsLoading]);
+
+  useEffect(() => {
+    collaborationSelectedEventIdRef.current = collaborationSelectedEventId;
+  }, [collaborationSelectedEventId]);
+
+  useEffect(() => {
+    collaborationDetailOpenRef.current = collaborationDetailOpen;
+  }, [collaborationDetailOpen]);
+
+  useEffect(() => {
+    collaborationUnresolvedOnlyRef.current = collaborationUnresolvedOnly;
+  }, [collaborationUnresolvedOnly]);
 
   useEffect(() => {
     chatScrollOffsetRef.current = 0;
@@ -760,11 +784,49 @@ export function App({
           return;
         }
         for (const timelineChunk of timelineChunks) {
+          if (collaborationDetailOpenRef.current && (timelineChunk === "\x1b" || timelineChunk === "\r" || timelineChunk === "\n")) {
+            collaborationDetailOpenRef.current = false;
+            setCollaborationDetailOpen(false);
+            collaborationMaxScrollOffsetRef.current = 0;
+            setCollaborationMaxScrollOffset(0);
+            setCollaborationScrollOffset(0);
+            continue;
+          }
+          if (collaborationDetailOpenRef.current) {
+            const detailDelta = mouseScrollDelta(timelineChunk, 3)
+              + rawPageScrollDelta(timelineChunk, Math.max(1, outputHeight - 3));
+            if (detailDelta !== 0) {
+              setCollaborationScrollOffset((current) => (
+                nextScrollOffset(current, -detailDelta, collaborationMaxScrollOffsetRef.current)
+              ));
+            }
+            continue;
+          }
           if (timelineChunk === "\x1b" || isWorkerOverviewShortcut(timelineChunk, {})) {
             setCollaborationError(null);
             viewRef.current = "workers";
             setView("workers");
             return;
+          }
+          const scopedEvents = collaborationTimelineRef.current
+            ? collaborationTimelineEvents(
+                collaborationTimelineRef.current,
+                collaborationFeatureIndexRef.current,
+                collaborationUnresolvedOnlyRef.current
+              )
+            : [];
+          if (timelineChunk === "\r" || timelineChunk === "\n") {
+            const selectedId = collaborationSelectedEventIdRef.current ?? scopedEvents.at(-1)?.id ?? null;
+            if (selectedId) {
+              collaborationSelectedEventIdRef.current = selectedId;
+              setCollaborationSelectedEventId(selectedId);
+              collaborationDetailOpenRef.current = true;
+              setCollaborationDetailOpen(true);
+              collaborationMaxScrollOffsetRef.current = 0;
+              setCollaborationMaxScrollOffset(0);
+              setCollaborationScrollOffset(0);
+            }
+            continue;
           }
           if (timelineChunk === "\t") {
             const nextIndex = nextCollaborationFeatureIndex(
@@ -774,6 +836,21 @@ export function App({
             );
             collaborationFeatureIndexRef.current = nextIndex;
             setCollaborationFeatureIndex(nextIndex);
+            collaborationSelectedEventIdRef.current = null;
+            setCollaborationSelectedEventId(null);
+            collaborationDetailOpenRef.current = false;
+            setCollaborationDetailOpen(false);
+            collaborationMaxScrollOffsetRef.current = 0;
+            setCollaborationMaxScrollOffset(0);
+            setCollaborationScrollOffset(0);
+            continue;
+          }
+          if (timelineChunk === "u" || timelineChunk === "U") {
+            const unresolved = !collaborationUnresolvedOnlyRef.current;
+            collaborationUnresolvedOnlyRef.current = unresolved;
+            setCollaborationUnresolvedOnly(unresolved);
+            collaborationSelectedEventIdRef.current = null;
+            setCollaborationSelectedEventId(null);
             collaborationMaxScrollOffsetRef.current = 0;
             setCollaborationMaxScrollOffset(0);
             setCollaborationScrollOffset(0);
@@ -781,6 +858,21 @@ export function App({
           }
           if (timelineChunk === "r" || timelineChunk === "R") {
             void refreshCollaborationTimelineRef.current(false);
+            continue;
+          }
+          const eventDelta = rawHistoryDelta(timelineChunk);
+          if (eventDelta !== 0) {
+            const nextId = moveCollaborationEventSelection(
+              scopedEvents,
+              collaborationSelectedEventIdRef.current,
+              -eventDelta
+            );
+            collaborationSelectedEventIdRef.current = nextId;
+            setCollaborationSelectedEventId(nextId);
+            const lineHeight = (process.stdout.columns || 120) < 28 ? 1 : 2;
+            setCollaborationScrollOffset((current) => (
+              nextScrollOffset(current, eventDelta * lineHeight, collaborationMaxScrollOffsetRef.current)
+            ));
             continue;
           }
           const timelineDelta = mouseScrollDelta(timelineChunk, 3)
@@ -1708,6 +1800,12 @@ export function App({
     setCollaborationTimeline(null);
     collaborationFeatureIndexRef.current = -1;
     setCollaborationFeatureIndex(-1);
+    collaborationSelectedEventIdRef.current = null;
+    setCollaborationSelectedEventId(null);
+    collaborationDetailOpenRef.current = false;
+    setCollaborationDetailOpen(false);
+    collaborationUnresolvedOnlyRef.current = false;
+    setCollaborationUnresolvedOnly(false);
     collaborationMaxScrollOffsetRef.current = 0;
     setCollaborationMaxScrollOffset(0);
     setCollaborationScrollOffset(0);
@@ -1741,6 +1839,26 @@ export function App({
         collaborationFeatureIndexRef.current = nextIndex;
         setCollaborationFeatureIndex(nextIndex);
         setCollaborationScrollOffset(0);
+      }
+      const scopedEvents = collaborationTimelineEvents(
+        timeline,
+        nextIndex,
+        collaborationUnresolvedOnlyRef.current
+      );
+      const selectedEventId = collaborationSelectedEventIdRef.current;
+      if (selectedEventId && !scopedEvents.some((event) => event.id === selectedEventId)) {
+        collaborationSelectedEventIdRef.current = null;
+        setCollaborationSelectedEventId(null);
+        collaborationDetailOpenRef.current = false;
+        setCollaborationDetailOpen(false);
+        setCollaborationScrollOffset(0);
+      } else if (selectedEventId && !collaborationDetailOpenRef.current) {
+        const minimumOffset = collaborationSelectionScrollOffset(
+          scopedEvents,
+          selectedEventId,
+          process.stdout.columns || 120
+        );
+        setCollaborationScrollOffset((current) => Math.max(current, minimumOffset));
       }
       setCollaborationError(null);
     } catch (error) {
@@ -1855,6 +1973,8 @@ export function App({
           ready={inputReady}
           busy={busy}
           routeFallback={Boolean(routeFallbackPrompt)}
+          collaborationDetail={collaborationDetailOpen}
+          collaborationUnresolved={collaborationUnresolvedOnly}
           canRetry={canRetryTask}
           hasWorkers={workers.length > 0}
           hasActiveTask={Boolean(activeTaskId)}
@@ -1892,6 +2012,9 @@ export function App({
           <CollaborationTimelineView
             timeline={collaborationTimeline}
             featureIndex={collaborationFeatureIndex}
+            selectedEventId={collaborationSelectedEventId}
+            detailOpen={collaborationDetailOpen}
+            unresolvedOnly={collaborationUnresolvedOnly}
             loading={collaborationLoading}
             error={collaborationError}
             scrollOffset={collaborationScrollOffset}

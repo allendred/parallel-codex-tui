@@ -39,6 +39,11 @@ const FeatureDialogueSchema = z.object({
 export type CollaborationFeatureState = z.infer<typeof CollaborationFeatureStateSchema>;
 export type CollaborationRole = "actor" | "critic" | "supervisor";
 
+export interface CollaborationArtifactRef {
+  label: string;
+  path: string;
+}
+
 export interface CollaborationFeature {
   id: string;
   title: string;
@@ -49,6 +54,7 @@ export interface CollaborationFeature {
   replies: number;
   latestFinding?: string;
   latestReply?: string;
+  artifactRefs: CollaborationArtifactRef[];
 }
 
 export interface CollaborationEvent {
@@ -64,6 +70,7 @@ export interface CollaborationEvent {
   findings?: number;
   replies?: number;
   artifacts: string[];
+  artifactRefs: CollaborationArtifactRef[];
 }
 
 export interface CollaborationTimeline {
@@ -85,6 +92,7 @@ export async function loadCollaborationTimeline(taskId: string, taskDir: string)
   const events: CollaborationEvent[] = [
     ...dialogue.map((event, index): CollaborationEvent => {
       const feature = featureById.get(event.feature_id);
+      const artifactRefs = collaborationArtifactRefs(event.paths ?? {});
       return {
         id: `dialogue-${index}-${event.time}`,
         time: event.time,
@@ -99,7 +107,8 @@ export async function loadCollaborationTimeline(taskId: string, taskDir: string)
         featureTitle: feature?.title ?? event.feature_id,
         findings: feature?.findings ?? 0,
         replies: feature?.replies ?? 0,
-        artifacts: Object.keys(event.paths ?? {}).sort()
+        artifacts: artifactRefs.map((artifact) => artifact.label),
+        artifactRefs
       };
     }),
     ...taskEvents.map((event, index): CollaborationEvent => ({
@@ -109,7 +118,8 @@ export async function loadCollaborationTimeline(taskId: string, taskDir: string)
       role: "supervisor",
       action: collaborationWaveAction(event.type),
       message: event.message ?? "",
-      artifacts: []
+      artifacts: ["task events"],
+      artifactRefs: [{ label: "task events", path: join(taskDir, "events.jsonl") }]
     })),
     ...features.map((feature): CollaborationEvent => ({
       id: `state-${feature.id}-${feature.updatedAt}`,
@@ -127,7 +137,8 @@ export async function loadCollaborationTimeline(taskId: string, taskDir: string)
       featureTitle: feature.title,
       findings: feature.findings,
       replies: feature.replies,
-      artifacts: ["status"]
+      artifacts: feature.artifactRefs.map((artifact) => artifact.label),
+      artifactRefs: feature.artifactRefs
     }))
   ].sort((left, right) => left.time.localeCompare(right.time) || left.id.localeCompare(right.id));
 
@@ -166,6 +177,12 @@ async function readCollaborationFeatures(taskDir: string): Promise<Collaboration
         updatedAt: status.updated_at,
         findings: findingEvidence.count,
         replies: replyEvidence.count,
+        artifactRefs: [
+          { label: "status", path: join(dir, "status.json") },
+          { label: "spec", path: join(dir, "spec.md") },
+          { label: "critic findings", path: join(dir, "critic-findings.jsonl") },
+          { label: "actor replies", path: join(dir, "actor-replies.jsonl") }
+        ],
         ...(findingEvidence.latest ? { latestFinding: findingEvidence.latest } : {}),
         ...(replyEvidence.latest ? { latestReply: replyEvidence.latest } : {})
       };
@@ -173,6 +190,13 @@ async function readCollaborationFeatures(taskDir: string): Promise<Collaboration
   return features
     .filter((feature): feature is CollaborationFeature => feature !== null)
     .sort((left, right) => left.turnId.localeCompare(right.turnId) || left.id.localeCompare(right.id));
+}
+
+function collaborationArtifactRefs(paths: Record<string, string>): CollaborationArtifactRef[] {
+  return Object.entries(paths)
+    .map(([label, path]) => ({ label: label.trim(), path: path.trim() }))
+    .filter((artifact) => artifact.label && artifact.path)
+    .sort((left, right) => left.label.localeCompare(right.label) || left.path.localeCompare(right.path));
 }
 
 function parseJsonLines<T>(text: string, schema: z.ZodType<T>): T[] {

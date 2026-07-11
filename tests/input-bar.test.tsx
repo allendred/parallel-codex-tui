@@ -490,8 +490,34 @@ describe("InputBar", () => {
     const roomy = render(
       <InputBar mode={collaborationMode} value="" terminalWidth={100} onChange={() => {}} />
     );
-    expect(roomy.lastFrame()).toContain("timeline · scroll · Tab feature · R refresh · Esc workers");
+    expect(roomy.lastFrame()).toContain(
+      "timeline · Up/Dn event · Enter detail · Tab feature · U unresolved · R refresh · Esc workers"
+    );
     roomy.unmount();
+
+    const unresolved = render(
+      <InputBar
+        mode={collaborationMode}
+        collaborationUnresolved
+        value=""
+        terminalWidth={100}
+        onChange={() => {}}
+      />
+    );
+    expect(unresolved.lastFrame()).toContain("U all");
+    unresolved.unmount();
+
+    const detail = render(
+      <InputBar
+        mode={collaborationMode}
+        collaborationDetail
+        value=""
+        terminalWidth={100}
+        onChange={() => {}}
+      />
+    );
+    expect(detail.lastFrame()).toContain("event detail · scroll · Enter/Esc timeline");
+    detail.unmount();
 
     const overflow: string[] = [];
     for (let width = 8; width <= 100; width += 1) {
@@ -503,6 +529,20 @@ describe("InputBar", () => {
         overflow.push(`${width}:${displayWidth(frame)}:${frame}`);
       }
       view.unmount();
+      const detailView = render(
+        <InputBar
+          mode={collaborationMode}
+          collaborationDetail
+          value=""
+          terminalWidth={width}
+          onChange={() => {}}
+        />
+      );
+      const detailFrame = detailView.lastFrame() ?? "";
+      if (detailFrame.split("\n").length > 1 || displayWidth(detailFrame) > width) {
+        overflow.push(`${width}:${displayWidth(detailFrame)}:${detailFrame}`);
+      }
+      detailView.unmount();
     }
     expect(overflow).toEqual([]);
   });

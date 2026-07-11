@@ -62,7 +62,14 @@ describe("collaboration timeline", () => {
     await writeText(join(task.dir, "dialogue", "actor-critic.jsonl"), [
       JSON.stringify(dialogue("2026-07-11T07:00:00.000Z", "0001-ui", "feature.created", "actor", "Mailbox ready")),
       "{partial",
-      JSON.stringify(dialogue("2026-07-11T07:01:00.000Z", "0001-ui", "actor.completed", "actor", "Implementation ready")),
+      JSON.stringify(dialogue(
+        "2026-07-11T07:01:00.000Z",
+        "0001-ui",
+        "actor.completed",
+        "actor",
+        "Implementation ready",
+        { worklog: join(uiDir, "actor-worklog.md") }
+      )),
       JSON.stringify(dialogue("2026-07-11T07:02:00.000Z", "0001-ui", "critic.revision_requested", "critic", "Fix alignment"))
     ].join("\n"));
     await writeText(task.eventsPath, [
@@ -127,6 +134,19 @@ describe("collaboration timeline", () => {
       findings: 1,
       replies: 1
     }));
+    expect(timeline?.events).toContainEqual(expect.objectContaining({
+      type: "actor.completed",
+      artifactRefs: [{ label: "worklog", path: join(uiDir, "actor-worklog.md") }]
+    }));
+    expect(timeline?.events).toContainEqual(expect.objectContaining({
+      type: "feature.state",
+      featureId: "0001-ui",
+      artifactRefs: expect.arrayContaining([
+        { label: "status", path: join(uiDir, "status.json") },
+        { label: "critic findings", path: join(uiDir, "critic-findings.jsonl") },
+        { label: "actor replies", path: join(uiDir, "actor-replies.jsonl") }
+      ])
+    }));
     expect(timeline?.events.some((event) => event.type === "task.done")).toBe(false);
   });
 });
@@ -136,7 +156,8 @@ function dialogue(
   featureId: string,
   type: string,
   role: "actor" | "critic",
-  message: string
+  message: string,
+  paths: Record<string, string> = {}
 ): Record<string, unknown> {
   return {
     time,
@@ -145,6 +166,6 @@ function dialogue(
     type,
     role,
     message,
-    paths: {}
+    paths
   };
 }

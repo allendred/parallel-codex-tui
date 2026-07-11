@@ -8,6 +8,8 @@ export interface InputBarProps {
   ready?: boolean;
   busy?: boolean;
   routeFallback?: boolean;
+  collaborationDetail?: boolean;
+  collaborationUnresolved?: boolean;
   canRetry?: boolean;
   hasWorkers?: boolean;
   hasActiveTask?: boolean;
@@ -28,6 +30,8 @@ export function InputBar({
   ready = true,
   busy = false,
   routeFallback = false,
+  collaborationDetail = false,
+  collaborationUnresolved = false,
   canRetry = false,
   hasWorkers = false,
   hasActiveTask = false,
@@ -74,7 +78,9 @@ export function InputBar({
   }
 
   if (mode === "collaboration") {
-    const hints = collaborationTimelineInputHints(terminalWidth);
+    const hints = collaborationDetail
+      ? collaborationDetailInputHints(terminalWidth)
+      : collaborationTimelineInputHints(terminalWidth, collaborationUnresolved);
     return (
       <InputRail terminalWidth={terminalWidth} textWidth={displayWidth(`${hints.label}${hints.detail}`)} fill={fillRail}>
         <Text backgroundColor={TUI_THEME.rail} color={TUI_THEME.accent} bold>{hints.label}</Text>
@@ -564,29 +570,57 @@ function workerOverviewInputHints(width: number): { label: string; detail: strin
   return { label: "workers", detail: " · Up/Dn select · Enter logs · C timeline · ^O attach · Esc back" };
 }
 
-function collaborationTimelineInputHints(width: number): { label: string; detail: string } {
+function collaborationTimelineInputHints(
+  width: number,
+  unresolvedOnly: boolean
+): { label: string; detail: string } {
   if (width < 10) {
     return { label: "tl", detail: "" };
   }
   if (width < 12) {
     return { label: "flow", detail: "" };
   }
-  if (width < 15) {
+  if (width < 16) {
     return { label: "flow", detail: " · Esc" };
   }
-  if (width < 22) {
+  if (width < 24) {
     return { label: "timeline", detail: " · Esc" };
   }
-  if (width < 32) {
-    return { label: "timeline", detail: " · Pg · Esc" };
+  if (width < 36) {
+    return { label: "timeline", detail: " · Enter · Esc" };
   }
-  if (width < 48) {
-    return { label: "timeline", detail: " · scroll · Tab · Esc" };
+  if (width < 41) {
+    return { label: "timeline", detail: " · Up/Dn · Enter · Esc" };
   }
-  if (width < 70) {
-    return { label: "timeline", detail: " · scroll · Tab feature · R · Esc" };
+  if (width < 56) {
+    return { label: "timeline", detail: ` · Up/Dn · Enter · Tab · U · Esc` };
   }
-  return { label: "timeline", detail: " · scroll · Tab feature · R refresh · Esc workers" };
+  if (width < 76) {
+    return { label: "timeline", detail: ` · Up/Dn event · Enter · Tab · ${unresolvedOnly ? "U all" : "U open"} · R · Esc` };
+  }
+  if (width < 96) {
+    return {
+      label: "timeline",
+      detail: ` · Up/Dn event · Enter detail · Tab · ${unresolvedOnly ? "U all" : "U unresolved"} · R · Esc`
+    };
+  }
+  return {
+    label: "timeline",
+    detail: ` · Up/Dn event · Enter detail · Tab feature · ${unresolvedOnly ? "U all" : "U unresolved"} · R refresh · Esc workers`
+  };
+}
+
+function collaborationDetailInputHints(width: number): { label: string; detail: string } {
+  if (width < 13) {
+    return { label: "event", detail: "" };
+  }
+  if (width < 18) {
+    return { label: "detail", detail: " · Esc" };
+  }
+  if (width < 43) {
+    return { label: "event", detail: " · Pg · Esc" };
+  }
+  return { label: "event detail", detail: " · scroll · Enter/Esc timeline" };
 }
 
 function taskSessionsInputHints(width: number): { label: string; detail: string } {

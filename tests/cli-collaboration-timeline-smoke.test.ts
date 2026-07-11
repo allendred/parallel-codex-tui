@@ -8,7 +8,7 @@ import { RouteDecisionSchema, TaskMetaSchema, WorkerStatusSchema } from "../src/
 import { NativeTerminalScreen } from "../src/tui/terminal-screen.js";
 
 describe("CLI collaboration timeline smoke", () => {
-  it("opens from Worker overview, filters features, refreshes file evidence, and returns", async () => {
+  it("inspects and filters live collaboration evidence from Worker overview", async () => {
     const appRoot = await mkdtemp(join(tmpdir(), "pct-cli-collaboration-app-"));
     const workspace = await mkdtemp(join(tmpdir(), "pct-cli-collaboration-workspace-"));
     const taskId = "task-20260711-070000-timeline";
@@ -97,7 +97,9 @@ describe("CLI collaboration timeline smoke", () => {
       await waitForScreenText(() => screenWrites, screen, "all · 2 features · approved 1 · revision 1 · 7 events");
       let snapshot = screen.snapshot();
       expect(snapshot.split("\n")[0]).toContain("timeline");
-      expect(snapshot).toContain("timeline · scroll · Tab feature · R refresh · Esc workers");
+      expect(snapshot).toContain(
+        "timeline · Up/Dn event · Enter detail · Tab feature · U unresolved · R refresh · Esc workers"
+      );
       expect(snapshot).toContain("Supervisor · Game UI");
 
       child.write("\t");
@@ -119,6 +121,21 @@ describe("CLI collaboration timeline smoke", () => {
       child.write("r");
       await waitForScreenText(() => screenWrites, screen, "Game UI · approved · 5 events · 1 finding · 1 reply");
       await waitForScreenText(() => screenWrites, screen, "UI revision completed");
+
+      child.write("\x1b[A");
+      await waitForScreenText(() => screenWrites, screen, "> 07:06:00 · T0001 · Supervisor · Game UI");
+      child.write("\r");
+      await waitForScreenText(() => screenWrites, screen, "Collaboration event");
+      await waitForScreenText(() => screenWrites, screen, "artifact · status");
+      await waitForScreenText(() => screenWrites, screen, "status.json");
+
+      child.write("\r");
+      await waitForScreenText(() => screenWrites, screen, "Collaboration timeline");
+      child.write("u");
+      await waitForScreenText(() => screenWrites, screen, "Game UI · approved · unresolved · 0 events");
+      await waitForScreenText(() => screenWrites, screen, "no unresolved collaboration events in this scope");
+      child.write("u");
+      await waitForScreenText(() => screenWrites, screen, "Game UI · approved · 5 events · 1 finding · 1 reply");
 
       child.write("\x1b");
       await waitForScreenText(() => screenWrites, screen, "parallel-codex-tui · workers");

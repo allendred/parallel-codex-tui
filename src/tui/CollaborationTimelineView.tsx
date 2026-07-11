@@ -6,10 +6,10 @@ import type {
   CollaborationRole,
   CollaborationTimeline
 } from "../core/collaboration-timeline.js";
-import { compactEndByDisplayWidth, displayWidth } from "./display-width.js";
+import { compactEndByDisplayWidth, displayWidth, wrapByDisplayWidth } from "./display-width.js";
 import { TUI_THEME } from "./theme.js";
 
-export type CollaborationTimelineTone = "heading" | "muted" | "actor" | "critic" | "success" | "warning" | "danger";
+export type CollaborationTimelineTone = "heading" | "text" | "muted" | "actor" | "critic" | "success" | "warning" | "danger";
 
 export interface CollaborationTimelineLine {
   text: string;
@@ -21,6 +21,9 @@ export interface CollaborationTimelineViewProps {
   featureIndex: number;
   loading?: boolean;
   error?: string | null;
+  selectedEventId?: string | null;
+  detailOpen?: boolean;
+  unresolvedOnly?: boolean;
   scrollOffset?: number;
   height?: number;
   terminalWidth?: number;
@@ -32,6 +35,9 @@ export function CollaborationTimelineView({
   featureIndex,
   loading = false,
   error = null,
+  selectedEventId = null,
+  detailOpen = false,
+  unresolvedOnly = false,
   scrollOffset = 0,
   height = 20,
   terminalWidth = process.stdout.columns || 120,
@@ -39,12 +45,20 @@ export function CollaborationTimelineView({
 }: CollaborationTimelineViewProps) {
   const viewportHeight = Math.max(1, Math.trunc(height));
   const width = collaborationTimelineContentWidth(terminalWidth);
-  const layout = collaborationTimelineLayout(timeline, featureIndex, terminalWidth, { loading, error });
+  const layout = collaborationTimelineLayout(timeline, featureIndex, terminalWidth, {
+    loading,
+    error,
+    selectedEventId,
+    detailOpen,
+    unresolvedOnly
+  });
   const header = layout.header.slice(0, viewportHeight);
   const eventHeight = Math.max(0, viewportHeight - header.length);
   const maxOffset = Math.max(0, layout.events.length - eventHeight);
   const clampedOffset = Math.min(maxOffset, Math.max(0, Math.trunc(scrollOffset)));
-  const start = Math.max(0, layout.events.length - eventHeight - clampedOffset);
+  const start = detailOpen
+    ? clampedOffset
+    : Math.max(0, layout.events.length - eventHeight - clampedOffset);
   const visibleEvents = eventHeight > 0 ? layout.events.slice(start, start + eventHeight) : [];
   const lines = [...header, ...visibleEvents];
   const blankRows = Math.max(0, viewportHeight - lines.length);
@@ -70,9 +84,14 @@ export function CollaborationTimelineView({
 export function collaborationTimelineDisplayLines(
   timeline: CollaborationTimeline,
   featureIndex: number,
-  terminalWidth: number
+  terminalWidth: number,
+  options: {
+    selectedEventId?: string | null;
+    detailOpen?: boolean;
+    unresolvedOnly?: boolean;
+  } = {}
 ): CollaborationTimelineLine[] {
-  const layout = collaborationTimelineLayout(timeline, featureIndex, terminalWidth);
+  const layout = collaborationTimelineLayout(timeline, featureIndex, terminalWidth, options);
   return [...layout.header, ...layout.events];
 }
 
@@ -87,22 +106,89 @@ export function nextCollaborationFeatureIndex(current: number, delta: number, fe
   return nextSlot - 1;
 }
 
+export function collaborationTimelineEvents(
+  timeline: CollaborationTimeline,
+  featureIndex: number,
+  unresolvedOnly = false
+): CollaborationEvent[] {
+  const feature = selectedCollaborationFeature(timeline, featureIndex);
+  const scoped = collaborationEventsForFeature(timeline.events, feature);
+  if (!unresolvedOnly) {
+    return scoped;
+  }
+  const unresolvedFeatureIds = new Set(
+    timeline.features.filter(collaborationFeatureIsUnresolved).map((item) => item.id)
+  );
+  if (feature && !unresolvedFeatureIds.has(feature.id)) {
+    return [];
+  }
+  return scoped.filter((event) => (
+    event.featureId
+      ? unresolvedFeatureIds.has(event.featureId)
+      : unresolvedFeatureIds.size > 0 && event.type.startsWith("feature.wave_")
+  ));
+}
+
+export function moveCollaborationEventSelection(
+  events: CollaborationEvent[],
+  selectedEventId: string | null,
+  delta: number
+): string | null {
+  if (events.length === 0) {
+    return null;
+  }
+  const latestIndex = events.length - 1;
+  const selectedIndex = selectedEventId
+    ? events.findIndex((event) => event.id === selectedEventId)
+    : latestIndex;
+  const currentIndex = selectedIndex >= 0 ? selectedIndex : latestIndex;
+  const nextIndex = Math.min(latestIndex, Math.max(0, currentIndex + Math.trunc(delta)));
+  return nextIndex === latestIndex ? null : events[nextIndex]?.id ?? null;
+}
+
+export function collaborationSelectionScrollOffset(
+  events: CollaborationEvent[],
+  selectedEventId: string | null,
+  terminalWidth: number
+): number {
+  if (!selectedEventId) {
+    return 0;
+  }
+  const selectedIndex = events.findIndex((event) => event.id === selectedEventId);
+  if (selectedIndex < 0) {
+    return 0;
+  }
+  const lineHeight = terminalWidth < 28 ? 1 : 2;
+  return Math.max(0, events.length - 1 - selectedIndex) * lineHeight;
+}
+
 function collaborationTimelineLayout(
   timeline: CollaborationTimeline | null,
   featureIndex: number,
   terminalWidth: number,
-  state: { loading?: boolean; error?: string | null } = {}
+  state: {
+    loading?: boolean;
+    error?: string | null;
+    selectedEventId?: string | null;
+    detailOpen?: boolean;
+    unresolvedOnly?: boolean;
+  } = {}
 ): { header: CollaborationTimelineLine[]; events: CollaborationTimelineLine[] } {
   const width = collaborationTimelineContentWidth(terminalWidth);
   const feature = selectedCollaborationFeature(timeline, featureIndex);
-  const events = timeline ? collaborationEventsForFeature(timeline.events, feature) : [];
+  const unresolvedOnly = state.unresolvedOnly ?? false;
+  const events = timeline ? collaborationTimelineEvents(timeline, featureIndex, unresolvedOnly) : [];
+  const selectedEvent = selectedCollaborationEvent(events, state.selectedEventId ?? null);
+  if (state.detailOpen) {
+    return collaborationEventDetailLayout(selectedEvent, width);
+  }
   const header: CollaborationTimelineLine[] = [
     {
       text: fitCollaborationCandidates(["Collaboration timeline", "Timeline", "Flow"], width),
       tone: "heading"
     },
     {
-      text: collaborationTimelineSummary(timeline, feature, events.length, width),
+      text: collaborationTimelineSummary(timeline, feature, events.length, width, unresolvedOnly),
       tone: "muted"
     }
   ];
@@ -117,11 +203,19 @@ function collaborationTimelineLayout(
     return { header, events: [{ text: fitCollaborationText("no collaboration timeline", width), tone: "muted" }] };
   }
   if (events.length === 0) {
-    return { header, events: [{ text: fitCollaborationText("no collaboration events in this scope", width), tone: "muted" }] };
+    const emptyMessage = unresolvedOnly
+      ? "no unresolved collaboration events in this scope"
+      : "no collaboration events in this scope";
+    return { header, events: [{ text: fitCollaborationText(emptyMessage, width), tone: "muted" }] };
   }
   return {
     header,
-    events: events.flatMap((event) => collaborationEventLines(event, width, terminalWidth))
+    events: events.flatMap((event) => collaborationEventLines(
+      event,
+      width,
+      terminalWidth,
+      event.id === selectedEvent?.id
+    ))
   };
 }
 
@@ -147,11 +241,28 @@ function collaborationEventsForFeature(
   ));
 }
 
+function collaborationFeatureIsUnresolved(feature: CollaborationFeature): boolean {
+  return feature.state !== "approved" || feature.findings > feature.replies;
+}
+
+function selectedCollaborationEvent(
+  events: CollaborationEvent[],
+  selectedEventId: string | null
+): CollaborationEvent | null {
+  if (events.length === 0) {
+    return null;
+  }
+  return selectedEventId
+    ? events.find((event) => event.id === selectedEventId) ?? events.at(-1) ?? null
+    : events.at(-1) ?? null;
+}
+
 function collaborationTimelineSummary(
   timeline: CollaborationTimeline | null,
   feature: CollaborationFeature | null,
   eventCount: number,
-  width: number
+  width: number,
+  unresolvedOnly = false
 ): string {
   if (!timeline) {
     return fitCollaborationCandidates(["waiting for task evidence", "waiting"], width);
@@ -160,6 +271,9 @@ function collaborationTimelineSummary(
     const findings = `${feature.findings} ${feature.findings === 1 ? "finding" : "findings"}`;
     const replies = `${feature.replies} ${feature.replies === 1 ? "reply" : "replies"}`;
     return fitCollaborationCandidates([
+      ...(unresolvedOnly ? [
+        `${safeCollaborationText(feature.title)} · ${humanizeState(feature.state)} · unresolved · ${eventCount} events`
+      ] : []),
       `${safeCollaborationText(feature.title)} · ${humanizeState(feature.state)} · ${eventCount} events · ${findings} · ${replies}`,
       `${safeCollaborationText(feature.title)} · ${humanizeState(feature.state)} · ${eventCount} events`,
       `${safeCollaborationText(feature.title)} · ${humanizeState(feature.state)}`,
@@ -169,6 +283,10 @@ function collaborationTimelineSummary(
   const approved = timeline.features.filter((item) => item.state === "approved").length;
   const revision = timeline.features.filter((item) => item.state === "revision_needed").length;
   return fitCollaborationCandidates([
+    ...(unresolvedOnly ? [
+      `all · ${timeline.features.length} features · unresolved · ${eventCount} events`,
+      `all · unresolved · ${eventCount} events`
+    ] : []),
     `all · ${timeline.features.length} features · approved ${approved} · revision ${revision} · ${eventCount} events`,
     `all · ${timeline.features.length} features · ${eventCount} events`,
     `all · ${timeline.features.length}f · ${eventCount}e`,
@@ -179,16 +297,17 @@ function collaborationTimelineSummary(
 function collaborationEventLines(
   event: CollaborationEvent,
   width: number,
-  terminalWidth: number
+  terminalWidth: number,
+  selected: boolean
 ): CollaborationTimelineLine[] {
   const role = collaborationRoleLabel(event.role);
   const action = safeCollaborationText(event.action);
   if (terminalWidth < 28) {
     return [{
       text: fitCollaborationCandidates([
-        `${event.time.slice(11, 16)} ${role.toLowerCase()} · ${action}`,
-        `${role.toLowerCase()} · ${action}`,
-        action
+        `${selected ? "> " : "  "}${event.time.slice(11, 16)} ${role.toLowerCase()} · ${action}`,
+        `${selected ? "> " : "  "}${role.toLowerCase()} · ${action}`,
+        `${selected ? "> " : "  "}${action}`
       ], width),
       tone: collaborationEventTone(event)
     }];
@@ -203,9 +322,71 @@ function collaborationEventLines(
   ];
   const detail = [action, safeCollaborationText(event.message), ...countParts].filter(Boolean).join(" · ");
   return [
-    { text: fitCollaborationText(meta, width), tone: collaborationRoleTone(event.role) },
-    { text: fitCollaborationText(`  ${detail}`, width), tone: collaborationEventTone(event) }
+    { text: fitCollaborationText(`${selected ? ">" : " "} ${meta}`, width), tone: collaborationRoleTone(event.role) },
+    { text: fitCollaborationText(`    ${detail}`, width), tone: collaborationEventTone(event) }
   ];
+}
+
+function collaborationEventDetailLayout(
+  event: CollaborationEvent | null,
+  width: number
+): { header: CollaborationTimelineLine[]; events: CollaborationTimelineLine[] } {
+  const header: CollaborationTimelineLine[] = [
+    { text: fitCollaborationCandidates(["Collaboration event", "Event"], width), tone: "heading" },
+    {
+      text: event
+        ? fitCollaborationText([
+            event.time.slice(11, 19),
+            collaborationRoleLabel(event.role),
+            collaborationEventScope(event)
+          ].join(" · "), width)
+        : fitCollaborationText("no selected event", width),
+      tone: "muted"
+    }
+  ];
+  if (!event) {
+    return { header, events: [{ text: "no event in this scope", tone: "muted" }] };
+  }
+
+  const lines: CollaborationTimelineLine[] = [
+    ...collaborationDetailLines("action", event.action, width, collaborationEventTone(event)),
+    ...collaborationDetailLines("type", event.type, width, "muted"),
+    ...(event.featureId
+      ? collaborationDetailLines(
+          "feature",
+          `${event.featureTitle ?? event.featureId} · ${event.featureId}`,
+          width,
+          "muted"
+        )
+      : []),
+    ...(event.turnId ? collaborationDetailLines("turn", event.turnId, width, "muted") : []),
+    ...collaborationDetailLines("message", event.message || "(empty)", width, "text"),
+    ...(typeof event.findings === "number"
+      ? collaborationDetailLines("findings", String(event.findings), width, "muted")
+      : []),
+    ...(typeof event.replies === "number"
+      ? collaborationDetailLines("replies", String(event.replies), width, "muted")
+      : []),
+    ...(event.artifactRefs.length > 0
+      ? event.artifactRefs.flatMap((artifact) => collaborationDetailLines(
+          "artifact",
+          `${artifact.label} · ${artifact.path}`,
+          width,
+          "actor"
+        ))
+      : [{ text: fitCollaborationText("artifacts · none", width), tone: "muted" as const }])
+  ];
+  return { header, events: lines };
+}
+
+function collaborationDetailLines(
+  label: string,
+  value: string,
+  width: number,
+  tone: CollaborationTimelineTone
+): CollaborationTimelineLine[] {
+  return wrapByDisplayWidth(`${label} · ${safeCollaborationText(value)}`, width)
+    .map((text) => ({ text, tone }));
 }
 
 function collaborationEventScope(event: CollaborationEvent): string {
@@ -239,6 +420,8 @@ function collaborationTimelineTheme(
           ? TUI_THEME.success
           : tone === "danger"
             ? TUI_THEME.danger
+            : tone === "text"
+              ? TUI_THEME.text
             : TUI_THEME.muted,
     ...(tone === "heading" || tone === "danger" ? { bold: true } : {})
   };

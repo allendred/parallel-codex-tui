@@ -208,6 +208,10 @@ describe("package metadata", () => {
     expect(readme).toContain("press `C` to open the file-backed Actor/Critic collaboration timeline");
     expect(readme).toContain("`dialogue/actor-critic.jsonl`, feature status, Critic findings, Actor replies, and Wave events");
     expect(readme).toContain("`Tab` cycles all features and each individual feature");
+    expect(readme).toContain("Up/Down selects a collaboration event");
+    expect(readme).toContain("`Enter` opens its complete event detail");
+    expect(readme).toContain("`U` filters to unresolved feature evidence");
+    expect(readme).toContain("artifact paths from dialogue, status, Critic findings, and Actor replies");
     expect(readme).toContain("`R` refreshes immediately");
     expect(readme).toContain("Up/Down, PageUp/PageDown, the mouse wheel, or `Tab` changes the selected worker");
     expect(readme).toContain("Enter or `Ctrl+W` opens its rendered log");
