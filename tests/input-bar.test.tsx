@@ -274,6 +274,11 @@ describe("InputBar", () => {
     expect(chatPlaceholderDisplayValue(30, { maxScrollOffset: 20 } as Parameters<typeof chatPlaceholderDisplayValue>[1])).toBe(
       "message · scroll"
     );
+    expect(chatPlaceholderDisplayValue(40, {
+      hasWorkers: true,
+      hasActiveTask: true,
+      maxScrollOffset: 20
+    })).toBe("PgUp/Dn · ^W logs · Tab · ^O");
     expect(chatPlaceholderDisplayValue(24, {
       hasWorkers: true,
       hasActiveTask: true,

@@ -326,6 +326,7 @@ function chatTaskPlaceholderDisplayValue(terminalWidth: number, scrollable = fal
     scrollable
       ? [
           "message · scroll · ^W logs · Tab · ^O attach",
+          "PgUp/Dn · ^W logs · Tab · ^O",
           "message · Pg · ^W · ^O",
           "msg · Pg · ^W · ^O",
           "msg · ^W · ^O",
