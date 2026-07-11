@@ -91,6 +91,7 @@ export function WorkspacePicker({
   );
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [pathValue, setPathValue] = useState("");
+  const pathValueRef = useRef("");
   const settledRef = useRef(false);
   const shortcutBufferRef = useRef("");
   const shortcutTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -121,6 +122,11 @@ export function WorkspacePicker({
     onSelect(value);
   }
 
+  function replacePathValue(value: string) {
+    pathValueRef.current = value;
+    setPathValue(value);
+  }
+
   function submitPath(value: string) {
     const requested = value.trim() || defaultWorkspace || cwd;
     finish(resolveWorkspacePath(cwd, requested));
@@ -129,7 +135,7 @@ export function WorkspacePicker({
   function openOption(option: WorkspacePickerOption | undefined) {
     clearShortcutBuffer();
     if (!option || option.kind === "new" || !option.path) {
-      setPathValue("");
+      replacePathValue("");
       setMode("path");
       return;
     }
@@ -189,23 +195,23 @@ export function WorkspacePicker({
         return;
       }
       if (key.return) {
-        submitPath(pathValue);
+        submitPath(pathValueRef.current);
         return;
       }
       if (key.backspace || key.delete) {
-        setPathValue((current) => Array.from(current).slice(0, -1).join(""));
+        replacePathValue(Array.from(pathValueRef.current).slice(0, -1).join(""));
         return;
       }
       if (key.ctrl && input.toLowerCase() === "u") {
-        setPathValue("");
+        replacePathValue("");
         return;
       }
       if (!key.ctrl && !key.meta) {
-        const nextValue = `${pathValue}${printableInput}`;
+        const nextValue = `${pathValueRef.current}${printableInput}`;
         if (inputHasReturn) {
           submitPath(nextValue);
         } else if (printableInput) {
-          setPathValue(nextValue);
+          replacePathValue(nextValue);
         }
       }
       return;
@@ -244,7 +250,7 @@ export function WorkspacePicker({
     }
     if (/^n(?:ew)?$/i.test(printableInput)) {
       clearShortcutBuffer();
-      setPathValue("");
+      replacePathValue("");
       setMode("path");
       return;
     }
@@ -258,7 +264,7 @@ export function WorkspacePicker({
       if (inputHasReturn) {
         submitPath(printableInput);
       } else {
-        setPathValue(printableInput);
+        replacePathValue(printableInput);
         setMode("path");
       }
     }

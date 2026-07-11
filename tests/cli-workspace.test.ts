@@ -238,6 +238,19 @@ describe("selectWorkspaceForCli", () => {
     expect(stdout.output()).toContain("Workspace path");
   });
 
+  it("submits a workspace path when text and return arrive before the picker rerenders", async () => {
+    const appRoot = await mkdtemp(join(tmpdir(), "pct-cli-workspace-burst-"));
+
+    await expect(
+      selectWorkspaceForCli({
+        appRoot,
+        cwd: appRoot,
+        stdin: fakeInputBurst(["burst-project", "\r"]),
+        stdout: fakeOutput()
+      })
+    ).resolves.toBe(join(appRoot, "burst-project"));
+  });
+
   it("submits a pasted Chinese workspace path when Enter shares the same input chunk", async () => {
     const appRoot = await mkdtemp(join(tmpdir(), "pct-cli-workspace-pasted-enter-"));
 
@@ -317,6 +330,19 @@ function fakeInputChunks(chunks: string[], options: { tty?: boolean } = {}): Nod
       }
     }, 20 + index * 30);
   }
+  return stream;
+}
+
+function fakeInputBurst(chunks: string[], options: { tty?: boolean } = {}): NodeJS.ReadStream {
+  const stream = new PassThrough() as unknown as NodeJS.ReadStream;
+  stream.isTTY = options.tty ?? true;
+  installFakeTtyInputMethods(stream);
+  setTimeout(() => {
+    for (const chunk of chunks) {
+      stream.write(chunk);
+    }
+    setTimeout(() => stream.end(), 20);
+  }, 20);
   return stream;
 }
 
