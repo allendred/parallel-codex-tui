@@ -46,6 +46,13 @@ export interface TaskRunLease {
   release(): Promise<void>;
 }
 
+export class TaskRunLeaseConflictError extends Error {
+  constructor(readonly owner: TaskRunOwner | null) {
+    super(`Task is already running in another parallel-codex-tui process (pid ${owner?.pid ?? "unknown"}).`);
+    this.name = "TaskRunLeaseConflictError";
+  }
+}
+
 export interface WriteWorkerProcessRecordInput {
   workerId: string;
   pid: number;
@@ -86,7 +93,7 @@ export async function claimTaskRunLease(
     }
     const inspection = await inspectTaskRunLease(taskDir);
     if (inspection.state === "active") {
-      throw new Error(`Task is already running in another parallel-codex-tui process (pid ${inspection.owner?.pid ?? "unknown"}).`);
+      throw new TaskRunLeaseConflictError(inspection.owner);
     }
     await removeOwnedLease(path, inspection.owner?.owner_id);
   }

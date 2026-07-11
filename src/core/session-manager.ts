@@ -16,9 +16,10 @@ import { sessionsRoot } from "./paths.js";
 import type { SessionIndex } from "./session-index.js";
 import { loadCollaborationTimeline, type CollaborationTimeline } from "./collaboration-timeline.js";
 import {
-  clearStaleTaskRunLease,
-  inspectTaskRunLease,
-  terminateOwnedWorkerProcess
+  claimTaskRunLease,
+  TaskRunLeaseConflictError,
+  terminateOwnedWorkerProcess,
+  type TaskRunLease
 } from "./process-ownership.js";
 import {
   type ChatRecord,
@@ -241,27 +242,39 @@ export class SessionManager {
       if (!meta || TERMINAL_TASK_STATES.has(meta.status)) {
         continue;
       }
-      const lease = await inspectTaskRunLease(task.dir);
-      if (lease.state === "active") {
-        continue;
+      let recoveryLease: TaskRunLease;
+      try {
+        recoveryLease = await claimTaskRunLease(task.dir);
+      } catch (error) {
+        if (error instanceof TaskRunLeaseConflictError) {
+          continue;
+        }
+        throw error;
       }
 
-      const workers = await this.reconcileTaskWorkers(task);
-      const featuresRecovered = await this.reconcileTaskFeatures(task);
-      await this.updateTaskStatus(task, "cancelled");
-      await this.appendEvent(
-        task,
-        "task.recovered_after_restart",
-        `Recovered interrupted task from ${meta.status}; ${workers.recovered} active workers and ${featuresRecovered} active features marked cancelled, checkpoints preserved`
-      );
-      await clearStaleTaskRunLease(task.dir, lease.owner);
-      recovered.push({
-        taskId: task.id,
-        previousState: meta.status,
-        workersRecovered: workers.recovered,
-        featuresRecovered,
-        processesTerminated: workers.terminated
-      });
+      try {
+        const claimedMeta = await readTaskMetaIfValid(task.metaPath);
+        if (!claimedMeta || TERMINAL_TASK_STATES.has(claimedMeta.status)) {
+          continue;
+        }
+        const workers = await this.reconcileTaskWorkers(task);
+        const featuresRecovered = await this.reconcileTaskFeatures(task);
+        await this.updateTaskStatus(task, "cancelled");
+        await this.appendEvent(
+          task,
+          "task.recovered_after_restart",
+          `Recovered interrupted task from ${claimedMeta.status}; ${workers.recovered} active workers and ${featuresRecovered} active features marked cancelled, checkpoints preserved`
+        );
+        recovered.push({
+          taskId: task.id,
+          previousState: claimedMeta.status,
+          workersRecovered: workers.recovered,
+          featuresRecovered,
+          processesTerminated: workers.terminated
+        });
+      } finally {
+        await recoveryLease.release();
+      }
     }
     return recovered;
   }

@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { appendText, pathExists, readJson, readTextIfExists, writeJson, writeText } from "../src/core/file-store.js";
 import { SessionIndex } from "../src/core/session-index.js";
-import { SessionManager } from "../src/core/session-manager.js";
+import { SessionManager, type TaskSession } from "../src/core/session-manager.js";
 import {
   claimTaskRunLease,
   processIsAlive,
@@ -1029,6 +1029,85 @@ describe("SessionManager", () => {
     index.close();
   });
 
+  it("allows only one startup process to reconcile the same interrupted task", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pct-reconcile-race-"));
+    const left = new SessionManager({
+      projectRoot: root,
+      dataDir: ".parallel-codex",
+      now: () => new Date("2026-07-11T14:30:30.000Z"),
+      randomId: () => "race"
+    });
+    const right = new SessionManager({
+      projectRoot: root,
+      dataDir: ".parallel-codex",
+      now: () => new Date("2026-07-11T14:30:31.000Z"),
+      randomId: () => "unused"
+    });
+    const task = await left.createTask({
+      request: "并发恢复任务",
+      cwd: root,
+      route: {
+        mode: "complex",
+        reason: "Project work.",
+        suggested_roles: ["judge", "actor", "critic"],
+        judge_engine: "mock",
+        actor_engine: "mock",
+        critic_engine: "mock"
+      }
+    });
+    await left.updateTaskStatus(task, "actor_running");
+    const worker = await left.initializeWorker(task, {
+      workerId: "actor-mock",
+      role: "actor",
+      engine: "mock",
+      prompt: "keep working"
+    });
+    await writeJson(worker.statusPath, {
+      worker_id: worker.workerId,
+      role: "actor",
+      engine: "mock",
+      state: "running",
+      phase: "process-output",
+      last_event_at: "2026-07-11T14:30:00.000Z",
+      summary: "working"
+    });
+
+    type ReconcileInternals = {
+      reconcileTaskWorkers(task: TaskSession): Promise<{ recovered: number; terminated: number }>;
+    };
+    let entrants = 0;
+    let openGate = () => {};
+    const gate = new Promise<void>((resolve) => {
+      openGate = resolve;
+    });
+    for (const manager of [left, right]) {
+      const internal = manager as unknown as ReconcileInternals;
+      const original = internal.reconcileTaskWorkers.bind(manager);
+      internal.reconcileTaskWorkers = async (currentTask) => {
+        entrants += 1;
+        if (entrants === 2) {
+          openGate();
+        }
+        await Promise.race([
+          gate,
+          new Promise((resolve) => setTimeout(resolve, 100))
+        ]);
+        return original(currentTask);
+      };
+    }
+
+    const results = await Promise.all([
+      left.reconcileInterruptedTasks(),
+      right.reconcileInterruptedTasks()
+    ]);
+
+    expect(results.flat()).toHaveLength(1);
+    expect(entrants).toBe(1);
+    expect(countOccurrences(await readTextIfExists(task.eventsPath), "task.recovered_after_restart")).toBe(1);
+    expect(countOccurrences(await readTextIfExists(worker.outputLogPath), "Recovered after previous TUI exit")).toBe(1);
+    expect(await pathExists(taskRunOwnerPath(task.dir))).toBe(false);
+  });
+
   it("leaves a nonterminal task untouched while its owner lease is active", async () => {
     const root = await mkdtemp(join(tmpdir(), "pct-reconcile-live-owner-"));
     const manager = new SessionManager({
@@ -1140,3 +1219,7 @@ describe("SessionManager", () => {
     }
   });
 });
+
+function countOccurrences(text: string, needle: string): number {
+  return text.split(needle).length - 1;
+}

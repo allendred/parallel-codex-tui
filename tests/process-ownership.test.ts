@@ -8,6 +8,7 @@ import {
   claimTaskRunLease,
   inspectTaskRunLease,
   processIsAlive,
+  TaskRunLeaseConflictError,
   terminateOwnedWorkerProcess,
   workerProcessRecordPath,
   writeWorkerProcessRecord
@@ -19,8 +20,13 @@ describe("process ownership", () => {
     const lease = await claimTaskRunLease(taskDir, { ownerId: "owner-one" });
 
     await expect(inspectTaskRunLease(taskDir)).resolves.toMatchObject({ state: "active" });
-    await expect(claimTaskRunLease(taskDir, { ownerId: "owner-two" }))
-      .rejects.toThrow("Task is already running in another parallel-codex-tui process");
+    const conflict = await claimTaskRunLease(taskDir, { ownerId: "owner-two" }).catch((error: unknown) => error);
+    expect(conflict).toBeInstanceOf(TaskRunLeaseConflictError);
+    expect(conflict).toMatchObject({
+      name: "TaskRunLeaseConflictError",
+      owner: { owner_id: "owner-one", pid: process.pid }
+    });
+    expect((conflict as Error).message).toContain("Task is already running in another parallel-codex-tui process");
 
     await lease.release();
     await expect(inspectTaskRunLease(taskDir)).resolves.toEqual({ state: "missing", owner: null });
