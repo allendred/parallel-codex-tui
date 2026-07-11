@@ -14,6 +14,7 @@ import {
 import { formatTaskTimestamp, taskDir } from "./paths.js";
 import { sessionsRoot } from "./paths.js";
 import type { SessionIndex } from "./session-index.js";
+import { loadCollaborationTimeline, type CollaborationTimeline } from "./collaboration-timeline.js";
 import {
   type ChatRecord,
   ChatRecordSchema,
@@ -183,6 +184,14 @@ export class SessionManager {
       routePath: join(dir, "route.json"),
       eventsPath: join(dir, "events.jsonl")
     };
+  }
+
+  async readCollaborationTimeline(taskId: string): Promise<CollaborationTimeline> {
+    const task = this.taskFromId(taskId);
+    if (!(await this.hasTask(taskId))) {
+      throw new Error(`Task session not found: ${taskId}`);
+    }
+    return loadCollaborationTimeline(taskId, task.dir);
   }
 
   async hasTask(taskId: string): Promise<boolean> {

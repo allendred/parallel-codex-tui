@@ -166,6 +166,25 @@ describe("AppShell", () => {
     expect(header).not.toContain(" · logs · ");
   });
 
+  it("labels collaboration evidence as a timeline", () => {
+    const { lastFrame } = render(
+      <AppShell
+        view={"collaboration" as Parameters<typeof AppShell>[0]["view"]}
+        cwd="/tmp/project"
+        taskId="task-1"
+        statusText="task done"
+        terminalWidth={80}
+        input={<TextLine text="timeline · Tab feature · Esc workers" />}
+      >
+        <TextLine text="Collaboration timeline" />
+      </AppShell>
+    );
+
+    const header = (lastFrame() ?? "").split("\n")[0] ?? "";
+    expect(header).toContain("parallel-codex-tui · timeline");
+    expect(header).not.toContain(" · workers · ");
+  });
+
   it("labels the task Session manager independently from chat", () => {
     const { lastFrame } = render(
       <AppShell

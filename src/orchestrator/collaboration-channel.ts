@@ -110,6 +110,9 @@ export async function updateFeatureStatus(channel: FeatureChannel, state: Featur
     feature_id: channel.id,
     task_id: channel.taskId,
     turn_id: channel.turnId,
+    title: channel.title,
+    description: channel.description,
+    depends_on: channel.dependsOn,
     state,
     updated_at: new Date().toISOString()
   });

@@ -112,6 +112,7 @@ async function main(): Promise<void> {
           };
         }}
         loadTaskSessions={() => state.runtime.index.listTasks(100)}
+        loadCollaborationTimeline={(taskId) => state.runtime.sessions.readCollaborationTimeline(taskId)}
         activateTaskSession={async (taskId) => {
           if (!taskId) {
             await state.runtime.index.setActiveTaskId(null);

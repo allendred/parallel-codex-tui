@@ -3,6 +3,7 @@ import { basename } from "node:path";
 import { Box, Text, useApp, useInput, useStdin, type TextProps } from "ink";
 import { Lexer, type Token, type Tokens } from "marked";
 import type { AppConfig } from "../core/config.js";
+import type { CollaborationTimeline } from "../core/collaboration-timeline.js";
 import { readJson } from "../core/file-store.js";
 import type { RouterAuditRecord } from "../core/router-audit.js";
 import type { TaskIndexSummary } from "../core/session-index.js";
@@ -42,6 +43,7 @@ import {
   type RouterDiagnosticsScope
 } from "./RouterDiagnosticsView.js";
 import { moveWorkerSelection, WorkerOverviewView } from "./WorkerOverviewView.js";
+import { CollaborationTimelineView, nextCollaborationFeatureIndex } from "./CollaborationTimelineView.js";
 import { moveTaskSessionSelection, TaskSessionsView } from "./TaskSessionsView.js";
 import {
   buildNativeAttachLaunch,
@@ -67,6 +69,7 @@ export interface AppProps {
     policy: RouterDiagnosticsPolicy;
   }>;
   loadTaskSessions?: () => Promise<TaskIndexSummary[]>;
+  loadCollaborationTimeline?: (taskId: string) => Promise<CollaborationTimeline>;
   activateTaskSession?: (taskId: string | null) => Promise<ActivatedTaskSession | null>;
   prepareNativeAttach?: (worker: WorkerLogRef) => Promise<NativeAttachLaunch>;
   startNativeAttach?: (
@@ -127,6 +130,7 @@ type NativeAttachStartingTheme = Pick<TextProps, "backgroundColor" | "color">;
 const NO_WORKERS_ATTACH_MESSAGE = "No workers yet · start a complex task before attaching";
 const NO_WORKERS_LOGS_MESSAGE = "No workers yet · start a complex task before opening logs";
 const NO_WORKERS_OVERVIEW_MESSAGE = "No workers yet · start a complex task before opening overview";
+const NO_ACTIVE_COLLABORATION_MESSAGE = "No active task · restore a task before opening timeline";
 const EMPTY_WORKER_NAVIGATION_TARGETS: WorkerOutputNavigationTargets = {
   searchOffsets: [],
   searchLineIndexes: [],
@@ -148,6 +152,7 @@ export function App({
   switchWorkspace,
   loadRouterDiagnostics,
   loadTaskSessions,
+  loadCollaborationTimeline,
   activateTaskSession,
   prepareNativeAttach,
   startNativeAttach
@@ -198,6 +203,12 @@ export function App({
   const [selectedTaskSessionIndex, setSelectedTaskSessionIndex] = useState(0);
   const [taskSessionsLoading, setTaskSessionsLoading] = useState(false);
   const [taskSessionsError, setTaskSessionsError] = useState<string | null>(null);
+  const [collaborationTimeline, setCollaborationTimeline] = useState<CollaborationTimeline | null>(null);
+  const [collaborationLoading, setCollaborationLoading] = useState(false);
+  const [collaborationError, setCollaborationError] = useState<string | null>(null);
+  const [collaborationFeatureIndex, setCollaborationFeatureIndex] = useState(-1);
+  const [collaborationScrollOffset, setCollaborationScrollOffset] = useState(0);
+  const [collaborationMaxScrollOffset, setCollaborationMaxScrollOffset] = useState(0);
   const [nativeAttach, setNativeAttach] = useState<{
     hasOutput: boolean;
     launch: NativeAttachLaunch;
@@ -229,6 +240,9 @@ export function App({
   const taskSessionsRef = useRef(taskSessions);
   const selectedTaskSessionIndexRef = useRef(selectedTaskSessionIndex);
   const taskSessionsLoadingRef = useRef(taskSessionsLoading);
+  const collaborationTimelineRef = useRef<CollaborationTimeline | null>(null);
+  const collaborationFeatureIndexRef = useRef(-1);
+  const collaborationMaxScrollOffsetRef = useRef(0);
   const autoSelectedFailedWorkerRef = useRef(false);
   const userSelectedWorkerRef = useRef(false);
   const attachSelectedWorkerRef = useRef<(worker: WorkerLogRef) => Promise<void>>(attachSelectedWorker);
@@ -239,11 +253,14 @@ export function App({
   const openRouterDiagnosticsRef = useRef<() => Promise<void>>(openRouterDiagnostics);
   const openWorkerOverviewRef = useRef<() => void>(openWorkerOverview);
   const openTaskSessionsRef = useRef<() => Promise<void>>(openTaskSessions);
+  const openCollaborationTimelineRef = useRef<() => Promise<void>>(openCollaborationTimeline);
+  const refreshCollaborationTimelineRef = useRef<(showLoading?: boolean) => Promise<void>>(refreshCollaborationTimeline);
   const activateSelectedTaskSessionRef = useRef<() => Promise<void>>(activateSelectedTaskSession);
   const workspaceReturnViewRef = useRef<"chat" | "worker" | "workers" | "sessions">("chat");
   const routerReturnViewRef = useRef<"chat" | "worker" | "workers" | "sessions">("chat");
   const workerOverviewReturnViewRef = useRef<"chat" | "worker">("chat");
   const taskSessionsReturnViewRef = useRef<"chat" | "worker" | "workers" | "router">("chat");
+  const collaborationLoadSequenceRef = useRef(0);
   const routerLoadSequenceRef = useRef(0);
   const taskSessionsLoadSequenceRef = useRef(0);
   const exitRef = useRef(exit);
@@ -258,7 +275,7 @@ export function App({
   const outputHeight = Math.max(1, contentHeight);
   const terminalWidth = process.stdout.columns || 120;
   const selectedWorkerStatus = formatSelectedWorkerStatus(status, selectedWorkerIndex);
-  const visibleWorkerStatus = view === "chat" || view === "router" || view === "sessions" || selectedWorkerStatusIsRedundant(status)
+  const visibleWorkerStatus = view === "chat" || view === "router" || view === "sessions" || view === "collaboration" || selectedWorkerStatusIsRedundant(status)
     ? ""
     : selectedWorkerStatus;
   const visibleRouteStatus = routePending
@@ -359,8 +376,20 @@ export function App({
     openRouterDiagnosticsRef.current = openRouterDiagnostics;
     openWorkerOverviewRef.current = openWorkerOverview;
     openTaskSessionsRef.current = openTaskSessions;
+    openCollaborationTimelineRef.current = openCollaborationTimeline;
+    refreshCollaborationTimelineRef.current = refreshCollaborationTimeline;
     activateSelectedTaskSessionRef.current = activateSelectedTaskSession;
   });
+
+  useEffect(() => {
+    if (view !== "collaboration" || !activeTaskId || !loadCollaborationTimeline) {
+      return;
+    }
+    const interval = setInterval(() => {
+      void refreshCollaborationTimelineRef.current(false);
+    }, 1500);
+    return () => clearInterval(interval);
+  }, [activeTaskId, loadCollaborationTimeline, view]);
 
   useEffect(() => {
     nativeAttachRef.current = nativeAttach;
@@ -686,6 +715,47 @@ export function App({
         }
         return;
       }
+      if (currentView === "collaboration") {
+        const timelineChunks = tokenizeRawInput(chunk);
+        if (timelineChunks.some((timelineChunk) => isExitShortcut(timelineChunk, {}))) {
+          activeRunControllerRef.current?.abort();
+          exitRef.current();
+          return;
+        }
+        for (const timelineChunk of timelineChunks) {
+          if (timelineChunk === "\x1b" || isWorkerOverviewShortcut(timelineChunk, {})) {
+            setCollaborationError(null);
+            viewRef.current = "workers";
+            setView("workers");
+            return;
+          }
+          if (timelineChunk === "\t") {
+            const nextIndex = nextCollaborationFeatureIndex(
+              collaborationFeatureIndexRef.current,
+              1,
+              collaborationTimelineRef.current?.features.length ?? 0
+            );
+            collaborationFeatureIndexRef.current = nextIndex;
+            setCollaborationFeatureIndex(nextIndex);
+            collaborationMaxScrollOffsetRef.current = 0;
+            setCollaborationMaxScrollOffset(0);
+            setCollaborationScrollOffset(0);
+            continue;
+          }
+          if (timelineChunk === "r" || timelineChunk === "R") {
+            void refreshCollaborationTimelineRef.current(false);
+            continue;
+          }
+          const timelineDelta = mouseScrollDelta(timelineChunk, 3)
+            + rawPageScrollDelta(timelineChunk, Math.max(1, outputHeight - 3));
+          if (timelineDelta !== 0) {
+            setCollaborationScrollOffset((current) => (
+              nextScrollOffset(current, timelineDelta, collaborationMaxScrollOffsetRef.current)
+            ));
+          }
+        }
+        return;
+      }
       if (currentView === "workers") {
         if (isExitShortcut(chunk, {})) {
           activeRunControllerRef.current?.abort();
@@ -712,6 +782,10 @@ export function App({
         }
         if (isNewTaskShortcut(chunk, {}) && !busyRef.current) {
           void newTaskRef.current();
+          return;
+        }
+        if (chunk === "c" || chunk === "C") {
+          void openCollaborationTimelineRef.current();
           return;
         }
         if (isAttachShortcut(chunk, {})) {
@@ -1040,6 +1114,7 @@ export function App({
 
   useEffect(() => () => {
     activeRunControllerRef.current?.abort();
+    collaborationLoadSequenceRef.current += 1;
     routerLoadSequenceRef.current += 1;
     taskSessionsLoadSequenceRef.current += 1;
   }, []);
@@ -1536,6 +1611,68 @@ export function App({
     }
   }
 
+  async function openCollaborationTimeline(): Promise<void> {
+    if (viewRef.current !== "workers") {
+      return;
+    }
+    if (!activeTaskIdRef.current) {
+      setAttachError(NO_ACTIVE_COLLABORATION_MESSAGE);
+      return;
+    }
+    viewRef.current = "collaboration";
+    setView("collaboration");
+    setAttachError(null);
+    setCollaborationError(null);
+    collaborationTimelineRef.current = null;
+    setCollaborationTimeline(null);
+    collaborationFeatureIndexRef.current = -1;
+    setCollaborationFeatureIndex(-1);
+    collaborationMaxScrollOffsetRef.current = 0;
+    setCollaborationMaxScrollOffset(0);
+    setCollaborationScrollOffset(0);
+    await refreshCollaborationTimeline(true);
+  }
+
+  async function refreshCollaborationTimeline(showLoading = true): Promise<void> {
+    const taskId = activeTaskIdRef.current;
+    if (!taskId) {
+      setCollaborationError(NO_ACTIVE_COLLABORATION_MESSAGE);
+      return;
+    }
+    const sequence = collaborationLoadSequenceRef.current + 1;
+    collaborationLoadSequenceRef.current = sequence;
+    if (showLoading) {
+      setCollaborationLoading(true);
+    }
+    try {
+      if (!loadCollaborationTimeline) {
+        throw new Error("Collaboration timeline is unavailable");
+      }
+      const timeline = await loadCollaborationTimeline(taskId);
+      if (collaborationLoadSequenceRef.current !== sequence) {
+        return;
+      }
+      collaborationTimelineRef.current = timeline;
+      setCollaborationTimeline(timeline);
+      const currentIndex = collaborationFeatureIndexRef.current;
+      const nextIndex = currentIndex >= timeline.features.length ? -1 : currentIndex;
+      if (nextIndex !== currentIndex) {
+        collaborationFeatureIndexRef.current = nextIndex;
+        setCollaborationFeatureIndex(nextIndex);
+        setCollaborationScrollOffset(0);
+      }
+      setCollaborationError(null);
+    } catch (error) {
+      if (collaborationLoadSequenceRef.current === sequence) {
+        setCollaborationError(error instanceof Error ? error.message : String(error));
+      }
+    } finally {
+      if (collaborationLoadSequenceRef.current === sequence) {
+        setCollaborationLoading(false);
+      }
+    }
+  }
+
   function updateWorkerNavigationTargets(next: WorkerOutputNavigationTargets): void {
     const previous = workerNavigationTargetsRef.current;
     workerNavigationTargetsRef.current = next;
@@ -1646,7 +1783,7 @@ export function App({
           searchMatchCount={workerNavigationTargets.searchOffsets.length}
           value={workerSearch.open && view === "worker"
             ? workerSearch.query
-            : view === "native" || view === "router" || view === "workers" || view === "sessions" ? "" : input}
+            : view === "native" || view === "router" || view === "workers" || view === "sessions" || view === "collaboration" ? "" : input}
           cursor={workerSearch.open && view === "worker"
             ? workerSearch.cursor
             : view === "chat" ? inputCursor : undefined}
@@ -1668,6 +1805,23 @@ export function App({
             error={taskSessionsError}
             height={contentHeight}
             terminalWidth={terminalWidth}
+          />
+        ) : view === "collaboration" ? (
+          <CollaborationTimelineView
+            timeline={collaborationTimeline}
+            featureIndex={collaborationFeatureIndex}
+            loading={collaborationLoading}
+            error={collaborationError}
+            scrollOffset={collaborationScrollOffset}
+            height={contentHeight}
+            terminalWidth={terminalWidth}
+            onViewportChange={({ offset, maxOffset }) => {
+              collaborationMaxScrollOffsetRef.current = maxOffset;
+              setCollaborationMaxScrollOffset(maxOffset);
+              if (offset !== collaborationScrollOffset) {
+                setCollaborationScrollOffset(offset);
+              }
+            }}
           />
         ) : view === "workers" ? (
           <WorkerOverviewView

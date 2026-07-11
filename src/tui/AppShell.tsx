@@ -6,7 +6,7 @@ import { StatusBar } from "./StatusBar.js";
 import { compactEndByDisplayWidth, displayWidth } from "./display-width.js";
 import { TUI_THEME } from "./theme.js";
 
-export type AppView = "chat" | "worker" | "workers" | "native" | "router" | "sessions";
+export type AppView = "chat" | "worker" | "workers" | "collaboration" | "native" | "router" | "sessions";
 type AppShellErrorLineTheme = Pick<TextProps, "backgroundColor" | "color">;
 type AppShellContentGutterTheme = Pick<TextProps, "backgroundColor">;
 const APP_HEADER_ROOMY_SEPARATOR = " · ";
@@ -387,6 +387,9 @@ function shortViewLabel(view: AppView): string {
   }
   if (view === "workers") {
     return "workers";
+  }
+  if (view === "collaboration") {
+    return "timeline";
   }
   if (view === "sessions") {
     return "sessions";

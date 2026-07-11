@@ -4,7 +4,7 @@ import { compactEndByDisplayWidth, compactTailByDisplayWidth, displayWidth } fro
 import { TUI_THEME } from "./theme.js";
 
 export interface InputBarProps {
-  mode: "chat" | "worker" | "worker-search" | "workers" | "native" | "router" | "sessions";
+  mode: "chat" | "worker" | "worker-search" | "workers" | "collaboration" | "native" | "router" | "sessions";
   ready?: boolean;
   busy?: boolean;
   canRetry?: boolean;
@@ -63,6 +63,16 @@ export function InputBar({
 
   if (mode === "sessions") {
     const hints = taskSessionsInputHints(terminalWidth);
+    return (
+      <InputRail terminalWidth={terminalWidth} textWidth={displayWidth(`${hints.label}${hints.detail}`)} fill={fillRail}>
+        <Text backgroundColor={TUI_THEME.rail} color={TUI_THEME.accent} bold>{hints.label}</Text>
+        {hints.detail ? <Text backgroundColor={TUI_THEME.rail} color={TUI_THEME.muted}>{hints.detail}</Text> : null}
+      </InputRail>
+    );
+  }
+
+  if (mode === "collaboration") {
+    const hints = collaborationTimelineInputHints(terminalWidth);
     return (
       <InputRail terminalWidth={terminalWidth} textWidth={displayWidth(`${hints.label}${hints.detail}`)} fill={fillRail}>
         <Text backgroundColor={TUI_THEME.rail} color={TUI_THEME.accent} bold>{hints.label}</Text>
@@ -511,7 +521,35 @@ function workerOverviewInputHints(width: number): { label: string; detail: strin
   if (width < 58) {
     return { label: "workers", detail: " · Up/Dn · Enter logs · ^O · Esc" };
   }
-  return { label: "workers", detail: " · Up/Dn select · Enter logs · ^O attach · Esc back" };
+  if (width < 74) {
+    return { label: "workers", detail: " · Up/Dn · Enter · C flow · ^O · Esc" };
+  }
+  return { label: "workers", detail: " · Up/Dn select · Enter logs · C timeline · ^O attach · Esc back" };
+}
+
+function collaborationTimelineInputHints(width: number): { label: string; detail: string } {
+  if (width < 10) {
+    return { label: "tl", detail: "" };
+  }
+  if (width < 12) {
+    return { label: "flow", detail: "" };
+  }
+  if (width < 15) {
+    return { label: "flow", detail: " · Esc" };
+  }
+  if (width < 22) {
+    return { label: "timeline", detail: " · Esc" };
+  }
+  if (width < 32) {
+    return { label: "timeline", detail: " · Pg · Esc" };
+  }
+  if (width < 48) {
+    return { label: "timeline", detail: " · scroll · Tab · Esc" };
+  }
+  if (width < 70) {
+    return { label: "timeline", detail: " · scroll · Tab feature · R · Esc" };
+  }
+  return { label: "timeline", detail: " · scroll · Tab feature · R refresh · Esc workers" };
 }
 
 function taskSessionsInputHints(width: number): { label: string; detail: string } {

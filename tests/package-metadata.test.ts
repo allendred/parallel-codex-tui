@@ -198,6 +198,10 @@ describe("package metadata", () => {
     expect(readme).toContain("the next complex request creates an independent task from turn `0001`");
     expect(readme).toContain("`Ctrl+W` to open worker logs");
     expect(readme).toContain("`Ctrl+B` opens a live Worker overview without replacing the `Ctrl+W` log shortcut");
+    expect(readme).toContain("press `C` to open the file-backed Actor/Critic collaboration timeline");
+    expect(readme).toContain("`dialogue/actor-critic.jsonl`, feature status, Critic findings, Actor replies, and Wave events");
+    expect(readme).toContain("`Tab` cycles all features and each individual feature");
+    expect(readme).toContain("`R` refreshes immediately");
     expect(readme).toContain("Up/Down, PageUp/PageDown, the mouse wheel, or `Tab` changes the selected worker");
     expect(readme).toContain("Enter or `Ctrl+W` opens its rendered log");
     expect(readme).toContain("`Ctrl+T` opens the workspace's persisted Task sessions");

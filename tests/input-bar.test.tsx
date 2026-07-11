@@ -448,7 +448,7 @@ describe("InputBar", () => {
       <InputBar mode="workers" value="ignored" terminalWidth={80} onChange={() => {}} />
     );
     const roomyFrame = roomy.lastFrame() ?? "";
-    expect(roomyFrame).toContain("workers · Up/Dn select · Enter logs · ^O attach · Esc back");
+    expect(roomyFrame).toContain("workers · Up/Dn select · Enter logs · C timeline · ^O attach · Esc back");
     expect(roomyFrame).not.toContain("ignored");
     expect(roomyFrame.split("\n")).toHaveLength(1);
     expect(displayWidth(roomyFrame)).toBeLessThanOrEqual(80);
@@ -462,6 +462,28 @@ describe("InputBar", () => {
     expect(narrowFrame.split("\n")).toHaveLength(1);
     expect(displayWidth(narrowFrame)).toBeLessThanOrEqual(24);
     narrow.unmount();
+  });
+
+  it("shows collaboration timeline filtering and refresh guidance", () => {
+    const collaborationMode = "collaboration" as Parameters<typeof InputBar>[0]["mode"];
+    const roomy = render(
+      <InputBar mode={collaborationMode} value="" terminalWidth={100} onChange={() => {}} />
+    );
+    expect(roomy.lastFrame()).toContain("timeline · scroll · Tab feature · R refresh · Esc workers");
+    roomy.unmount();
+
+    const overflow: string[] = [];
+    for (let width = 8; width <= 100; width += 1) {
+      const view = render(
+        <InputBar mode={collaborationMode} value="" terminalWidth={width} onChange={() => {}} />
+      );
+      const frame = view.lastFrame() ?? "";
+      if (frame.split("\n").length > 1 || displayWidth(frame) > width) {
+        overflow.push(`${width}:${displayWidth(frame)}:${frame}`);
+      }
+      view.unmount();
+    }
+    expect(overflow).toEqual([]);
   });
 
   it("shows Task session restore and new-task guidance", () => {
