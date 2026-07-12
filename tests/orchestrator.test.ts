@@ -2164,6 +2164,8 @@ describe("Orchestrator", () => {
       mode: "auto",
       command: "codex",
       timeoutMs: 20000,
+      firstOutputTimeoutMs: 15000,
+      idleTimeoutMs: 15000,
       phase: "starting",
       attempt: 1,
       maxAttempts: 1,

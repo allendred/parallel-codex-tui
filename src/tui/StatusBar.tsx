@@ -386,10 +386,10 @@ function compactRouteStatusValue(value: string, compact: boolean): string {
 function compactRouteStatusValueToWidth(value: string, maxWidth: number): string {
   const compact = compactRouteStatusValue(value, true);
   const parts = value.split(/\s+·\s+/).map((part) => part.trim()).filter(Boolean);
-  const duration = parts.find((part) => /^\d+(?:\.\d+)?(?:ms|s|m)(?:\s+max)?$/i.test(part))
-    ?.replace(/\s+max$/i, "");
+  const duration = parts.find((part) => /^\d+(?:\.\d+)?(?:ms|s|m)(?:\s+(?:max|total|first|idle))?$/i.test(part))
+    ?.replace(/\s+(?:max|total|first|idle)$/i, "");
   const progress = parts
-    .map((part) => part.match(/^(\d+(?:\.\d+)?s)\s*\/\s*(\d+(?:\.\d+)?(?:ms|s|m))$/i))
+    .map((part) => part.match(/^(\d+(?:\.\d+)?s)\s*\/\s*(\d+(?:\.\d+)?(?:ms|s|m))(?:\s+(first|total))?$/i))
     .find((match): match is RegExpMatchArray => match !== null);
   const elapsed = progress?.[1];
   const compactProgress = progress
@@ -410,9 +410,11 @@ function compactRouteStatusValueToWidth(value: string, maxWidth: number): string
     candidates = [compact, progressCandidates[0] ? `follow ${progressCandidates[0]}` : "follow", ...progressCandidates, "wait"];
   } else if (routeProgressStatusAlias(first)) {
     const alias = routeProgressStatusAlias(first)!;
+    const firstOutputProgress = progress?.[3]?.toLowerCase() === "first";
     candidates = [
       compact,
       ...(compactProgress ? [`${alias} ${compactProgress}`] : []),
+      ...(firstOutputProgress && compactProgress ? [compactProgress] : []),
       ...(elapsed ? [`${alias} ${elapsed}`] : []),
       alias,
       ...progressCandidates,

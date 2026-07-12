@@ -200,12 +200,12 @@ describe("CLI chat Markdown smoke", () => {
       await waitForScreenText(
         () => screenWrites,
         screen,
-        "route diagnostics · runner node · via 127.0.0.1:7890 · 0s / 5s"
+        "route diagnostics · runner node · via 127.0.0.1:7890 · 0s / 5s total · 1.6s idle"
       );
       await waitForScreenText(
         () => screenWrites,
         screen,
-        "route diagnostics · runner node · via 127.0.0.1:7890 · 1s / 5s"
+        "route diagnostics · runner node · via 127.0.0.1:7890 · 1s / 5s total · 1.6s idle"
       );
       await waitForScreenText(
         () => screenWrites,

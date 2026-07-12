@@ -96,6 +96,8 @@ export interface RouteStartInfo {
   mode: AppConfig["router"]["defaultMode"];
   command: string;
   timeoutMs: number;
+  firstOutputTimeoutMs: number;
+  idleTimeoutMs: number;
   phase: RouterExecutionPhase;
   attempt: number;
   maxAttempts: number;
@@ -1443,6 +1445,8 @@ export class Orchestrator {
         mode: router.defaultMode,
         command: routerCommandLabel(routeConfig.router.codex.command),
         timeoutMs: routeConfig.router.codex.timeoutMs,
+        firstOutputTimeoutMs: routeConfig.router.codex.firstOutputTimeoutMs,
+        idleTimeoutMs: routeConfig.router.codex.idleTimeoutMs,
         phase: "starting",
         attempt,
         maxAttempts: routeConfig.router.codex.maxAttempts,
@@ -1487,6 +1491,8 @@ export class Orchestrator {
           mode: router.defaultMode,
           command: routerCommandLabel(routeConfig.router.codex.command),
           timeoutMs: routeConfig.router.codex.timeoutMs,
+          firstOutputTimeoutMs: routeConfig.router.codex.firstOutputTimeoutMs,
+          idleTimeoutMs: routeConfig.router.codex.idleTimeoutMs,
           phase: "retrying",
           attempt: attempt + 1,
           maxAttempts: routeConfig.router.codex.maxAttempts,

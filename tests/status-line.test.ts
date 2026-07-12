@@ -261,33 +261,41 @@ describe("formatStatusLine", () => {
       scope: "initial",
       mode: "auto",
       timeoutMs: 30000,
+      firstOutputTimeoutMs: 15000,
+      idleTimeoutMs: 15000,
       phase: "waiting-output",
       command: "acme-router",
       proxyConfigured: false
-    }, 7300)).toBe("route waiting output · runner acme-router · direct · 7s / 30s");
+    }, 7300)).toBe("route waiting output · runner acme-router · direct · 7s / 15s first · 30s total");
     expect(formatRoutePendingStatus?.({
       scope: "initial",
       mode: "auto",
       timeoutMs: 30000,
+      firstOutputTimeoutMs: 15000,
+      idleTimeoutMs: 15000,
       phase: "waiting-output",
       proxyConfigured: true,
       proxyEndpoint: "proxy.test:8443"
-    }, 7300)).toBe("route waiting output · via proxy.test:8443 · 7s / 30s");
+    }, 7300)).toBe("route waiting output · via proxy.test:8443 · 7s / 15s first · 30s total");
     expect(formatRoutePendingStatus?.({
       scope: "initial",
       mode: "auto",
       timeoutMs: 30000,
+      firstOutputTimeoutMs: 15000,
+      idleTimeoutMs: 15000,
       phase: "receiving-stderr",
       proxyConfigured: true,
       proxyEndpoint: "proxy.test:8443"
-    }, 7300)).toBe("route diagnostics · via proxy.test:8443 · 7s / 30s");
+    }, 7300)).toBe("route diagnostics · via proxy.test:8443 · 7s / 30s total · 15s idle");
     expect(formatRoutePendingStatus?.({
       scope: "initial",
       mode: "auto",
       timeoutMs: 30000,
+      firstOutputTimeoutMs: 15000,
+      idleTimeoutMs: 15000,
       phase: "receiving-response",
       proxyConfigured: false
-    }, 7300)).toBe("route receiving · direct · 7s / 30s");
+    }, 7300)).toBe("route receiving · direct · 7s / 30s total · 15s idle");
     expect(formatRoutePendingStatus?.({
       scope: "follow-up",
       mode: "auto",

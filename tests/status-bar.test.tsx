@@ -112,6 +112,7 @@ describe("StatusBar", () => {
     expect(frame("route checking · 30s max", 13)).toContain("r:check 30s");
     expect(frame("route checking · 7s / 30s", 8)).toContain("r:7s");
     expect(frame("route checking · 7s / 30s", 13)).toContain("r:7/30s");
+    expect(frame("route waiting output · direct · 7s / 15s first · 30s total", 13)).toContain("r:7/15s");
     expect(frame("workers 3 | done 3 | route follow-up · 20s max", 8)).toContain("r:20s");
     expect(frame("workers 3 | done 3 | route complex · fallback · timeout · 120s", 8)).toContain("r:time");
     expect(frame("workers 3 | done 3 | route simple · fallback · timeout via proxy · 30s", 8)).toContain("r:p:to");
@@ -120,6 +121,7 @@ describe("StatusBar", () => {
     expect(frame("workers 3 | done 3 | route simple · fallback · first output timeout · direct · 15s", 8)).toContain("r:f:to");
     expect(frame("workers 3 | done 3 | route simple · fallback · idle timeout after stderr · via proxy.test:8443 · 25s", 8)).toContain("r:i:to");
     expect(frame("route diagnostics · via proxy.test:8443 · 7s / 30s", 13)).toContain("r:diag 7s");
+    expect(frame("route diagnostics · via proxy.test:8443 · 7s / 30s total · 15s idle", 13)).toContain("r:diag 7s");
     expect(frame("route receiving · direct · 7s / 30s", 13)).toContain("r:recv 7s");
     expect(frame("route retry 2/2 · via proxy.test:8443 · 500ms backoff", 8)).toContain("r:2/2");
     expect(frame("route retry 2/2 · via proxy.test:8443 · 500ms backoff", 13)).toContain("r:retry 2/2");

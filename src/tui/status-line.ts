@@ -158,13 +158,53 @@ export function formatRoutePendingStatus(state: RouteStartInfo | null, elapsedMs
     ...(state.command && state.command !== "codex" ? [`runner ${state.command}`] : []),
     ...(path ? [path] : [])
   ];
-  if (typeof elapsedMs === "number") {
-    const boundedElapsedMs = Math.min(state.timeoutMs, Math.max(0, elapsedMs));
-    details.push(`${formatRouteElapsed(boundedElapsedMs)} / ${formatRouteDuration(state.timeoutMs)}`);
-    return `route ${details.join(" · ")}`;
-  }
-  details.push(`${formatRouteDuration(state.timeoutMs)} max`);
+  details.push(...routePendingBudgetDetails(state, elapsedMs));
   return `route ${details.join(" · ")}`;
+}
+
+function routePendingBudgetDetails(state: RouteStartInfo, elapsedMs?: number): string[] {
+  const firstOutputActive = state.phase === "dispatching"
+    || state.phase === "starting"
+    || state.phase === "waiting-output";
+  const idleActive = state.phase === "receiving-stderr" || state.phase === "receiving-response";
+  const firstOutputIsSeparate = firstOutputActive
+    && typeof state.firstOutputTimeoutMs === "number"
+    && state.firstOutputTimeoutMs < state.timeoutMs;
+  const idleIsSeparate = idleActive
+    && typeof state.idleTimeoutMs === "number"
+    && state.idleTimeoutMs < state.timeoutMs;
+
+  if (typeof elapsedMs === "number") {
+    if (firstOutputIsSeparate) {
+      const boundedElapsedMs = Math.min(state.firstOutputTimeoutMs, Math.max(0, elapsedMs));
+      return [
+        `${formatRouteElapsed(boundedElapsedMs)} / ${formatRouteDuration(state.firstOutputTimeoutMs)} first`,
+        `${formatRouteDuration(state.timeoutMs)} total`
+      ];
+    }
+    const boundedElapsedMs = Math.min(state.timeoutMs, Math.max(0, elapsedMs));
+    if (idleIsSeparate) {
+      return [
+        `${formatRouteElapsed(boundedElapsedMs)} / ${formatRouteDuration(state.timeoutMs)} total`,
+        `${formatRouteDuration(state.idleTimeoutMs)} idle`
+      ];
+    }
+    return [`${formatRouteElapsed(boundedElapsedMs)} / ${formatRouteDuration(state.timeoutMs)}`];
+  }
+
+  if (firstOutputIsSeparate) {
+    return [
+      `${formatRouteDuration(state.firstOutputTimeoutMs)} first`,
+      `${formatRouteDuration(state.timeoutMs)} total`
+    ];
+  }
+  if (idleIsSeparate) {
+    return [
+      `${formatRouteDuration(state.timeoutMs)} total`,
+      `${formatRouteDuration(state.idleTimeoutMs)} idle`
+    ];
+  }
+  return [`${formatRouteDuration(state.timeoutMs)} max`];
 }
 
 function routeFailureKindLabel(
