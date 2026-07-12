@@ -217,6 +217,9 @@ describe("package metadata", () => {
     expect(readme).toContain("sanitized Router executable name");
     expect(readme).toContain("reads JSONL backward in bounded chunks");
     expect(readme).toContain("first-output deadline and total ceiling");
+    expect(readme).toContain("`routed` only after the turn and route files are durable");
+    expect(readme).toContain("`ready_for_pair` only after Judge artifacts validate");
+    expect(readme).toContain("invalid phase skips are rejected");
     expect(readme).toContain("`firstOutputTimeoutMs` stops a silent process");
     expect(readme).toContain("`idleTimeoutMs` resets after every stdout or stderr chunk");
     expect(readme).toContain("The 15-second first-output and idle defaults stay below the 30-second total ceiling");

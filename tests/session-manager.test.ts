@@ -104,10 +104,40 @@ describe("SessionManager", () => {
     const turn = await readJson(join(task.dir, "turns", "0001", "turn.json"), TurnMetaSchema);
     const turnRoute = await readJson(join(task.dir, "turns", "0001", "route.json"), RouteDecisionSchema);
 
-    expect(meta.status).toBe("created");
+    expect(meta.status).toBe("routed");
     expect(route.mode).toBe("complex");
     expect(turn.turn_id).toBe("0001");
     expect(turnRoute.mode).toBe("complex");
+    const events = await readTextIfExists(task.eventsPath);
+    expect(events.indexOf('"type":"task.created"')).toBeLessThan(events.indexOf('"type":"task.routed"'));
+  });
+
+  it("rejects task status changes that skip lifecycle phases", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pct-task-status-invalid-transition-"));
+    const manager = new SessionManager({
+      projectRoot: root,
+      dataDir: ".parallel-codex",
+      now: () => new Date("2026-06-30T03:30:00.000Z"),
+      randomId: () => "invalid-transition"
+    });
+    const task = await manager.createTask({
+      request: "Build it.",
+      cwd: root,
+      route: {
+        mode: "complex",
+        reason: "Requires workers.",
+        suggested_roles: ["judge", "actor", "critic"],
+        judge_engine: "mock",
+        actor_engine: "mock",
+        critic_engine: "mock"
+      }
+    });
+
+    await expect(manager.updateTaskStatus(task, "critic_running")).rejects.toThrow(
+      `Task ${task.id} cannot move from routed to critic_running`
+    );
+    await expect(readJson(task.metaPath, TaskMetaSchema)).resolves.toMatchObject({ status: "routed" });
+    expect(await readTextIfExists(task.eventsPath)).not.toContain('"type":"task.critic_running"');
   });
 
   it("records repeated task status transitions idempotently", async () => {
@@ -131,12 +161,13 @@ describe("SessionManager", () => {
       }
     });
 
+    await advanceTaskToReady(manager, task);
     await manager.updateTaskStatus(task, "actor_running");
     await manager.updateTaskStatus(task, "actor_running");
 
     const events = await readTextIfExists(task.eventsPath);
     expect(countOccurrences(events, '"type":"task.actor_running"')).toBe(1);
-    expect(events).toContain('"message":"Task moved from created to actor_running"');
+    expect(events).toContain('"message":"Task moved from ready_for_pair to actor_running"');
     await expect(readJson(task.metaPath, TaskMetaSchema)).resolves.toMatchObject({ status: "actor_running" });
   });
 
@@ -160,6 +191,7 @@ describe("SessionManager", () => {
         critic_engine: "mock"
       }
     });
+    await advanceTaskToReady(initial, task);
     const upsertTask = vi.fn()
       .mockRejectedValueOnce(new Error("index temporarily unavailable"))
       .mockResolvedValue(undefined);
@@ -177,7 +209,7 @@ describe("SessionManager", () => {
 
     const events = await readTextIfExists(task.eventsPath);
     expect(countOccurrences(events, '"type":"task.actor_running"')).toBe(1);
-    expect(events).toContain('"message":"Task moved from created to actor_running"');
+    expect(events).toContain('"message":"Task moved from ready_for_pair to actor_running"');
     expect(upsertTask).toHaveBeenCalledTimes(2);
   });
 
@@ -201,6 +233,11 @@ describe("SessionManager", () => {
         critic_engine: "mock"
       }
     });
+    await advanceTaskToReady(manager, task);
+    const readyMeta = await readJson(task.metaPath, TaskMetaSchema);
+    const readyMetaWithoutTransition = { ...readyMeta };
+    delete readyMetaWithoutTransition.status_transition;
+    await writeJson(task.metaPath, readyMetaWithoutTransition);
     const eventsBackup = `${task.eventsPath}.backup`;
     await rename(task.eventsPath, eventsBackup);
     await mkdir(task.eventsPath);
@@ -208,7 +245,7 @@ describe("SessionManager", () => {
     await expect(manager.updateTaskStatus(task, "actor_running")).rejects.toMatchObject({ code: "EISDIR" });
     await expect(readJson(task.metaPath, TaskMetaSchema)).resolves.toMatchObject({
       status: "actor_running",
-      status_transition: { from: "created", to: "actor_running" }
+      status_transition: { from: "ready_for_pair", to: "actor_running" }
     });
 
     await rm(task.eventsPath, { recursive: true });
@@ -241,6 +278,7 @@ describe("SessionManager", () => {
         critic_engine: "mock"
       }
     });
+    await advanceTaskToIntegrating(manager, task);
 
     await expect(manager.updateTaskStatus(task, "done")).rejects.toThrow(
       `Task ${task.id} cannot move to done before latest-turn completion evidence is published`
@@ -259,7 +297,7 @@ describe("SessionManager", () => {
     await expect(manager.updateTaskStatus(task, "done")).rejects.toThrow(
       `Task ${task.id} cannot move to done before latest-turn completion evidence is published`
     );
-    await expect(readJson(task.metaPath, TaskMetaSchema)).resolves.toMatchObject({ status: "created" });
+    await expect(readJson(task.metaPath, TaskMetaSchema)).resolves.toMatchObject({ status: "integrating" });
     expect(await readTextIfExists(task.eventsPath)).not.toContain('"type":"task.done"');
   });
 
@@ -280,6 +318,7 @@ describe("SessionManager", () => {
       critic_engine: "mock" as const
     };
     const task = await manager.createTask({ request: "Build it.", cwd: root, route });
+    await advanceTaskToIntegrating(manager, task);
     await writeText(join(task.dir, "turns", "0001", "supervisor-summary.md"), "Complex task completed.\n");
     await manager.updateTaskStatus(task, "done");
 
@@ -314,6 +353,13 @@ describe("SessionManager", () => {
       cwd: root,
       route
     });
+    await manager.updateTaskStatus(task, "judging");
+    await manager.updateTaskStatus(task, "ready_for_pair");
+    await manager.updateTaskStatus(task, "actor_running");
+    await manager.updateTaskStatus(task, "critic_running");
+    await manager.updateTaskStatus(task, "integrating");
+    await writeText(join(task.dir, "turns", "0001", "supervisor-summary.md"), "Initial task completed.\n");
+    await manager.updateTaskStatus(task, "done");
 
     const turn = await manager.appendTurn(task, {
       request: "继续改",
@@ -324,6 +370,7 @@ describe("SessionManager", () => {
     expect(await readTextIfExists(join(task.dir, "turns", "0002", "user.md"))).toContain("继续改");
     const meta = await readJson(join(task.dir, "turns", "0002", "turn.json"), TurnMetaSchema);
     expect(meta.turn_id).toBe("0002");
+    await expect(readJson(task.metaPath, TaskMetaSchema)).resolves.toMatchObject({ status: "routed" });
   });
 
   it("reads the latest persisted route across task turns", async () => {
@@ -1437,7 +1484,7 @@ describe("SessionManager", () => {
         critic_engine: "claude"
       }
     });
-    await manager.updateTaskStatus(task, "actor_running");
+    await advanceTaskToActor(manager, task);
     const worker = await manager.initializeWorker(task, {
       workerId: "actor-codex-0001-ui",
       featureId: "0001-ui",
@@ -1749,6 +1796,46 @@ describe("SessionManager", () => {
     expect(await readTextIfExists(task.eventsPath)).toContain("task.recovered_incomplete_done");
   });
 
+  it("recovers a follow-up turn that was persisted before its routed state", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pct-reconcile-persisted-follow-up-"));
+    const manager = new SessionManager({
+      projectRoot: root,
+      dataDir: ".parallel-codex",
+      now: () => new Date("2026-07-11T14:30:15.000Z"),
+      randomId: () => "persisted-follow-up"
+    });
+    const route = {
+      mode: "complex" as const,
+      reason: "Project work.",
+      suggested_roles: ["judge" as const, "actor" as const, "critic" as const],
+      judge_engine: "mock" as const,
+      actor_engine: "mock" as const,
+      critic_engine: "mock" as const
+    };
+    const task = await manager.createTask({ request: "Build it.", cwd: root, route });
+    await manager.updateTaskStatus(task, "judging");
+    await manager.updateTaskStatus(task, "ready_for_pair");
+    await manager.updateTaskStatus(task, "actor_running");
+    await manager.updateTaskStatus(task, "critic_running");
+    await manager.updateTaskStatus(task, "integrating");
+    await writeText(join(task.dir, "turns", "0001", "supervisor-summary.md"), "Initial task completed.\n");
+    await manager.updateTaskStatus(task, "done");
+    const completedMeta = await readJson(task.metaPath, TaskMetaSchema);
+
+    await manager.appendTurn(task, { request: "Continue it.", route });
+    await writeJson(task.metaPath, completedMeta);
+
+    await expect(manager.reconcileInterruptedTasks()).resolves.toEqual([{
+      taskId: task.id,
+      previousState: "done",
+      workersRecovered: 0,
+      featuresRecovered: 0,
+      processesTerminated: 0
+    }]);
+    await expect(readJson(task.metaPath, TaskMetaSchema)).resolves.toMatchObject({ status: "cancelled" });
+    expect(await readTextIfExists(task.eventsPath)).toContain("task.recovered_incomplete_done");
+  });
+
   it("keeps an evidence-complete terminal done task untouched", async () => {
     const root = await mkdtemp(join(tmpdir(), "pct-reconcile-complete-done-"));
     const manager = new SessionManager({
@@ -1780,6 +1867,7 @@ describe("SessionManager", () => {
       state: "approved",
       updated_at: "2026-07-11T14:30:19.000Z"
     });
+    await advanceTaskToIntegrating(manager, task);
     await manager.updateTaskStatus(task, "done");
 
     await expect(manager.reconcileInterruptedTasks()).resolves.toEqual([]);
@@ -1812,7 +1900,7 @@ describe("SessionManager", () => {
         critic_engine: "mock"
       }
     });
-    await left.updateTaskStatus(task, "actor_running");
+    await advanceTaskToActor(left, task);
     const worker = await left.initializeWorker(task, {
       workerId: "actor-mock",
       role: "actor",
@@ -1885,7 +1973,7 @@ describe("SessionManager", () => {
         critic_engine: "mock"
       }
     });
-    await manager.updateTaskStatus(task, "actor_running");
+    await advanceTaskToActor(manager, task);
     const lease = await claimTaskRunLease(task.dir, { ownerId: "live-tui" });
 
     try {
@@ -1916,7 +2004,7 @@ describe("SessionManager", () => {
         critic_engine: "mock"
       }
     });
-    await manager.updateTaskStatus(task, "actor_running");
+    await advanceTaskToActor(manager, task);
     const worker = await manager.initializeWorker(task, {
       workerId: "actor-mock",
       featureId: "0001-safety",
@@ -1991,7 +2079,7 @@ describe("SessionManager", () => {
         critic_engine: "mock"
       }
     });
-    await manager.updateTaskStatus(task, "actor_running");
+    await advanceTaskToActor(manager, task);
     const worker = await manager.initializeWorker(task, {
       workerId: "actor-mock",
       role: "actor",
@@ -2054,4 +2142,20 @@ describe("SessionManager", () => {
 
 function countOccurrences(text: string, needle: string): number {
   return text.split(needle).length - 1;
+}
+
+async function advanceTaskToReady(manager: SessionManager, task: TaskSession): Promise<void> {
+  await manager.updateTaskStatus(task, "judging");
+  await manager.updateTaskStatus(task, "ready_for_pair");
+}
+
+async function advanceTaskToActor(manager: SessionManager, task: TaskSession): Promise<void> {
+  await advanceTaskToReady(manager, task);
+  await manager.updateTaskStatus(task, "actor_running");
+}
+
+async function advanceTaskToIntegrating(manager: SessionManager, task: TaskSession): Promise<void> {
+  await advanceTaskToActor(manager, task);
+  await manager.updateTaskStatus(task, "critic_running");
+  await manager.updateTaskStatus(task, "integrating");
 }

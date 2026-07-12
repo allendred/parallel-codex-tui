@@ -25,6 +25,8 @@ describe("CLI startup recovery smoke", () => {
         critic_engine: "mock"
       }
     });
+    await initial.sessions.updateTaskStatus(task, "judging");
+    await initial.sessions.updateTaskStatus(task, "ready_for_pair");
     await initial.sessions.updateTaskStatus(task, "actor_running");
     const worker = await initial.sessions.initializeWorker(task, {
       workerId: "actor-mock",

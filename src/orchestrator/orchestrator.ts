@@ -504,6 +504,7 @@ export class Orchestrator {
       const judge = reuseJudgeSnapshot
         ? { ...judgeWorker, dir: turn.dir }
         : await this.snapshotJudgeArtifacts(judgeWorker, turn);
+      await this.sessions.updateTaskStatus(task, "ready_for_pair");
       const featurePlan = await this.loadFeaturePlan(judge, turn);
       if (featurePlan && featurePlan.features.length > 1) {
         features = await Promise.all(featurePlan.features.map((feature) => createFeatureChannel({
@@ -551,6 +552,7 @@ export class Orchestrator {
       const judge = reuseJudgeSnapshot
         ? { ...judgeWorker, dir: turn.dir }
         : await this.snapshotJudgeArtifacts(judgeWorker, turn);
+      await this.sessions.updateTaskStatus(task, "ready_for_pair");
       const featurePlan = await this.loadFeaturePlan(judge, turn);
       if (featurePlan && featurePlan.features.length > 1) {
         features = await Promise.all(featurePlan.features.map((feature) => createFeatureChannel({
@@ -875,6 +877,7 @@ export class Orchestrator {
             findings: channel.criticFindingsPath
           });
         }));
+        await this.sessions.updateTaskStatus(task, "actor_running");
         let revisionCompleted = 0;
         reportProgress("revision", revisionCompleted, revisionRuns.length, "revision", "done");
 
@@ -1000,6 +1003,7 @@ export class Orchestrator {
         await this.sessions.updateTaskStatus(task, "revision_needed");
         await Promise.all(finalPairs.map(({ channel }) => updateFeatureStatus(channel, "revision_needed")));
         reportProgress("revision", 0, 1, "revision", "done");
+        await this.sessions.updateTaskStatus(task, "actor_running");
         await this.runWaveActor(
           input,
           task,
@@ -1251,6 +1255,7 @@ export class Orchestrator {
         findings: feature.criticFindingsPath
       });
       input.onStatus?.({ taskId: task.id, judge: "done", actor: "revision", critic: "done" });
+      await this.sessions.updateTaskStatus(task, "actor_running");
       actor = await this.runActor(
         input,
         task,

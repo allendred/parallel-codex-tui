@@ -6,6 +6,7 @@ import { createRuntime } from "../src/bootstrap.js";
 import { pathExists, readJson, readTextIfExists, writeJson, writeText } from "../src/core/file-store.js";
 import { workerProcessRecordPath } from "../src/core/process-ownership.js";
 import { SessionIndex } from "../src/core/session-index.js";
+import { SessionManager, type TaskSession } from "../src/core/session-manager.js";
 import { NativeSessionSchema, TaskMetaSchema, WorkerStatusSchema } from "../src/domain/schemas.js";
 
 describe("createRuntime", () => {
@@ -107,7 +108,7 @@ describe("createRuntime", () => {
         critic_engine: "mock"
       }
     });
-    await firstRuntime.sessions.updateTaskStatus(task, "actor_running");
+    await advanceTaskToActor(firstRuntime.sessions, task);
     const worker = await firstRuntime.sessions.initializeWorker(task, {
       workerId: "actor-mock",
       role: "actor",
@@ -214,7 +215,7 @@ describe("createRuntime", () => {
         critic_engine: "mock"
       }
     });
-    await firstRuntime.sessions.updateTaskStatus(task, "actor_running");
+    await advanceTaskToActor(firstRuntime.sessions, task);
     const worker = await firstRuntime.sessions.initializeWorker(task, {
       workerId: "actor-mock",
       role: "actor",
@@ -290,6 +291,7 @@ describe("createRuntime", () => {
       retired_reason: "context window full"
     });
     await writeText(join(task.dir, "turns", "0001", "supervisor-summary.md"), "Complex task completed.\n");
+    await advanceTaskToIntegrating(firstRuntime.sessions, task);
     await firstRuntime.sessions.updateTaskStatus(task, "done");
     firstRuntime.index.close();
 
@@ -355,6 +357,7 @@ describe("createRuntime", () => {
       native_session_id: "native-missing"
     }));
     await writeText(join(task.dir, "turns", "0001", "supervisor-summary.md"), "Complex task completed.\n");
+    await advanceTaskToIntegrating(firstRuntime.sessions, task);
     await firstRuntime.sessions.updateTaskStatus(task, "done");
     firstRuntime.index.close();
 
@@ -401,3 +404,15 @@ describe("createRuntime", () => {
     expect(second.taskId).toEqual(expect.stringMatching(/^task-/));
   });
 });
+
+async function advanceTaskToActor(manager: SessionManager, task: TaskSession): Promise<void> {
+  await manager.updateTaskStatus(task, "judging");
+  await manager.updateTaskStatus(task, "ready_for_pair");
+  await manager.updateTaskStatus(task, "actor_running");
+}
+
+async function advanceTaskToIntegrating(manager: SessionManager, task: TaskSession): Promise<void> {
+  await advanceTaskToActor(manager, task);
+  await manager.updateTaskStatus(task, "critic_running");
+  await manager.updateTaskStatus(task, "integrating");
+}

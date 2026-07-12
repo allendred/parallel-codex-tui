@@ -243,6 +243,21 @@ describe("Orchestrator", () => {
     expect(await readTextIfExists(join(taskDir, "actor-mock", "prompt.md"))).toContain(`Feature directory: ${featureDir}`);
     expect(await readTextIfExists(join(taskDir, "critic-mock", "prompt.md"))).toContain("critic-findings.jsonl");
     expect(await readTextIfExists(join(taskDir, "dialogue", "actor-critic.jsonl"))).toContain('"type":"critic.completed"');
+    const taskEvents = await readTextIfExists(join(taskDir, "events.jsonl"));
+    const lifecycle = [
+      "task.routed",
+      "task.judging",
+      "task.ready_for_pair",
+      "task.actor_running",
+      "task.critic_running",
+      "task.integrating",
+      "task.done"
+    ];
+    for (let index = 1; index < lifecycle.length; index += 1) {
+      expect(taskEvents.indexOf(`"type":"${lifecycle[index - 1]}"`)).toBeLessThan(
+        taskEvents.indexOf(`"type":"${lifecycle[index]}"`)
+      );
+    }
   });
 
   it("stops before Actor when Judge artifacts are not executable", async () => {

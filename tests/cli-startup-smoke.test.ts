@@ -185,6 +185,8 @@ describe("CLI startup", () => {
         critic_engine: "mock"
       }
     });
+    await runtime.sessions.updateTaskStatus(task, "judging");
+    await runtime.sessions.updateTaskStatus(task, "ready_for_pair");
     await runtime.sessions.updateTaskStatus(task, "actor_running");
     const worker = await runtime.sessions.initializeWorker(task, {
       workerId: "actor-mock",

@@ -18,6 +18,7 @@ import { formatTaskTimestamp, taskDir } from "./paths.js";
 import { sessionsRoot } from "./paths.js";
 import type { SessionIndex } from "./session-index.js";
 import { loadCollaborationTimeline, type CollaborationTimeline } from "./collaboration-timeline.js";
+import { taskStateTransitionAllowed } from "./task-state-machine.js";
 import {
   claimTaskRunLease,
   inspectTaskRunLease,
@@ -191,22 +192,25 @@ export class SessionManager {
       status: "created"
     };
 
-    await ensureDir(dir);
-    await writeJson(join(dir, "meta.json"), TaskMetaSchema.parse(meta));
-    await writeText(join(dir, "user-request.md"), `${input.request.trim()}\n`);
-    await this.index?.upsertTask(meta);
-    await writeJson(join(dir, "route.json"), RouteDecisionSchema.parse(input.route));
-    await this.writeTurn({ id, dir }, "0001", input.request, input.route, createdAt);
-    await this.appendEvent({ id, dir }, "task.created", "Task session created");
-    await this.index?.setActiveTaskId(id);
-
-    return {
+    const task: TaskSession = {
       id,
       dir,
       metaPath: join(dir, "meta.json"),
       routePath: join(dir, "route.json"),
       eventsPath: join(dir, "events.jsonl")
     };
+
+    await ensureDir(dir);
+    await writeJson(join(dir, "meta.json"), TaskMetaSchema.parse(meta));
+    await writeText(join(dir, "user-request.md"), `${input.request.trim()}\n`);
+    await this.index?.upsertTask(meta);
+    await writeJson(join(dir, "route.json"), RouteDecisionSchema.parse(input.route));
+    await this.writeTurn({ id, dir }, "0001", input.request, input.route, createdAt);
+    await this.appendEvent(task, "task.created", "Task session created");
+    await this.updateTaskStatus(task, "routed");
+    await this.index?.setActiveTaskId(id);
+
+    return task;
   }
 
   mainSessionDir(): string {
@@ -413,6 +417,9 @@ export class SessionManager {
     const turnId = await this.nextTurnId(task);
     const turn = await this.writeTurn(task, turnId, input.request, input.route, this.now());
     await this.appendEvent(task, "turn.created", `Turn ${turnId} created`);
+    if (await readTaskMetaIfValid(task.metaPath)) {
+      await this.updateTaskStatus(task, "routed");
+    }
     return turn;
   }
 
@@ -463,18 +470,21 @@ export class SessionManager {
     if (meta.status !== status && await this.taskStatusTransitionNeedsRepair(task, meta)) {
       await this.syncTaskStatusTransition(task, meta);
     }
-    const completeEvidence = status === "done" || meta.status === "done"
-      ? await this.hasCompleteTaskEvidence(task)
-      : false;
-    if (status === "done" && !completeEvidence) {
-      throw new Error(`Task ${task.id} cannot move to done before latest-turn completion evidence is published.`);
-    }
-    if (meta.status === "done" && status !== "done" && completeEvidence) {
-      throw new Error(`Task ${task.id} is completely done and cannot move backward to ${status}.`);
-    }
     if (meta.status === status) {
       await this.syncTaskStatusTransition(task, meta);
       return;
+    }
+    const completeEvidence = status === "done" || meta.status === "done"
+      ? await this.hasCompleteTaskEvidence(task)
+      : false;
+    if (meta.status === "done" && completeEvidence) {
+      throw new Error(`Task ${task.id} is completely done and cannot move backward to ${status}.`);
+    }
+    if (!taskStateTransitionAllowed(meta.status, status)) {
+      throw new Error(`Task ${task.id} cannot move from ${meta.status} to ${status}.`);
+    }
+    if (status === "done" && !completeEvidence) {
+      throw new Error(`Task ${task.id} cannot move to done before latest-turn completion evidence is published.`);
     }
     const nextMeta = TaskMetaSchema.parse({
       ...meta,
@@ -704,9 +714,17 @@ export class SessionManager {
     if (!TERMINAL_TASK_STATES.has(meta.status)) {
       return true;
     }
-    return meta.status === "done"
-      && !(await this.hasCompleteTaskEvidence(task))
-      && await this.hasIntegratedLatestTurnCheckpoint(task);
+    if (meta.status !== "done" || await this.hasCompleteTaskEvidence(task)) {
+      return false;
+    }
+    const latestTurn = await this.latestTurn(task);
+    return Boolean(
+      latestTurn
+      && (
+        latestTurn.turnId !== "0001"
+        || await this.hasIntegratedLatestTurnCheckpoint(task)
+      )
+    );
   }
 
   private async taskStatusTransitionNeedsRepair(task: TaskSession, meta: TaskMeta): Promise<boolean> {
