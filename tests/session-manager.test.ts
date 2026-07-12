@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { mkdir, mkdtemp, rename, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readdir, rename, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
@@ -370,6 +370,7 @@ describe("SessionManager", () => {
     expect(await readTextIfExists(join(task.dir, "turns", "0002", "user.md"))).toContain("继续改");
     const meta = await readJson(join(task.dir, "turns", "0002", "turn.json"), TurnMetaSchema);
     expect(meta.turn_id).toBe("0002");
+    expect((await readdir(join(task.dir, "turns"))).filter((entry) => entry.endsWith(".pending"))).toEqual([]);
     await expect(readJson(task.metaPath, TaskMetaSchema)).resolves.toMatchObject({ status: "routed" });
   });
 
@@ -534,9 +535,10 @@ describe("SessionManager", () => {
     const manager = new SessionManager({
       projectRoot: root,
       dataDir: ".parallel-codex",
+      now: () => new Date("2026-07-11T15:00:00.000Z"),
       randomId: () => "a1b2"
     });
-    await manager.createTask({
+    const first = await manager.createTask({
       request: "First task.",
       cwd: root,
       route: {
@@ -561,9 +563,38 @@ describe("SessionManager", () => {
       }
     });
 
+    expect(second.id).not.toBe(first.id);
+    expect(await pathExists(first.metaPath)).toBe(true);
+    expect(await pathExists(second.metaPath)).toBe(true);
+
     const latest = await manager.latestTask();
 
     expect(latest?.id).toBe(second.id);
+  });
+
+  it("claims unique task ids when two creators collide", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pct-task-id-collision-"));
+    const options = {
+      projectRoot: root,
+      dataDir: ".parallel-codex",
+      now: () => new Date("2026-07-11T15:01:00.000Z"),
+      randomId: () => "same"
+    };
+    const left = new SessionManager(options);
+    const right = new SessionManager(options);
+    const route = testComplexRoute("Concurrent task creation.");
+
+    const [first, second] = await Promise.all([
+      left.createTask({ request: "First concurrent task.", cwd: root, route }),
+      right.createTask({ request: "Second concurrent task.", cwd: root, route })
+    ]);
+
+    expect(new Set([first.id, second.id])).toEqual(new Set([
+      "task-20260711-150100-same",
+      "task-20260711-150100-same-0002"
+    ]));
+    expect(await readTextIfExists(join(first.dir, "user-request.md"))).toContain("First concurrent task.");
+    expect(await readTextIfExists(join(second.dir, "user-request.md"))).toContain("Second concurrent task.");
   });
 
   it("skips corrupt task metadata when finding the latest complex task", async () => {
@@ -1836,6 +1867,98 @@ describe("SessionManager", () => {
     expect(await readTextIfExists(task.eventsPath)).toContain("task.recovered_incomplete_done");
   });
 
+  it("publishes a complete pending follow-up turn during startup recovery", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pct-reconcile-pending-turn-"));
+    const manager = new SessionManager({
+      projectRoot: root,
+      dataDir: ".parallel-codex",
+      now: () => new Date("2026-07-11T14:30:16.000Z"),
+      randomId: () => "pending-turn"
+    });
+    const route = testComplexRoute("Recovered pending route.");
+    const task = await manager.createTask({ request: "Build it.", cwd: root, route });
+    await completeTaskWithoutFeatures(manager, task, "Initial task completed.");
+    const pendingDir = join(task.dir, "turns", ".turn-0002-crashed.pending");
+    await writeText(join(pendingDir, "user.md"), "Continue the feature.\n");
+    await writeJson(join(pendingDir, "route.json"), route);
+    await writeJson(join(pendingDir, "turn.json"), {
+      task_id: task.id,
+      turn_id: "0002",
+      created_at: "2026-07-11T14:30:15.000Z",
+      request_path: "turns/0002/user.md"
+    });
+
+    await expect(manager.reconcileInterruptedTasks()).resolves.toEqual([{
+      taskId: task.id,
+      previousState: "done",
+      workersRecovered: 0,
+      featuresRecovered: 0,
+      processesTerminated: 0
+    }]);
+
+    expect(await pathExists(pendingDir)).toBe(false);
+    await expect(manager.latestTurn(task)).resolves.toMatchObject({ turnId: "0002" });
+    await expect(readJson(join(task.dir, "turns", "0002", "route.json"), RouteDecisionSchema)).resolves.toMatchObject({
+      reason: "Recovered pending route."
+    });
+    expect(await readTextIfExists(task.eventsPath)).toContain("turn.recovered_after_restart");
+    await expect(readJson(task.metaPath, TaskMetaSchema)).resolves.toMatchObject({ status: "cancelled" });
+  });
+
+  it("repairs a partial pending turn from its durable request and latest route", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pct-reconcile-partial-turn-"));
+    const manager = new SessionManager({
+      projectRoot: root,
+      dataDir: ".parallel-codex",
+      now: () => new Date("2026-07-11T14:30:17.000Z"),
+      randomId: () => "partial-turn"
+    });
+    const initialRoute = testComplexRoute("Initial route.");
+    const followUpRoute = testComplexRoute("Latest follow-up route.");
+    const task = await manager.createTask({ request: "Build it.", cwd: root, route: initialRoute });
+    await completeTaskWithoutFeatures(manager, task, "Initial task completed.");
+    await manager.recordLatestRoute(task, followUpRoute);
+    const pendingDir = join(task.dir, "turns", ".turn-0002-input-only.pending");
+    await writeText(join(pendingDir, "user.md"), "Continue from this exact request.\n");
+
+    await expect(manager.reconcileInterruptedTasks()).resolves.toHaveLength(1);
+
+    expect(await pathExists(pendingDir)).toBe(false);
+    expect(await readTextIfExists(join(task.dir, "turns", "0002", "user.md"))).toContain(
+      "Continue from this exact request."
+    );
+    await expect(readJson(join(task.dir, "turns", "0002", "route.json"), RouteDecisionSchema)).resolves.toMatchObject({
+      reason: "Latest follow-up route."
+    });
+    expect(await readTextIfExists(task.eventsPath)).toContain("turn.repaired_after_restart");
+    await expect(readJson(task.metaPath, TaskMetaSchema)).resolves.toMatchObject({ status: "cancelled" });
+  });
+
+  it("quarantines an empty pending turn without changing a completed task", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pct-reconcile-empty-pending-turn-"));
+    const manager = new SessionManager({
+      projectRoot: root,
+      dataDir: ".parallel-codex",
+      now: () => new Date("2026-07-11T14:30:18.000Z"),
+      randomId: () => "empty-pending-turn"
+    });
+    const route = testComplexRoute("Initial route.");
+    const task = await manager.createTask({ request: "Build it.", cwd: root, route });
+    await completeTaskWithoutFeatures(manager, task, "Initial task completed.");
+    const pendingName = ".turn-0002-empty.pending";
+    const pendingDir = join(task.dir, "turns", pendingName);
+    await writeText(join(pendingDir, "incomplete.tmp"), "");
+
+    await expect(manager.reconcileInterruptedTasks()).resolves.toEqual([]);
+    await expect(manager.reconcileInterruptedTasks()).resolves.toEqual([]);
+
+    expect(await pathExists(pendingDir)).toBe(false);
+    expect(await pathExists(join(task.dir, "turns", ".abandoned", pendingName))).toBe(true);
+    expect((await readdir(join(task.dir, "turns"))).filter((entry) => /^\d{4}$/.test(entry))).toEqual(["0001"]);
+    await expect(readJson(task.metaPath, TaskMetaSchema)).resolves.toMatchObject({ status: "done" });
+    expect(countOccurrences(await readTextIfExists(task.eventsPath), "turn.pending_abandoned")).toBe(1);
+  });
+
   it("keeps an evidence-complete terminal done task untouched", async () => {
     const root = await mkdtemp(join(tmpdir(), "pct-reconcile-complete-done-"));
     const manager = new SessionManager({
@@ -2158,4 +2281,25 @@ async function advanceTaskToIntegrating(manager: SessionManager, task: TaskSessi
   await advanceTaskToActor(manager, task);
   await manager.updateTaskStatus(task, "critic_running");
   await manager.updateTaskStatus(task, "integrating");
+}
+
+async function completeTaskWithoutFeatures(
+  manager: SessionManager,
+  task: TaskSession,
+  summary: string
+): Promise<void> {
+  await advanceTaskToIntegrating(manager, task);
+  await writeText(join(task.dir, "turns", "0001", "supervisor-summary.md"), `${summary}\n`);
+  await manager.updateTaskStatus(task, "done");
+}
+
+function testComplexRoute(reason: string) {
+  return RouteDecisionSchema.parse({
+    mode: "complex",
+    reason,
+    suggested_roles: ["judge", "actor", "critic"],
+    judge_engine: "mock",
+    actor_engine: "mock",
+    critic_engine: "mock"
+  });
 }

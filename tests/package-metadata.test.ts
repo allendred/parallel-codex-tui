@@ -220,6 +220,10 @@ describe("package metadata", () => {
     expect(readme).toContain("`routed` only after the turn and route files are durable");
     expect(readme).toContain("`ready_for_pair` only after Judge artifacts validate");
     expect(readme).toContain("invalid phase skips are rejected");
+    expect(readme).toContain("writes every Turn into a hidden staging directory");
+    expect(readme).toContain("complete pending Turns are published and request-only pending Turns are rebuilt");
+    expect(readme).toContain("Task ids are claimed with atomic directory creation");
+    expect(readme).toContain("SQLite startup rebuild indexes only complete numbered Turn directories");
     expect(readme).toContain("`firstOutputTimeoutMs` stops a silent process");
     expect(readme).toContain("`idleTimeoutMs` resets after every stdout or stderr chunk");
     expect(readme).toContain("The 15-second first-output and idle defaults stay below the 30-second total ceiling");

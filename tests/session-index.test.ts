@@ -192,6 +192,7 @@ describe("SessionIndex", () => {
       request_path: "turns/0001/user.md"
     }));
     await writeText(join(turnDir, "user.md"), "Rebuild\n");
+    await writeJson(join(turnDir, "route.json"), route);
     await writeJson(join(workerDir, "status.json"), WorkerStatusSchema.parse({
       worker_id: "actor-mock",
       role: "actor",
@@ -460,6 +461,14 @@ describe("SessionIndex", () => {
     const sessionDir = join(root, dataDir, "sessions", "task-corrupt-turn");
     const goodTurnDir = join(sessionDir, "turns", "0001");
     const corruptTurnDir = join(sessionDir, "turns", "0002");
+    const route = RouteDecisionSchema.parse({
+      mode: "complex",
+      reason: "Committed turn.",
+      suggested_roles: ["judge", "actor", "critic"],
+      judge_engine: "mock",
+      actor_engine: "mock",
+      critic_engine: "mock"
+    });
 
     await writeJson(join(sessionDir, "meta.json"), TaskMetaSchema.parse({
       id: "task-corrupt-turn",
@@ -475,7 +484,63 @@ describe("SessionIndex", () => {
       created_at: "2026-07-01T01:00:00.000Z",
       request_path: "turns/0001/user.md"
     }));
+    await writeText(join(goodTurnDir, "user.md"), "Committed request.\n");
+    await writeJson(join(goodTurnDir, "route.json"), route);
     await writeText(join(corruptTurnDir, "turn.json"), "{");
+
+    const index = await SessionIndex.open(root, dataDir);
+    await index.rebuildFromFiles();
+
+    await expect(index.countRows("turns")).resolves.toBe(1);
+    index.close();
+  });
+
+  it("indexes only committed turn directories with matching identities", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pct-index-committed-turns-"));
+    const dataDir = ".parallel-codex";
+    const taskId = "task-committed-turns";
+    const sessionDir = join(root, dataDir, "sessions", taskId);
+    const route = RouteDecisionSchema.parse({
+      mode: "complex",
+      reason: "Committed turn.",
+      suggested_roles: ["judge", "actor", "critic"],
+      judge_engine: "mock",
+      actor_engine: "mock",
+      critic_engine: "mock"
+    });
+
+    await writeJson(join(sessionDir, "meta.json"), TaskMetaSchema.parse({
+      id: taskId,
+      title: "Committed turns only",
+      created_at: "2026-07-01T01:00:00.000Z",
+      cwd: root,
+      mode: "complex",
+      status: "cancelled"
+    }));
+    await writeJson(join(sessionDir, "turns", "0001", "turn.json"), TurnMetaSchema.parse({
+      task_id: taskId,
+      turn_id: "0001",
+      created_at: "2026-07-01T01:00:00.000Z",
+      request_path: "turns/0001/user.md"
+    }));
+    await writeText(join(sessionDir, "turns", "0001", "user.md"), "Committed request.\n");
+    await writeJson(join(sessionDir, "turns", "0001", "route.json"), route);
+    await writeJson(join(sessionDir, "turns", ".turn-0002-crashed.pending", "turn.json"), TurnMetaSchema.parse({
+      task_id: taskId,
+      turn_id: "0002",
+      created_at: "2026-07-01T01:01:00.000Z",
+      request_path: "turns/0002/user.md"
+    }));
+    await writeText(join(sessionDir, "turns", ".turn-0002-crashed.pending", "user.md"), "Pending request.\n");
+    await writeJson(join(sessionDir, "turns", ".turn-0002-crashed.pending", "route.json"), route);
+    await writeJson(join(sessionDir, "turns", "0003", "turn.json"), TurnMetaSchema.parse({
+      task_id: "task-other",
+      turn_id: "9999",
+      created_at: "2026-07-01T01:02:00.000Z",
+      request_path: "turns/9999/user.md"
+    }));
+    await writeText(join(sessionDir, "turns", "0003", "user.md"), "Mismatched request.\n");
+    await writeJson(join(sessionDir, "turns", "0003", "route.json"), route);
 
     const index = await SessionIndex.open(root, dataDir);
     await index.rebuildFromFiles();

@@ -7,7 +7,7 @@ import { pathExists, readJson, readTextIfExists, writeJson, writeText } from "..
 import { workerProcessRecordPath } from "../src/core/process-ownership.js";
 import { SessionIndex } from "../src/core/session-index.js";
 import { SessionManager, type TaskSession } from "../src/core/session-manager.js";
-import { NativeSessionSchema, TaskMetaSchema, WorkerStatusSchema } from "../src/domain/schemas.js";
+import { NativeSessionSchema, RouteDecisionSchema, TaskMetaSchema, WorkerStatusSchema } from "../src/domain/schemas.js";
 
 describe("createRuntime", () => {
   it("wires config, session manager, workers, and orchestrator", async () => {
@@ -142,6 +142,50 @@ describe("createRuntime", () => {
     });
     await expect(restarted.orchestrator.canRetryTask(task.id)).resolves.toBe(true);
     restarted.index.close();
+  });
+
+  it("repairs a pending follow-up before exposing the rebuilt session index", async () => {
+    const appRoot = await mkdtemp(join(tmpdir(), "pct-pending-turn-app-root-"));
+    const workspaceRoot = await mkdtemp(join(tmpdir(), "pct-pending-turn-worker-root-"));
+    const firstRuntime = await createRuntime(appRoot, workspaceRoot);
+    const initialRoute = RouteDecisionSchema.parse({
+      mode: "complex",
+      reason: "Initial route.",
+      suggested_roles: ["judge", "actor", "critic"],
+      judge_engine: "mock",
+      actor_engine: "mock",
+      critic_engine: "mock"
+    });
+    const followUpRoute = RouteDecisionSchema.parse({
+      ...initialRoute,
+      reason: "Recovered follow-up route."
+    });
+    const task = await firstRuntime.sessions.createTask({
+      request: "Build it.",
+      cwd: workspaceRoot,
+      route: initialRoute
+    });
+    await advanceTaskToIntegrating(firstRuntime.sessions, task);
+    await writeText(join(task.dir, "turns", "0001", "supervisor-summary.md"), "Initial task completed.\n");
+    await firstRuntime.sessions.updateTaskStatus(task, "done");
+    await firstRuntime.sessions.recordLatestRoute(task, followUpRoute);
+    await writeText(
+      join(task.dir, "turns", ".turn-0002-restart.pending", "user.md"),
+      "Continue after restart.\n"
+    );
+    firstRuntime.index.close();
+
+    const restarted = await createRuntime(appRoot, workspaceRoot);
+    try {
+      await expect(restarted.index.countRows("turns")).resolves.toBe(2);
+      await expect(restarted.sessions.latestTurn(task)).resolves.toMatchObject({ turnId: "0002" });
+      await expect(readJson(task.metaPath, TaskMetaSchema)).resolves.toMatchObject({ status: "cancelled" });
+      await expect(readJson(join(task.dir, "turns", "0002", "route.json"), RouteDecisionSchema)).resolves.toMatchObject({
+        reason: "Recovered follow-up route."
+      });
+    } finally {
+      restarted.index.close();
+    }
   });
 
   it("recovers an interrupted Main session before exposing the runtime", async () => {

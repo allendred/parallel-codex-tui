@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { readdir } from "node:fs/promises";
+import { mkdir, readdir, rename, rm } from "node:fs/promises";
 import { basename, dirname, join } from "node:path";
 import {
   appendJsonLine,
@@ -124,6 +124,12 @@ export interface InterruptedMainSessionRecovery {
 
 type BlockingProcessTermination = Extract<WorkerProcessTermination, "unverifiable" | "still-running">;
 
+interface PendingTurnDirectory {
+  name: string;
+  turnId: string;
+  dir: string;
+}
+
 export interface InterruptedTaskRecoveryBlock {
   workerId: string;
   processPath: string;
@@ -161,6 +167,7 @@ const ACTIVE_FEATURE_STATES = new Set([
   "integrating",
   "verifying"
 ]);
+const PENDING_TURN_DIRECTORY = /^\.turn-(\d{4})-.+\.pending$/;
 
 export class SessionManager {
   private readonly projectRoot: string;
@@ -181,8 +188,8 @@ export class SessionManager {
 
   async createTask(input: CreateTaskInput): Promise<TaskSession> {
     const createdAt = this.now();
-    const id = `task-${formatTaskTimestamp(createdAt)}-${this.randomId()}`;
-    const dir = taskDir(this.projectRoot, this.dataDir, id);
+    const baseId = `task-${formatTaskTimestamp(createdAt)}-${this.randomId()}`;
+    const { id, dir } = await this.claimUniqueTaskDirectory(baseId);
     const meta: TaskMeta = {
       id,
       title: titleFromRequest(input.request),
@@ -200,7 +207,6 @@ export class SessionManager {
       eventsPath: join(dir, "events.jsonl")
     };
 
-    await ensureDir(dir);
     await writeJson(join(dir, "meta.json"), TaskMetaSchema.parse(meta));
     await writeText(join(dir, "user-request.md"), `${input.request.trim()}\n`);
     await this.index?.upsertTask(meta);
@@ -211,6 +217,22 @@ export class SessionManager {
     await this.index?.setActiveTaskId(id);
 
     return task;
+  }
+
+  private async claimUniqueTaskDirectory(baseId: string): Promise<{ id: string; dir: string }> {
+    await ensureDir(sessionsRoot(this.projectRoot, this.dataDir));
+    for (let attempt = 1; ; attempt += 1) {
+      const id = attempt === 1 ? baseId : `${baseId}-${String(attempt).padStart(4, "0")}`;
+      const dir = taskDir(this.projectRoot, this.dataDir, id);
+      try {
+        await mkdir(dir);
+        return { id, dir };
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== "EEXIST") {
+          throw error;
+        }
+      }
+    }
   }
 
   mainSessionDir(): string {
@@ -314,7 +336,8 @@ export class SessionManager {
       }
       const needsTaskRecovery = await this.taskNeedsRecovery(task, meta);
       const needsTransitionRepair = await this.taskStatusTransitionNeedsRepair(task, meta);
-      if (!needsTaskRecovery && !needsTransitionRepair) {
+      const needsTurnReconciliation = (await this.pendingTurnDirectories(task)).length > 0;
+      if (!needsTaskRecovery && !needsTransitionRepair && !needsTurnReconciliation) {
         continue;
       }
       let recoveryLease: TaskRunLease;
@@ -335,6 +358,7 @@ export class SessionManager {
           if (!claimedMeta) {
             return null;
           }
+          await this.reconcilePendingTurns(task);
           const claimedNeedsTaskRecovery = await this.taskNeedsRecovery(task, claimedMeta);
           const claimedNeedsTransitionRepair = await this.taskStatusTransitionNeedsRepair(task, claimedMeta);
           if (!claimedNeedsTaskRecovery && !claimedNeedsTransitionRepair) {
@@ -396,7 +420,10 @@ export class SessionManager {
       }
     }
 
-    const latest = tasks.sort((left, right) => left.created_at.localeCompare(right.created_at)).at(-1);
+    const latest = tasks.sort((left, right) => (
+      left.created_at.localeCompare(right.created_at)
+      || left.id.localeCompare(right.id)
+    )).at(-1);
     if (!latest) {
       return null;
     }
@@ -909,6 +936,95 @@ export class SessionManager {
     }
   }
 
+  private async pendingTurnDirectories(
+    task: Pick<TaskSession, "dir">
+  ): Promise<PendingTurnDirectory[]> {
+    const root = join(task.dir, "turns");
+    if (!(await pathExists(root))) {
+      return [];
+    }
+    const entries = await readdir(root, { withFileTypes: true });
+    return entries.flatMap((entry) => {
+      const match = entry.isDirectory() ? entry.name.match(PENDING_TURN_DIRECTORY) : null;
+      return match?.[1]
+        ? [{ name: entry.name, turnId: match[1], dir: join(root, entry.name) }]
+        : [];
+    }).sort((left, right) => left.name.localeCompare(right.name));
+  }
+
+  private async reconcilePendingTurns(task: TaskSession): Promise<void> {
+    for (const pending of await this.pendingTurnDirectories(task)) {
+      const files = this.turnFiles(task, pending.turnId);
+      if (await pathExists(files.dir)) {
+        await this.quarantinePendingTurn(task, pending);
+        await this.appendEvent(
+          task,
+          "turn.pending_abandoned",
+          `Archived pending turn ${pending.turnId} because the committed turn already exists`
+        );
+        continue;
+      }
+
+      const request = (await readTextIfExists(join(pending.dir, "user.md"))).trim();
+      const pendingRoute = await readRouteDecisionIfValid(join(pending.dir, "route.json"));
+      const pendingMeta = await readTurnMetaIfValid(join(pending.dir, "turn.json"));
+      const metaMatches = Boolean(
+        pendingMeta
+        && pendingMeta.task_id === task.id
+        && pendingMeta.turn_id === pending.turnId
+        && pendingMeta.request_path === `turns/${pending.turnId}/user.md`
+      );
+
+      if (request && pendingRoute && pendingMeta && metaMatches) {
+        await rename(pending.dir, files.dir);
+        await this.index?.upsertTurn(task.id, pendingMeta);
+        await this.appendEvent(
+          task,
+          "turn.recovered_after_restart",
+          `Published complete pending turn ${pending.turnId} after restart`
+        );
+        continue;
+      }
+
+      const fallbackRoute = pendingRoute
+        ?? await readRouteDecisionIfValid(join(task.dir, "latest-route.json"))
+        ?? await readRouteDecisionIfValid(task.routePath);
+      if (request && fallbackRoute) {
+        const createdAt = pendingMeta && metaMatches
+          ? new Date(pendingMeta.created_at)
+          : this.now();
+        await this.quarantinePendingTurn(task, pending);
+        await this.writeTurn(task, pending.turnId, request, fallbackRoute, createdAt);
+        await this.appendEvent(
+          task,
+          "turn.repaired_after_restart",
+          `Rebuilt partial pending turn ${pending.turnId} from its durable request and route evidence`
+        );
+        continue;
+      }
+
+      await this.quarantinePendingTurn(task, pending);
+      await this.appendEvent(
+        task,
+        "turn.pending_abandoned",
+        `Archived incomplete pending turn ${pending.turnId}; no durable request and route pair was available`
+      );
+    }
+  }
+
+  private async quarantinePendingTurn(
+    task: Pick<TaskSession, "dir">,
+    pending: PendingTurnDirectory
+  ): Promise<void> {
+    const root = join(task.dir, "turns", ".abandoned");
+    await ensureDir(root);
+    const preferred = join(root, pending.name);
+    const destination = await pathExists(preferred)
+      ? join(root, `${pending.name}.${randomUUID()}`)
+      : preferred;
+    await rename(pending.dir, destination);
+  }
+
   private async backfillInitialTurn(task: TaskSession, fallbackRoute: RouteDecision): Promise<void> {
     const firstTurn = this.turnFiles(task, "0001");
     if (await pathExists(firstTurn.metaPath)) {
@@ -938,23 +1054,43 @@ export class SessionManager {
     createdAt: Date
   ): Promise<TaskTurn> {
     const files = this.turnFiles(task, turnId);
-    const turnMeta: TurnMeta = {
+    const turnMeta = TurnMetaSchema.parse({
       task_id: task.id,
       turn_id: turnId,
       created_at: createdAt.toISOString(),
       request_path: `turns/${turnId}/user.md`
-    };
+    });
+    const parsedRoute = RouteDecisionSchema.parse(route);
+    if (await pathExists(files.dir)) {
+      throw new Error(`Turn ${turnId} already exists for task ${task.id}.`);
+    }
 
-    await ensureDir(files.dir);
-    await writeText(files.userPath, `${request.trim()}\n`);
-    await writeJson(files.routePath, RouteDecisionSchema.parse(route));
-    await writeJson(files.metaPath, TurnMetaSchema.parse(turnMeta));
+    const pendingDir = join(task.dir, "turns", `.turn-${turnId}-${randomUUID()}.pending`);
+    const pendingFiles = this.turnFilesAtDir(turnId, pendingDir);
+    let published = false;
+
+    try {
+      await ensureDir(pendingDir);
+      await writeText(pendingFiles.userPath, `${request.trim()}\n`);
+      await writeJson(pendingFiles.routePath, parsedRoute);
+      await writeJson(pendingFiles.metaPath, turnMeta);
+      await rename(pendingDir, files.dir);
+      published = true;
+    } finally {
+      if (!published) {
+        await rm(pendingDir, { recursive: true, force: true });
+      }
+    }
     await this.index?.upsertTurn(task.id, turnMeta);
     return files;
   }
 
   private turnFiles(task: Pick<TaskSession, "id" | "dir">, turnId: string): TaskTurn {
     const dir = join(task.dir, "turns", turnId);
+    return this.turnFilesAtDir(turnId, dir);
+  }
+
+  private turnFilesAtDir(turnId: string, dir: string): TaskTurn {
     return {
       turnId,
       dir,
@@ -1093,6 +1229,18 @@ async function readRouteDecisionIfValid(routePath: string): Promise<RouteDecisio
 
   try {
     return await readJson(routePath, RouteDecisionSchema);
+  } catch {
+    return null;
+  }
+}
+
+async function readTurnMetaIfValid(metaPath: string): Promise<TurnMeta | null> {
+  if (!(await pathExists(metaPath))) {
+    return null;
+  }
+
+  try {
+    return await readJson(metaPath, TurnMetaSchema);
   } catch {
     return null;
   }

@@ -6,6 +6,7 @@ import {
   NativeSessionSchema,
   type NativeSession,
   RetiredNativeSessionSchema,
+  RouteDecisionSchema,
   TaskMetaSchema,
   type TaskMeta,
   TurnMetaSchema,
@@ -13,7 +14,7 @@ import {
   WorkerStatusSchema,
   type WorkerStatus
 } from "../domain/schemas.js";
-import { ensureDir, pathExists, readJson } from "./file-store.js";
+import { ensureDir, pathExists, readJson, readTextIfExists } from "./file-store.js";
 
 export interface WorkerIndexPaths {
   dir: string;
@@ -314,12 +315,24 @@ export class SessionIndex {
     if (await pathExists(turnsDir)) {
       const turnEntries = await readdir(turnsDir, { withFileTypes: true });
       for (const turnEntry of turnEntries) {
+        if (!turnEntry.isDirectory() || !/^\d{4}$/.test(turnEntry.name)) {
+          continue;
+        }
         const turnPath = join(turnsDir, turnEntry.name, "turn.json");
-        if (turnEntry.isDirectory() && (await pathExists(turnPath))) {
-          const turn = await readJsonIfValid(turnPath, TurnMetaSchema);
-          if (turn) {
-            await this.upsertTurn(taskId, turn);
-          }
+        const [turn, route, request] = await Promise.all([
+          readJsonIfValid(turnPath, TurnMetaSchema),
+          readJsonIfValid(join(turnsDir, turnEntry.name, "route.json"), RouteDecisionSchema),
+          readTextIfExists(join(turnsDir, turnEntry.name, "user.md"))
+        ]);
+        if (
+          turn
+          && route
+          && request.trim()
+          && turn.task_id === taskId
+          && turn.turn_id === turnEntry.name
+          && turn.request_path === `turns/${turnEntry.name}/user.md`
+        ) {
+          await this.upsertTurn(taskId, turn);
         }
       }
     }
