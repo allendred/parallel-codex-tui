@@ -6,6 +6,7 @@ import { pathExists, readTextIfExists } from "../core/file-store.js";
 import type { WorkerRole } from "../domain/schemas.js";
 import { compactEndByDisplayWidth, displayWidth, wrapByDisplayWidth } from "./display-width.js";
 import { decodeHtmlEntities } from "./markdown-text.js";
+import { createIncrementalTextFileReader } from "./incremental-text-file.js";
 import { selectViewportLines } from "./scrolling.js";
 import { TUI_THEME } from "./theme.js";
 
@@ -161,38 +162,71 @@ export function WorkerOutputView({
 
   useEffect(() => {
     let active = true;
+    let refreshing = false;
+    let refreshQueued = false;
     const loadKey = contentKey;
+    const outputReader = logPath ? createIncrementalTextFileReader(logPath) : null;
 
     async function load() {
-      if (!logPath) {
-        setContentState({
-          key: loadKey,
-          lines: [{ kind: "placeholder", text: NO_WORKER_OUTPUT_TEXT }]
-        });
-        return;
-      }
-      if (nanoOutput) {
-        const lines = await loadNanoWorkerOutputLines(logPath, height);
+      try {
+        if (!logPath || !outputReader) {
+          setContentState({
+            key: loadKey,
+            lines: [{ kind: "placeholder", text: NO_WORKER_OUTPUT_TEXT }]
+          });
+          return;
+        }
+        const output = (await outputReader.read()).text;
+        if (nanoOutput) {
+          const lines = await loadNanoWorkerOutputLines(logPath, height, output);
+          if (active) {
+            setContentState({
+              key: loadKey,
+              lines
+            });
+          }
+          return;
+        }
+        const sections = await loadWorkerOutputSections(role, logPath, output);
         if (active) {
           setContentState({
             key: loadKey,
-            lines
+            lines: renderLinesFromSections(sections, { nanoProcess: nanoOutput, height })
           });
         }
-        return;
-      }
-      const sections = await loadWorkerOutputSections(role, logPath);
-      if (active) {
-        setContentState({
-          key: loadKey,
-          lines: renderLinesFromSections(sections, { nanoProcess: nanoOutput, height })
-        });
+      } catch (error) {
+        if (active) {
+          const detail = error instanceof Error ? error.message : String(error);
+          setContentState({
+            key: loadKey,
+            lines: [{ kind: "error", text: `output read failed · ${detail}` }]
+          });
+        }
       }
     }
 
-    void load();
+    const refresh = (): void => {
+      if (refreshing) {
+        refreshQueued = true;
+        return;
+      }
+      refreshing = true;
+      void (async () => {
+        do {
+          refreshQueued = false;
+          await load();
+        } while (active && refreshQueued);
+      })().finally(() => {
+        refreshing = false;
+        if (active && refreshQueued) {
+          refresh();
+        }
+      });
+    };
+
+    refresh();
     const interval = setInterval(() => {
-      void load();
+      refresh();
     }, 1000);
 
     return () => {
@@ -668,7 +702,11 @@ function latestSectionBoundaryWithinTail(
   return latestSectionStart !== null && end - latestSectionStart >= 3 ? latestSectionStart : null;
 }
 
-async function loadWorkerOutputSections(role: WorkerRole | undefined, logPath: string): Promise<WorkerOutputSection[]> {
+async function loadWorkerOutputSections(
+  role: WorkerRole | undefined,
+  logPath: string,
+  processOutput?: string
+): Promise<WorkerOutputSection[]> {
   const workerDir = dirname(logPath);
   const sections: WorkerOutputSection[] = [];
   const artifactFiles = roleArtifactFiles(role);
@@ -689,7 +727,7 @@ async function loadWorkerOutputSections(role: WorkerRole | undefined, logPath: s
     sections.push({ group: "feature", title: artifact.label, text });
   }
 
-  const rawOutput = (await readTextIfExists(logPath)).trimEnd();
+  const rawOutput = (processOutput ?? await readTextIfExists(logPath)).trimEnd();
   if (rawOutput) {
     sections.push({ group: "process", title: "output.log", text: rawOutput });
   }
@@ -697,8 +735,12 @@ async function loadWorkerOutputSections(role: WorkerRole | undefined, logPath: s
   return sections;
 }
 
-async function loadNanoWorkerOutputLines(logPath: string, height: number): Promise<RenderLine[]> {
-  const rawOutput = (await readTextIfExists(logPath)).trimEnd();
+async function loadNanoWorkerOutputLines(
+  logPath: string,
+  height: number,
+  processOutput?: string
+): Promise<RenderLine[]> {
+  const rawOutput = (processOutput ?? await readTextIfExists(logPath)).trimEnd();
   if (!rawOutput) {
     return [{ kind: "placeholder", text: EMPTY_WORKER_OUTPUT_TEXT }];
   }

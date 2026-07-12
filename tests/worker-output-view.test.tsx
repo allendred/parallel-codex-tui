@@ -1,5 +1,5 @@
 import React from "react";
-import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
+import { appendFile, mkdir, mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { render } from "ink-testing-library";
@@ -102,6 +102,40 @@ describe("WorkerOutputView", () => {
       expect(frame).toContain("waiting for output");
       expect(frame).not.toContain("Loading worker output...");
       expect(frame).not.toContain("Waiting for worker output...");
+    } finally {
+      unmount();
+    }
+  });
+
+  it("polls appended output incrementally and resets after an in-place log rewrite", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pct-worker-output-incremental-"));
+    const workerDir = join(root, "actor-mock");
+    const logPath = join(workerDir, "output.log");
+    await mkdir(workerDir, { recursive: true });
+    await writeFile(logPath, "first generation line\n", "utf8");
+
+    const { lastFrame, unmount } = render(
+      <WorkerOutputView
+        title="Actor (mock) output"
+        role="actor"
+        logPath={logPath}
+        height={8}
+      />
+    );
+
+    try {
+      await waitForFrame(lastFrame, "first generation line");
+      await appendFile(logPath, "增量中文内容\n", "utf8");
+      await waitForFrame(lastFrame, "增量中文内容");
+      expect(lastFrame() ?? "").toContain("first generation line");
+
+      await writeFile(
+        logPath,
+        `${"replacement padding ".repeat(8)}\nsecond generation only\n`,
+        "utf8"
+      );
+      await waitForFrame(lastFrame, "second generation only");
+      expect(lastFrame() ?? "").not.toContain("first generation line");
     } finally {
       unmount();
     }
