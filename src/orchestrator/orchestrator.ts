@@ -707,6 +707,7 @@ export class Orchestrator {
     });
 
     for (const [waveIndex, wave] of featureWaves.entries()) {
+      throwIfCancelled(input.signal);
       const waveNumber = waveIndex + 1;
       const waveChannels = wave.map((definition) => requiredChannel(channels, definition));
       const reportProgress = (
@@ -1092,7 +1093,9 @@ export class Orchestrator {
         `Wave ${waveNumber}/${featureWaves.length} combined workspace approved`
       );
 
+      throwIfCancelled(input.signal);
       await this.sessions.updateTaskStatus(task, "integrating");
+      throwIfCancelled(input.signal);
       const integration = await workspaceManager.commitWave(workspaceWave);
       integration.changedPaths.forEach((path) => changedPaths.add(path));
       await writeJson(join(workspaceWave.rootDir, "verification.json"), {
@@ -1116,7 +1119,6 @@ export class Orchestrator {
       await this.sessions.appendEvent(task, "feature.wave_completed", `Completed feature wave: ${wave.map((feature) => feature.id).join(", ")}`);
     }
 
-    throwIfCancelled(input.signal);
     const turnRequirements = await readTextIfExists(join(turn.dir, "requirements.md"));
     const summary = multiFeatureSummary(summaries, waveReviews, {
       requirements: turnRequirements || await readTextIfExists(join(judge.dir, "requirements.md")),
@@ -1340,6 +1342,7 @@ export class Orchestrator {
       critic: "done",
       featureProgress: { wave: 1, waves: 1, phase: "integration", completed: 0, total: 1 }
     });
+    throwIfCancelled(input.signal);
     const integration = await workspaceManager.integrateWave(workspaceWave);
     input.onStatus?.({
       taskId: task.id,
@@ -1363,7 +1366,6 @@ export class Orchestrator {
     workers: WorkerLogRef[],
     changedPaths: string[]
   ): Promise<HandleRequestResult> {
-    throwIfCancelled(input.signal);
     const summary = await buildSupervisorSummary({
       judgeDir: judge.dir,
       actorDir: actor.dir,
