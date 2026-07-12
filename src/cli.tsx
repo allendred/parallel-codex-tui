@@ -5,6 +5,7 @@ import { render } from "ink";
 import { ZodError } from "zod";
 import { parseCliArgs, validateCliArgs } from "./cli-args.js";
 import { selectWorkspaceForCli } from "./cli-workspace.js";
+import { commitWorkspaceTransition } from "./cli-workspace-transition.js";
 import { WorkspaceSelectionCancelledError } from "./cli-workspace-picker.js";
 import { createRuntime } from "./bootstrap.js";
 import type { AppRuntime } from "./bootstrap.js";
@@ -88,6 +89,7 @@ async function main(): Promise<void> {
     }
     let instance: ReturnType<typeof render> | null = null;
     const shutdownController = new AbortController();
+    const deferredWorkspaceClosures = new Set<InteractiveWorkspaceState>();
 
     const appElement = (state: InteractiveWorkspaceState) => (
       <App
@@ -135,15 +137,21 @@ async function main(): Promise<void> {
           if (workspace === current.runtime.workspaceRoot) {
             return;
           }
+          retryDeferredWorkspaceClosures(deferredWorkspaceClosures);
           const next = await loadInteractiveWorkspace(cliArgs.appRoot, workspace, null);
-          if (!instance) {
-            next.runtime.index.close();
-            throw new Error("Interactive TUI is not ready to switch workspaces.");
-          }
           const previous = current;
-          instance.rerender(appElement(next));
-          current = next;
-          previous.runtime.index.close();
+          current = commitWorkspaceTransition({
+            previous,
+            next,
+            render: (state) => {
+              if (!instance) {
+                throw new Error("Interactive TUI is not ready to switch workspaces.");
+              }
+              instance.rerender(appElement(state));
+            },
+            close: closeInteractiveWorkspace,
+            deferClose: (state) => deferredWorkspaceClosures.add(state)
+          });
         }}
         persistChatMessage={(message, taskId) => state.runtime.sessions.appendChatMessage({
           ...message,
@@ -158,6 +166,7 @@ async function main(): Promise<void> {
       await instance.waitUntilExit();
     } finally {
       removeSigintHandler();
+      retryDeferredWorkspaceClosures(deferredWorkspaceClosures);
     }
   }
 }
@@ -231,6 +240,21 @@ async function loadInteractiveWorkspace(
   } catch (error) {
     runtime.index.close();
     throw error;
+  }
+}
+
+function closeInteractiveWorkspace(state: InteractiveWorkspaceState): void {
+  state.runtime.index.close();
+}
+
+function retryDeferredWorkspaceClosures(states: Set<InteractiveWorkspaceState>): void {
+  for (const state of states) {
+    try {
+      closeInteractiveWorkspace(state);
+      states.delete(state);
+    } catch {
+      // Process exit remains the final cleanup boundary if an index cannot be closed yet.
+    }
   }
 }
 
