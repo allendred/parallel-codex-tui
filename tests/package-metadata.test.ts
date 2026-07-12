@@ -224,6 +224,8 @@ describe("package metadata", () => {
     expect(readme).toContain("complete pending Turns are published and request-only pending Turns are rebuilt");
     expect(readme).toContain("Task ids are claimed with atomic directory creation");
     expect(readme).toContain("SQLite startup rebuild indexes only complete numbered Turn directories");
+    expect(readme).toContain("startup notice distinguishes a restored follow-up Turn");
+    expect(readme).toContain("request and route kept");
     expect(readme).toContain("`firstOutputTimeoutMs` stops a silent process");
     expect(readme).toContain("`idleTimeoutMs` resets after every stdout or stderr chunk");
     expect(readme).toContain("The 15-second first-output and idle defaults stay below the 30-second total ceiling");

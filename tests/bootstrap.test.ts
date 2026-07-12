@@ -177,6 +177,9 @@ describe("createRuntime", () => {
 
     const restarted = await createRuntime(appRoot, workspaceRoot);
     try {
+      expect(restarted.recoveredTasks).toEqual([
+        expect.objectContaining({ taskId: task.id, turnsRepaired: 1 })
+      ]);
       await expect(restarted.index.countRows("turns")).resolves.toBe(2);
       await expect(restarted.sessions.latestTurn(task)).resolves.toMatchObject({ turnId: "0002" });
       await expect(readJson(task.metaPath, TaskMetaSchema)).resolves.toMatchObject({ status: "cancelled" });

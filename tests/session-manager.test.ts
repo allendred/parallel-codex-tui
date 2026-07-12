@@ -1893,7 +1893,8 @@ describe("SessionManager", () => {
       previousState: "done",
       workersRecovered: 0,
       featuresRecovered: 0,
-      processesTerminated: 0
+      processesTerminated: 0,
+      turnsPublished: 1
     }]);
 
     expect(await pathExists(pendingDir)).toBe(false);
@@ -1921,7 +1922,9 @@ describe("SessionManager", () => {
     const pendingDir = join(task.dir, "turns", ".turn-0002-input-only.pending");
     await writeText(join(pendingDir, "user.md"), "Continue from this exact request.\n");
 
-    await expect(manager.reconcileInterruptedTasks()).resolves.toHaveLength(1);
+    await expect(manager.reconcileInterruptedTasks()).resolves.toEqual([
+      expect.objectContaining({ taskId: task.id, turnsRepaired: 1 })
+    ]);
 
     expect(await pathExists(pendingDir)).toBe(false);
     expect(await readTextIfExists(join(task.dir, "turns", "0002", "user.md"))).toContain(

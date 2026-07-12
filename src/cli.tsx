@@ -7,6 +7,7 @@ import { parseCliArgs, validateCliArgs } from "./cli-args.js";
 import { selectWorkspaceForCli } from "./cli-workspace.js";
 import { commitWorkspaceTransition } from "./cli-workspace-transition.js";
 import { WorkspaceSelectionCancelledError } from "./cli-workspace-picker.js";
+import { startupRecoveryMessages } from "./cli-startup-recovery.js";
 import { createRuntime } from "./bootstrap.js";
 import type { AppRuntime } from "./bootstrap.js";
 import { prepareAppRoot } from "./core/app-root.js";
@@ -219,7 +220,7 @@ async function loadInteractiveWorkspace(
       runtime.sessions.readChatHistory(),
       listWorkspaceChoices(appRoot)
     ]);
-    const recoveryMessages = startupRecoveryMessages(runtime, initialTaskId);
+    const recoveryMessages = startupRecoveryMessages(runtime.recoveredTasks, initialTaskId);
 
     return {
       runtime,
@@ -256,40 +257,6 @@ function retryDeferredWorkspaceClosures(states: Set<InteractiveWorkspaceState>):
       // Process exit remains the final cleanup boundary if an index cannot be closed yet.
     }
   }
-}
-
-function startupRecoveryMessages(
-  runtime: AppRuntime,
-  activeTaskId: string | null
-): Array<{ from: "system"; text: string }> {
-  if (runtime.recoveredTasks.length === 0) {
-    return [];
-  }
-  const active = activeTaskId
-    ? runtime.recoveredTasks.find((recovery) => recovery.taskId === activeTaskId)
-    : null;
-  if (active) {
-    if (active.previousState === "done") {
-      return [{
-        from: "system",
-        text: `Recovered incomplete task #${compactStartupTaskId(active.taskId)} · completion evidence missing · checkpoints kept · Ctrl+R rebuild`
-      }];
-    }
-    const workerLabel = `${active.workersRecovered} ${active.workersRecovered === 1 ? "worker" : "workers"}`;
-    return [{
-      from: "system",
-      text: `Recovered interrupted task #${compactStartupTaskId(active.taskId)} · ${workerLabel} stopped · checkpoints kept · Ctrl+R resume`
-    }];
-  }
-  return [{
-    from: "system",
-    text: `Recovered ${runtime.recoveredTasks.length} interrupted ${runtime.recoveredTasks.length === 1 ? "task" : "tasks"} · checkpoints kept · Ctrl+T inspect`
-  }];
-}
-
-function compactStartupTaskId(taskId: string): string {
-  const parts = taskId.split("-");
-  return parts.length > 2 ? parts.slice(-2).join("-") : taskId;
 }
 
 function canRenderInteractiveTui(): boolean {

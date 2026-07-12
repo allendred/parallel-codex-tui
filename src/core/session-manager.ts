@@ -115,6 +115,9 @@ export interface InterruptedTaskRecovery {
   workersRecovered: number;
   featuresRecovered: number;
   processesTerminated: number;
+  turnsPublished?: number;
+  turnsRepaired?: number;
+  turnsAbandoned?: number;
 }
 
 export interface InterruptedMainSessionRecovery {
@@ -128,6 +131,12 @@ interface PendingTurnDirectory {
   name: string;
   turnId: string;
   dir: string;
+}
+
+interface TurnReconciliationSummary {
+  published: number;
+  repaired: number;
+  abandoned: number;
 }
 
 export interface InterruptedTaskRecoveryBlock {
@@ -358,7 +367,7 @@ export class SessionManager {
           if (!claimedMeta) {
             return null;
           }
-          await this.reconcilePendingTurns(task);
+          const turns = await this.reconcilePendingTurns(task);
           const claimedNeedsTaskRecovery = await this.taskNeedsRecovery(task, claimedMeta);
           const claimedNeedsTransitionRepair = await this.taskStatusTransitionNeedsRepair(task, claimedMeta);
           if (!claimedNeedsTaskRecovery && !claimedNeedsTransitionRepair) {
@@ -385,7 +394,10 @@ export class SessionManager {
             previousState: claimedMeta.status,
             workersRecovered: workers.recovered,
             featuresRecovered,
-            processesTerminated: workers.terminated
+            processesTerminated: workers.terminated,
+            ...(turns.published > 0 ? { turnsPublished: turns.published } : {}),
+            ...(turns.repaired > 0 ? { turnsRepaired: turns.repaired } : {}),
+            ...(turns.abandoned > 0 ? { turnsAbandoned: turns.abandoned } : {})
           };
         }
       );
@@ -952,7 +964,8 @@ export class SessionManager {
     }).sort((left, right) => left.name.localeCompare(right.name));
   }
 
-  private async reconcilePendingTurns(task: TaskSession): Promise<void> {
+  private async reconcilePendingTurns(task: TaskSession): Promise<TurnReconciliationSummary> {
+    const summary: TurnReconciliationSummary = { published: 0, repaired: 0, abandoned: 0 };
     for (const pending of await this.pendingTurnDirectories(task)) {
       const files = this.turnFiles(task, pending.turnId);
       if (await pathExists(files.dir)) {
@@ -962,6 +975,7 @@ export class SessionManager {
           "turn.pending_abandoned",
           `Archived pending turn ${pending.turnId} because the committed turn already exists`
         );
+        summary.abandoned += 1;
         continue;
       }
 
@@ -983,6 +997,7 @@ export class SessionManager {
           "turn.recovered_after_restart",
           `Published complete pending turn ${pending.turnId} after restart`
         );
+        summary.published += 1;
         continue;
       }
 
@@ -1000,6 +1015,7 @@ export class SessionManager {
           "turn.repaired_after_restart",
           `Rebuilt partial pending turn ${pending.turnId} from its durable request and route evidence`
         );
+        summary.repaired += 1;
         continue;
       }
 
@@ -1009,7 +1025,9 @@ export class SessionManager {
         "turn.pending_abandoned",
         `Archived incomplete pending turn ${pending.turnId}; no durable request and route pair was available`
       );
+      summary.abandoned += 1;
     }
+    return summary;
   }
 
   private async quarantinePendingTurn(

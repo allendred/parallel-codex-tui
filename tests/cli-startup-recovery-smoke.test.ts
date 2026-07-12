@@ -4,8 +4,8 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { spawn } from "node-pty";
 import { createRuntime } from "../src/bootstrap.js";
-import { readJson, readTextIfExists, writeJson } from "../src/core/file-store.js";
-import { TaskMetaSchema, WorkerStatusSchema } from "../src/domain/schemas.js";
+import { readJson, readTextIfExists, writeJson, writeText } from "../src/core/file-store.js";
+import { RouteDecisionSchema, TaskMetaSchema, WorkerStatusSchema } from "../src/domain/schemas.js";
 import { NativeTerminalScreen } from "../src/tui/terminal-screen.js";
 
 describe("CLI startup recovery smoke", () => {
@@ -137,6 +137,72 @@ describe("CLI startup recovery smoke", () => {
       await waitForScreenText(() => screenWrites, screen, "rebuild");
       await waitForScreenText(() => screenWrites, screen, "^R retry");
       await expect(readJson(task.metaPath, TaskMetaSchema)).resolves.toMatchObject({ status: "cancelled" });
+
+      child.write("\x03");
+      await waitForExit(exits);
+      expect(exits[0]).toBe(0);
+    } finally {
+      if (exits.length === 0) {
+        child.kill("SIGTERM");
+      }
+    }
+  }, 12000);
+
+  it("explains a recovered pending follow-up as a resumable saved request", async () => {
+    const appRoot = await mkdtemp(join(tmpdir(), "pct-cli-pending-turn-app-"));
+    const workspace = await mkdtemp(join(tmpdir(), "pct-cli-pending-turn-workspace-"));
+    const initial = await createRuntime(appRoot, workspace);
+    const route = RouteDecisionSchema.parse({
+      mode: "complex",
+      reason: "Recovered follow-up route.",
+      suggested_roles: ["judge", "actor", "critic"],
+      judge_engine: "mock",
+      actor_engine: "mock",
+      critic_engine: "mock"
+    });
+    const task = await initial.sessions.createTask({ request: "Build it.", cwd: workspace, route });
+    await initial.sessions.updateTaskStatus(task, "judging");
+    await initial.sessions.updateTaskStatus(task, "ready_for_pair");
+    await initial.sessions.updateTaskStatus(task, "actor_running");
+    await initial.sessions.updateTaskStatus(task, "critic_running");
+    await initial.sessions.updateTaskStatus(task, "integrating");
+    await writeText(join(task.dir, "turns", "0001", "supervisor-summary.md"), "Initial task completed.\n");
+    await initial.sessions.updateTaskStatus(task, "done");
+    await initial.sessions.recordLatestRoute(task, route);
+    await writeText(
+      join(task.dir, "turns", ".turn-0002-cli.pending", "user.md"),
+      "Continue this saved request.\n"
+    );
+    initial.index.close();
+
+    const screen = new NativeTerminalScreen({ cols: 100, rows: 20, scrollback: 500 });
+    const exits: number[] = [];
+    let screenWrites = Promise.resolve();
+    const child = spawn(
+      process.execPath,
+      ["./node_modules/.bin/tsx", "src/cli.tsx", "--app-root", appRoot, "--workspace", workspace],
+      {
+        cwd: process.cwd(),
+        cols: 100,
+        rows: 20,
+        name: "xterm-256color",
+        env: { ...process.env, TERM: "xterm-256color" }
+      }
+    );
+    child.onData((chunk) => {
+      screenWrites = screenWrites.then(() => screen.write(chunk));
+    });
+    child.onExit(({ exitCode }) => exits.push(exitCode));
+
+    try {
+      await waitForScreenText(() => screenWrites, screen, "Recovered follow-up turn");
+      await waitForScreenText(() => screenWrites, screen, "request and route kept");
+      await waitForScreenText(() => screenWrites, screen, "checkpoints kept · Ctrl+R resume");
+      await waitForScreenText(() => screenWrites, screen, "^R retry");
+      await expect(readJson(task.metaPath, TaskMetaSchema)).resolves.toMatchObject({ status: "cancelled" });
+      await expect(readJson(join(task.dir, "turns", "0002", "route.json"), RouteDecisionSchema)).resolves.toMatchObject({
+        reason: "Recovered follow-up route."
+      });
 
       child.write("\x03");
       await waitForExit(exits);
