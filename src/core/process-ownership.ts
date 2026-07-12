@@ -1,12 +1,12 @@
-import { execFile } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { readFile, readdir, writeFile } from "node:fs/promises";
+import { writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { promisify } from "node:util";
 import { z } from "zod";
 import { ensureDir, pathExists, readJson, removeIfExists, writeJson } from "./file-store.js";
+import { processIsAlive, readProcessStartToken } from "./process-identity.js";
+import { acquireProcessMutationTurn } from "./process-mutation-turn.js";
 
-const execFileAsync = promisify(execFile);
+export { processIsAlive, readProcessStartToken } from "./process-identity.js";
 
 const TaskRunOwnerSchema = z.object({
   version: z.literal(1),
@@ -16,18 +16,7 @@ const TaskRunOwnerSchema = z.object({
   process_start_token: z.string().min(1).optional()
 });
 
-const TaskRunClaimIntentSchema = z.object({
-  version: z.literal(1),
-  intent_id: z.string().min(1),
-  pid: z.number().int().positive(),
-  created_at: z.string().datetime(),
-  choosing: z.boolean(),
-  ticket: z.number().int().nonnegative(),
-  process_start_token: z.string().min(1).optional()
-});
-
 const CLAIM_INTENT_PREFIX = ".run-owner-claim-";
-const CLAIM_INTENT_SUFFIX = ".json";
 const CLAIM_INTENT_TIMEOUT_MS = 5000;
 const CLAIM_INTENT_POLL_MS = 5;
 
@@ -43,8 +32,6 @@ const WorkerProcessRecordSchema = z.object({
 });
 
 export type TaskRunOwner = z.infer<typeof TaskRunOwnerSchema>;
-type TaskRunClaimIntent = z.infer<typeof TaskRunClaimIntentSchema>;
-type TaskRunMutationIdentity = Pick<TaskRunClaimIntent, "pid" | "process_start_token">;
 export type WorkerProcessRecord = z.infer<typeof WorkerProcessRecordSchema>;
 export type TaskRunLeaseInspection = {
   state: "missing" | "active" | "stale";
@@ -234,49 +221,6 @@ export async function terminateOwnedWorkerProcess(workerDir: string): Promise<Wo
   return "still-running";
 }
 
-export function processIsAlive(pid: number): boolean {
-  if (!Number.isInteger(pid) || pid <= 0) {
-    return false;
-  }
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch (error) {
-    return (error as NodeJS.ErrnoException).code === "EPERM";
-  }
-}
-
-export async function readProcessStartToken(pid: number): Promise<string | null> {
-  if (!processIsAlive(pid)) {
-    return null;
-  }
-  if (process.platform === "linux") {
-    try {
-      const stat = await readFile(`/proc/${pid}/stat`, "utf8");
-      const fields = stat.slice(stat.lastIndexOf(") ") + 2).trim().split(/\s+/);
-      const startTick = fields[19];
-      if (startTick) {
-        return `linux:${startTick}`;
-      }
-    } catch {
-      // Fall through to ps when procfs is unavailable.
-    }
-  }
-  if (process.platform !== "win32") {
-    try {
-      const result = await execFileAsync("ps", ["-o", "lstart=", "-p", String(pid)], {
-        encoding: "utf8",
-        timeout: 1000
-      });
-      const value = String(result.stdout).trim().replace(/\s+/g, " ");
-      return value ? `ps:${value}` : null;
-    } catch {
-      return null;
-    }
-  }
-  return null;
-}
-
 async function optionalProcessStartToken(pid: number): Promise<{ process_start_token?: string }> {
   const processStartToken = await readProcessStartToken(pid);
   return processStartToken ? { process_start_token: processStartToken } : {};
@@ -295,58 +239,12 @@ async function writeJsonExclusive(path: string, value: unknown): Promise<boolean
 }
 
 async function acquireTaskRunMutationTurn(taskDir: string): Promise<{ release(): Promise<void> }> {
-  await ensureDir(taskDir);
-  const identity = await currentMutationIdentity();
-  const intentId = randomUUID();
-  const path = claimIntentPath(taskDir, intentId);
-  let intent: TaskRunClaimIntent = TaskRunClaimIntentSchema.parse({
-    version: 1,
-    intent_id: intentId,
-    pid: identity.pid,
-    created_at: new Date().toISOString(),
-    choosing: true,
-    ticket: 0,
-    ...(identity.process_start_token ? { process_start_token: identity.process_start_token } : {})
+  return acquireProcessMutationTurn(taskDir, {
+    intentPrefix: CLAIM_INTENT_PREFIX,
+    timeoutMs: CLAIM_INTENT_TIMEOUT_MS,
+    pollMs: CLAIM_INTENT_POLL_MS,
+    timeoutMessage: "Timed out waiting to update task run ownership."
   });
-  await writeJson(path, intent);
-
-  try {
-    const existing = await readActiveClaimIntents(taskDir);
-    intent = {
-      ...intent,
-      choosing: false,
-      ticket: Math.max(0, ...existing.map((candidate) => candidate.ticket)) + 1
-    };
-    await writeJson(path, intent);
-
-    const deadline = Date.now() + CLAIM_INTENT_TIMEOUT_MS;
-    while (true) {
-      const candidates = await readActiveClaimIntents(taskDir);
-      const blocked = candidates.some((candidate) => (
-        candidate.intent_id !== intent.intent_id
-        && (candidate.choosing || claimIntentPrecedes(candidate, intent))
-      ));
-      if (!blocked) {
-        let released = false;
-        return {
-          release: async () => {
-            if (released) {
-              return;
-            }
-            released = true;
-            await removeIfExists(path);
-          }
-        };
-      }
-      if (Date.now() >= deadline) {
-        throw new Error("Timed out waiting to update task run ownership.");
-      }
-      await delay(CLAIM_INTENT_POLL_MS);
-    }
-  } catch (error) {
-    await removeIfExists(path);
-    throw error;
-  }
 }
 
 async function releaseTaskRunLease(taskDir: string, path: string, ownerId: string): Promise<void> {
@@ -356,61 +254,6 @@ async function releaseTaskRunLease(taskDir: string, path: string, ownerId: strin
   } finally {
     await mutationTurn.release();
   }
-}
-
-async function currentMutationIdentity(): Promise<TaskRunMutationIdentity> {
-  return {
-    pid: process.pid,
-    ...await optionalProcessStartToken(process.pid)
-  };
-}
-
-async function readActiveClaimIntents(taskDir: string): Promise<TaskRunClaimIntent[]> {
-  const names = await readdir(taskDir);
-  const tokenReads = new Map<number, Promise<string | null>>();
-  const active: TaskRunClaimIntent[] = [];
-
-  for (const name of names) {
-    if (!name.startsWith(CLAIM_INTENT_PREFIX) || !name.endsWith(CLAIM_INTENT_SUFFIX)) {
-      continue;
-    }
-    const path = join(taskDir, name);
-    const intent = await readValidJson(path, TaskRunClaimIntentSchema);
-    if (!intent || !processIsAlive(intent.pid)) {
-      await removeIfExists(path);
-      continue;
-    }
-    if (intent.process_start_token) {
-      let tokenRead = tokenReads.get(intent.pid);
-      if (!tokenRead) {
-        tokenRead = readProcessStartToken(intent.pid);
-        tokenReads.set(intent.pid, tokenRead);
-      }
-      const currentToken = await tokenRead;
-      if (!currentToken || currentToken !== intent.process_start_token) {
-        await removeIfExists(path);
-        continue;
-      }
-    }
-    active.push(intent);
-  }
-
-  return active;
-}
-
-function claimIntentPath(taskDir: string, intentId: string): string {
-  return join(taskDir, `${CLAIM_INTENT_PREFIX}${intentId}${CLAIM_INTENT_SUFFIX}`);
-}
-
-function claimIntentPrecedes(candidate: TaskRunClaimIntent, current: TaskRunClaimIntent): boolean {
-  if (candidate.ticket !== current.ticket) {
-    return candidate.ticket < current.ticket;
-  }
-  return candidate.intent_id < current.intent_id;
-}
-
-async function delay(milliseconds: number): Promise<void> {
-  await new Promise((resolve) => setTimeout(resolve, milliseconds));
 }
 
 async function removeOwnedLease(path: string, ownerId?: string): Promise<void> {

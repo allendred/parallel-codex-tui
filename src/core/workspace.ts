@@ -2,10 +2,13 @@ import { join, resolve } from "node:path";
 import { homedir } from "node:os";
 import { z } from "zod";
 import { ensureDir, pathExists, pathIsDirectory, readJson, readTextIfExists, writeJson, writeText } from "./file-store.js";
+import { runWithLeaseFinalization } from "./lease-finalization.js";
+import { acquireProcessMutationTurn } from "./process-mutation-turn.js";
 
 const lastWorkspaceFile = "last-workspace";
 const workspacesFile = "workspaces.json";
 const maxRememberedWorkspaces = 20;
+const workspaceRegistryIntentPrefix = ".workspace-registry-claim-";
 
 const WorkspaceRegistrySchema = z.object({
   version: z.literal(1).default(1),
@@ -102,19 +105,25 @@ export async function listWorkspaceChoices(appRoot: string): Promise<WorkspaceCh
 }
 
 async function rememberWorkspace(appRoot: string, workspaceRoot: string): Promise<void> {
-  const now = new Date().toISOString();
   const resolved = resolveWorkspacePath(process.cwd(), workspaceRoot);
-  const current = await readWorkspaceEntries(appRoot);
-  const next: WorkspaceRegistry = {
-    version: 1,
-    workspaces: [
-      { path: resolved, last_used_at: now },
-      ...current.filter((entry) => resolveStoredWorkspacePath(appRoot, entry.path) !== resolved)
-    ].slice(0, maxRememberedWorkspaces)
-  };
+  const mutationTurn = await acquireProcessMutationTurn(join(appRoot, ".parallel-codex"), {
+    intentPrefix: workspaceRegistryIntentPrefix,
+    timeoutMessage: "Timed out waiting to update the workspace registry."
+  });
 
-  await writeText(lastWorkspacePath(appRoot), `${resolved}\n`);
-  await writeJson(workspacesPath(appRoot), WorkspaceRegistrySchema.parse(next));
+  await runWithLeaseFinalization("Workspace registry update", mutationTurn, async () => {
+    const current = await readWorkspaceEntries(appRoot);
+    const next: WorkspaceRegistry = {
+      version: 1,
+      workspaces: [
+        { path: resolved, last_used_at: new Date().toISOString() },
+        ...current.filter((entry) => resolveStoredWorkspacePath(appRoot, entry.path) !== resolved)
+      ].slice(0, maxRememberedWorkspaces)
+    };
+
+    await writeJson(workspacesPath(appRoot), WorkspaceRegistrySchema.parse(next));
+    await writeText(lastWorkspacePath(appRoot), `${resolved}\n`);
+  });
 }
 
 async function readWorkspaceEntries(appRoot: string): Promise<WorkspaceRegistry["workspaces"]> {
