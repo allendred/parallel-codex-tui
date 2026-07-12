@@ -181,7 +181,7 @@ export async function runCodexRouterProcess(
   signal?: AbortSignal,
   onProgress?: RouterProgressListener
 ): Promise<CodexRouteRunnerResult> {
-  const { command, args, timeoutMs, firstOutputTimeoutMs, idleTimeoutMs } = config.router.codex;
+  const { command, args, timeoutMs, firstOutputTimeoutMs, idleTimeoutMs, maxOutputBytes } = config.router.codex;
 
   if (signal?.aborted) {
     throw cancellationError();
@@ -328,6 +328,18 @@ export async function runCodexRouterProcess(
       );
     };
 
+    const stopIfOutputLimitExceeded = (): boolean => {
+      if (stdoutBytes + stderrBytes <= maxOutputBytes) {
+        return false;
+      }
+      terminateThenFinish(
+        new Error(`Codex router output exceeded ${maxOutputBytes} byte limit`),
+        stdout,
+        "response"
+      );
+      return true;
+    };
+
     const resetIdleTimeout = (): void => {
       if (idleTimeout) {
         clearTimeout(idleTimeout);
@@ -380,6 +392,9 @@ export async function runCodexRouterProcess(
       stdoutBytes += chunk.byteLength;
       firstOutputMs ??= Math.max(0, Date.now() - processStartedAt);
       firstStdoutMs ??= Math.max(0, Date.now() - processStartedAt);
+      if (stopIfOutputLimitExceeded()) {
+        return;
+      }
       stdout += stdoutDecoder.write(chunk);
       recordOutputActivity();
       reportProgress("receiving-response");
@@ -392,6 +407,9 @@ export async function runCodexRouterProcess(
       stderrBytes += chunk.byteLength;
       firstOutputMs ??= Math.max(0, Date.now() - processStartedAt);
       firstStderrMs ??= Math.max(0, Date.now() - processStartedAt);
+      if (stopIfOutputLimitExceeded()) {
+        return;
+      }
       stderr += stderrDecoder.write(chunk);
       recordOutputActivity();
       if (stdoutBytes === 0) {

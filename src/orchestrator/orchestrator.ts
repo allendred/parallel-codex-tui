@@ -1554,6 +1554,7 @@ export class Orchestrator {
             router_timeout_ms: routeConfig.router.codex.timeoutMs,
             router_first_output_timeout_ms: routeConfig.router.codex.firstOutputTimeoutMs,
             router_idle_timeout_ms: routeConfig.router.codex.idleTimeoutMs,
+            router_max_output_bytes: routeConfig.router.codex.maxOutputBytes,
             router_max_attempts: routeConfig.router.codex.maxAttempts,
             router_retry_delay_ms: routeConfig.router.codex.retryDelayMs,
             ...(route.source === "fallback"

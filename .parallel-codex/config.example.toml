@@ -9,6 +9,8 @@ timeoutMs = 30000
 firstOutputTimeoutMs = 15000
 # Reset after every stdout/stderr chunk; timeoutMs remains the hard ceiling.
 idleTimeoutMs = 15000
+# Stop a noisy or malformed classifier before it can grow Router memory without bound (1 KiB..16 MiB).
+maxOutputBytes = 1048576
 # Retry one transient Router failure before asking the user; 1 disables automatic retry.
 maxAttempts = 2
 retryDelayMs = 500

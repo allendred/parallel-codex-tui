@@ -20,6 +20,7 @@ export const RouterAuditRecordSchema = RouteDecisionSchema.extend({
   router_timeout_ms: z.number().int().positive().optional(),
   router_first_output_timeout_ms: z.number().int().positive().optional(),
   router_idle_timeout_ms: z.number().int().positive().optional(),
+  router_max_output_bytes: z.number().int().min(1024).max(16 * 1024 * 1024).optional(),
   router_max_attempts: z.number().int().min(1).max(3).optional(),
   router_retry_delay_ms: z.number().int().nonnegative().max(10000).optional(),
   proxy_configured: z.boolean().optional(),

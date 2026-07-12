@@ -249,6 +249,32 @@ describe("routeRequestWithCodex", () => {
     expect(route.reason).not.toContain("�");
   });
 
+  it("terminates a Router whose combined output exceeds the configured memory limit", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pct-router-output-limit-"));
+    const config = defaultConfig(root);
+    config.router.codex.command = process.execPath;
+    config.router.codex.args = [
+      "-e",
+      "process.stdout.write('x'.repeat(600));process.stderr.write('y'.repeat(600));setInterval(()=>{},1000)"
+    ];
+    config.router.codex.maxOutputBytes = 1024;
+    config.router.codex.timeoutMs = 3000;
+    config.router.codex.firstOutputTimeoutMs = 1000;
+    config.router.codex.idleTimeoutMs = 1000;
+
+    const route = await routeRequestWithCodex("实现功能", config, undefined, root);
+
+    expect(route).toMatchObject({
+      source: "fallback",
+      router_failure_kind: "invalid-output",
+      router_failure_stage: "response",
+      router_stdout_bytes: 600,
+      router_stderr_bytes: 600
+    });
+    expect(route.reason).toContain("output exceeded 1024 byte limit");
+    expect(route.duration_ms).toBeLessThan(900);
+  });
+
   it("trusts the Codex route even when old keywords would have matched", async () => {
     const config = defaultConfig("/tmp/project");
     const runner: CodexRouteRunner = async () =>

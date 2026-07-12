@@ -18,6 +18,7 @@ export interface RouterDiagnosticsPolicy {
   timeoutMs: number;
   firstOutputTimeoutMs: number;
   idleTimeoutMs: number;
+  maxOutputBytes: number;
   maxAttempts: number;
   retryDelayMs: number;
   followUpTimeoutMs: number;
@@ -40,6 +41,7 @@ export function routerDiagnosticsPolicy(
     timeoutMs: router.codex.timeoutMs,
     firstOutputTimeoutMs: router.codex.firstOutputTimeoutMs,
     idleTimeoutMs: router.codex.idleTimeoutMs,
+    maxOutputBytes: router.codex.maxOutputBytes,
     maxAttempts: router.codex.maxAttempts,
     retryDelayMs: router.codex.retryDelayMs,
     followUpTimeoutMs: router.codex.followUpTimeoutMs,
@@ -169,7 +171,7 @@ export function routerDiagnosticsDisplayLines(
       tone: "muted"
     },
     {
-      text: routerDiagnosticsProxyPolicy(policy, proxyRecordCount),
+      text: `guard · output ${formatDiagnosticBytes(policy.maxOutputBytes)} · ${routerDiagnosticsProxyPolicy(policy, proxyRecordCount)}`,
       tone: policy.proxyConfigured || proxyRecordCount > 0 ? "warning" : "muted"
     },
     { text: "Recent routes", tone: "heading" }
@@ -610,6 +612,9 @@ function formatDiagnosticDuration(durationMs: number): string {
 function formatDiagnosticBytes(bytes: number): string {
   if (bytes < 1024) {
     return `${Math.round(bytes)}B`;
+  }
+  if (bytes >= 1024 * 1024) {
+    return `${(bytes / (1024 * 1024)).toFixed(bytes < 10 * 1024 * 1024 ? 1 : 0).replace(/\.0$/, "")}MB`;
   }
   return `${(bytes / 1024).toFixed(bytes < 10 * 1024 ? 1 : 0)}KB`;
 }

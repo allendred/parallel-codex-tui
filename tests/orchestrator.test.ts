@@ -1030,6 +1030,7 @@ describe("Orchestrator", () => {
       router_timeout_ms: 30000,
       router_first_output_timeout_ms: 15000,
       router_idle_timeout_ms: 15000,
+      router_max_output_bytes: 1024 * 1024,
       proxy_configured: true,
       failure_kind: "timeout",
       router_attempt: 1,

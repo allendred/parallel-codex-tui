@@ -32,6 +32,10 @@ interface ProcessAttemptResult {
   launch: ProcessLaunch;
 }
 
+const WORKER_DIAGNOSTIC_TAIL_CHARS = 64 * 1024;
+const RESUME_DETECTION_OVERLAP_CHARS = 512;
+const RESUME_REASON_CHARS = 2048;
+
 export class ProcessWorkerAdapter implements WorkerAdapter {
   readonly name: EngineName;
   private readonly command: string;
@@ -160,9 +164,13 @@ export class ProcessWorkerAdapter implements WorkerAdapter {
       let persistenceError: unknown;
       let hasPersistenceError = false;
       let detectedNativeSessionId = options.initialNativeSessionId ?? runSpec.nativeSession?.session_id;
-      let sessionDetectionTail = "";
+      let stdoutSessionDetectionTail = "";
+      let stderrSessionDetectionTail = "";
       let sawOutput = false;
-      const outputChunks: string[] = [];
+      let outputTail = "";
+      let stdoutResumeDetectionTail = "";
+      let stderrResumeDetectionTail = "";
+      let unrecoverableResumeReason: string | undefined;
       const stdoutDecoder = new StringDecoder("utf8");
       const stderrDecoder = new StringDecoder("utf8");
       let outputDecodersEnded = false;
@@ -232,22 +240,36 @@ export class ProcessWorkerAdapter implements WorkerAdapter {
         });
       };
 
-      const recordDecodedOutput = (text: string): void => {
+      const recordDecodedOutput = (text: string, stream: "stdout" | "stderr"): void => {
         if (!text || settled || finishing) {
           return;
         }
-        outputChunks.push(text);
+        outputTail = appendBoundedTextTail(outputTail, text, WORKER_DIAGNOSTIC_TAIL_CHARS);
+        if (launch.isResume && !unrecoverableResumeReason) {
+          const detectionTail = stream === "stdout" ? stdoutResumeDetectionTail : stderrResumeDetectionTail;
+          const detectionText = `${detectionTail}${text}`;
+          unrecoverableResumeReason = findUnrecoverableNativeResumeReason(detectionText);
+          if (stream === "stdout") {
+            stdoutResumeDetectionTail = detectionText.slice(-RESUME_DETECTION_OVERLAP_CHARS);
+          } else {
+            stderrResumeDetectionTail = detectionText.slice(-RESUME_DETECTION_OVERLAP_CHARS);
+          }
+        }
         queuePersistence(async () => {
           await appendText(runSpec.outputLogPath, text);
           if (!detectedNativeSessionId && runSpec.nativeSessionConfig?.detectSessionId !== false) {
-            const detectionText = `${sessionDetectionTail}${text}`;
+            const detectionTail = stream === "stdout" ? stdoutSessionDetectionTail : stderrSessionDetectionTail;
+            const detectionText = `${detectionTail}${text}`;
             const sessionId = detectNativeSessionId(detectionText);
             if (sessionId) {
               detectedNativeSessionId = sessionId;
-              sessionDetectionTail = "";
+              stdoutSessionDetectionTail = "";
+              stderrSessionDetectionTail = "";
               await runSpec.onNativeSession?.(sessionId);
+            } else if (stream === "stdout") {
+              stdoutSessionDetectionTail = detectionText.slice(-512);
             } else {
-              sessionDetectionTail = detectionText.slice(-512);
+              stderrSessionDetectionTail = detectionText.slice(-512);
             }
           }
           if (!settled && !terminalState) {
@@ -261,8 +283,8 @@ export class ProcessWorkerAdapter implements WorkerAdapter {
           return;
         }
         outputDecodersEnded = true;
-        recordDecodedOutput(stdoutDecoder.end());
-        recordDecodedOutput(stderrDecoder.end());
+        recordDecodedOutput(stdoutDecoder.end(), "stdout");
+        recordDecodedOutput(stderrDecoder.end(), "stderr");
       };
 
       const failAndTerminate = (phase: string, summary: string, logLine: string): void => {
@@ -355,7 +377,7 @@ export class ProcessWorkerAdapter implements WorkerAdapter {
                 signal: result.signal,
                 failure: { phase, summary }
               },
-              output: outputChunks.join(""),
+              output: unrecoverableResumeReason ?? outputTail,
               launch
             });
             return;
@@ -388,7 +410,7 @@ export class ProcessWorkerAdapter implements WorkerAdapter {
           };
           resolve({
             result: finalResult,
-            output: outputChunks.join(""),
+            output: unrecoverableResumeReason ?? outputTail,
             launch
           });
         } catch (error) {
@@ -424,7 +446,11 @@ export class ProcessWorkerAdapter implements WorkerAdapter {
         }, runSpec.idleTimeoutMs);
       };
 
-      const recordOutput = (chunk: Buffer, decoder: StringDecoder): void => {
+      const recordOutput = (
+        chunk: Buffer,
+        decoder: StringDecoder,
+        stream: "stdout" | "stderr"
+      ): void => {
         if (settled || finishing) {
           return;
         }
@@ -433,16 +459,16 @@ export class ProcessWorkerAdapter implements WorkerAdapter {
           clearTimeout(firstOutputTimeout);
           firstOutputTimeout = undefined;
         }
-        recordDecodedOutput(decoder.write(chunk));
+        recordDecodedOutput(decoder.write(chunk), stream);
         resetIdleTimeout();
       };
 
       child.stdout.on("data", (chunk: Buffer) => {
-        recordOutput(chunk, stdoutDecoder);
+        recordOutput(chunk, stdoutDecoder, "stdout");
       });
 
       child.stderr.on("data", (chunk: Buffer) => {
-        recordOutput(chunk, stderrDecoder);
+        recordOutput(chunk, stderrDecoder, "stderr");
       });
 
       child.on("error", (error) => {
@@ -779,6 +805,36 @@ function isUnrecoverableNativeResumeOutput(output: string): boolean {
     normalized.includes("clear earlier history") ||
     normalized.includes("start a new thread")
   );
+}
+
+function findUnrecoverableNativeResumeReason(output: string): string | undefined {
+  const normalized = output.toLowerCase();
+  const matchIndex = [
+    "context window",
+    "ran out of room",
+    "clear earlier history",
+    "start a new thread"
+  ].reduce((earliest, phrase) => {
+    const index = normalized.indexOf(phrase);
+    return index < 0 || (earliest >= 0 && earliest <= index) ? earliest : index;
+  }, -1);
+  if (matchIndex < 0) {
+    return undefined;
+  }
+
+  const lineStart = output.lastIndexOf("\n", matchIndex - 1) + 1;
+  const nextLine = output.indexOf("\n", matchIndex);
+  const lineEnd = nextLine < 0 ? output.length : nextLine;
+  const contextStart = Math.max(lineStart, matchIndex - 256);
+  const contextEnd = Math.min(lineEnd, contextStart + RESUME_REASON_CHARS);
+  return output.slice(contextStart, contextEnd).trim() || "Native session context is exhausted";
+}
+
+function appendBoundedTextTail(current: string, chunk: string, limit: number): string {
+  if (chunk.length >= limit) {
+    return chunk.slice(-limit);
+  }
+  return `${current.slice(-(limit - chunk.length))}${chunk}`;
 }
 
 function renderTemplate(value: string, sessionId: string | undefined, modelConfig: WorkerModelRunConfig | undefined): string {

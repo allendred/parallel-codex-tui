@@ -1255,6 +1255,68 @@ describe("ProcessWorkerAdapter", () => {
     expect(status.native_session_id).toBe("fresh-123");
   });
 
+  it("bounds in-memory resume diagnostics while preserving the full worker log", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pct-process-resume-bounded-output-"));
+    const filesDir = join(root, "actor-mock");
+    const promptPath = join(filesDir, "prompt.md");
+    const outputLogPath = join(filesDir, "output.log");
+    const statusPath = join(filesDir, "status.json");
+    const script = [
+      "const mode=process.argv[1];",
+      "if(mode==='resume') {",
+      "  process.stderr.write('ERROR: context win');",
+      "  setTimeout(()=>process.stderr.write('dow is full; start a new thread\\n',()=>{",
+      "    process.stdout.write('x'.repeat(200000)+'WORKER_LOG_TAIL\\n',()=>process.exit(1));",
+      "  }),10);",
+      "}",
+      "console.log('fresh bounded run');"
+    ].join("");
+    const retiredReasons: string[] = [];
+    await writeText(promptPath, "resume prompt");
+
+    const adapter = new ProcessWorkerAdapter(process.execPath, ["-e", script, "normal"]);
+    const result = await adapter.run({
+      workerId: "actor-bounded-output",
+      role: "actor",
+      engine: "mock",
+      cwd: root,
+      filesDir,
+      promptPath,
+      outputLogPath,
+      statusPath,
+      prompt: "resume prompt",
+      nativeSession: {
+        engine: "mock",
+        role: "actor",
+        worker_id: "actor-bounded-output",
+        session_id: "bounded-session",
+        scope: "task",
+        cwd: root,
+        created_at: "2026-07-12T12:00:00.000Z",
+        last_used_at: "2026-07-12T12:00:00.000Z",
+        source: "manual"
+      },
+      nativeSessionConfig: {
+        enabled: true,
+        resumeArgs: ["-e", script, "resume", "{sessionId}"],
+        detectSessionId: true,
+        fallback: "new"
+      },
+      onNativeSessionRetired: (_sessionId, reason) => {
+        retiredReasons.push(reason);
+      }
+    });
+
+    const log = await readTextIfExists(outputLogPath);
+    expect(result.exitCode).toBe(0);
+    expect(retiredReasons).toHaveLength(1);
+    expect(retiredReasons[0]).toContain("context window");
+    expect(retiredReasons[0]?.length).toBeLessThanOrEqual(2048);
+    expect(log).toContain("WORKER_LOG_TAIL");
+    expect(log.length).toBeGreaterThan(200000);
+    expect(log).toContain("fresh bounded run");
+  });
+
   it("does not start a fresh native session for generic resume failures", async () => {
     const root = await mkdtemp(join(tmpdir(), "pct-process-resume-generic-failure-"));
     const filesDir = join(root, "actor-mock");

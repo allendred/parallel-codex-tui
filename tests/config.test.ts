@@ -30,6 +30,7 @@ describe("config", () => {
     expect(config.router.codex.timeoutMs).toBe(30000);
     expect(config.router.codex.firstOutputTimeoutMs).toBe(15000);
     expect(config.router.codex.idleTimeoutMs).toBe(15000);
+    expect(config.router.codex.maxOutputBytes).toBe(1024 * 1024);
     expect(config.router.codex.maxAttempts).toBe(2);
     expect(config.router.codex.retryDelayMs).toBe(500);
     expect(config.router.codex.fallback).toBe("simple");
@@ -304,6 +305,7 @@ describe("config", () => {
         "timeoutMs = 120000",
         "firstOutputTimeoutMs = 15000",
         "idleTimeoutMs = 25000",
+        "maxOutputBytes = 2048",
         "maxAttempts = 3",
         "retryDelayMs = 750",
         "followUpTimeoutMs = 9000",
@@ -321,6 +323,7 @@ describe("config", () => {
     expect(config.router.codex.timeoutMs).toBe(120000);
     expect(config.router.codex.firstOutputTimeoutMs).toBe(15000);
     expect(config.router.codex.idleTimeoutMs).toBe(25000);
+    expect(config.router.codex.maxOutputBytes).toBe(2048);
     expect(config.router.codex.maxAttempts).toBe(3);
     expect(config.router.codex.retryDelayMs).toBe(750);
     expect(config.router.codex.followUpTimeoutMs).toBe(9000);
@@ -360,6 +363,18 @@ describe("config", () => {
       await writeText(
         join(root, ".parallel-codex", "config.toml"),
         ["[router.codex]", entry].join("\n")
+      );
+      await expect(loadConfig(root)).rejects.toThrow();
+    }
+  });
+
+  it("rejects unsafe Router output limits", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pct-config-router-output-limit-"));
+
+    for (const value of [1023, 16 * 1024 * 1024 + 1]) {
+      await writeText(
+        join(root, ".parallel-codex", "config.toml"),
+        ["[router.codex]", `maxOutputBytes = ${value}`].join("\n")
       );
       await expect(loadConfig(root)).rejects.toThrow();
     }
