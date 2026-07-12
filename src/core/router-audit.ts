@@ -7,7 +7,7 @@ import {
   type RouterFailureStage,
   type RouterTimeoutKind
 } from "../domain/schemas.js";
-import { readTextIfExists } from "./file-store.js";
+import { readRecentJsonLines } from "./file-store.js";
 import { sanitizeRouterText } from "./router-redaction.js";
 
 export { RouterFailureKindSchema };
@@ -237,23 +237,9 @@ export async function readRouterAudit(path: string, limit = 100): Promise<Router
     return [];
   }
 
-  const records: RouterAuditRecord[] = [];
-  for (const line of (await readTextIfExists(path)).split(/\r?\n/)) {
-    if (!line.trim()) {
-      continue;
-    }
-    try {
-      const parsed = RouterAuditRecordSchema.safeParse(JSON.parse(line));
-      if (parsed.success) {
-        records.push({
-          ...parsed.data,
-          request: sanitizeRouterText(parsed.data.request),
-          reason: sanitizeRouterText(parsed.data.reason)
-        });
-      }
-    } catch {
-      // A partial final write must not hide earlier Router evidence.
-    }
-  }
-  return records.slice(-boundedLimit);
+  return (await readRecentJsonLines(path, RouterAuditRecordSchema, boundedLimit)).map((record) => ({
+    ...record,
+    request: sanitizeRouterText(record.request),
+    reason: sanitizeRouterText(record.reason)
+  }));
 }

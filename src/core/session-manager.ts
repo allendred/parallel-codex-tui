@@ -7,6 +7,7 @@ import {
   ensureDir,
   pathExists,
   readJson,
+  readRecentJsonLines,
   readTextIfExists,
   removeIfExists,
   writeJson,
@@ -256,26 +257,14 @@ export class SessionManager {
   }
 
   async readChatHistory(limit = 200): Promise<ChatRecord[]> {
-    const text = await readTextIfExists(join(this.mainSessionDir(), "chat.jsonl"));
-    const records: ChatRecord[] = [];
-    for (const line of text.split(/\r?\n/)) {
-      if (!line.trim()) {
-        continue;
-      }
-      try {
-        const parsed = ChatRecordSchema.safeParse(JSON.parse(line));
-        if (parsed.success) {
-          records.push(parsed.data);
-        }
-      } catch {
-        // A partial final write must not hide the rest of the workspace history.
-      }
-    }
-
     const boundedLimit = Number.isFinite(limit)
       ? Math.min(1000, Math.max(0, Math.trunc(limit)))
       : 200;
-    return boundedLimit === 0 ? [] : records.slice(-boundedLimit);
+    return readRecentJsonLines(
+      join(this.mainSessionDir(), "chat.jsonl"),
+      ChatRecordSchema,
+      boundedLimit
+    );
   }
 
   taskFromId(taskId: string): TaskSession {
