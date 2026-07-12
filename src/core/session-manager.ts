@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
-import { mkdir, readdir, rename, rm } from "node:fs/promises";
+import { mkdir, readdir, rename, rm, writeFile } from "node:fs/promises";
 import { basename, dirname, join } from "node:path";
+import { z } from "zod";
 import {
   appendJsonLine,
   appendText,
@@ -19,6 +20,7 @@ import { sessionsRoot } from "./paths.js";
 import type { SessionIndex } from "./session-index.js";
 import { loadCollaborationTimeline, type CollaborationTimeline } from "./collaboration-timeline.js";
 import { taskStateTransitionAllowed } from "./task-state-machine.js";
+import { processIsAlive, readProcessStartToken } from "./process-identity.js";
 import {
   claimTaskRunLease,
   inspectTaskRunLease,
@@ -62,6 +64,10 @@ export interface CreateTaskInput {
   request: string;
   cwd: string;
   route: RouteDecision;
+}
+
+export interface CreateTaskOptions {
+  retainCreationClaim?: boolean;
 }
 
 export interface TaskSession {
@@ -125,6 +131,13 @@ export interface InterruptedMainSessionRecovery {
   processesTerminated: number;
 }
 
+export interface PendingTaskCreationRecovery {
+  published: number;
+  abandoned: number;
+  active: number;
+  publishedTaskIds: string[];
+}
+
 type BlockingProcessTermination = Extract<WorkerProcessTermination, "unverifiable" | "still-running">;
 
 interface PendingTurnDirectory {
@@ -137,6 +150,13 @@ interface TurnReconciliationSummary {
   published: number;
   repaired: number;
   abandoned: number;
+}
+
+interface PendingTaskCreationDirectory {
+  taskId: string;
+  stagingDir: string;
+  finalDir: string;
+  claimPath: string;
 }
 
 export interface InterruptedTaskRecoveryBlock {
@@ -177,6 +197,15 @@ const ACTIVE_FEATURE_STATES = new Set([
   "verifying"
 ]);
 const PENDING_TURN_DIRECTORY = /^\.turn-(\d{4})-.+\.pending$/;
+const PENDING_TASK_CREATION_CLAIM = /^\.(task-.+)\.creating\.json$/;
+const TaskCreationOwnerSchema = z.object({
+  version: z.literal(1),
+  task_id: z.string().min(1),
+  pid: z.number().int().positive(),
+  started_at: z.string().datetime(),
+  process_start_token: z.string().min(1).optional()
+});
+type TaskCreationOwner = z.infer<typeof TaskCreationOwnerSchema>;
 
 export class SessionManager {
   private readonly projectRoot: string;
@@ -195,10 +224,11 @@ export class SessionManager {
     this.claimTaskRunLease = options.claimTaskRunLease ?? claimTaskRunLease;
   }
 
-  async createTask(input: CreateTaskInput): Promise<TaskSession> {
+  async createTask(input: CreateTaskInput, options: CreateTaskOptions = {}): Promise<TaskSession> {
     const createdAt = this.now();
     const baseId = `task-${formatTaskTimestamp(createdAt)}-${this.randomId()}`;
-    const { id, dir } = await this.claimUniqueTaskDirectory(baseId);
+    const creation = await this.claimUniqueTaskDirectory(baseId, createdAt);
+    const { taskId: id, stagingDir, finalDir } = creation;
     const meta: TaskMeta = {
       id,
       title: titleFromRequest(input.request),
@@ -208,40 +238,86 @@ export class SessionManager {
       status: "created"
     };
 
-    const task: TaskSession = {
+    const stagingTask: TaskSession = {
       id,
-      dir,
-      metaPath: join(dir, "meta.json"),
-      routePath: join(dir, "route.json"),
-      eventsPath: join(dir, "events.jsonl")
+      dir: stagingDir,
+      metaPath: join(stagingDir, "meta.json"),
+      routePath: join(stagingDir, "route.json"),
+      eventsPath: join(stagingDir, "events.jsonl")
     };
+    const task = this.taskFromId(id);
+    let published = false;
 
-    await writeJson(join(dir, "meta.json"), TaskMetaSchema.parse(meta));
-    await writeText(join(dir, "user-request.md"), `${input.request.trim()}\n`);
-    await this.index?.upsertTask(meta);
-    await writeJson(join(dir, "route.json"), RouteDecisionSchema.parse(input.route));
-    await this.writeTurn({ id, dir }, "0001", input.request, input.route, createdAt);
-    await this.appendEvent(task, "task.created", "Task session created");
-    await this.updateTaskStatus(task, "routed");
-    await this.index?.setActiveTaskId(id);
-
-    return task;
+    try {
+      await writeJson(stagingTask.metaPath, TaskMetaSchema.parse(meta));
+      await writeText(join(stagingDir, "user-request.md"), `${input.request.trim()}\n`);
+      await writeJson(stagingTask.routePath, RouteDecisionSchema.parse(input.route));
+      const turn = await this.writeTurn(stagingTask, "0001", input.request, input.route, createdAt, false);
+      await this.appendEvent(stagingTask, "task.created", "Task session created");
+      await rename(stagingDir, finalDir);
+      published = true;
+      await this.updateTaskStatus(task, "routed");
+      await this.index?.upsertTurn(task.id, await readJson(join(task.dir, "turns", turn.turnId, "turn.json"), TurnMetaSchema));
+      await this.index?.setActiveTaskId(id);
+      if (!options.retainCreationClaim) {
+        await removeIfExists(creation.claimPath);
+      }
+      return task;
+    } catch (error) {
+      try {
+        if (!published) {
+          await rm(stagingDir, { recursive: true, force: true });
+        }
+        await removeIfExists(creation.claimPath);
+      } catch {
+        // Startup reconciliation can finish cleanup when immediate cleanup is unavailable.
+      }
+      throw error;
+    }
   }
 
-  private async claimUniqueTaskDirectory(baseId: string): Promise<{ id: string; dir: string }> {
-    await ensureDir(sessionsRoot(this.projectRoot, this.dataDir));
+  async releaseTaskCreationClaim(task: Pick<TaskSession, "id">): Promise<void> {
+    await removeIfExists(this.taskCreationClaimPath(task.id));
+  }
+
+  private async claimUniqueTaskDirectory(baseId: string, createdAt: Date): Promise<PendingTaskCreationDirectory> {
+    const root = sessionsRoot(this.projectRoot, this.dataDir);
+    await ensureDir(root);
+    const processStartToken = await readProcessStartToken(process.pid);
     for (let attempt = 1; ; attempt += 1) {
       const id = attempt === 1 ? baseId : `${baseId}-${String(attempt).padStart(4, "0")}`;
-      const dir = taskDir(this.projectRoot, this.dataDir, id);
+      const claimPath = this.taskCreationClaimPath(id);
+      const stagingDir = join(root, `.${id}.creating`);
+      const finalDir = taskDir(this.projectRoot, this.dataDir, id);
+      const owner = TaskCreationOwnerSchema.parse({
+        version: 1,
+        task_id: id,
+        pid: process.pid,
+        started_at: createdAt.toISOString(),
+        ...(processStartToken ? { process_start_token: processStartToken } : {})
+      });
+      if (!(await writeJsonExclusive(claimPath, owner))) {
+        continue;
+      }
       try {
-        await mkdir(dir);
-        return { id, dir };
-      } catch (error) {
-        if ((error as NodeJS.ErrnoException).code !== "EEXIST") {
-          throw error;
+        if (await pathExists(finalDir)) {
+          await removeIfExists(claimPath);
+          continue;
         }
+        await mkdir(stagingDir);
+        return { taskId: id, stagingDir, finalDir, claimPath };
+      } catch (error) {
+        await removeIfExists(claimPath);
+        if ((error as NodeJS.ErrnoException).code === "EEXIST") {
+          continue;
+        }
+        throw error;
       }
     }
+  }
+
+  private taskCreationClaimPath(taskId: string): string {
+    return join(sessionsRoot(this.projectRoot, this.dataDir), `.${taskId}.creating.json`);
   }
 
   mainSessionDir(): string {
@@ -326,6 +402,86 @@ export class SessionManager {
     return Boolean(await readTaskMetaIfValid(task.metaPath));
   }
 
+  async reconcilePendingTaskCreations(): Promise<PendingTaskCreationRecovery> {
+    const report: PendingTaskCreationRecovery = {
+      published: 0,
+      abandoned: 0,
+      active: 0,
+      publishedTaskIds: []
+    };
+    for (const pending of await this.pendingTaskCreationDirectories()) {
+      const owner = await readTaskCreationOwnerIfValid(pending.claimPath);
+      if (owner?.task_id === pending.taskId && await taskCreationOwnerIsActive(owner)) {
+        report.active += 1;
+        continue;
+      }
+
+      const finalTask = this.taskFromId(pending.taskId);
+      const finalMeta = await readTaskMetaIfValid(finalTask.metaPath);
+      if (finalMeta) {
+        await this.projectPublishedTaskCreation(pending.taskId, finalMeta);
+        if (await pathExists(pending.stagingDir)) {
+          await this.quarantinePendingTaskCreation(pending);
+          report.abandoned += 1;
+        } else {
+          report.published += 1;
+          report.publishedTaskIds.push(pending.taskId);
+        }
+        await removeIfExists(pending.claimPath);
+        continue;
+      }
+
+      const snapshot = await this.readCompletePendingTaskCreation(pending);
+      if (snapshot) {
+        if (!(await pathExists(pending.finalDir))) {
+          try {
+            await rename(pending.stagingDir, pending.finalDir);
+          } catch (error) {
+            const code = (error as NodeJS.ErrnoException).code;
+            if (code !== "ENOENT" && code !== "EEXIST") {
+              throw error;
+            }
+          }
+        }
+        const publishedMeta = await readTaskMetaIfValid(finalTask.metaPath);
+        if (publishedMeta) {
+          await removeIfExists(pending.claimPath);
+          await this.projectPublishedTaskCreation(pending.taskId, publishedMeta);
+          report.published += 1;
+          report.publishedTaskIds.push(pending.taskId);
+          continue;
+        }
+      }
+
+      const racedMeta = await readTaskMetaIfValid(finalTask.metaPath);
+      if (racedMeta) {
+        await removeIfExists(pending.claimPath);
+        await this.projectPublishedTaskCreation(pending.taskId, racedMeta);
+        report.published += 1;
+        report.publishedTaskIds.push(pending.taskId);
+        continue;
+      }
+
+      let archived = false;
+      if (await pathExists(pending.stagingDir)) {
+        archived = await this.quarantinePendingTaskCreation(pending);
+      }
+      if (!archived) {
+        const concurrentlyPublishedMeta = await readTaskMetaIfValid(finalTask.metaPath);
+        if (concurrentlyPublishedMeta) {
+          await removeIfExists(pending.claimPath);
+          await this.projectPublishedTaskCreation(pending.taskId, concurrentlyPublishedMeta);
+          report.published += 1;
+          report.publishedTaskIds.push(pending.taskId);
+          continue;
+        }
+      }
+      await removeIfExists(pending.claimPath);
+      report.abandoned += 1;
+    }
+    return report;
+  }
+
   async reconcileInterruptedTasks(): Promise<InterruptedTaskRecovery[]> {
     const root = sessionsRoot(this.projectRoot, this.dataDir);
     if (!(await pathExists(root))) {
@@ -339,6 +495,9 @@ export class SessionManager {
         continue;
       }
       const task = this.taskFromId(entry.name);
+      if (await this.taskCreationClaimIsActive(task.id)) {
+        continue;
+      }
       const meta = await readTaskMetaIfValid(task.metaPath);
       if (!meta) {
         continue;
@@ -948,6 +1107,104 @@ export class SessionManager {
     }
   }
 
+  private async pendingTaskCreationDirectories(): Promise<PendingTaskCreationDirectory[]> {
+    const root = sessionsRoot(this.projectRoot, this.dataDir);
+    if (!(await pathExists(root))) {
+      return [];
+    }
+    const entries = await readdir(root, { withFileTypes: true });
+    return entries.flatMap((entry) => {
+      const match = entry.isFile() ? entry.name.match(PENDING_TASK_CREATION_CLAIM) : null;
+      if (!match?.[1]) {
+        return [];
+      }
+      const taskId = match[1];
+      return [{
+        taskId,
+        stagingDir: join(root, `.${taskId}.creating`),
+        finalDir: taskDir(this.projectRoot, this.dataDir, taskId),
+        claimPath: join(root, entry.name)
+      }];
+    }).sort((left, right) => left.taskId.localeCompare(right.taskId));
+  }
+
+  private async taskCreationClaimIsActive(taskId: string): Promise<boolean> {
+    const owner = await readTaskCreationOwnerIfValid(this.taskCreationClaimPath(taskId));
+    return Boolean(owner?.task_id === taskId && await taskCreationOwnerIsActive(owner));
+  }
+
+  private async readCompletePendingTaskCreation(
+    pending: PendingTaskCreationDirectory
+  ): Promise<{ meta: TaskMeta; turn: TurnMeta } | null> {
+    return this.readCompleteTaskCreation(pending.stagingDir, pending.taskId);
+  }
+
+  private async readCompleteTaskCreation(
+    directory: string,
+    taskId: string
+  ): Promise<{ meta: TaskMeta; turn: TurnMeta } | null> {
+    try {
+      const firstTurnDir = join(directory, "turns", "0001");
+      const [meta, route, request, turn, turnRoute, turnRequest] = await Promise.all([
+        readTaskMetaIfValid(join(directory, "meta.json")),
+        readRouteDecisionIfValid(join(directory, "route.json")),
+        readTextIfExists(join(directory, "user-request.md")),
+        readTurnMetaIfValid(join(firstTurnDir, "turn.json")),
+        readRouteDecisionIfValid(join(firstTurnDir, "route.json")),
+        readTextIfExists(join(firstTurnDir, "user.md"))
+      ]);
+      if (
+        !meta
+        || !route
+        || !turn
+        || !turnRoute
+        || !request.trim()
+        || request.trim() !== turnRequest.trim()
+        || meta.id !== taskId
+        || meta.mode !== route.mode
+        || turn.task_id !== taskId
+        || turn.turn_id !== "0001"
+        || turn.request_path !== "turns/0001/user.md"
+        || turnRoute.mode !== route.mode
+      ) {
+        return null;
+      }
+      return { meta, turn };
+    } catch {
+      return null;
+    }
+  }
+
+  private async projectPublishedTaskCreation(taskId: string, meta: TaskMeta): Promise<void> {
+    if (!this.index) {
+      return;
+    }
+    await this.index.upsertTask(meta);
+    const snapshot = await this.readCompleteTaskCreation(this.taskFromId(taskId).dir, taskId);
+    if (snapshot) {
+      await this.index.upsertTurn(taskId, snapshot.turn);
+    }
+  }
+
+  private async quarantinePendingTaskCreation(pending: PendingTaskCreationDirectory): Promise<boolean> {
+    const root = join(sessionsRoot(this.projectRoot, this.dataDir), ".abandoned");
+    await ensureDir(root);
+    const name = basename(pending.stagingDir);
+    const preferred = join(root, name);
+    const destination = await pathExists(preferred)
+      ? join(root, `${name}.${randomUUID()}`)
+      : preferred;
+    try {
+      await rename(pending.stagingDir, destination);
+      return true;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+        return false;
+      }
+      throw error;
+    }
+  }
+
   private async pendingTurnDirectories(
     task: Pick<TaskSession, "dir">
   ): Promise<PendingTurnDirectory[]> {
@@ -1069,7 +1326,8 @@ export class SessionManager {
     turnId: string,
     request: string,
     route: RouteDecision,
-    createdAt: Date
+    createdAt: Date,
+    projectIndex = true
   ): Promise<TaskTurn> {
     const files = this.turnFiles(task, turnId);
     const turnMeta = TurnMetaSchema.parse({
@@ -1099,7 +1357,9 @@ export class SessionManager {
         await rm(pendingDir, { recursive: true, force: true });
       }
     }
-    await this.index?.upsertTurn(task.id, turnMeta);
+    if (projectIndex) {
+      await this.index?.upsertTurn(task.id, turnMeta);
+    }
     return files;
   }
 
@@ -1237,6 +1497,39 @@ async function readTaskMetaIfValid(metaPath: string): Promise<TaskMeta | null> {
     return await readJson(metaPath, TaskMetaSchema);
   } catch {
     return null;
+  }
+}
+
+async function readTaskCreationOwnerIfValid(path: string): Promise<TaskCreationOwner | null> {
+  if (!(await pathExists(path))) {
+    return null;
+  }
+  try {
+    return await readJson(path, TaskCreationOwnerSchema);
+  } catch {
+    return null;
+  }
+}
+
+async function taskCreationOwnerIsActive(owner: TaskCreationOwner): Promise<boolean> {
+  if (!processIsAlive(owner.pid)) {
+    return false;
+  }
+  if (!owner.process_start_token) {
+    return true;
+  }
+  return (await readProcessStartToken(owner.pid)) === owner.process_start_token;
+}
+
+async function writeJsonExclusive(path: string, value: unknown): Promise<boolean> {
+  try {
+    await writeFile(path, `${JSON.stringify(value, null, 2)}\n`, { encoding: "utf8", flag: "wx" });
+    return true;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "EEXIST") {
+      return false;
+    }
+    throw error;
   }
 }
 

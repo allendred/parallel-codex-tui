@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import { defaultConfig } from "../src/core/config.js";
-import { readJson } from "../src/core/file-store.js";
+import { pathExists, readJson } from "../src/core/file-store.js";
 import type { TaskRunLease } from "../src/core/process-ownership.js";
 import { SessionManager } from "../src/core/session-manager.js";
 import { TaskMetaSchema } from "../src/domain/schemas.js";
@@ -12,6 +12,98 @@ import { MockWorkerAdapter } from "../src/workers/mock-adapter.js";
 import type { WorkerAdapter, WorkerResult, WorkerRunSpec } from "../src/workers/types.js";
 
 describe("Orchestrator lease finalization", () => {
+  it("hands a new task directly from its creation claim to the run lease", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pct-orch-task-lease-handoff-"));
+    const config = mockConfig(root, "complex");
+    const manager = new SessionManager({
+      projectRoot: root,
+      dataDir: config.dataDir,
+      now: () => new Date("2026-07-12T07:19:00.000Z"),
+      randomId: () => "lease-handoff"
+    });
+    let runLeaseActive = false;
+    const readLatestTurn = manager.latestTurn.bind(manager);
+    const latestTurn = vi.spyOn(manager, "latestTurn").mockImplementation(async (task) => {
+      if (!runLeaseActive) {
+        throw new Error("initial turn was read before the run lease");
+      }
+      return readLatestTurn(task);
+    });
+    const release = vi.fn(async () => {
+      runLeaseActive = false;
+    });
+    const claim = vi.fn(async () => {
+      runLeaseActive = true;
+      return leaseClaimer(release)();
+    });
+    const orchestrator = new Orchestrator(
+      config,
+      manager,
+      new Map([["mock", new MockWorkerAdapter()]]),
+      undefined,
+      undefined,
+      undefined,
+      { claimTaskRunLease: claim }
+    );
+
+    const result = await orchestrator.handleRequest({
+      request: "实现无缝任务锁交接",
+      cwd: root
+    });
+
+    expect(result.mode).toBe("complex");
+    expect(latestTurn).toHaveBeenCalled();
+    expect(claim).toHaveBeenCalledOnce();
+    expect(release).toHaveBeenCalledOnce();
+    expect(await pathExists(join(
+      root,
+      ".parallel-codex",
+      "sessions",
+      ".task-20260712-071900-lease-handoff.creating.json"
+    ))).toBe(false);
+  });
+
+  it("releases the creation claim when the task run lease cannot be acquired", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pct-orch-task-lease-rejected-"));
+    const config = mockConfig(root, "complex");
+    const manager = new SessionManager({
+      projectRoot: root,
+      dataDir: config.dataDir,
+      now: () => new Date("2026-07-12T07:19:30.000Z"),
+      randomId: () => "lease-rejected"
+    });
+    const leaseError = new Error("task lease unavailable");
+    const orchestrator = new Orchestrator(
+      config,
+      manager,
+      new Map([["mock", new MockWorkerAdapter()]]),
+      undefined,
+      undefined,
+      undefined,
+      { claimTaskRunLease: async () => Promise.reject(leaseError) }
+    );
+    const taskId = "task-20260712-071930-lease-rejected";
+
+    await expect(orchestrator.handleRequest({
+      request: "实现运行锁失败后的恢复",
+      cwd: root
+    })).rejects.toBe(leaseError);
+
+    expect(await pathExists(join(
+      root,
+      ".parallel-codex",
+      "sessions",
+      `.${taskId}.creating.json`
+    ))).toBe(false);
+    await expect(readJson(
+      join(root, ".parallel-codex", "sessions", taskId, "meta.json"),
+      TaskMetaSchema
+    )).resolves.toMatchObject({ status: "routed" });
+    await expect(manager.reconcileInterruptedTasks()).resolves.toEqual([
+      expect.objectContaining({ taskId, previousState: "routed" })
+    ]);
+  });
+
   it("preserves both the Worker failure and task lease release failure", async () => {
     const root = await mkdtemp(join(tmpdir(), "pct-orch-task-lease-finalize-"));
     const config = mockConfig(root, "complex");

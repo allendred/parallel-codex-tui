@@ -1,4 +1,4 @@
-import { mkdtemp } from "node:fs/promises";
+import { mkdtemp, rename } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
@@ -65,6 +65,56 @@ describe("createRuntime", () => {
     expect(await pathExists(join(appRoot, ".parallel-codex", "sessions", task.id))).toBe(false);
     expect(await pathExists(join(workspaceRoot, ".parallel-codex", "session-index.sqlite"))).toBe(true);
     expect(await pathExists(join(appRoot, ".parallel-codex", "session-index.sqlite"))).toBe(false);
+  });
+
+  it("publishes a complete task creation before rebuilding interrupted task state", async () => {
+    const appRoot = await mkdtemp(join(tmpdir(), "pct-pending-task-app-root-"));
+    const workspaceRoot = await mkdtemp(join(tmpdir(), "pct-pending-task-worker-root-"));
+    const firstRuntime = await createRuntime(appRoot, workspaceRoot);
+    const task = await firstRuntime.sessions.createTask({
+      request: "恢复发布前中断的任务",
+      cwd: workspaceRoot,
+      route: {
+        mode: "complex",
+        reason: "test",
+        suggested_roles: ["judge", "actor", "critic"],
+        judge_engine: "mock",
+        actor_engine: "mock",
+        critic_engine: "mock"
+      }
+    }, { retainCreationClaim: true });
+    const sessionsDir = join(workspaceRoot, ".parallel-codex", "sessions");
+    const stagingDir = join(sessionsDir, `.${task.id}.creating`);
+    const claimPath = join(sessionsDir, `.${task.id}.creating.json`);
+    await rename(task.dir, stagingDir);
+    await writeJson(claimPath, {
+      version: 1,
+      task_id: task.id,
+      pid: 2147483647,
+      started_at: "2026-07-12T07:30:00.000Z"
+    });
+    firstRuntime.index.close();
+
+    const restarted = await createRuntime(appRoot, workspaceRoot);
+    try {
+      expect(restarted.pendingTaskCreations).toEqual({
+        published: 1,
+        abandoned: 0,
+        active: 0,
+        publishedTaskIds: [task.id]
+      });
+      expect(restarted.recoveredTasks).toEqual([
+        expect.objectContaining({ taskId: task.id, previousState: "routed" })
+      ]);
+      expect(await pathExists(task.dir)).toBe(true);
+      expect(await pathExists(stagingDir)).toBe(false);
+      expect(await pathExists(claimPath)).toBe(false);
+      await expect(restarted.index.countRows("tasks")).resolves.toBe(1);
+      await expect(restarted.index.countRows("turns")).resolves.toBe(1);
+      await expect(readJson(task.metaPath, TaskMetaSchema)).resolves.toMatchObject({ status: "cancelled" });
+    } finally {
+      restarted.index.close();
+    }
   });
 
   it("can start and restore the latest task when another task has corrupt metadata", async () => {

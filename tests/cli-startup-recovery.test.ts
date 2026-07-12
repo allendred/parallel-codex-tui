@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 import { startupRecoveryMessages } from "../src/cli-startup-recovery.js";
-import type { InterruptedTaskRecovery } from "../src/core/session-manager.js";
+import type {
+  InterruptedTaskRecovery,
+  PendingTaskCreationRecovery
+} from "../src/core/session-manager.js";
 
 describe("startupRecoveryMessages", () => {
   it("distinguishes a restored follow-up turn from missing completion evidence", () => {
@@ -34,6 +37,32 @@ describe("startupRecoveryMessages", () => {
       from: "system",
       text: "Recovered 2 interrupted tasks · 1 turn restored · checkpoints kept · Ctrl+T inspect"
     }]);
+  });
+
+  it("reports incomplete and still-active task creations without a recovered task", () => {
+    const pending: PendingTaskCreationRecovery = {
+      published: 0,
+      abandoned: 1,
+      active: 2,
+      publishedTaskIds: []
+    };
+
+    expect(startupRecoveryMessages([], null, pending)).toEqual([{
+      from: "system",
+      text: "Startup cleanup · 1 incomplete task creation archived · 2 task creations active in another TUI"
+    }]);
+  });
+
+  it("does not duplicate a published task creation already covered by task recovery", () => {
+    const recovery = recoveredTask();
+    const pending: PendingTaskCreationRecovery = {
+      published: 1,
+      abandoned: 0,
+      active: 0,
+      publishedTaskIds: [recovery.taskId]
+    };
+
+    expect(startupRecoveryMessages([recovery], recovery.taskId, pending)).toHaveLength(1);
   });
 });
 

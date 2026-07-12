@@ -245,8 +245,8 @@ export class Orchestrator {
       request: input.request,
       cwd: input.cwd,
       route
-    });
-    const turn = (await this.sessions.latestTurn(task)) ?? {
+    }, { retainCreationClaim: true });
+    const turn: TaskTurn = {
       turnId: "0001",
       dir: join(task.dir, "turns", "0001"),
       metaPath: join(task.dir, "turns", "0001", "turn.json"),
@@ -355,8 +355,24 @@ export class Orchestrator {
   }
 
   private async withTaskRunLease<Result>(task: TaskSession, run: () => Promise<Result>): Promise<Result> {
-    const lease = await (this.dependencies.claimTaskRunLease ?? claimTaskRunLease)(task.dir);
-    return runWithLeaseFinalization(`Task ${task.id}`, lease, run);
+    let lease;
+    try {
+      lease = await (this.dependencies.claimTaskRunLease ?? claimTaskRunLease)(task.dir);
+    } catch (error) {
+      try {
+        await this.sessions.releaseTaskCreationClaim(task);
+      } catch (releaseError) {
+        throw new Error(
+          `${errorMessage(error)}; task creation claim release failed: ${errorMessage(releaseError)}`,
+          { cause: new AggregateError([error, releaseError]) }
+        );
+      }
+      throw error;
+    }
+    return runWithLeaseFinalization(`Task ${task.id}`, lease, async () => {
+      await this.sessions.releaseTaskCreationClaim(task);
+      return run();
+    });
   }
 
   async routeTaskFollowUp(input: HandleTaskQuestionInput): Promise<TaskFollowUpRouteResult> {

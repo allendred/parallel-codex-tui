@@ -222,7 +222,12 @@ describe("package metadata", () => {
     expect(readme).toContain("invalid phase skips are rejected");
     expect(readme).toContain("writes every Turn into a hidden staging directory");
     expect(readme).toContain("complete pending Turns are published and request-only pending Turns are rebuilt");
-    expect(readme).toContain("Task ids are claimed with atomic directory creation");
+    expect(readme).toContain("Task creation writes its complete first Turn into a hidden staging directory");
+    expect(readme).toContain("an exclusive process-identity claim reserves the Task id");
+    expect(readme).toContain("atomically publishes the whole Task");
+    expect(readme).toContain("hands the creation claim directly to the task run lease");
+    expect(readme).toContain("stale complete Task staging is published");
+    expect(readme).toContain("incomplete staging is archived under `.abandoned`");
     expect(readme).toContain("SQLite startup rebuild indexes only complete numbered Turn directories");
     expect(readme).toContain("startup notice distinguishes a restored follow-up Turn");
     expect(readme).toContain("request and route kept");

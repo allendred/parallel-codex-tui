@@ -3,7 +3,11 @@ import { configPath, loadConfig, writeDefaultConfig, type AppConfig } from "./co
 import { ensureDir, pathExists } from "./core/file-store.js";
 import { routerRuntimeDir } from "./core/paths.js";
 import { SessionIndex } from "./core/session-index.js";
-import { SessionManager, type InterruptedTaskRecovery } from "./core/session-manager.js";
+import {
+  SessionManager,
+  type InterruptedTaskRecovery,
+  type PendingTaskCreationRecovery
+} from "./core/session-manager.js";
 import { prepareWorkspace } from "./core/workspace.js";
 import { Orchestrator } from "./orchestrator/orchestrator.js";
 import { createWorkerRegistry, type WorkerRegistry } from "./workers/registry.js";
@@ -16,6 +20,7 @@ export interface AppRuntime {
   sessions: SessionManager;
   workers: WorkerRegistry;
   orchestrator: Orchestrator;
+  pendingTaskCreations: PendingTaskCreationRecovery;
   recoveredTasks: InterruptedTaskRecovery[];
 }
 
@@ -36,6 +41,7 @@ export async function createRuntime(appRoot: string, workspaceRoot = appRoot): P
       dataDir: config.dataDir,
       index
     });
+    const pendingTaskCreations = await sessions.reconcilePendingTaskCreations();
     await sessions.reconcileInterruptedMainSession();
     await sessions.reconcileNativeSessionState();
     const recoveredTasks = await sessions.reconcileInterruptedTasks();
@@ -57,6 +63,7 @@ export async function createRuntime(appRoot: string, workspaceRoot = appRoot): P
       sessions,
       workers,
       orchestrator,
+      pendingTaskCreations,
       recoveredTasks
     };
   } catch (error) {

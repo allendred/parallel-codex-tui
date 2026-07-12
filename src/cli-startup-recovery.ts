@@ -1,4 +1,7 @@
-import type { InterruptedTaskRecovery } from "./core/session-manager.js";
+import type {
+  InterruptedTaskRecovery,
+  PendingTaskCreationRecovery
+} from "./core/session-manager.js";
 
 export interface StartupRecoveryMessage {
   from: "system";
@@ -6,6 +9,17 @@ export interface StartupRecoveryMessage {
 }
 
 export function startupRecoveryMessages(
+  recoveredTasks: InterruptedTaskRecovery[],
+  activeTaskId: string | null,
+  pendingTaskCreations?: PendingTaskCreationRecovery
+): StartupRecoveryMessage[] {
+  return [
+    ...interruptedTaskRecoveryMessages(recoveredTasks, activeTaskId),
+    ...pendingTaskCreationMessages(pendingTaskCreations)
+  ];
+}
+
+function interruptedTaskRecoveryMessages(
   recoveredTasks: InterruptedTaskRecovery[],
   activeTaskId: string | null
 ): StartupRecoveryMessage[] {
@@ -44,6 +58,29 @@ export function startupRecoveryMessages(
   return [{
     from: "system",
     text: `Recovered ${recoveredTasks.length} interrupted ${recoveredTasks.length === 1 ? "task" : "tasks"}${turnDetail} · checkpoints kept · Ctrl+T inspect`
+  }];
+}
+
+function pendingTaskCreationMessages(
+  recovery?: PendingTaskCreationRecovery
+): StartupRecoveryMessage[] {
+  if (!recovery || (recovery.abandoned === 0 && recovery.active === 0)) {
+    return [];
+  }
+  const details: string[] = [];
+  if (recovery.abandoned > 0) {
+    details.push(
+      `${recovery.abandoned} incomplete task ${recovery.abandoned === 1 ? "creation" : "creations"} archived`
+    );
+  }
+  if (recovery.active > 0) {
+    details.push(
+      `${recovery.active} task ${recovery.active === 1 ? "creation" : "creations"} active in another TUI`
+    );
+  }
+  return [{
+    from: "system",
+    text: `Startup cleanup · ${details.join(" · ")}`
   }];
 }
 

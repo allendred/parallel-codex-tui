@@ -220,7 +220,11 @@ async function loadInteractiveWorkspace(
       runtime.sessions.readChatHistory(),
       listWorkspaceChoices(appRoot)
     ]);
-    const recoveryMessages = startupRecoveryMessages(runtime.recoveredTasks, initialTaskId);
+    const recoveryMessages = startupRecoveryMessages(
+      runtime.recoveredTasks,
+      initialTaskId,
+      runtime.pendingTaskCreations
+    );
 
     return {
       runtime,

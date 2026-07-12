@@ -597,6 +597,119 @@ describe("SessionManager", () => {
     expect(await readTextIfExists(join(second.dir, "user-request.md"))).toContain("Second concurrent task.");
   });
 
+  it("publishes a complete task creation left by a dead process", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pct-pending-task-complete-"));
+    const manager = new SessionManager({
+      projectRoot: root,
+      dataDir: ".parallel-codex",
+      now: () => new Date("2026-07-11T15:02:00.000Z")
+    });
+    const taskId = "task-20260711-150159-stale";
+    const stagingDir = join(root, ".parallel-codex", "sessions", `.${taskId}.creating`);
+    await writePendingTaskCreation(stagingDir, taskId, root, 2147483647, true);
+
+    await expect(manager.reconcilePendingTaskCreations()).resolves.toEqual({
+      published: 1,
+      abandoned: 0,
+      active: 0,
+      publishedTaskIds: [taskId]
+    });
+
+    const task = manager.taskFromId(taskId);
+    expect(await pathExists(stagingDir)).toBe(false);
+    await expect(readJson(task.metaPath, TaskMetaSchema)).resolves.toMatchObject({ status: "routed" });
+    await expect(manager.latestTurn(task)).resolves.toMatchObject({ turnId: "0001" });
+    await expect(manager.reconcileInterruptedTasks()).resolves.toEqual([
+      expect.objectContaining({ taskId, previousState: "routed" })
+    ]);
+    await expect(readJson(task.metaPath, TaskMetaSchema)).resolves.toMatchObject({ status: "cancelled" });
+  });
+
+  it("settles concurrent recovery of one complete task creation without failing startup", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pct-pending-task-concurrent-"));
+    const taskId = "task-20260711-150159-concurrent";
+    const stagingDir = join(root, ".parallel-codex", "sessions", `.${taskId}.creating`);
+    await writePendingTaskCreation(stagingDir, taskId, root, 2147483647, true);
+    const managers = [
+      new SessionManager({ projectRoot: root, dataDir: ".parallel-codex" }),
+      new SessionManager({ projectRoot: root, dataDir: ".parallel-codex" })
+    ];
+
+    const results = await Promise.all(managers.map((manager) => manager.reconcilePendingTaskCreations()));
+
+    expect(results.reduce((total, result) => total + result.published, 0)).toBeGreaterThanOrEqual(1);
+    expect(results.reduce((total, result) => total + result.abandoned, 0)).toBe(0);
+    expect(await pathExists(stagingDir)).toBe(false);
+    await expect(readJson(managers[0]!.taskFromId(taskId).metaPath, TaskMetaSchema)).resolves.toMatchObject({
+      status: "routed"
+    });
+  });
+
+  it("does not project a corrupt published creation turn into SQLite", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pct-pending-task-corrupt-turn-"));
+    const index = await SessionIndex.open(root, ".parallel-codex");
+    const manager = new SessionManager({ projectRoot: root, dataDir: ".parallel-codex", index });
+    const taskId = "task-20260711-150159-corrupt-turn";
+    const sessionsDir = join(root, ".parallel-codex", "sessions");
+    const stagingDir = join(sessionsDir, `.${taskId}.creating`);
+    const finalDir = join(sessionsDir, taskId);
+    await writePendingTaskCreation(stagingDir, taskId, root, 2147483647, true);
+    await rename(stagingDir, finalDir);
+    await writeText(join(finalDir, "turns", "0001", "route.json"), "{");
+
+    try {
+      await expect(manager.reconcilePendingTaskCreations()).resolves.toMatchObject({ published: 1 });
+      await expect(index.countRows("tasks")).resolves.toBe(1);
+      await expect(index.countRows("turns")).resolves.toBe(0);
+    } finally {
+      index.close();
+    }
+  });
+
+  it("archives an incomplete task creation left by a dead process", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pct-pending-task-incomplete-"));
+    const manager = new SessionManager({
+      projectRoot: root,
+      dataDir: ".parallel-codex"
+    });
+    const taskId = "task-20260711-150200-incomplete";
+    const stagingName = `.${taskId}.creating`;
+    const stagingDir = join(root, ".parallel-codex", "sessions", stagingName);
+    await writePendingTaskCreation(stagingDir, taskId, root, 2147483647, false);
+
+    await expect(manager.reconcilePendingTaskCreations()).resolves.toEqual({
+      published: 0,
+      abandoned: 1,
+      active: 0,
+      publishedTaskIds: []
+    });
+
+    expect(await pathExists(stagingDir)).toBe(false);
+    expect(await pathExists(join(root, ".parallel-codex", "sessions", ".abandoned", stagingName))).toBe(true);
+    await expect(manager.latestTask()).resolves.toBeNull();
+  });
+
+  it("leaves a task creation owned by a live process untouched", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pct-pending-task-active-"));
+    const manager = new SessionManager({
+      projectRoot: root,
+      dataDir: ".parallel-codex"
+    });
+    const taskId = "task-20260711-150201-active";
+    const stagingDir = join(root, ".parallel-codex", "sessions", `.${taskId}.creating`);
+    await writePendingTaskCreation(stagingDir, taskId, root, process.pid, false);
+
+    await expect(manager.reconcilePendingTaskCreations()).resolves.toEqual({
+      published: 0,
+      abandoned: 0,
+      active: 1,
+      publishedTaskIds: []
+    });
+
+    expect(await pathExists(stagingDir)).toBe(true);
+    expect(await pathExists(manager.taskFromId(taskId).dir)).toBe(false);
+  });
+
   it("skips corrupt task metadata when finding the latest complex task", async () => {
     const root = await mkdtemp(join(tmpdir(), "pct-latest-task-corrupt-meta-"));
     const manager = new SessionManager({
@@ -2305,4 +2418,42 @@ function testComplexRoute(reason: string) {
     actor_engine: "mock",
     critic_engine: "mock"
   });
+}
+
+async function writePendingTaskCreation(
+  stagingDir: string,
+  taskId: string,
+  cwd: string,
+  pid: number,
+  complete: boolean
+): Promise<void> {
+  await writeJson(`${stagingDir}.json`, {
+    version: 1,
+    task_id: taskId,
+    pid,
+    started_at: "2026-07-11T15:01:59.000Z"
+  });
+  await writeText(join(stagingDir, "user-request.md"), "Recover this task creation.\n");
+  if (!complete) {
+    return;
+  }
+
+  const route = testComplexRoute("Recovered task creation.");
+  await writeJson(join(stagingDir, "meta.json"), TaskMetaSchema.parse({
+    id: taskId,
+    title: "Recover this task creation.",
+    created_at: "2026-07-11T15:01:59.000Z",
+    cwd,
+    mode: "complex",
+    status: "routed"
+  }));
+  await writeJson(join(stagingDir, "route.json"), route);
+  await writeText(join(stagingDir, "turns", "0001", "user.md"), "Recover this task creation.\n");
+  await writeJson(join(stagingDir, "turns", "0001", "route.json"), route);
+  await writeJson(join(stagingDir, "turns", "0001", "turn.json"), TurnMetaSchema.parse({
+    task_id: taskId,
+    turn_id: "0001",
+    created_at: "2026-07-11T15:01:59.000Z",
+    request_path: "turns/0001/user.md"
+  }));
 }
