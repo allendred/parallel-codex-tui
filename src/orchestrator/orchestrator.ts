@@ -211,6 +211,7 @@ export class Orchestrator {
   ) {}
 
   async handleRequest(input: HandleRequestInput): Promise<HandleRequestResult> {
+    throwIfCancelled(input.signal);
     const route = await this.routeRequest(
       input.request,
       input.cwd,
@@ -221,6 +222,7 @@ export class Orchestrator {
       input.onRouteProgress
     );
     input.onRoute?.(route);
+    throwIfCancelled(input.signal);
     const workers: WorkerLogRef[] = [];
 
     if (route.mode === "simple") {
@@ -258,6 +260,7 @@ export class Orchestrator {
   }
 
   async handleTaskTurn(input: HandleTaskTurnInput): Promise<HandleRequestResult> {
+    throwIfCancelled(input.signal);
     const task: TaskSession = this.sessions.taskFromId(input.taskId);
     const route = input.route ?? await this.routeRequest(
       input.request,
@@ -271,10 +274,12 @@ export class Orchestrator {
     if (!input.route) {
       input.onRoute?.(route);
     }
+    throwIfCancelled(input.signal);
     if (route.mode === "simple") {
       return this.answerTaskQuestion({ ...input, route });
     }
     return this.withTaskRunLease(task, async () => {
+      throwIfCancelled(input.signal);
       await this.sessions.recordLatestRoute(task, route);
       const turn = await this.sessions.appendTurn(task, {
         request: input.request,
@@ -286,12 +291,14 @@ export class Orchestrator {
   }
 
   async retryTask(input: RetryTaskInput): Promise<HandleRequestResult> {
+    throwIfCancelled(input.signal);
     const task = this.sessions.taskFromId(input.taskId);
     if (!(await readTaskMetaIfValid(task.metaPath))) {
       throw new Error(`Task session not found: ${input.taskId}`);
     }
 
     return this.withTaskRunLease(task, async () => {
+      throwIfCancelled(input.signal);
       const meta = await readTaskMetaIfValid(task.metaPath);
       if (!meta) {
         throw new Error(`Task session not found: ${input.taskId}`);
@@ -315,9 +322,10 @@ export class Orchestrator {
         retry: true
       };
       const workers: WorkerLogRef[] = [];
+      input.onRoute?.(route);
+      throwIfCancelled(input.signal);
       await this.sessions.recordLatestRoute(task, route);
       await this.sessions.appendEvent(task, "task.retrying", `Retrying turn ${turn.turnId}`);
-      input.onRoute?.(route);
       return turn.turnId === "0001"
         ? this.runInitialTask(executionInput, task, route, turn, workers)
         : this.runPairTask(executionInput, task, route, turn, workers);
@@ -376,6 +384,7 @@ export class Orchestrator {
   }
 
   async routeTaskFollowUp(input: HandleTaskQuestionInput): Promise<TaskFollowUpRouteResult> {
+    throwIfCancelled(input.signal);
     const route = await this.routeRequest(
       input.request,
       input.cwd,
@@ -386,6 +395,7 @@ export class Orchestrator {
       input.onRouteProgress
     );
     input.onRoute?.(route);
+    throwIfCancelled(input.signal);
 
     return {
       mode: route.mode,
@@ -396,6 +406,7 @@ export class Orchestrator {
   }
 
   async answerTaskQuestion(input: HandleTaskQuestionInput): Promise<HandleRequestResult> {
+    throwIfCancelled(input.signal);
     const task = this.sessions.taskFromId(input.taskId);
     if (!(await pathExists(task.dir))) {
       throw new Error(`Task session not found: ${input.taskId}`);
@@ -507,6 +518,7 @@ export class Orchestrator {
   ): Promise<HandleRequestResult> {
     let features: FeatureChannel[] = [];
     try {
+      throwIfCancelled(input.signal);
       const reuseJudgeSnapshot = input.retry && await this.hasCompleteJudgeSnapshot(turn);
       if (!reuseJudgeSnapshot) {
         await this.clearTurnJudgeArtifacts(turn, input.retry);
@@ -557,6 +569,7 @@ export class Orchestrator {
   ): Promise<HandleRequestResult> {
     let features: FeatureChannel[] = [];
     try {
+      throwIfCancelled(input.signal);
       const reuseJudgeSnapshot = input.retry && await this.hasCompleteJudgeSnapshot(turn);
       if (!reuseJudgeSnapshot) {
         await this.clearTurnJudgeArtifacts(turn);
@@ -1597,6 +1610,7 @@ export class Orchestrator {
   }
 
   private async runMain(input: HandleRequestInput, workers: WorkerLogRef[], context?: string): Promise<string> {
+    throwIfCancelled(input.signal);
     const engine = this.config.pairing.main;
     const dir = this.sessions.mainSessionDir();
     let lease;
@@ -1625,6 +1639,7 @@ export class Orchestrator {
     engine: EngineName,
     dir: string
   ): Promise<string> {
+    throwIfCancelled(input.signal);
     const workerId = `main-${engine}`;
     const filesDir = join(dir, workerId);
     const promptPath = join(filesDir, "prompt.md");

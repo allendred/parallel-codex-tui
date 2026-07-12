@@ -228,6 +228,8 @@ describe("package metadata", () => {
     expect(readme).toContain("hands the creation claim directly to the task run lease");
     expect(readme).toContain("stale complete Task staging is published");
     expect(readme).toContain("incomplete staging is archived under `.abandoned`");
+    expect(readme).toContain("Cancellation is rechecked after routing and after acquiring a task lease");
+    expect(readme).toContain("cannot create a Task, initialize Main, append a Turn, or record a retry");
     expect(readme).toContain("SQLite startup rebuild indexes only complete numbered Turn directories");
     expect(readme).toContain("startup notice distinguishes a restored follow-up Turn");
     expect(readme).toContain("request and route kept");
