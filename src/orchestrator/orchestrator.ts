@@ -9,6 +9,7 @@ import { classifyRouterFailure, routerFallbackIsTransient } from "../core/router
 import { sanitizeRouterText } from "../core/router-redaction.js";
 import {
   routeRequestWithCodex,
+  routerCommandLabel,
   routerProxyContext,
   type CodexRouteRunner,
   type RouterExecutionPhase,
@@ -93,6 +94,7 @@ export interface TaskFollowUpRouteResult {
 export interface RouteStartInfo {
   scope: "initial" | "follow-up";
   mode: AppConfig["router"]["defaultMode"];
+  command: string;
   timeoutMs: number;
   phase: RouterExecutionPhase;
   attempt: number;
@@ -1439,6 +1441,7 @@ export class Orchestrator {
       onRouteStart?.({
         scope,
         mode: router.defaultMode,
+        command: routerCommandLabel(routeConfig.router.codex.command),
         timeoutMs: routeConfig.router.codex.timeoutMs,
         phase: "starting",
         attempt,
@@ -1482,6 +1485,7 @@ export class Orchestrator {
         onRouteStart?.({
           scope,
           mode: router.defaultMode,
+          command: routerCommandLabel(routeConfig.router.codex.command),
           timeoutMs: routeConfig.router.codex.timeoutMs,
           phase: "retrying",
           attempt: attempt + 1,

@@ -87,6 +87,8 @@ export async function routeRequestWithCodex(
   }
 
   const proxyContext = routerProxyContext(config.router.codex.env);
+  const commandLabel = routerCommandLabel(config.router.codex.command);
+  const routerName = routerDisplayName(commandLabel);
   try {
     const prompt = buildCodexRouterPrompt(request, config);
     dispatchMs = Math.max(0, performance.now() - telemetryStartedAt);
@@ -108,7 +110,7 @@ export async function routeRequestWithCodex(
     return annotateRoute(route, "codex", startedAt, mergeRouterTelemetry(result.telemetry, {
       router_dispatch_ms: dispatchMs,
       router_parse_ms: Math.max(0, performance.now() - parseStartedAt)
-    }), proxyContext);
+    }), proxyContext, commandLabel);
   } catch (error) {
     if (error instanceof ProcessTreeCleanupError) {
       throw error;
@@ -118,15 +120,15 @@ export async function routeRequestWithCodex(
     }
     const context = routerExecutionErrorContext(error);
     const failureSummary = summarizeRouterError(error);
-    const fallback = annotateRoute(fallbackRoute(config), "fallback", startedAt, mergeRouterTelemetry(context.telemetry, {
+    const fallback = annotateRoute(fallbackRoute(config, routerName), "fallback", startedAt, mergeRouterTelemetry(context.telemetry, {
       router_dispatch_ms: dispatchMs
-    }), proxyContext);
+    }), proxyContext, commandLabel);
     return {
       ...fallback,
       ...(context.stage ? { router_failure_stage: context.stage } : {}),
       router_failure_kind: routerFailureKind(failureSummary, context.stage, context.timeoutKind),
       ...(context.timeoutKind ? { router_timeout_kind: context.timeoutKind } : {}),
-      reason: `Codex router failed: ${failureSummary}. ${fallback.reason}`
+      reason: `${routerName} failed: ${failureSummary}. ${fallback.reason}`
     };
   }
 }
@@ -163,15 +165,31 @@ function annotateRoute(
   source: NonNullable<RouteDecision["source"]>,
   startedAt: number,
   telemetry?: RouterExecutionTelemetry,
-  proxyContext?: RouterProxyContext
+  proxyContext?: RouterProxyContext,
+  routerCommand?: string
 ): RouteDecision {
   return {
     ...route,
     ...normalizeRouterTelemetry(telemetry),
     ...routerProxyRouteFields(proxyContext),
+    ...(routerCommand ? { router_command: routerCommand } : {}),
     source,
     duration_ms: Math.max(0, Date.now() - startedAt)
   };
+}
+
+export function routerCommandLabel(command: string): string {
+  const executable = command.trim().split(/[\\/]/).filter(Boolean).at(-1) ?? "router";
+  const safe = sanitizeRouterText(executable)
+    .replace(/[\u0000-\u001f\u007f|·]+/g, "-")
+    .replace(/\s+/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-|-$/g, "");
+  return Array.from(safe || "router").slice(0, 80).join("");
+}
+
+function routerDisplayName(commandLabel: string): string {
+  return /^codex(?:\.exe)?$/i.test(commandLabel) ? "Codex router" : `Router ${commandLabel}`;
 }
 
 export async function runCodexRouterProcess(
@@ -182,6 +200,7 @@ export async function runCodexRouterProcess(
   onProgress?: RouterProgressListener
 ): Promise<CodexRouteRunnerResult> {
   const { command, args, timeoutMs, firstOutputTimeoutMs, idleTimeoutMs, maxOutputBytes } = config.router.codex;
+  const routerName = routerDisplayName(routerCommandLabel(command));
 
   if (signal?.aborted) {
     throw cancellationError();
@@ -293,7 +312,7 @@ export async function runCodexRouterProcess(
       }
       void terminateProcessTree(child, {
         processGroup: detached,
-        label: "Codex router process",
+        label: `${routerName} process`,
         termGraceMs: 250,
         killWaitMs: 500,
         pollMs: 20
@@ -302,7 +321,7 @@ export async function runCodexRouterProcess(
         (cleanupError: unknown) => finish(
           cleanupError instanceof ProcessTreeCleanupError
             ? cleanupError
-            : new ProcessTreeCleanupError(`Codex router cleanup failed: ${errorMessage(cleanupError)}`)
+            : new ProcessTreeCleanupError(`${routerName} cleanup failed: ${errorMessage(cleanupError)}`)
         )
       );
     };
@@ -321,7 +340,7 @@ export async function runCodexRouterProcess(
         : "";
       const timeoutLabel = kind === "first-output" ? " first output" : kind === "idle" ? " idle" : "";
       terminateThenFinish(
-        new Error(`Codex router${timeoutLabel} timed out after ${limitMs}ms${proxyContext}${detail ? `: ${detail}` : ""}`),
+        new Error(`${routerName}${timeoutLabel} timed out after ${limitMs}ms${proxyContext}${detail ? `: ${detail}` : ""}`),
         stdout,
         stage,
         kind
@@ -333,7 +352,7 @@ export async function runCodexRouterProcess(
         return false;
       }
       terminateThenFinish(
-        new Error(`Codex router output exceeded ${maxOutputBytes} byte limit`),
+        new Error(`${routerName} output exceeded ${maxOutputBytes} byte limit`),
         stdout,
         "response"
       );
@@ -438,7 +457,7 @@ export async function runCodexRouterProcess(
       const detail = (stderr || stdout).trim();
       finish(
         new Error(
-          `Codex router exited with ${signal ? `signal ${signal}` : `code ${code ?? 1}`}${detail ? `: ${detail}` : ""}`
+          `${routerName} exited with ${signal ? `signal ${signal}` : `code ${code ?? 1}`}${detail ? `: ${detail}` : ""}`
         ),
         stdout,
         "exit"
@@ -446,7 +465,7 @@ export async function runCodexRouterProcess(
     });
 
     child.stdin.once("error", (error) => {
-      terminateThenFinish(new Error(`Codex router input failed: ${error.message}`), stdout, "input");
+      terminateThenFinish(new Error(`${routerName} input failed: ${error.message}`), stdout, "input");
     });
 
     if (signal?.aborted) {
@@ -674,20 +693,21 @@ function buildCodexRouterPrompt(request: string, config: AppConfig): string {
 }
 
 function parseCodexRoute(output: string, config: AppConfig): RouteDecision {
+  const routerName = routerDisplayName(routerCommandLabel(config.router.codex.command));
   const jsonText = extractJsonObject(output);
   const parsed: unknown = JSON.parse(jsonText);
   if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-    throw new Error("Invalid Codex router response object");
+    throw new Error(`Invalid ${routerName} response object`);
   }
   const record = parsed as Record<string, unknown>;
   const mode = typeof record.mode === "string" ? record.mode.trim().toLowerCase() : "";
   if (mode !== "simple" && mode !== "complex") {
-    throw new Error("Invalid Codex router mode");
+    throw new Error(`Invalid ${routerName} mode`);
   }
   const reason = typeof record.reason === "string" ? record.reason.trim() : "";
   return {
     mode,
-    reason: reason ? sanitizeRouterText(reason) : "Codex router decision.",
+    reason: reason ? sanitizeRouterText(reason) : `${routerName} decision.`,
     suggested_roles: mode === "complex" ? ["judge", "actor", "critic"] : [],
     judge_engine: config.pairing.judge,
     actor_engine: config.pairing.actor,
@@ -708,16 +728,16 @@ function extractJsonObject(output: string): string {
   return match[0];
 }
 
-function fallbackRoute(config: AppConfig): RouteDecision {
+function fallbackRoute(config: AppConfig, routerName: string): RouteDecision {
   if (config.router.codex.fallback === "simple") {
-    return simpleRoute("Codex router fallback forced simple.", config);
+    return simpleRoute(`${routerName} fallback forced simple.`, config);
   }
 
   if (config.router.codex.fallback === "complex") {
-    return complexRoute("Codex router fallback forced complex.", config);
+    return complexRoute(`${routerName} fallback forced complex.`, config);
   }
 
-  return complexRoute("Codex router fallback forced complex.", config);
+  return complexRoute(`${routerName} fallback forced complex.`, config);
 }
 
 function summarizeRouterError(error: unknown): string {

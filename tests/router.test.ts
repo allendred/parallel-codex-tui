@@ -5,7 +5,7 @@ import { describe, expect, it, vi } from "vitest";
 import { defaultConfig } from "../src/core/config.js";
 import { processIsAlive } from "../src/core/process-ownership.js";
 import * as router from "../src/core/router.js";
-import { routeRequestWithCodex } from "../src/core/router.js";
+import { routeRequestWithCodex, routerCommandLabel } from "../src/core/router.js";
 import type { CodexRouteRunner } from "../src/core/router.js";
 
 describe("routeRequestWithCodex", () => {
@@ -93,6 +93,34 @@ describe("routeRequestWithCodex", () => {
     expect(route.reason).toBe("Codex saw an optimization request.");
     expect(route.source).toBe("codex");
     expect(route.duration_ms).toEqual(expect.any(Number));
+  });
+
+  it("records only the executable name for a custom Router command", async () => {
+    const config = defaultConfig("/tmp/project");
+    config.router.codex.command = "/opt/private/bin/acme-router";
+    const runner: CodexRouteRunner = async () => JSON.stringify({
+      mode: "simple",
+      reason: "Custom Router selected Main."
+    });
+
+    const route = await routeRequestWithCodex("你好", config, runner);
+
+    expect(route.router_command).toBe("acme-router");
+    expect(JSON.stringify(route)).not.toContain("/opt/private");
+  });
+
+  it("names a custom Router command in fallback errors", async () => {
+    const config = defaultConfig("/tmp/project");
+    config.router.codex.command = "/opt/private/bin/acme-router";
+
+    const route = await routeRequestWithCodex("你好", config, async () => {
+      throw new Error("upstream unavailable");
+    });
+
+    expect(route).toMatchObject({ source: "fallback", router_command: "acme-router" });
+    expect(route.reason).toContain("Router acme-router failed: upstream unavailable");
+    expect(route.reason).toContain("Router acme-router fallback forced simple.");
+    expect(route.reason).not.toContain("Codex router");
   });
 
   it("normalizes harmless casing and whitespace in Codex route modes", async () => {
@@ -596,7 +624,9 @@ describe("routeRequestWithCodex", () => {
 
       expect(error).toMatchObject({
         name: "ProcessTreeCleanupError",
-        message: expect.stringContaining(`Could not terminate Codex router process ${pid}`)
+        message: expect.stringContaining(
+          `Could not terminate Router ${routerCommandLabel(process.execPath)} process ${pid}`
+        )
       });
       expect(error).not.toMatchObject({ source: "fallback" });
       expect(processIsAlive(pid)).toBe(true);
@@ -846,7 +876,7 @@ describe("routeRequestWithCodex", () => {
       mode: "simple",
       source: "fallback"
     });
-    expect(route.reason).toContain("Codex router input failed");
+    expect(route.reason).toContain(`Router ${routerCommandLabel(process.execPath)} input failed`);
     expect(route.duration_ms).toBeLessThan(1500);
     expect(route).toMatchObject({
       router_failure_kind: "input",

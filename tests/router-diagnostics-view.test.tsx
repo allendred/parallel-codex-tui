@@ -25,6 +25,7 @@ describe("RouterDiagnosticsView", () => {
     expect(routerDiagnosticsPolicy).toBeTypeOf("function");
     expect(routerDiagnosticsPolicy?.(router, {})).toEqual({
       mode: "auto",
+      command: "codex",
       timeoutMs: 30000,
       firstOutputTimeoutMs: 15000,
       idleTimeoutMs: 15000,
@@ -121,6 +122,29 @@ describe("RouterDiagnosticsView", () => {
     expect(text).not.toContain("other workspace");
   });
 
+  it("shows a custom Router runner in policy and route evidence", () => {
+    const displayLines = (
+      diagnosticsModule as typeof diagnosticsModule & {
+        routerDiagnosticsDisplayLines?: (
+          records: RouterAuditRecord[],
+          routerPolicy: ReturnType<typeof policy>,
+          terminalWidth: number
+        ) => Array<{ text: string }>;
+      }
+    ).routerDiagnosticsDisplayLines;
+    const fallback = { ...records()[1]!, router_command: "acme-router" };
+
+    const text = displayLines?.(
+      [fallback],
+      { ...policy(), command: "acme-router" },
+      120
+    ).map((line) => line.text).join(" ") ?? "";
+
+    expect(text).toContain("policy · auto · runner acme-router");
+    expect(text).toContain("complex · fallback · runner acme-router");
+    expect(text).toContain("evidence · timeout · runner acme-router · idle");
+  });
+
   it("flags timeout budgets that are far above or below successful p95 latency", () => {
     const routerDiagnosticsBudget = (
       diagnosticsModule as typeof diagnosticsModule & {
@@ -207,6 +231,7 @@ describe("RouterDiagnosticsView", () => {
 function policy() {
   return {
     mode: "auto" as const,
+    command: "codex",
     timeoutMs: 30000,
     firstOutputTimeoutMs: 15000,
     idleTimeoutMs: 15000,
@@ -236,6 +261,7 @@ function records(): RouterAuditRecord[] {
       actor_engine: "codex",
       critic_engine: "codex",
       source: "codex",
+      router_command: "codex",
       duration_ms: 9700,
       router_dispatch_ms: 1,
       router_spawn_ms: 5,
@@ -265,6 +291,7 @@ function records(): RouterAuditRecord[] {
       actor_engine: "codex",
       critic_engine: "codex",
       source: "fallback",
+      router_command: "codex",
       duration_ms: 30000,
       router_timeout_ms: 30000,
       router_first_output_timeout_ms: 15000,

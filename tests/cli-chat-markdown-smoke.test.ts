@@ -200,22 +200,22 @@ describe("CLI chat Markdown smoke", () => {
       await waitForScreenText(
         () => screenWrites,
         screen,
-        "route diagnostics · via 127.0.0.1:7890 · 0s / 5s"
+        "route diagnostics · runner node · via 127.0.0.1:7890 · 0s / 5s"
       );
       await waitForScreenText(
         () => screenWrites,
         screen,
-        "route diagnostics · via 127.0.0.1:7890 · 1s / 5s"
+        "route diagnostics · runner node · via 127.0.0.1:7890 · 1s / 5s"
       );
       await waitForScreenText(
         () => screenWrites,
         screen,
-        "route retry 2/2 · via 127.0.0.1:7890 · 500ms backoff"
+        "route retry 2/2 · runner node · via 127.0.0.1:7890 · 500ms backoff"
       );
       await waitForScreenText(
         () => screenWrites,
         screen,
-        "route diagnostics · try 2 · via 127.0.0.1:7890"
+        "route diagnostics · try 2 · runner node · via 127.0.0.1:7890"
       );
       await waitForScreenText(
         () => screenWrites,

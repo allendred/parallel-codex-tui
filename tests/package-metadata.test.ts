@@ -214,6 +214,7 @@ describe("package metadata", () => {
     expect(readme).toContain("`via <proxy-host:port>` remains context, not a claim that the proxy caused the failure");
     expect(readme).toContain("`starting`, `waiting output`, `diagnostics`, `receiving`, `parsing`, and `stopping`");
     expect(readme).toContain("normalized proxy source/variable, sanitized proxy host:port");
+    expect(readme).toContain("sanitized Router executable name");
     expect(readme).toContain("`firstOutputTimeoutMs` stops a silent process");
     expect(readme).toContain("`idleTimeoutMs` resets after every stdout or stderr chunk");
     expect(readme).toContain("The 15-second first-output and idle defaults stay below the 30-second total ceiling");

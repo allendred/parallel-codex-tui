@@ -941,6 +941,7 @@ describe("Orchestrator", () => {
       mode: "simple",
       reason: "Greeting needs Main only.",
       source: "codex",
+      router_command: "codex",
       router_timeout_ms: 30000,
       router_first_output_timeout_ms: 15000,
       router_idle_timeout_ms: 15000,
@@ -2161,6 +2162,7 @@ describe("Orchestrator", () => {
     expect(routeStart).toEqual({
       scope: "follow-up",
       mode: "auto",
+      command: "codex",
       timeoutMs: 20000,
       phase: "starting",
       attempt: 1,

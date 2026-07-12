@@ -145,6 +145,7 @@ export function formatRoutePendingStatus(state: RouteStartInfo | null, elapsedMs
   if (state.phase === "retrying") {
     const details = [
       `retry ${state.attempt}/${state.maxAttempts}`,
+      ...(state.command && state.command !== "codex" ? [`runner ${state.command}`] : []),
       ...(path ? [path] : []),
       `${formatRouteDuration(state.retryDelayMs ?? 0)} backoff`
     ];
@@ -154,6 +155,7 @@ export function formatRoutePendingStatus(state: RouteStartInfo | null, elapsedMs
   const details = [
     label,
     ...(state.attempt > 1 ? [`try ${state.attempt}`] : []),
+    ...(state.command && state.command !== "codex" ? [`runner ${state.command}`] : []),
     ...(path ? [path] : [])
   ];
   if (typeof elapsedMs === "number") {

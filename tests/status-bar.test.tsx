@@ -23,6 +23,7 @@ describe("StatusBar", () => {
       ["checking-progress", "route checking · 7s / 30s"],
       ["diagnostics-progress", "route diagnostics · via proxy.test:8443 · 7s / 30s"],
       ["receiving-progress", "route receiving · direct · 7s / 30s"],
+      ["custom-router", "route waiting output · runner acme-router · direct · 7s / 30s"],
       ["retrying", "route retry 2/2 · via proxy.test:8443 · 500ms backoff"],
       ["follow-up", "workers 3 | done 3 | route follow-up · 20s max"],
       ["wave", "wave 2/3 · verification 0/1 | workers 4 | run 1 done 3"],

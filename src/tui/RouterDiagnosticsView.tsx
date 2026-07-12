@@ -8,13 +8,14 @@ import {
   type RouterAuditRecord,
   type RouterFailureKind
 } from "../core/router-audit.js";
-import { routerProxyContext } from "../core/router.js";
+import { routerCommandLabel, routerProxyContext } from "../core/router.js";
 import { compactEndByDisplayWidth, displayWidth, wrapByDisplayWidth } from "./display-width.js";
 import { formatRouteStatus } from "./status-line.js";
 import { TUI_THEME } from "./theme.js";
 
 export interface RouterDiagnosticsPolicy {
   mode: "auto" | "simple" | "complex";
+  command: string;
   timeoutMs: number;
   firstOutputTimeoutMs: number;
   idleTimeoutMs: number;
@@ -38,6 +39,7 @@ export function routerDiagnosticsPolicy(
   const proxy = routerProxyContext(router.codex.env, env);
   return {
     mode: router.defaultMode,
+    command: routerCommandLabel(router.codex.command),
     timeoutMs: router.codex.timeoutMs,
     firstOutputTimeoutMs: router.codex.firstOutputTimeoutMs,
     idleTimeoutMs: router.codex.idleTimeoutMs,
@@ -167,7 +169,15 @@ export function routerDiagnosticsDisplayLines(
     { text: routerDiagnosticsLatencyText(visibleRecords), tone: "muted" },
     budget,
     {
-      text: `policy · ${policy.mode} · total ${formatDiagnosticDuration(policy.timeoutMs)} / ${formatDiagnosticDuration(policy.followUpTimeoutMs)} · first ${formatDiagnosticDuration(policy.firstOutputTimeoutMs)} · idle ${formatDiagnosticDuration(policy.idleTimeoutMs)} · retry ${policy.maxAttempts}x / ${formatDiagnosticDuration(policy.retryDelayMs)} · fallback ${policy.fallback}`,
+      text: [
+        `policy · ${policy.mode}`,
+        ...(policy.command !== "codex" ? [`runner ${policy.command}`] : []),
+        `total ${formatDiagnosticDuration(policy.timeoutMs)} / ${formatDiagnosticDuration(policy.followUpTimeoutMs)}`,
+        `first ${formatDiagnosticDuration(policy.firstOutputTimeoutMs)}`,
+        `idle ${formatDiagnosticDuration(policy.idleTimeoutMs)}`,
+        `retry ${policy.maxAttempts}x / ${formatDiagnosticDuration(policy.retryDelayMs)}`,
+        `fallback ${policy.fallback}`
+      ].join(" · "),
       tone: "muted"
     },
     {
@@ -259,12 +269,15 @@ function routerAuditStatus(record: RouterAuditRecord): string {
     ? record
     : { ...record, router_failure_kind: record.failure_kind };
   const formatted = formatRouteStatus(route).replace(/^route\s+/, "");
-  if (record.source === "codex") {
-    const parts = formatted.split(/\s+·\s+/);
-    parts.splice(1, 0, "codex");
-    return parts.join(" · ");
+  const parts = formatted.split(/\s+·\s+/);
+  if (record.router_command && record.router_command !== "codex") {
+    const sourceIndex = parts.findIndex((part) => part === "codex" || part === "fallback" || part === "forced");
+    parts.splice(Math.max(1, sourceIndex + 1), 0, `runner ${safeDiagnosticText(record.router_command)}`);
   }
-  return formatted;
+  if (record.source === "codex") {
+    parts.splice(1, 0, "codex");
+  }
+  return parts.join(" · ");
 }
 
 function routerAuditHeading(record: RouterAuditRecord, workspace: string, width: number): string {
@@ -395,6 +408,9 @@ function routerAuditEvidence(record: RouterAuditRecord): string | null {
   }
   const kind = routerAuditFailureKind(record) ?? "unknown";
   const parts = [`evidence · ${routerFailureKindLabel(kind)}`];
+  if (record.router_command && record.router_command !== "codex") {
+    parts.push(`runner ${safeDiagnosticText(record.router_command)}`);
+  }
   if (kind === "timeout" && record.router_timeout_kind) {
     parts.push(record.router_timeout_kind.replaceAll("-", " "));
   }

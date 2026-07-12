@@ -64,6 +64,12 @@ describe("formatStatusLine", () => {
     expect(formatRouteStatus?.({
       mode: "simple",
       source: "codex",
+      duration_ms: 42,
+      router_command: "acme-router"
+    })).toBe("route simple · 42ms");
+    expect(formatRouteStatus?.({
+      mode: "simple",
+      source: "codex",
       duration_ms: 900,
       router_attempt: 2,
       router_total_duration_ms: 31500,
@@ -256,6 +262,14 @@ describe("formatStatusLine", () => {
       mode: "auto",
       timeoutMs: 30000,
       phase: "waiting-output",
+      command: "acme-router",
+      proxyConfigured: false
+    }, 7300)).toBe("route waiting output · runner acme-router · direct · 7s / 30s");
+    expect(formatRoutePendingStatus?.({
+      scope: "initial",
+      mode: "auto",
+      timeoutMs: 30000,
+      phase: "waiting-output",
       proxyConfigured: true,
       proxyEndpoint: "proxy.test:8443"
     }, 7300)).toBe("route waiting output · via proxy.test:8443 · 7s / 30s");
@@ -296,9 +310,10 @@ describe("formatStatusLine", () => {
       attempt: 2,
       maxAttempts: 2,
       retryDelayMs: 500,
+      command: "acme-router",
       proxyConfigured: true,
       proxyEndpoint: "proxy.test:8443"
-    }, 300)).toBe("route retry 2/2 · via proxy.test:8443 · 500ms backoff");
+    }, 300)).toBe("route retry 2/2 · runner acme-router · via proxy.test:8443 · 500ms backoff");
     expect(formatRoutePendingStatus?.({
       scope: "initial",
       mode: "auto",

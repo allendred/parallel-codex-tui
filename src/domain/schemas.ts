@@ -98,6 +98,7 @@ export const RouteDecisionSchema = z.object({
   router_parse_ms: z.number().nonnegative().optional(),
   router_stdout_bytes: z.number().int().nonnegative().optional(),
   router_stderr_bytes: z.number().int().nonnegative().optional(),
+  router_command: z.string().min(1).max(80).optional(),
   router_failure_stage: RouterFailureStageSchema.optional(),
   router_failure_kind: RouterFailureKindSchema.optional(),
   router_attempt: z.number().int().positive().optional(),
