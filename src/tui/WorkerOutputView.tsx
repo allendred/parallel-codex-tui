@@ -83,6 +83,7 @@ interface ParsedDiffFile {
   title: string;
   added: number;
   removed: number;
+  hunks: number;
   lines: RenderLine[];
 }
 
@@ -3926,7 +3927,7 @@ function renderDiffContent(text: string): RenderLine[] {
     const fileTitle = renderDiffFileTitle(trimmedStart);
     if (fileTitle) {
       flushCurrentFile();
-      currentFile = { title: fileTitle, added: 0, removed: 0, lines: [] };
+      currentFile = { title: fileTitle, added: 0, removed: 0, hunks: 0, lines: [] };
       oldLineNumber = 0;
       newLineNumber = 0;
       insideHunk = false;
@@ -3935,6 +3936,12 @@ function renderDiffContent(text: string): RenderLine[] {
 
     const hunkStart = parseHunkStart(trimmedStart);
     if (hunkStart) {
+      if (currentFile) {
+        if (currentFile.hunks > 0) {
+          currentFile.lines.push({ kind: "diff-hunk", text: trimmedStart });
+        }
+        currentFile.hunks += 1;
+      }
       oldLineNumber = hunkStart.oldStart;
       newLineNumber = hunkStart.newStart;
       insideHunk = true;
@@ -4728,7 +4735,7 @@ export function workerOutputLineLayout(kind: WorkerOutputLineKind, text: string)
     return { gutter: "", body: `└ ${text}` };
   }
   if (kind === "diff-hunk") {
-    return { gutter: "", body: `hunk ${text}` };
+    return { gutter: "", body: text };
   }
   if (kind === "diff-context") {
     return { gutter: "", body: text };
@@ -5381,6 +5388,9 @@ export function workerOutputBodyDisplayLines(kind: WorkerOutputLineKind, text: s
 }
 
 function compactWorkerBodyForWidth(kind: WorkerOutputLineKind, body: string, width: number): string {
+  if (kind === "diff-hunk") {
+    return compactDiffHunkBodyForWidth(body, width);
+  }
   if (kind === "summary") {
     return compactSummaryBodyForWidth(body, width);
   }
@@ -5422,6 +5432,26 @@ function compactWorkerBodyForWidth(kind: WorkerOutputLineKind, body: string, wid
     return compactNarrowWorkerBody(body, width);
   }
   return body;
+}
+
+function compactDiffHunkBodyForWidth(body: string, width: number): string {
+  if (displayWidth(body) <= width) {
+    return body;
+  }
+  const match = body.match(/^@@\s+-(\d+)(?:,\d+)?\s+\+(\d+)(?:,\d+)?\s+@@(?:\s+.*)?$/);
+  if (!match) {
+    return compactEndByDisplayWidth(body, width);
+  }
+  const oldStart = match[1] ?? "0";
+  const newStart = match[2] ?? "0";
+  const candidates = [
+    `@@ -${oldStart} +${newStart} @@`,
+    `-${oldStart} +${newStart}`,
+    `${oldStart}>${newStart}`,
+    `+${newStart}`
+  ];
+  return candidates.find((candidate) => displayWidth(candidate) <= width)
+    ?? compactEndByDisplayWidth(body, width);
 }
 
 function compactContextWindowErrorForWidth(body: string, width: number): string {

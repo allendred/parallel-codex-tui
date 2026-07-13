@@ -68,6 +68,10 @@ describe("CLI Worker log search smoke", () => {
       "@@ -1,2 +1,2 @@",
       "-const mode = 'old';",
       "+const mode = 'new';",
+      " context line",
+      "@@ -20,2 +20,2 @@",
+      "-const fallback = 'old';",
+      "+const fallback = 'new';",
       ""
     ].join("\n"));
     await writeText(outputPath, [
@@ -123,7 +127,10 @@ describe("CLI Worker log search smoke", () => {
       await waitForScreenText(() => screenWrites, screen, "^F find");
       child.write("e");
       await waitForScreenText(() => screenWrites, screen, "error · unique search failure");
-      child.write("dd");
+      child.write("d");
+      await waitForScreenText(() => screenWrites, screen, "@@ -20,2 +20,2 @@");
+      await waitForScreenText(() => screenWrites, screen, "20 - const fallback = 'old';");
+      child.write("d");
       await waitForScreenText(() => screenWrites, screen, "actor/mock · 1/1 · top");
       await waitForScreenText(() => screenWrites, screen, "1 - const mode = 'old';");
 

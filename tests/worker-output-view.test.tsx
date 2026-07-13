@@ -6,6 +6,7 @@ import { render } from "ink-testing-library";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   WorkerOutputView,
+  type WorkerOutputNavigationTargets,
   type WorkerOutputLineKind,
   workerOutputBodyDisplayLines,
   workerOutputCodeDisplayLines,
@@ -1667,6 +1668,56 @@ describe("WorkerOutputView", () => {
       expect(frame).not.toContain("json |");
       expect(frame).not.toContain("msg  |");
       expect(frame).not.toContain("\u001b[32m");
+    } finally {
+      unmount();
+    }
+  });
+
+  it("separates later diff hunks and exposes them as navigation targets", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pct-worker-output-multi-hunk-"));
+    const workerDir = join(root, "actor-mock");
+    const navigation: WorkerOutputNavigationTargets[] = [];
+
+    await mkdir(workerDir, { recursive: true });
+    await writeFile(
+      join(workerDir, "patch.diff"),
+      [
+        "diff --git a/src/multi.ts b/src/multi.ts",
+        "index 1111111..2222222 100644",
+        "--- a/src/multi.ts",
+        "+++ b/src/multi.ts",
+        "@@ -1,2 +1,2 @@",
+        "-const first = 'old';",
+        "+const first = 'new';",
+        " first context",
+        "@@ -20,2 +20,2 @@",
+        "-const second = 'old';",
+        "+const second = 'new';",
+        " second context"
+      ].join("\n")
+    );
+    await writeFile(join(workerDir, "output.log"), "");
+
+    const { lastFrame, unmount } = render(
+      <WorkerOutputView
+        title="Actor (mock) output"
+        role="actor"
+        logPath={join(workerDir, "output.log")}
+        height={5}
+        terminalWidth={80}
+        onNavigationChange={(targets) => navigation.push(targets)}
+      />
+    );
+
+    try {
+      await waitForFrame(lastFrame, "@@ -20,2 +20,2 @@");
+
+      const frame = lastFrame() ?? "";
+      const diffOffsets = navigation.at(-1)?.diffOffsets ?? [];
+      expect(frame).toContain("@@ -20,2 +20,2 @@");
+      expect(frame).not.toContain("hunk @@");
+      expect(diffOffsets).toHaveLength(2);
+      expect(new Set(diffOffsets).size).toBe(2);
     } finally {
       unmount();
     }
@@ -4508,6 +4559,18 @@ describe("WorkerOutputView", () => {
   });
 
   it("wraps ordinary worker log rows instead of truncating them in narrow terminals", () => {
+    expect(workerOutputBodyDisplayLines("diff-hunk", "@@ -20,2 +20,2 @@", 32)).toEqual([
+      "@@ -20,2 +20,2 @@"
+    ]);
+    expect(workerOutputBodyDisplayLines("diff-hunk", "@@ -20,2 +20,2 @@", 14)).toEqual([
+      "@@ -20 +20 @@"
+    ]);
+    expect(workerOutputBodyDisplayLines("diff-hunk", "@@ -20,2 +20,2 @@", 8)).toEqual([
+      "-20 +20"
+    ]);
+    expect(workerOutputBodyDisplayLines("diff-hunk", "@@ -20,2 +20,2 @@", 5)).toEqual([
+      "20>20"
+    ]);
     expect(workerOutputBodyDisplayLines("list", "只能靠鼠标点击，键盘或触控缺失", 18)).toEqual([
       "• 只能靠鼠标点击，",
       "  键盘或触控缺失"
