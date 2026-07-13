@@ -626,6 +626,7 @@ export function App({
               id: worker.id,
               label: worker.label,
               role: worker.role,
+              engine: worker.engine,
               state: workerStatus.state,
               status: formatWorkerRuntimeStatus(workerStatus),
               runtimeStatus: workerStatus
@@ -655,6 +656,9 @@ export function App({
         for (const update of updates) {
           if (update) {
             next[update.role] = update.status;
+            if (update.role === "main") {
+              next.mainEngine = update.engine;
+            }
           }
         }
         return next;
@@ -1670,7 +1674,9 @@ export function App({
         }
       },
       onStatus: (nextStatus: WorkerRunStatus) => {
-        setStatus(nextStatus);
+        setStatus(nextStatus.main
+          ? { ...nextStatus, mainEngine: config.pairing.main }
+          : nextStatus);
         if (nextStatus.taskId !== "main") {
           activeTaskIdRef.current = nextStatus.taskId;
           setActiveTaskId(nextStatus.taskId);
@@ -3528,6 +3534,7 @@ function restoredWorkerStatusLine(
     }
     return [{
       role: worker.role,
+      engine: worker.engine,
       label: worker.label,
       status: formatWorkerRuntimeStatus(worker.runtimeStatus)
     }];
@@ -3539,6 +3546,9 @@ function restoredWorkerStatusLine(
   state.workers = restored.map(({ label, status }) => ({ label, status }));
   for (const worker of restored) {
     state[worker.role] = worker.status;
+    if (worker.role === "main") {
+      state.mainEngine = worker.engine;
+    }
   }
   return state;
 }

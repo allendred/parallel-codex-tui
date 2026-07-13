@@ -28,10 +28,11 @@ export function StatusBar({ text, terminalWidth: providedTerminalWidth, showTask
     return <IdleStatusRail terminalWidth={terminalWidth} fill={fillRail} />;
   }
 
-  const segments = omitTinyCurrentSegment(
+  const baseSegments = omitTinyCurrentSegment(
     readableCompletedSegments(parsedSegments, terminalWidth),
     terminalWidth
   );
+  const segments = fitMainIdentityBesideRoute(baseSegments, terminalWidth);
   const compact = !segments.some((segment) => segment.hideLabel)
     && shouldUseCompactStatus(segments, terminalWidth);
   const fittedSegments = fitStatusSegments(segments, terminalWidth, compact);
@@ -138,6 +139,40 @@ function readableCompletedSegments(segments: Segment[], terminalWidth: number): 
   return statusSegmentsWidth(readable, false) <= Math.max(1, terminalWidth - 2)
     ? readable
     : segments;
+}
+
+function fitMainIdentityBesideRoute(segments: Segment[], terminalWidth: number): Segment[] {
+  if (terminalWidth < 56 || segments.length !== 2) {
+    return segments;
+  }
+  const currentIndex = segments.findIndex((segment) => segment.label.toLowerCase() === "current");
+  const routeIndex = segments.findIndex((segment) => segment.label.toLowerCase() === "route");
+  if (currentIndex < 0 || routeIndex < 0 || statusSegmentsWidth(segments, false) <= terminalWidth - 2) {
+    return segments;
+  }
+  const current = segments[currentIndex];
+  const identity = current ? workerIdentityStatus(current.value) : null;
+  if (!current || identity?.role !== "main") {
+    return segments;
+  }
+
+  const route = segments[routeIndex];
+  if (!route) {
+    return segments;
+  }
+  const contentWidth = Math.max(1, terminalWidth - 2);
+  const currentValueWidth = Math.max(
+    1,
+    contentWidth
+      - statusSegmentsWidth([route], false)
+      - displayWidth(statusSegmentSeparator(false))
+      - displayWidth("@ ")
+  );
+  const value = compactCurrentStatusValue(current.value, currentValueWidth);
+  const fitted = segments.map((segment, index) => (
+    index === currentIndex ? { ...segment, value } : segment
+  ));
+  return statusSegmentsWidth(fitted, false) <= contentWidth ? fitted : segments;
 }
 
 function isIdleStatus(segments: Segment[]): boolean {
@@ -299,6 +334,16 @@ function compactCurrentStatusValue(text: string, maxLength: number): string {
   if (displayWidth(text) <= maxLength) {
     return text;
   }
+  const identity = workerIdentityStatus(text);
+  if (identity) {
+    const fullIdentity = `${identity.role}/${identity.engine}`;
+    if (displayWidth(fullIdentity) <= maxLength) {
+      return fullIdentity;
+    }
+    if (displayWidth(identity.engine) <= maxLength) {
+      return identity.engine;
+    }
+  }
   const role = workerIdentityRole(text);
   if (role && displayWidth(role) <= maxLength) {
     return role;
@@ -307,11 +352,22 @@ function compactCurrentStatusValue(text: string, maxLength: number): string {
 }
 
 function workerIdentityRole(text: string): string | null {
-  const match = text.trim().match(/^(main|judge|actor|critic)\/.+$/i);
+  const identity = workerIdentityStatus(text);
+  if (!identity) {
+    return null;
+  }
+  return displayRoleStatusLabel(identity.role);
+}
+
+function workerIdentityStatus(text: string): { role: string; engine: string } | null {
+  const match = text.trim().match(/^(main|judge|actor|critic)\/([^\s]+)(?:\s+.*)?$/i);
   if (!match) {
     return null;
   }
-  return displayRoleStatusLabel((match[1] ?? "").toLowerCase());
+  return {
+    role: (match[1] ?? "").toLowerCase(),
+    engine: match[2] ?? ""
+  };
 }
 
 function statusSegmentDisplay(segment: Segment, compact: boolean): { label: string; separator: string; value: string } {
@@ -362,7 +418,14 @@ function statusSegmentDisplay(segment: Segment, compact: boolean): { label: stri
     return { label: "w", separator: "", value: segment.value };
   }
   if (label === "current") {
-    return { label: "@", separator: " ", value: workerIdentityRole(segment.value) ?? segment.value };
+    const identity = workerIdentityStatus(segment.value);
+    return {
+      label: "@",
+      separator: " ",
+      value: identity?.role === "main"
+        ? segment.value
+        : workerIdentityRole(segment.value) ?? segment.value
+    };
   }
   if (segment.tone && segment.tone !== "idle") {
     return { label: compactToneLabel(segment.tone), separator: "", value: segment.value };
@@ -651,6 +714,10 @@ function parseStateCounts(part: string): Segment[] {
 }
 
 function parseCurrentStatus(part: string): Segment {
+  const mainEngineStatus = parseMainEngineStatus(part);
+  if (mainEngineStatus) {
+    return mainEngineStatus;
+  }
   const roleStatus = parseRoleStatus(part);
   if (roleStatus) {
     return roleStatus;
@@ -664,6 +731,38 @@ function parseCurrentStatus(part: string): Segment {
     value,
     tone
   };
+}
+
+function parseMainEngineStatus(part: string): Segment | null {
+  const match = part.match(/^main\/([^\s]+)\s+([^\s]+)\b/i);
+  if (!match) {
+    return null;
+  }
+  const status = (match[2] ?? "idle").toLowerCase();
+  return {
+    label: "CURRENT",
+    value: `main/${match[1]} ${status}`,
+    tone: runtimeStatusTone(status)
+  };
+}
+
+function runtimeStatusTone(status: string): StatusTone | undefined {
+  if (status === "run" || status === "running" || status === "starting") {
+    return "run";
+  }
+  if (status === "done") {
+    return "done";
+  }
+  if (status === "fail" || status === "failed" || status === "error") {
+    return "fail";
+  }
+  if (status === "wait" || status === "waiting" || status === "queued") {
+    return "wait";
+  }
+  if (status === "idle") {
+    return "idle";
+  }
+  return undefined;
 }
 
 function parseRoleStatus(part: string): Segment | null {

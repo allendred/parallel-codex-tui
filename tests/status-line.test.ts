@@ -34,6 +34,16 @@ describe("formatStatusLine", () => {
     ).toBe("main | main run");
   });
 
+  it("identifies the actual Main engine in chat status", () => {
+    expect(
+      formatStatusLine({
+        taskId: "main",
+        main: "starting · process spawned",
+        mainEngine: "claude"
+      })
+    ).toBe("main | main/claude starting");
+  });
+
   it("keeps the current Main turn ahead of completed historical task workers", () => {
     expect(formatStatusLine({
       taskId: "task-20260707-033720-fefc",

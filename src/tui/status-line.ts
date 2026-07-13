@@ -1,4 +1,4 @@
-import type { RouteDecision } from "../domain/schemas.js";
+import type { EngineName, RouteDecision } from "../domain/schemas.js";
 import type { RouteStartInfo } from "../orchestrator/orchestrator.js";
 import { classifyRouterFailure } from "../core/router-audit.js";
 import { compactEndByDisplayWidth } from "./display-width.js";
@@ -6,6 +6,7 @@ import { compactEndByDisplayWidth } from "./display-width.js";
 export interface StatusLineState {
   taskId: string;
   main?: string;
+  mainEngine?: EngineName;
   judge?: string;
   actor?: string;
   critic?: string;
@@ -38,7 +39,8 @@ export function formatStatusLine(state: StatusLineState | null): string {
 
   const parts = [compactTaskId(state.taskId)];
   if (state.main) {
-    parts.push(`main ${compactStatus(state.main)}`);
+    const mainIdentity = state.mainEngine ? `main/${state.mainEngine}` : "main";
+    parts.push(`${mainIdentity} ${compactStatus(state.main)}`);
     return parts.join(" | ");
   }
   if (state.featureProgress) {

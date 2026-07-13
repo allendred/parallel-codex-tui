@@ -84,6 +84,7 @@ describe("App Router reason", () => {
       await waitForFrame(view.lastFrame, "Short conversation without project work.");
       const routingFrame = view.lastFrame() ?? "";
       expect(routingFrame).toContain("route · simple · codex");
+      expect(routingFrame).toContain("@ main/claude run");
       expect(routingFrame).not.toContain("Final Main answer.");
 
       completion.resolve({

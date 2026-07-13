@@ -414,6 +414,54 @@ describe("StatusBar", () => {
     expect(frame).not.toContain("selected main");
   });
 
+  it("renders the actual Main engine and keeps its runtime state visible", () => {
+    const { lastFrame } = render(
+      <StatusBar
+        text="main | main/claude starting | route simple · 42ms"
+        terminalWidth={80}
+      />
+    );
+
+    const frame = lastFrame() ?? "";
+    expect(frame).toContain("@ main/claude starting");
+    expect(frame).toContain("route simple · 42ms");
+    expect(frame).not.toContain("chat starting");
+  });
+
+  it("degrades Main engine identity cleanly in narrow terminals", () => {
+    const frame = (terminalWidth: number): string => {
+      const view = render(
+        <StatusBar text="main | main/claude run" terminalWidth={terminalWidth} />
+      );
+      const value = view.lastFrame() ?? "";
+      view.unmount();
+      return value;
+    };
+
+    expect(frame(24)).toContain("@ main/claude run");
+    expect(frame(18)).toContain("@ main/claude");
+    expect(frame(18)).not.toContain(" run");
+    expect(frame(10)).toContain("@ claude");
+    expect(frame(10)).not.toContain("main/");
+    expect(frame(8)).toContain("@ chat");
+  });
+
+  it("keeps complete fallback evidence beside Main identity at 120 columns", () => {
+    const route = "route simple · fallback · user Main · try 2 · idle timeout after stderr · via 127.0.0.1:7890 · 4s total";
+    const { lastFrame } = render(
+      <StatusBar
+        text={`main | main/codex done | ${route}`}
+        terminalWidth={120}
+      />
+    );
+
+    const frame = lastFrame() ?? "";
+    expect(frame).toContain("@ main/codex");
+    expect(frame).not.toContain("@ main/codex done");
+    expect(frame).toContain(route);
+    expect(displayWidth(frame)).toBeLessThanOrEqual(120);
+  });
+
   it("renders route evidence as a quiet named segment instead of selected-worker chrome", () => {
     const { lastFrame } = render(
       <StatusBar
