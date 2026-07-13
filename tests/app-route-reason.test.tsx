@@ -14,6 +14,7 @@ import {
   chatMessageDisplayLines,
   routeDecisionChatMessage
 } from "../src/tui/App.js";
+import { displayWidth } from "../src/tui/display-width.js";
 
 describe("App Router reason", () => {
   it("renders the transient route as a distinct rail with an indented reason", () => {
@@ -48,6 +49,55 @@ describe("App Router reason", () => {
         spans: [{ text: "  Short conversation without project work.", tone: "muted" }]
       }
     ]);
+  });
+
+  it("keeps wrapped Router reasons indented inside the rail", () => {
+    const route: RouteDecision = {
+      mode: "complex",
+      reason: "用户要求跨工作区实现多个功能，并且需要保留当前任务上下文与原生会话。",
+      source: "codex",
+      suggested_roles: ["judge", "actor", "critic"],
+      judge_engine: "codex",
+      actor_engine: "codex",
+      critic_engine: "claude"
+    };
+
+    const lines = chatMessageDisplayLines([{
+      from: "system",
+      kind: "route",
+      text: routeDecisionChatMessage(route)
+    }], 30, 10);
+    const reasonLines = lines.slice(1);
+
+    expect(reasonLines.length).toBeGreaterThan(1);
+    expect(reasonLines.every((line) => line.text.startsWith("  "))).toBe(true);
+    expect(reasonLines.every((line) => line.background === "rail")).toBe(true);
+    expect(Math.max(...lines.map((line) => displayWidth(line.text)))).toBeLessThanOrEqual(28);
+  });
+
+  it("indents wrapped Router header continuations in nano terminals", () => {
+    const route: RouteDecision = {
+      mode: "complex",
+      reason: "Implementation request.",
+      source: "codex",
+      suggested_roles: ["judge", "actor", "critic"],
+      judge_engine: "codex",
+      actor_engine: "codex",
+      critic_engine: "claude"
+    };
+
+    const lines = chatMessageDisplayLines([{
+      from: "system",
+      kind: "route",
+      text: routeDecisionChatMessage(route)
+    }], 16, 10);
+    const reasonStart = lines.findIndex((line) => line.text.includes("Implementation"));
+    const headerLines = lines.slice(0, reasonStart);
+
+    expect(headerLines.length).toBeGreaterThan(1);
+    expect(headerLines[0]?.text.startsWith("route")).toBe(true);
+    expect(headerLines.slice(1).every((line) => line.text.startsWith("  "))).toBe(true);
+    expect(Math.max(...lines.map((line) => displayWidth(line.text)))).toBeLessThanOrEqual(14);
   });
 
   it("shows the Router reason before the selected execution path finishes", async () => {

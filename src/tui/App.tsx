@@ -2862,14 +2862,16 @@ function routeChatMessageLines(text: string): ChatMarkdownLine[] {
   return [
     {
       spans: routeChatHeaderSpans(header),
-      background: "rail"
+      background: "rail",
+      continuationPrefix: "  "
     },
     ...details.map((detail) => ({
       spans: mergeChatSpans([
         { text: "  ", tone: "muted" as const },
         ...applyChatSpanTone(chatMarkdownSpans(detail), "muted")
       ]),
-      background: "rail" as const
+      background: "rail" as const,
+      continuationPrefix: "  "
     }))
   ];
 }
