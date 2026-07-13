@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { defaultConfig } from "../src/core/config.js";
-import { pathExists, readJson, writeJson, writeText } from "../src/core/file-store.js";
+import { pathExists, readJson, readTextIfExists, writeJson, writeText } from "../src/core/file-store.js";
 import { SessionManager } from "../src/core/session-manager.js";
 import { TaskMetaSchema } from "../src/domain/schemas.js";
 import { Orchestrator, type WorkerRunStatus } from "../src/orchestrator/orchestrator.js";
@@ -67,6 +67,48 @@ describe("Orchestrator integration cancellation", () => {
     expect(await pathExists(join(fixture.root, "0001-alpha.txt"))).toBe(false);
     expect(await pathExists(join(fixture.root, "0001-beta.txt"))).toBe(false);
   });
+
+  it("retries a lost final integration checkpoint without rerunning workers", async () => {
+    const fixture = await integrationFixture("lost-checkpoint-retry");
+    const initial = await fixture.orchestrator.handleRequest({
+      request: "实现可恢复提交",
+      cwd: fixture.root
+    });
+    const task = fixture.manager.taskFromId(initial.taskId!);
+    const waveRoot = join(task.dir, "workspaces", "turn-0001", "wave-0001");
+    const integrationPath = join(waveRoot, "integration.json");
+    const integration = JSON.parse(await readTextIfExists(integrationPath)) as {
+      changed_paths: string[];
+      [key: string]: unknown;
+    };
+    const workspace = JSON.parse(await readTextIfExists(join(waveRoot, "workspace.json"))) as {
+      features: Record<string, string>;
+    };
+    await writeJson(join(waveRoot, "integration.pending.json"), {
+      version: 1,
+      state: "committing",
+      turn_id: "0001",
+      wave: 1,
+      feature_ids: Object.keys(workspace.features),
+      changed_paths: integration.changed_paths
+    });
+    await writeJson(integrationPath, { ...integration, state: "staged" });
+    const meta = await readJson(task.metaPath, TaskMetaSchema);
+    await writeJson(task.metaPath, { ...meta, status: "failed" });
+    const initialWorkerRuns = fixture.adapter.runs.length;
+
+    const retried = await fixture.orchestrator.retryTask({ taskId: task.id, cwd: fixture.root });
+
+    expect(retried.mode).toBe("complex");
+    expect(fixture.adapter.runs).toHaveLength(initialWorkerRuns);
+    expect(await readTextIfExists(join(fixture.root, "integrated.txt"))).toBe("committed\n");
+    expect(await pathExists(join(waveRoot, "integration.pending.json"))).toBe(false);
+    expect(JSON.parse(await readTextIfExists(integrationPath))).toMatchObject({
+      state: "integrated",
+      changed_paths: ["integrated.txt"]
+    });
+    await expect(readJson(task.metaPath, TaskMetaSchema)).resolves.toMatchObject({ status: "done" });
+  });
 });
 
 function abortAtIntegration(
@@ -98,15 +140,18 @@ async function integrationFixture(id: string, multiFeature = false) {
   });
   const adapter = new EditingMockWorkerAdapter(multiFeature);
   const orchestrator = new Orchestrator(config, manager, new Map([["mock", adapter]]));
-  return { root, manager, orchestrator };
+  return { root, manager, adapter, orchestrator };
 }
 
 class EditingMockWorkerAdapter extends MockWorkerAdapter {
+  readonly runs: WorkerRunSpec[] = [];
+
   constructor(private readonly multiFeature = false) {
     super();
   }
 
   override async run(spec: WorkerRunSpec): Promise<WorkerResult> {
+    this.runs.push(spec);
     const result = await super.run(spec);
     if (spec.role === "judge" && this.multiFeature && result.exitCode === 0 && !result.cancelled) {
       await writeJson(join(spec.filesDir, "features.json"), {

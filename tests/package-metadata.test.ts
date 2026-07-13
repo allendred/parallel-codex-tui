@@ -233,6 +233,10 @@ describe("package metadata", () => {
     expect(readme).toContain("Live workspace integration is the cancellation commit point");
     expect(readme).toContain("Cancellation immediately before commit leaves the live project untouched");
     expect(readme).toContain("task evidence finishes as `done` even if cancellation arrives after that commit");
+    expect(readme).toContain("writes `integration.pending.json` as a durable two-phase commit intent");
+    expect(readme).toContain("each live path must still match either the Wave baseline or integration snapshot");
+    expect(readme).toContain("partial apply resumes without rerunning completed Workers");
+    expect(readme).toContain("Any third-state content or extra live path blocks recovery");
     expect(readme).toContain("SQLite startup rebuild indexes only complete numbered Turn directories");
     expect(readme).toContain("startup notice distinguishes a restored follow-up Turn");
     expect(readme).toContain("request and route kept");

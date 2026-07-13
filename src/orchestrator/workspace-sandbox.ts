@@ -15,7 +15,7 @@ import {
   writeFile
 } from "node:fs/promises";
 import { basename, dirname, join, relative, resolve, sep } from "node:path";
-import { ensureDir, pathIsDirectory, writeJson } from "../core/file-store.js";
+import { ensureDir, pathExists, pathIsDirectory, writeJson } from "../core/file-store.js";
 
 const MAX_TEXT_MERGE_BYTES = 10 * 1024 * 1024;
 const FEATURE_ID_PATTERN = /^[a-z0-9][a-z0-9-]{0,63}$/;
@@ -24,6 +24,10 @@ export interface ParallelWorkspaceManagerOptions {
   workspaceRoot: string;
   taskDir: string;
   dataDir: string;
+}
+
+export interface ParallelWorkspaceManagerDependencies {
+  writeIntegrationCheckpoint?: (path: string, value: Record<string, unknown>) => Promise<void>;
 }
 
 export interface PrepareWorkspaceWaveInput {
@@ -87,6 +91,15 @@ interface MergeFileResult {
   stderr: string;
 }
 
+interface IntegrationCommitIntent {
+  version: 1;
+  state: "committing";
+  turn_id: string;
+  wave: number;
+  feature_ids: string[];
+  changed_paths: string[];
+}
+
 export class WorkspaceMergeConflictError extends Error {
   readonly paths: string[];
   readonly conflictDir: string;
@@ -106,11 +119,13 @@ export class WorkspaceMergeConflictError extends Error {
 export class WorkspaceLiveMutationError extends Error {
   readonly paths: string[];
 
-  constructor(paths: string[]) {
+  constructor(paths: string[], context: "before-commit" | "pending-commit" = "before-commit") {
     const count = paths.length;
     super(
       `Live workspace changed outside orchestration in ${count} ${count === 1 ? "path" : "paths"}: ${paths.join(", ")}. `
-      + "The isolated wave was not integrated."
+      + (context === "pending-commit"
+        ? "Pending integration recovery was blocked and its commit intent was preserved."
+        : "The isolated wave was not integrated.")
     );
     this.name = "WorkspaceLiveMutationError";
     this.paths = paths;
@@ -121,13 +136,18 @@ export class ParallelWorkspaceManager {
   private readonly workspaceRoot: string;
   private readonly taskDir: string;
   private readonly dataRelativePath: string | null;
+  private readonly writeIntegrationCheckpoint: (path: string, value: Record<string, unknown>) => Promise<void>;
 
-  constructor(options: ParallelWorkspaceManagerOptions) {
+  constructor(
+    options: ParallelWorkspaceManagerOptions,
+    dependencies: ParallelWorkspaceManagerDependencies = {}
+  ) {
     this.workspaceRoot = resolve(options.workspaceRoot);
     this.taskDir = resolve(options.taskDir);
     const candidateDataRoot = resolve(this.workspaceRoot, options.dataDir);
     const dataRoot = isWithin(candidateDataRoot, this.workspaceRoot) ? candidateDataRoot : null;
     this.dataRelativePath = dataRoot ? relative(this.workspaceRoot, dataRoot) : null;
+    this.writeIntegrationCheckpoint = dependencies.writeIntegrationCheckpoint ?? writeJson;
   }
 
   async prepareWave(input: PrepareWorkspaceWaveInput): Promise<FeatureWorkspaceWave> {
@@ -174,6 +194,11 @@ export class ParallelWorkspaceManager {
       if (!(await pathIsDirectory(featureDir))) {
         return null;
       }
+    }
+    const pendingCommit = await this.readPendingCommit(wave);
+    if (pendingCommit) {
+      await this.assertLiveWorkspaceCommitResumable(wave);
+      return wave;
     }
     try {
       await this.assertLiveWorkspaceUnchanged(wave);
@@ -239,6 +264,11 @@ export class ParallelWorkspaceManager {
   }
 
   async stageWave(wave: FeatureWorkspaceWave): Promise<WorkspaceIntegrationResult> {
+    const pendingCommit = await this.readPendingCommit(wave);
+    if (pendingCommit) {
+      await this.assertLiveWorkspaceCommitResumable(wave);
+      return { changedPaths: pendingCommit.changed_paths };
+    }
     await this.assertLiveWorkspaceUnchanged(wave);
     await rm(wave.conflictDir, { recursive: true, force: true });
     await rm(wave.stagingDir, { recursive: true, force: true });
@@ -271,9 +301,12 @@ export class ParallelWorkspaceManager {
       wave.integrationDir,
       (path) => this.excludeRelativePath(path)
     );
-    await writeJson(join(wave.rootDir, "integration.json"), {
+    await this.writeIntegrationCheckpoint(join(wave.rootDir, "integration.json"), {
       version: 1,
       state: "staged",
+      turn_id: wave.turnId,
+      wave: wave.wave,
+      feature_ids: wave.featureIds,
       changed_paths: changedPaths
     });
     return { changedPaths };
@@ -297,7 +330,12 @@ export class ParallelWorkspaceManager {
   }
 
   async commitWave(wave: FeatureWorkspaceWave): Promise<WorkspaceIntegrationResult> {
-    await this.assertLiveWorkspaceUnchanged(wave);
+    const pendingCommit = await this.readPendingCommit(wave);
+    if (pendingCommit) {
+      await this.assertLiveWorkspaceCommitResumable(wave);
+    } else {
+      await this.assertLiveWorkspaceUnchanged(wave);
+    }
     const liveConflictDir = join(wave.conflictDir, "live-workspace");
     const livePlan = await planWorkspaceMerge(
       wave.baselineDir,
@@ -310,13 +348,41 @@ export class ParallelWorkspaceManager {
       throw new WorkspaceMergeConflictError(livePlan.conflicts, liveConflictDir);
     }
 
+    const changedPaths = pendingCommit?.changed_paths ?? await workspaceChangedPaths(
+      wave.baselineDir,
+      wave.integrationDir,
+      (path) => this.excludeRelativePath(path)
+    );
+    const pendingPath = this.pendingCommitPath(wave);
+    if (!pendingCommit) {
+      await this.writeIntegrationCheckpoint(pendingPath, {
+        version: 1,
+        state: "committing",
+        turn_id: wave.turnId,
+        wave: wave.wave,
+        feature_ids: wave.featureIds,
+        changed_paths: changedPaths
+      });
+    }
     await applyMergePlan(this.workspaceRoot, livePlan);
-    await writeJson(join(wave.rootDir, "integration.json"), {
+    const incompletePaths = await workspaceChangedPaths(
+      wave.integrationDir,
+      this.workspaceRoot,
+      (path) => this.excludeRelativePath(path)
+    );
+    if (incompletePaths.length > 0) {
+      throw new Error(`Live workspace commit verification failed: ${incompletePaths.join(", ")}`);
+    }
+    await this.writeIntegrationCheckpoint(join(wave.rootDir, "integration.json"), {
       version: 1,
       state: "integrated",
-      changed_paths: livePlan.changedPaths
+      turn_id: wave.turnId,
+      wave: wave.wave,
+      feature_ids: wave.featureIds,
+      changed_paths: changedPaths
     });
-    return { changedPaths: livePlan.changedPaths };
+    await rm(pendingPath, { force: true });
+    return { changedPaths };
   }
 
   async integrateWave(wave: FeatureWorkspaceWave): Promise<WorkspaceIntegrationResult> {
@@ -332,6 +398,63 @@ export class ParallelWorkspaceManager {
     );
     if (paths.length > 0) {
       throw new WorkspaceLiveMutationError(paths);
+    }
+  }
+
+  private pendingCommitPath(wave: FeatureWorkspaceWave): string {
+    return join(wave.rootDir, "integration.pending.json");
+  }
+
+  private async readPendingCommit(wave: FeatureWorkspaceWave): Promise<IntegrationCommitIntent | null> {
+    const path = this.pendingCommitPath(wave);
+    if (!(await pathExists(path))) {
+      return null;
+    }
+    const record = await readJsonRecord(path);
+    const featureIds = readStringArray(record?.feature_ids);
+    const changedPaths = readStringArray(record?.changed_paths);
+    const expectedChangedPaths = await workspaceChangedPaths(
+      wave.baselineDir,
+      wave.integrationDir,
+      (item) => this.excludeRelativePath(item)
+    );
+    if (
+      record?.version !== 1
+      || record.state !== "committing"
+      || record.turn_id !== wave.turnId
+      || record.wave !== wave.wave
+      || !featureIds
+      || !changedPaths
+      || !sameStrings(featureIds, wave.featureIds)
+      || !sameStrings(changedPaths, expectedChangedPaths)
+    ) {
+      throw new Error(`Invalid integration commit intent: ${path}`);
+    }
+    return {
+      version: 1,
+      state: "committing",
+      turn_id: wave.turnId,
+      wave: wave.wave,
+      feature_ids: featureIds,
+      changed_paths: changedPaths
+    };
+  }
+
+  private async assertLiveWorkspaceCommitResumable(wave: FeatureWorkspaceWave): Promise<void> {
+    const exclude = (path: string) => this.excludeRelativePath(path);
+    const [baseline, integration, live] = await Promise.all([
+      workspaceManifest(wave.baselineDir, exclude),
+      workspaceManifest(wave.integrationDir, exclude),
+      workspaceManifest(this.workspaceRoot, exclude)
+    ]);
+    const paths = [...new Set([...baseline.keys(), ...integration.keys(), ...live.keys()])].sort();
+    const unsafe = paths.filter((path) => {
+      const current = live.get(path) ?? missingEntry();
+      return !sameEntry(current, baseline.get(path) ?? missingEntry())
+        && !sameEntry(current, integration.get(path) ?? missingEntry());
+    });
+    if (unsafe.length > 0) {
+      throw new WorkspaceLiveMutationError(unsafe, "pending-commit");
     }
   }
 
@@ -371,6 +494,19 @@ function recordKeysEqual(value: unknown, expected: string[]): boolean {
   const wanted = [...expected].sort();
   return actual.length === wanted.length
     && actual.every((key, index) => key === wanted[index]);
+}
+
+function readStringArray(value: unknown): string[] | null {
+  return Array.isArray(value) && value.every((item): item is string => typeof item === "string")
+    ? [...value]
+    : null;
+}
+
+function sameStrings(left: string[], right: string[]): boolean {
+  const actual = [...left].sort();
+  const expected = [...right].sort();
+  return actual.length === expected.length
+    && actual.every((value, index) => value === expected[index]);
 }
 
 async function workspaceChangedPaths(

@@ -2,7 +2,7 @@ import { chmod, lstat, mkdtemp, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { pathExists, readTextIfExists, writeText } from "../src/core/file-store.js";
+import { pathExists, readTextIfExists, writeJson, writeText } from "../src/core/file-store.js";
 import {
   ParallelWorkspaceManager,
   WorkspaceLiveMutationError,
@@ -89,6 +89,128 @@ describe("ParallelWorkspaceManager", () => {
 
     expect(restored?.rootDir).toBe(wave.rootDir);
     expect(await readTextIfExists(completedPath)).toBe("completed actor output\n");
+  });
+
+  it("resumes a partially applied live commit from its durable intent", async () => {
+    const workspaceRoot = await mkdtemp(join(tmpdir(), "pct-workspace-partial-commit-"));
+    const taskDir = join(workspaceRoot, ".parallel-codex", "sessions", "task-partial-commit");
+    await writeText(join(workspaceRoot, "base.txt"), "base\n");
+    const manager = new ParallelWorkspaceManager({ workspaceRoot, taskDir, dataDir: ".parallel-codex" });
+    const input = { turnId: "0001", wave: 1, featureIds: ["0001-ui"] };
+    const wave = await manager.prepareWave(input);
+    const featureRoot = wave.featureDirs.get("0001-ui") ?? "";
+    await writeText(join(featureRoot, "first.txt"), "first\n");
+    await writeText(join(featureRoot, "second.txt"), "second\n");
+    const staged = await manager.stageWave(wave);
+    await writePendingCommit(wave, staged.changedPaths);
+    await writeText(join(workspaceRoot, "first.txt"), "first\n");
+
+    const restored = await manager.restoreWave(input);
+    expect(restored).not.toBeNull();
+    if (!restored) {
+      throw new Error("Pending commit was not restored");
+    }
+    const result = await manager.commitWave(restored);
+
+    expect(result.changedPaths).toEqual(["first.txt", "second.txt"]);
+    expect(await readTextIfExists(join(workspaceRoot, "first.txt"))).toBe("first\n");
+    expect(await readTextIfExists(join(workspaceRoot, "second.txt"))).toBe("second\n");
+    expect(await pathExists(join(wave.rootDir, "integration.pending.json"))).toBe(false);
+    expect(JSON.parse(await readTextIfExists(join(wave.rootDir, "integration.json")))).toMatchObject({
+      state: "integrated",
+      changed_paths: ["first.txt", "second.txt"]
+    });
+  });
+
+  it("promotes a fully applied live commit when only its final checkpoint was lost", async () => {
+    const workspaceRoot = await mkdtemp(join(tmpdir(), "pct-workspace-lost-checkpoint-"));
+    const taskDir = join(workspaceRoot, ".parallel-codex", "sessions", "task-lost-checkpoint");
+    await writeText(join(workspaceRoot, "base.txt"), "base\n");
+    const manager = new ParallelWorkspaceManager({ workspaceRoot, taskDir, dataDir: ".parallel-codex" });
+    const wave = await manager.prepareWave({ turnId: "0001", wave: 1, featureIds: ["0001-ui"] });
+    const featureRoot = wave.featureDirs.get("0001-ui") ?? "";
+    await writeText(join(featureRoot, "committed.txt"), "committed\n");
+    const staged = await manager.stageWave(wave);
+    await writePendingCommit(wave, staged.changedPaths);
+    await writeText(join(workspaceRoot, "committed.txt"), "committed\n");
+
+    const result = await manager.commitWave(wave);
+
+    expect(result.changedPaths).toEqual(["committed.txt"]);
+    expect(await pathExists(join(wave.rootDir, "integration.pending.json"))).toBe(false);
+    expect(JSON.parse(await readTextIfExists(join(wave.rootDir, "integration.json")))).toMatchObject({
+      state: "integrated",
+      changed_paths: ["committed.txt"]
+    });
+  });
+
+  it("blocks pending commit recovery when the live workspace contains an external change", async () => {
+    const workspaceRoot = await mkdtemp(join(tmpdir(), "pct-workspace-pending-external-"));
+    const taskDir = join(workspaceRoot, ".parallel-codex", "sessions", "task-pending-external");
+    await writeText(join(workspaceRoot, "base.txt"), "base\n");
+    const manager = new ParallelWorkspaceManager({ workspaceRoot, taskDir, dataDir: ".parallel-codex" });
+    const input = { turnId: "0001", wave: 1, featureIds: ["0001-ui"] };
+    const wave = await manager.prepareWave(input);
+    const featureRoot = wave.featureDirs.get("0001-ui") ?? "";
+    await writeText(join(featureRoot, "first.txt"), "first\n");
+    await writeText(join(featureRoot, "second.txt"), "second\n");
+    const staged = await manager.stageWave(wave);
+    await writePendingCommit(wave, staged.changedPaths);
+    await writeText(join(workspaceRoot, "first.txt"), "first\n");
+    await writeText(join(workspaceRoot, "user-change.txt"), "keep me\n");
+
+    await expect(manager.restoreWave(input)).rejects.toMatchObject({
+      name: "WorkspaceLiveMutationError",
+      paths: ["user-change.txt"],
+      message: expect.stringContaining("commit intent was preserved")
+    });
+    expect(await pathExists(join(workspaceRoot, "second.txt"))).toBe(false);
+    expect(await pathExists(join(wave.rootDir, "integration.pending.json"))).toBe(true);
+  });
+
+  it("recovers after the live apply succeeds but final checkpoint persistence fails", async () => {
+    const workspaceRoot = await mkdtemp(join(tmpdir(), "pct-workspace-checkpoint-failure-"));
+    const taskDir = join(workspaceRoot, ".parallel-codex", "sessions", "task-checkpoint-failure");
+    await writeText(join(workspaceRoot, "base.txt"), "base\n");
+    let failIntegratedCheckpoint = true;
+    const manager = new ParallelWorkspaceManager(
+      { workspaceRoot, taskDir, dataDir: ".parallel-codex" },
+      {
+        writeIntegrationCheckpoint: async (path, value) => {
+          if (
+            failIntegratedCheckpoint
+            && value !== null
+            && typeof value === "object"
+            && "state" in value
+            && value.state === "integrated"
+          ) {
+            throw new Error("integration checkpoint disk unavailable");
+          }
+          await writeJson(path, value);
+        }
+      }
+    );
+    const input = { turnId: "0001", wave: 1, featureIds: ["0001-ui"] };
+    const wave = await manager.prepareWave(input);
+    await writeText(join(wave.featureDirs.get("0001-ui") ?? "", "committed.txt"), "committed\n");
+    await manager.stageWave(wave);
+
+    await expect(manager.commitWave(wave)).rejects.toThrow("integration checkpoint disk unavailable");
+    expect(await readTextIfExists(join(workspaceRoot, "committed.txt"))).toBe("committed\n");
+    expect(await pathExists(join(wave.rootDir, "integration.pending.json"))).toBe(true);
+    expect(JSON.parse(await readTextIfExists(join(wave.rootDir, "integration.json")))).toMatchObject({
+      state: "staged"
+    });
+
+    failIntegratedCheckpoint = false;
+    const restarted = new ParallelWorkspaceManager({ workspaceRoot, taskDir, dataDir: ".parallel-codex" });
+    const restored = await restarted.restoreWave(input);
+    expect(restored).not.toBeNull();
+    if (!restored) {
+      throw new Error("Lost checkpoint commit was not restored");
+    }
+    await expect(restarted.commitWave(restored)).resolves.toEqual({ changedPaths: ["committed.txt"] });
+    expect(await pathExists(join(wave.rootDir, "integration.pending.json"))).toBe(false);
   });
 
   it("rejects a wave checkpoint after the live workspace changes", async () => {
@@ -240,3 +362,17 @@ describe("ParallelWorkspaceManager", () => {
     expect(await readFile(join(workspaceRoot, "asset.bin"))).toEqual(Buffer.from("\u0000\u0001feature"));
   });
 });
+
+async function writePendingCommit(
+  wave: { rootDir: string; turnId: string; wave: number; featureIds: string[] },
+  changedPaths: string[]
+): Promise<void> {
+  await writeJson(join(wave.rootDir, "integration.pending.json"), {
+    version: 1,
+    state: "committing",
+    turn_id: wave.turnId,
+    wave: wave.wave,
+    feature_ids: wave.featureIds,
+    changed_paths: changedPaths
+  });
+}
