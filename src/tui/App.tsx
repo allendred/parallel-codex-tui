@@ -225,7 +225,6 @@ export function App({
   const [attachError, setAttachError] = useState<string | null>(null);
   const [nativeInput, setNativeInput] = useState("");
   const [workerScrollOffset, setWorkerScrollOffset] = useState(0);
-  const [workerMaxScrollOffset, setWorkerMaxScrollOffset] = useState(0);
   const [workerSearch, setWorkerSearch] = useState<WorkerSearchState>({
     open: false,
     query: "",
@@ -288,7 +287,6 @@ export function App({
   const workerSearchRef = useRef(workerSearch);
   const workerNavigationTargetsRef = useRef(workerNavigationTargets);
   const workerJumpIndexRef = useRef({ error: -1, diff: -1 });
-  const workerMaxScrollOffsetRef = useRef(workerMaxScrollOffset);
   const chatScrollOffsetRef = useRef(chatScrollOffset);
   const chatMaxScrollOffsetRef = useRef(chatMaxScrollOffset);
   const taskResultExpandedRef = useRef(taskResultExpanded);
@@ -415,10 +413,6 @@ export function App({
   useEffect(() => {
     selectedWorkerIndexRef.current = selectedWorkerIndex;
   }, [selectedWorkerIndex]);
-
-  useEffect(() => {
-    workerMaxScrollOffsetRef.current = workerMaxScrollOffset;
-  }, [workerMaxScrollOffset]);
 
   useEffect(() => {
     chatScrollOffsetRef.current = chatScrollOffset;
@@ -1265,7 +1259,7 @@ export function App({
           }
           const delta = mouseScrollDelta(workerChunk, 3);
           if (delta !== 0) {
-            setWorkerScrollOffset((current) => nextScrollOffset(current, delta, workerMaxScrollOffsetRef.current));
+            setWorkerScrollOffset((current) => nextScrollOffset(current, delta, null));
           }
         }
         return;
@@ -1346,10 +1340,11 @@ export function App({
           });
           return;
         }
-        if (wheelDelta !== 0 && workersRef.current.length > 0 && !taskResultExpandedRef.current) {
+        if (wheelDelta > 0 && workersRef.current.length > 0 && !taskResultExpandedRef.current) {
           setAttachError(null);
+          viewRef.current = "worker";
           setView("worker");
-          setWorkerScrollOffset((current) => nextScrollOffset(current, wheelDelta, workerMaxScrollOffsetRef.current));
+          setWorkerScrollOffset((current) => nextScrollOffset(current, wheelDelta, null));
           return;
         }
         if (chunk === "\u0017") {
@@ -1511,7 +1506,7 @@ export function App({
       }
       const delta = scrollDelta(inputKey, key, outputHeight - 1);
       if (delta !== 0) {
-        setWorkerScrollOffset((current) => nextScrollOffset(current, delta, workerMaxScrollOffset));
+        setWorkerScrollOffset((current) => nextScrollOffset(current, delta, null));
         return;
       }
     }
@@ -1799,7 +1794,6 @@ export function App({
         userSelectedWorkerRef.current = false;
         setSelectedWorkerIndex(0);
         setWorkerScrollOffset(0);
-        setWorkerMaxScrollOffset(0);
       }
       const result =
         target.kind === "task-turn"
@@ -1939,7 +1933,6 @@ export function App({
     selectedWorkerIndexRef.current = 0;
     setSelectedWorkerIndex(0);
     setWorkerScrollOffset(0);
-    setWorkerMaxScrollOffset(0);
     autoSelectedFailedWorkerRef.current = false;
     userSelectedWorkerRef.current = false;
     setAttachError(null);
@@ -2082,7 +2075,6 @@ export function App({
       selectedWorkerIndexRef.current = 0;
       setSelectedWorkerIndex(0);
       setWorkerScrollOffset(0);
-      setWorkerMaxScrollOffset(0);
       autoSelectedFailedWorkerRef.current = false;
       userSelectedWorkerRef.current = false;
       setAttachError(null);
@@ -2484,8 +2476,7 @@ export function App({
             height={Math.max(1, outputHeight - 1)}
             terminalWidth={terminalWidth}
             onNavigationChange={updateWorkerNavigationTargets}
-            onViewportChange={({ offset, maxOffset }) => {
-              setWorkerMaxScrollOffset(maxOffset);
+            onViewportChange={({ offset }) => {
               if (offset !== workerScrollOffset) {
                 setWorkerScrollOffset(offset);
               }

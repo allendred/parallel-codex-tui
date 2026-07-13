@@ -26,4 +26,9 @@ describe("scrolling", () => {
     expect(nextScrollOffset(2, 10, 7)).toBe(7);
     expect(nextScrollOffset(2, -10, 7)).toBe(0);
   });
+
+  it("preserves pending scroll intent while the viewport limit is unknown", () => {
+    expect(nextScrollOffset(3, 3, null)).toBe(6);
+    expect(nextScrollOffset(3, -10, null)).toBe(0);
+  });
 });

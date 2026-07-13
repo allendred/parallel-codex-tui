@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 import { spawn } from "node-pty";
 import { writeJson } from "../src/core/file-store.js";
 import { TaskMetaSchema, WorkerStatusSchema } from "../src/domain/schemas.js";
+import { NativeTerminalScreen } from "../src/tui/terminal-screen.js";
 
 describe("CLI worker log scroll smoke", () => {
   it("scrolls worker logs with SGR mouse wheel input", async () => {
@@ -13,6 +14,8 @@ describe("CLI worker log scroll smoke", () => {
     const taskDir = join(workspace, ".parallel-codex", "sessions", taskId);
     const workerDir = join(taskDir, "actor-mock");
     const chunks: string[] = [];
+    const screen = new NativeTerminalScreen({ cols: 140, rows: 24, scrollback: 1000 });
+    let screenWrites = Promise.resolve();
 
     await mkdir(workerDir, { recursive: true });
     await writeTaskFiles({ workspace, taskId, taskDir, workerDir });
@@ -32,18 +35,36 @@ describe("CLI worker log scroll smoke", () => {
       }
     );
 
-    child.onData((chunk) => chunks.push(chunk));
+    child.onData((chunk) => {
+      chunks.push(chunk);
+      screenWrites = screenWrites.then(() => screen.write(chunk));
+    });
     try {
       await waitForText(chunks, "attach");
-      await writeUntilText(child, chunks, "\x1b[<64;10;5M", "tail");
+      await screenWrites;
+      child.write("\x1b[<65;10;5M");
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      await screenWrites;
+      expect(screen.snapshot().split("\n")[0]).toContain("chat");
+      expect(screen.snapshot().split("\n")[0]).not.toContain("logs");
+
       let outputCursor = chunks.length;
       child.write("\x1b[<64;10;5M");
-      await waitForText(chunks, "back 3/", outputCursor);
+      child.write("\x1b[<64;10;5M");
+      child.write("\x1b[<64;10;5M");
+      await waitForText(chunks, "back 9/", outputCursor);
+      await settleScreen(() => screenWrites);
+      expect(screen.snapshot()).toContain("back 9/");
       outputCursor = chunks.length;
       child.write("\x1b[<65;10;5M");
+      child.write("\x1b[<65;10;5M");
+      child.write("\x1b[<65;10;5M");
       await waitForText(chunks, "tail", outputCursor);
+      await settleScreen(() => screenWrites);
+      expect(screen.snapshot()).toContain("tail");
+      expect(screen.snapshot()).not.toContain("back 9/");
 
-      expect(chunks.join("")).toContain("back 3/");
+      expect(chunks.join("")).toContain("back 9/");
     } finally {
       child.kill("SIGTERM");
     }
@@ -150,4 +171,9 @@ async function waitForText(chunks: string[], text: string, startIndex = 0, maxAt
     await new Promise((resolve) => setTimeout(resolve, 50));
   }
   throw new Error(`Timed out waiting for ${text}\nOutput:\n${chunks.join("")}`);
+}
+
+async function settleScreen(screenWrites: () => Promise<void>): Promise<void> {
+  await new Promise((resolve) => setTimeout(resolve, 100));
+  await screenWrites();
 }

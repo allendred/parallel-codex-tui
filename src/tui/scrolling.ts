@@ -19,8 +19,9 @@ export function selectViewportLines(text: string, height: number, offsetFromBott
   };
 }
 
-export function nextScrollOffset(current: number, delta: number, maxOffset: number): number {
-  return clamp(current + delta, 0, Math.max(0, maxOffset));
+export function nextScrollOffset(current: number, delta: number, maxOffset: number | null): number {
+  const next = Math.max(0, current + delta);
+  return maxOffset === null ? next : Math.min(next, Math.max(0, maxOffset));
 }
 
 function splitLines(text: string): string[] {

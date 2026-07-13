@@ -236,7 +236,8 @@ export function WorkerOutputView({
     };
   }, [contentKey, height, logPath, nanoOutput, role]);
 
-  const content = contentState.key === contentKey
+  const contentReady = contentState.key === contentKey;
+  const content = contentReady
     ? contentState.lines
     : [{ kind: "placeholder" as const, text: LOADING_WORKER_OUTPUT_TEXT }];
   const sourceLines = isNanoWorkerOutputWidth(terminalWidth) ? tinyWorkerOutputSourceLines(content, height) : content;
@@ -271,11 +272,14 @@ export function WorkerOutputView({
     );
 
   useEffect(() => {
+    if (!contentReady) {
+      return;
+    }
     onViewportChange?.({
       offset: selection.clampedOffset,
       maxOffset: selection.maxOffset
     });
-  }, [onViewportChange, selection.clampedOffset, selection.maxOffset]);
+  }, [contentReady, onViewportChange, selection.clampedOffset, selection.maxOffset]);
 
   useEffect(() => {
     onNavigationChange?.(navigationTargets);
