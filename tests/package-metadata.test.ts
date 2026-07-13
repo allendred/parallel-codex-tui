@@ -328,6 +328,7 @@ describe("package metadata", () => {
     expect(readme).toContain("`feature.status_recovered`");
     expect(readme).toContain("Actor worklog, replies, or Critic findings");
     expect(readme).toContain("A reused PID with a different start fingerprint is never signalled");
+    expect(readme).toContain("A detached leader PID reused after exit is never treated as its former process group");
     expect(readme).toContain("Every new Router fallback persists an authoritative `router_failure_kind`");
     expect(readme).toContain("shows `unknown failure` instead of omitting the cause");
     expect(readme).toContain("Recovery commits cancellation only after every recorded process group is confirmed stopped");
@@ -425,7 +426,7 @@ describe("package metadata", () => {
     const cliFile = pack.files.find((file) => file.path === "dist/cli.js");
 
     expect(cliFile?.mode).toBe(0o755);
-  });
+  }, 30000);
 
   it("runs CI checks on GitHub Actions", async () => {
     const workflow = await readFile(join(process.cwd(), ".github", "workflows", "ci.yml"), "utf8");

@@ -355,7 +355,7 @@ describe("routeRequestWithCodex", () => {
       "-e",
       "process.stderr.write('Connecting through proxy http://user:secret@127.0.0.1:7890\\n'); setInterval(() => {}, 1000)"
     ];
-    config.router.codex.timeoutMs = 200;
+    config.router.codex.timeoutMs = 1000;
 
     const route = await routeRequestWithCodex("你好", config, undefined, root);
 
@@ -365,11 +365,11 @@ describe("routeRequestWithCodex", () => {
       router_failure_kind: "timeout",
       suggested_roles: []
     });
-    expect(route.reason).toContain("timed out after 200ms");
+    expect(route.reason).toContain("timed out after 1000ms");
     expect(route.reason).toContain("Connecting through proxy http://***@127.0.0.1:7890");
     expect(route.reason).not.toContain("user:secret");
-    expect(route.duration_ms).toBeGreaterThanOrEqual(150);
-    expect(route.duration_ms).toBeLessThan(1000);
+    expect(route.duration_ms).toBeGreaterThanOrEqual(800);
+    expect(route.duration_ms).toBeLessThan(2000);
     expect(route).toMatchObject({
       router_failure_stage: "streaming",
       router_dispatch_ms: expect.any(Number),

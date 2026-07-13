@@ -48,35 +48,36 @@ export async function promptForWorkspaceTui(input: WorkspacePickerInput): Promis
     rejectSelection = reject;
   });
   const cancelSelection = () => rejectSelection(new WorkspaceSelectionCancelledError());
-  const instance = render(
-    <WorkspacePicker
-      cwd={input.cwd}
-      choices={input.choices}
-      invalidExplicitWorkspace={input.invalidExplicitWorkspace}
-      terminalHeight={input.stdout.rows ?? 24}
-      terminalWidth={input.stdout.columns ?? 80}
-      onCancel={cancelSelection}
-      onSelect={resolveSelection}
-    />,
-    {
-      stdin: input.stdin,
-      stdout: input.stdout,
-      stderr: input.stdout,
-      exitOnCtrlC: false,
-      patchConsole: false
-    }
-  );
-  void instance.waitUntilExit().catch((error: unknown) => {
-    rejectSelection(error instanceof Error ? error : new Error(String(error)));
-  });
+  let instance: ReturnType<typeof render> | null = null;
   process.on("SIGINT", cancelSelection);
 
   try {
+    instance = render(
+      <WorkspacePicker
+        cwd={input.cwd}
+        choices={input.choices}
+        invalidExplicitWorkspace={input.invalidExplicitWorkspace}
+        terminalHeight={input.stdout.rows ?? 24}
+        terminalWidth={input.stdout.columns ?? 80}
+        onCancel={cancelSelection}
+        onSelect={resolveSelection}
+      />,
+      {
+        stdin: input.stdin,
+        stdout: input.stdout,
+        stderr: input.stdout,
+        exitOnCtrlC: false,
+        patchConsole: false
+      }
+    );
+    void instance.waitUntilExit().catch((error: unknown) => {
+      rejectSelection(error instanceof Error ? error : new Error(String(error)));
+    });
     return await selection;
   } finally {
     process.off("SIGINT", cancelSelection);
-    instance.clear();
-    instance.unmount();
+    instance?.clear();
+    instance?.unmount();
   }
 }
 

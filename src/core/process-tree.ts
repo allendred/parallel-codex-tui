@@ -28,6 +28,9 @@ export async function terminateProcessTree(
   const pollMs = options.pollMs ?? 20;
 
   try {
+    if (processGroupLeaderWasReused(child, options.processGroup)) {
+      return;
+    }
     signalProcessTree(pid, "SIGTERM", options.processGroup);
     if (await waitForProcessTreeExit(child, options.processGroup, termGraceMs, pollMs)) {
       return;
@@ -51,13 +54,24 @@ export function processTreeIsAlive(child: ChildProcess, processGroup: boolean): 
   if (!pid) {
     return false;
   }
+  if (child.exitCode !== null || child.signalCode !== null) {
+    if (processGroupLeaderWasReused(child, processGroup)) {
+      return false;
+    }
+    return processGroup && signalTargetIsAlive(-pid);
+  }
   if (processGroup && signalTargetIsAlive(-pid)) {
     return true;
   }
-  if (child.exitCode !== null || child.signalCode !== null) {
-    return false;
-  }
   return signalTargetIsAlive(pid);
+}
+
+function processGroupLeaderWasReused(child: ChildProcess, processGroup: boolean): boolean {
+  // POSIX keeps the numeric PID reserved while the original process group still exists.
+  return processGroup
+    && (child.exitCode !== null || child.signalCode !== null)
+    && typeof child.pid === "number"
+    && signalTargetIsAlive(child.pid);
 }
 
 async function waitForProcessTreeExit(

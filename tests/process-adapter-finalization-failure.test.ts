@@ -112,7 +112,7 @@ describe("ProcessWorkerAdapter finalization failures", () => {
     await writeText(promptPath, "detect session");
     const adapter = new ProcessWorkerAdapter(
       process.execPath,
-      ["-e", "console.log('session id: callback-123')"]
+      ["-e", "console.log('session id: callback-123');setInterval(() => {}, 1000)"]
     );
 
     await expect(adapter.run({
