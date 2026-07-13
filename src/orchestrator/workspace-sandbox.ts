@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import {
   chmod,
   constants,
@@ -19,6 +19,7 @@ import { ensureDir, pathExists, pathIsDirectory, writeJson } from "../core/file-
 
 const MAX_TEXT_MERGE_BYTES = 10 * 1024 * 1024;
 const FEATURE_ID_PATTERN = /^[a-z0-9][a-z0-9-]{0,63}$/;
+const COMMIT_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9-]{0,63}$/;
 
 export interface ParallelWorkspaceManagerOptions {
   workspaceRoot: string;
@@ -97,6 +98,7 @@ interface IntegrationCommitIntent {
   turn_id: string;
   wave: number;
   feature_ids: string[];
+  commit_id?: string;
   changed_paths: string[];
 }
 
@@ -197,6 +199,7 @@ export class ParallelWorkspaceManager {
     }
     const pendingCommit = await this.readPendingCommit(wave);
     if (pendingCommit) {
+      await this.recoverOwnedCommitTempArtifacts(wave, pendingCommit);
       await this.assertLiveWorkspaceCommitResumable(wave);
       return wave;
     }
@@ -266,6 +269,7 @@ export class ParallelWorkspaceManager {
   async stageWave(wave: FeatureWorkspaceWave): Promise<WorkspaceIntegrationResult> {
     const pendingCommit = await this.readPendingCommit(wave);
     if (pendingCommit) {
+      await this.recoverOwnedCommitTempArtifacts(wave, pendingCommit);
       await this.assertLiveWorkspaceCommitResumable(wave);
       return { changedPaths: pendingCommit.changed_paths };
     }
@@ -332,6 +336,7 @@ export class ParallelWorkspaceManager {
   async commitWave(wave: FeatureWorkspaceWave): Promise<WorkspaceIntegrationResult> {
     const pendingCommit = await this.readPendingCommit(wave);
     if (pendingCommit) {
+      await this.recoverOwnedCommitTempArtifacts(wave, pendingCommit);
       await this.assertLiveWorkspaceCommitResumable(wave);
     } else {
       await this.assertLiveWorkspaceUnchanged(wave);
@@ -354,6 +359,7 @@ export class ParallelWorkspaceManager {
       (path) => this.excludeRelativePath(path)
     );
     const pendingPath = this.pendingCommitPath(wave);
+    const commitId = pendingCommit?.commit_id ?? randomUUID();
     if (!pendingCommit) {
       await this.writeIntegrationCheckpoint(pendingPath, {
         version: 1,
@@ -361,10 +367,11 @@ export class ParallelWorkspaceManager {
         turn_id: wave.turnId,
         wave: wave.wave,
         feature_ids: wave.featureIds,
+        commit_id: commitId,
         changed_paths: changedPaths
       });
     }
-    await applyMergePlan(this.workspaceRoot, livePlan);
+    await applyMergePlan(this.workspaceRoot, livePlan, commitId);
     const incompletePaths = await workspaceChangedPaths(
       wave.integrationDir,
       this.workspaceRoot,
@@ -379,6 +386,7 @@ export class ParallelWorkspaceManager {
       turn_id: wave.turnId,
       wave: wave.wave,
       feature_ids: wave.featureIds,
+      commit_id: commitId,
       changed_paths: changedPaths
     });
     await rm(pendingPath, { force: true });
@@ -413,6 +421,9 @@ export class ParallelWorkspaceManager {
     const record = await readJsonRecord(path);
     const featureIds = readStringArray(record?.feature_ids);
     const changedPaths = readStringArray(record?.changed_paths);
+    const commitId = typeof record?.commit_id === "string" && COMMIT_ID_PATTERN.test(record.commit_id)
+      ? record.commit_id
+      : undefined;
     const expectedChangedPaths = await workspaceChangedPaths(
       wave.baselineDir,
       wave.integrationDir,
@@ -425,6 +436,7 @@ export class ParallelWorkspaceManager {
       || record.wave !== wave.wave
       || !featureIds
       || !changedPaths
+      || (record.commit_id !== undefined && !commitId)
       || !sameStrings(featureIds, wave.featureIds)
       || !sameStrings(changedPaths, expectedChangedPaths)
     ) {
@@ -436,8 +448,43 @@ export class ParallelWorkspaceManager {
       turn_id: wave.turnId,
       wave: wave.wave,
       feature_ids: featureIds,
+      ...(commitId ? { commit_id: commitId } : {}),
       changed_paths: changedPaths
     };
+  }
+
+  private async recoverOwnedCommitTempArtifacts(
+    wave: FeatureWorkspaceWave,
+    intent: IntegrationCommitIntent
+  ): Promise<void> {
+    if (!intent.commit_id) {
+      return;
+    }
+    for (const path of intent.changed_paths) {
+      const tempPath = mergeOperationTempPath(this.workspaceRoot, path, intent.commit_id);
+      if (!(await pathExists(tempPath))) {
+        continue;
+      }
+      const [temp, baseline, integration, live] = await Promise.all([
+        inspectEntry(tempPath),
+        inspectEntry(join(wave.baselineDir, path)),
+        inspectEntry(join(wave.integrationDir, path)),
+        inspectEntry(join(this.workspaceRoot, path))
+      ]);
+      if (integration.type === "missing" || !sameEntry(temp, integration)) {
+        throw new Error(`Pending integration temp does not match the integration snapshot: ${path}`);
+      }
+      if (sameEntry(live, integration)) {
+        await rm(tempPath, { recursive: true, force: true });
+        continue;
+      }
+      if (!sameEntry(live, baseline) && live.type !== "missing") {
+        throw new WorkspaceLiveMutationError([path], "pending-commit");
+      }
+      await rm(join(this.workspaceRoot, path), { recursive: true, force: true });
+      await ensureDir(dirname(join(this.workspaceRoot, path)));
+      await rename(tempPath, join(this.workspaceRoot, path));
+    }
   }
 
   private async assertLiveWorkspaceCommitResumable(wave: FeatureWorkspaceWave): Promise<void> {
@@ -647,21 +694,23 @@ async function planWorkspaceMerge(
   };
 }
 
-async function applyMergePlan(targetRoot: string, plan: MergePlan): Promise<void> {
+async function applyMergePlan(targetRoot: string, plan: MergePlan, commitId?: string): Promise<void> {
   for (const operation of plan.operations.filter((item) => item.incoming.type === "missing")) {
     await rm(join(targetRoot, operation.path), { recursive: true, force: true });
   }
   for (const operation of plan.operations.filter((item) => item.incoming.type !== "missing")) {
-    await applyOperation(targetRoot, operation);
+    await applyOperation(targetRoot, operation, commitId);
   }
 }
 
-async function applyOperation(targetRoot: string, operation: CopyOperation): Promise<void> {
+async function applyOperation(targetRoot: string, operation: CopyOperation, commitId?: string): Promise<void> {
   const targetPath = join(targetRoot, operation.path);
-  const tempPath = join(
-    dirname(targetPath),
-    `.${basename(targetPath)}.${process.pid}.${Date.now()}.${Math.random().toString(16).slice(2)}.tmp`
-  );
+  const tempPath = commitId
+    ? mergeOperationTempPath(targetRoot, operation.path, commitId)
+    : join(
+        dirname(targetPath),
+        `.${basename(targetPath)}.${process.pid}.${Date.now()}.${Math.random().toString(16).slice(2)}.tmp`
+      );
   await ensureDir(dirname(targetPath));
   await rm(tempPath, { recursive: true, force: true });
 
@@ -680,6 +729,11 @@ async function applyOperation(targetRoot: string, operation: CopyOperation): Pro
 
   await rm(targetPath, { recursive: true, force: true });
   await rename(tempPath, targetPath);
+}
+
+function mergeOperationTempPath(targetRoot: string, path: string, commitId: string): string {
+  const targetPath = join(targetRoot, path);
+  return join(dirname(targetPath), `.${basename(targetPath)}.parallel-codex-${commitId}.tmp`);
 }
 
 async function workspaceManifest(

@@ -237,6 +237,9 @@ describe("package metadata", () => {
     expect(readme).toContain("each live path must still match either the Wave baseline or integration snapshot");
     expect(readme).toContain("partial apply resumes without rerunning completed Workers");
     expect(readme).toContain("Any third-state content or extra live path blocks recovery");
+    expect(readme).toContain("`commit_id` scopes deterministic replacement temp files");
+    expect(readme).toContain("content and mode exactly match the integration snapshot");
+    expect(readme).toContain("A foreign or mismatched temp file blocks recovery");
     expect(readme).toContain("SQLite startup rebuild indexes only complete numbered Turn directories");
     expect(readme).toContain("startup notice distinguishes a restored follow-up Turn");
     expect(readme).toContain("request and route kept");
