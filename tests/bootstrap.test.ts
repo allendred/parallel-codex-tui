@@ -472,6 +472,67 @@ describe("createRuntime", () => {
     }
   });
 
+  it("cleans only workspace commit intents proven redundant during startup", async () => {
+    const appRoot = await mkdtemp(join(tmpdir(), "pct-bootstrap-workspace-intent-app-"));
+    const workspaceRoot = await mkdtemp(join(tmpdir(), "pct-bootstrap-workspace-intent-workspace-"));
+    const firstRuntime = await createRuntime(appRoot, workspaceRoot);
+    const task = await firstRuntime.sessions.createTask({
+      request: "Recover committed workspace intent evidence.",
+      cwd: workspaceRoot,
+      route: {
+        mode: "complex",
+        reason: "test",
+        suggested_roles: ["judge", "actor", "critic"],
+        judge_engine: "mock",
+        actor_engine: "mock",
+        critic_engine: "mock"
+      }
+    });
+    await writeText(join(task.dir, "turns", "0001", "supervisor-summary.md"), "Complex task completed.\n");
+    await advanceTaskToIntegrating(firstRuntime.sessions, task);
+    await firstRuntime.sessions.updateTaskStatus(task, "done");
+
+    const matchingWave = join(task.dir, "workspaces", "turn-0001", "wave-0001");
+    const mismatchedWave = join(task.dir, "workspaces", "turn-0001", "wave-0002");
+    const matchingIntent = {
+      version: 1,
+      state: "committing",
+      turn_id: "0001",
+      wave: 1,
+      feature_ids: ["0001-ui"],
+      commit_id: "commit-001",
+      changed_paths: ["src/ui.ts"]
+    };
+    await writeJson(join(matchingWave, "integration.pending.json"), matchingIntent);
+    await writeJson(join(matchingWave, "integration.json"), {
+      ...matchingIntent,
+      state: "integrated"
+    });
+    await writeJson(join(mismatchedWave, "integration.pending.json"), {
+      ...matchingIntent,
+      wave: 2,
+      commit_id: "commit-002",
+      changed_paths: ["src/pending.ts"]
+    });
+    await writeJson(join(mismatchedWave, "integration.json"), {
+      ...matchingIntent,
+      state: "integrated",
+      wave: 2,
+      commit_id: "commit-002",
+      changed_paths: ["src/final.ts"]
+    });
+    firstRuntime.index.close();
+
+    const restarted = await createRuntime(appRoot, workspaceRoot);
+    try {
+      expect(restarted.workspaceCommitRecovery).toEqual({ cleaned: 1, preserved: 1 });
+      expect(await pathExists(join(matchingWave, "integration.pending.json"))).toBe(false);
+      expect(await pathExists(join(mismatchedWave, "integration.pending.json"))).toBe(true);
+    } finally {
+      restarted.index.close();
+    }
+  });
+
   it("reloads router settings for the next request without rebuilding the worker runtime", async () => {
     const appRoot = await mkdtemp(join(tmpdir(), "pct-router-reload-app-"));
     const workspaceRoot = await mkdtemp(join(tmpdir(), "pct-router-reload-workspace-"));

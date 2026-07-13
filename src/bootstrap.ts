@@ -9,6 +9,10 @@ import {
   type PendingTaskCreationRecovery
 } from "./core/session-manager.js";
 import { prepareWorkspace } from "./core/workspace.js";
+import {
+  reconcileWorkspaceCommitIntents,
+  type WorkspaceCommitRecovery
+} from "./core/workspace-commit-recovery.js";
 import { Orchestrator } from "./orchestrator/orchestrator.js";
 import { createWorkerRegistry, type WorkerRegistry } from "./workers/registry.js";
 
@@ -21,6 +25,7 @@ export interface AppRuntime {
   workers: WorkerRegistry;
   orchestrator: Orchestrator;
   pendingTaskCreations: PendingTaskCreationRecovery;
+  workspaceCommitRecovery: WorkspaceCommitRecovery;
   recoveredTasks: InterruptedTaskRecovery[];
 }
 
@@ -42,6 +47,7 @@ export async function createRuntime(appRoot: string, workspaceRoot = appRoot): P
       index
     });
     const pendingTaskCreations = await sessions.reconcilePendingTaskCreations();
+    const workspaceCommitRecovery = await reconcileWorkspaceCommitIntents(preparedWorkspace, config.dataDir);
     await sessions.reconcileInterruptedMainSession();
     await sessions.reconcileNativeSessionState();
     const recoveredTasks = await sessions.reconcileInterruptedTasks();
@@ -64,6 +70,7 @@ export async function createRuntime(appRoot: string, workspaceRoot = appRoot): P
       workers,
       orchestrator,
       pendingTaskCreations,
+      workspaceCommitRecovery,
       recoveredTasks
     };
   } catch (error) {

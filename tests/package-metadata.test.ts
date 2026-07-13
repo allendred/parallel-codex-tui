@@ -241,7 +241,8 @@ describe("package metadata", () => {
     expect(readme).toContain("content and mode exactly match the integration snapshot");
     expect(readme).toContain("A foreign or mismatched temp file blocks recovery");
     expect(readme).toContain("intent cleanup is best-effort and cannot downgrade the committed task");
-    expect(readme).toContain("A leftover intent is removed by a later idempotent commit reconciliation");
+    expect(readme).toContain("Startup removes a leftover intent only when the final integrated checkpoint matches it");
+    expect(readme).toContain("mismatched or unreadable evidence remains on disk");
     expect(readme).toContain("SQLite startup rebuild indexes only complete numbered Turn directories");
     expect(readme).toContain("startup notice distinguishes a restored follow-up Turn");
     expect(readme).toContain("request and route kept");
