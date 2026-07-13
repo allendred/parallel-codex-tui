@@ -34,7 +34,7 @@ import { AppShell, type AppView } from "./AppShell.js";
 import { InputBar } from "./InputBar.js";
 import { applyNativeInputChunk } from "./native-input.js";
 import { nextScrollOffset } from "./scrolling.js";
-import { chooseSubmitTarget, newTaskMemoryState, nextSubmitMemoryState, shouldClearWorkersForSubmit } from "./task-memory.js";
+import { chooseSubmitTarget, currentSubmitMemoryState, newTaskMemoryState, nextSubmitMemoryState, shouldClearWorkersForSubmit } from "./task-memory.js";
 import { TerminalOutput } from "./TerminalOutput.js";
 import { NativeTerminalScreen } from "./terminal-screen.js";
 import { WorkerOutputView, type WorkerOutputNavigationTargets } from "./WorkerOutputView.js";
@@ -119,10 +119,11 @@ export interface Message {
   from: "user" | "system";
   text: string;
   taskId?: string;
+  kind?: "route";
 }
 
 export function routeDecisionChatMessage(route: RouteDecision): string {
-  return `**route · ${route.mode} · ${route.source ?? "router"}**\n${route.reason.trim()}`;
+  return `route · ${route.mode} · ${route.source ?? "router"}\n${route.reason.trim()}`;
 }
 
 export interface ChatDisplayLine {
@@ -1660,6 +1661,7 @@ export function App({
         if (announceRoute) {
           setRouteAnnouncement({
             from: "system",
+            kind: "route",
             text: routeDecisionChatMessage(route),
             ...(activeTaskIdRef.current ? { taskId: activeTaskIdRef.current } : {})
           });
@@ -1766,23 +1768,20 @@ export function App({
     setTaskResultExpanded(false);
     const controller = new AbortController();
     activeRunControllerRef.current = controller;
+    const memory = currentSubmitMemoryState(activeTaskIdRef.current, activeMode);
     await appendVisibleMessage(
       { from: "user", text: request },
-      activeTaskIdRef.current ?? undefined
+      memory.activeTaskId ?? undefined
     );
 
     try {
       const callbacks = createRunCallbacks(controller);
-      const memory = {
-        activeTaskId,
-        activeMode
-      };
       const followUpRoute =
-        activeTaskId && activeMode === "complex"
+        memory.activeTaskId && memory.activeMode === "complex"
           ? await orchestrator.routeTaskFollowUp({
               request,
               cwd,
-              taskId: activeTaskId,
+              taskId: memory.activeTaskId,
               ...callbacks
             })
           : undefined;
@@ -2833,6 +2832,9 @@ function chatSingleMessageDisplayLines(
 }
 
 function chatMessageMarkdownLines(message: Message, expandedTaskResult = false): ChatMarkdownLine[] {
+  if (message.kind === "route") {
+    return routeChatMessageLines(message.text);
+  }
   if (message.from === "system" && expandedTaskResult) {
     const expanded = expandedSupervisorSummaryForChat(message.text);
     if (expanded) {
@@ -2847,6 +2849,37 @@ function chatMessageMarkdownLines(message: Message, expandedTaskResult = false):
     }));
   }
   return chatMarkdownBlockLines(message.text);
+}
+
+function routeChatMessageLines(text: string): ChatMarkdownLine[] {
+  const [header = "route", ...details] = text.split(/\r?\n/);
+  return [
+    {
+      spans: routeChatHeaderSpans(header),
+      background: "rail"
+    },
+    ...details.map((detail) => ({
+      spans: mergeChatSpans([
+        { text: "  ", tone: "muted" as const },
+        ...applyChatSpanTone(chatMarkdownSpans(detail), "muted")
+      ]),
+      background: "rail" as const
+    }))
+  ];
+}
+
+function routeChatHeaderSpans(header: string): ChatDisplaySpan[] {
+  const match = header.match(/^route\s*·\s*(simple|complex)\s*·\s*(.+)$/i);
+  if (!match?.[1] || !match[2]) {
+    return applyChatSpanTone(chatMarkdownSpans(header), "heading");
+  }
+  const mode = match[1].toLowerCase();
+  return [
+    { text: "route", tone: "heading" },
+    { text: " · ", tone: "muted" },
+    { text: mode, tone: mode === "simple" ? "success" : "warning" },
+    { text: ` · ${match[2].trim()}`, tone: "muted" }
+  ];
 }
 
 function chatMarkdownBlockLines(text: string): ChatMarkdownLine[] {

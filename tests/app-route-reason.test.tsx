@@ -9,9 +9,47 @@ import type {
   HandleRequestResult,
   Orchestrator
 } from "../src/orchestrator/orchestrator.js";
-import { App } from "../src/tui/App.js";
+import {
+  App,
+  chatMessageDisplayLines,
+  routeDecisionChatMessage
+} from "../src/tui/App.js";
 
 describe("App Router reason", () => {
+  it("renders the transient route as a distinct rail with an indented reason", () => {
+    const route: RouteDecision = {
+      mode: "simple",
+      reason: "Short conversation without project work.",
+      source: "codex",
+      suggested_roles: [],
+      judge_engine: "mock",
+      actor_engine: "mock",
+      critic_engine: "mock"
+    };
+
+    expect(chatMessageDisplayLines([{
+      from: "system",
+      kind: "route",
+      text: routeDecisionChatMessage(route)
+    }], 80, 10)).toMatchObject([
+      {
+        text: "route · simple · codex",
+        background: "rail",
+        spans: [
+          { text: "route", tone: "heading" },
+          { text: " · ", tone: "muted" },
+          { text: "simple", tone: "success" },
+          { text: " · codex", tone: "muted" }
+        ]
+      },
+      {
+        text: "  Short conversation without project work.",
+        background: "rail",
+        spans: [{ text: "  Short conversation without project work.", tone: "muted" }]
+      }
+    ]);
+  });
+
   it("shows the Router reason before the selected execution path finishes", async () => {
     const testInput = installTestInputStream();
     const completion = deferred<HandleRequestResult>();

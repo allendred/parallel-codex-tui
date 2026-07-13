@@ -1,8 +1,33 @@
 import { describe, expect, it } from "vitest";
-import { chooseSubmitTarget, nextSubmitMemoryState, shouldClearWorkersForSubmit } from "../src/tui/task-memory.js";
+import {
+  chooseSubmitTarget,
+  currentSubmitMemoryState,
+  nextSubmitMemoryState,
+  shouldClearWorkersForSubmit
+} from "../src/tui/task-memory.js";
 import * as taskMemoryModule from "../src/tui/task-memory.js";
 
 describe("chooseSubmitTarget", () => {
+  it("treats a synchronously restored task id as complex before React state catches up", () => {
+    const memory = currentSubmitMemoryState("task-restored", null);
+
+    expect(memory).toEqual({
+      activeTaskId: "task-restored",
+      activeMode: "complex"
+    });
+    expect(chooseSubmitTarget(memory, { mode: "simple", taskId: null })).toEqual({
+      kind: "task-question",
+      taskId: "task-restored"
+    });
+  });
+
+  it("keeps the latest non-task mode when no task id is active", () => {
+    expect(currentSubmitMemoryState(null, "simple")).toEqual({
+      activeTaskId: null,
+      activeMode: "simple"
+    });
+  });
+
   it("clears the active complex context when starting a new task", () => {
     const newTaskMemoryState = (
       taskMemoryModule as typeof taskMemoryModule & {

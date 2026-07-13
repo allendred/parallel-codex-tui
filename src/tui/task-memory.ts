@@ -8,6 +8,16 @@ export interface SubmitResultMemory {
   taskId: string | null;
 }
 
+export function currentSubmitMemoryState(
+  activeTaskId: string | null,
+  activeMode: SubmitMemoryState["activeMode"]
+): SubmitMemoryState {
+  return {
+    activeTaskId,
+    activeMode: activeTaskId ? "complex" : activeMode
+  };
+}
+
 export function newTaskMemoryState(): SubmitMemoryState {
   return {
     activeTaskId: null,
