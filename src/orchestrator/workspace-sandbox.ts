@@ -29,6 +29,7 @@ export interface ParallelWorkspaceManagerOptions {
 
 export interface ParallelWorkspaceManagerDependencies {
   writeIntegrationCheckpoint?: (path: string, value: Record<string, unknown>) => Promise<void>;
+  removeIntegrationIntent?: (path: string) => Promise<void>;
 }
 
 export interface PrepareWorkspaceWaveInput {
@@ -139,6 +140,7 @@ export class ParallelWorkspaceManager {
   private readonly taskDir: string;
   private readonly dataRelativePath: string | null;
   private readonly writeIntegrationCheckpoint: (path: string, value: Record<string, unknown>) => Promise<void>;
+  private readonly removeIntegrationIntent: (path: string) => Promise<void>;
 
   constructor(
     options: ParallelWorkspaceManagerOptions,
@@ -150,6 +152,8 @@ export class ParallelWorkspaceManager {
     const dataRoot = isWithin(candidateDataRoot, this.workspaceRoot) ? candidateDataRoot : null;
     this.dataRelativePath = dataRoot ? relative(this.workspaceRoot, dataRoot) : null;
     this.writeIntegrationCheckpoint = dependencies.writeIntegrationCheckpoint ?? writeJson;
+    this.removeIntegrationIntent = dependencies.removeIntegrationIntent
+      ?? ((path) => rm(path, { force: true }));
   }
 
   async prepareWave(input: PrepareWorkspaceWaveInput): Promise<FeatureWorkspaceWave> {
@@ -389,7 +393,11 @@ export class ParallelWorkspaceManager {
       commit_id: commitId,
       changed_paths: changedPaths
     });
-    await rm(pendingPath, { force: true });
+    try {
+      await this.removeIntegrationIntent(pendingPath);
+    } catch {
+      // The integrated checkpoint is authoritative; a later retry can remove the redundant intent.
+    }
     return { changedPaths };
   }
 

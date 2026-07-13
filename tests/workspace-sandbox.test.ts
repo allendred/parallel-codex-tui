@@ -213,6 +213,38 @@ describe("ParallelWorkspaceManager", () => {
     expect(await pathExists(join(wave.rootDir, "integration.pending.json"))).toBe(false);
   });
 
+  it("keeps a committed wave successful when only intent cleanup fails", async () => {
+    const workspaceRoot = await mkdtemp(join(tmpdir(), "pct-workspace-intent-cleanup-"));
+    const taskDir = join(workspaceRoot, ".parallel-codex", "sessions", "task-intent-cleanup");
+    await writeText(join(workspaceRoot, "base.txt"), "base\n");
+    let cleanupCalls = 0;
+    const manager = new ParallelWorkspaceManager(
+      { workspaceRoot, taskDir, dataDir: ".parallel-codex" },
+      {
+        removeIntegrationIntent: async () => {
+          cleanupCalls += 1;
+          throw new Error("intent unlink unavailable");
+        }
+      }
+    );
+    const input = { turnId: "0001", wave: 1, featureIds: ["0001-ui"] };
+    const wave = await manager.prepareWave(input);
+    await writeText(join(wave.featureDirs.get("0001-ui") ?? "", "committed.txt"), "committed\n");
+    await manager.stageWave(wave);
+
+    await expect(manager.commitWave(wave)).resolves.toEqual({ changedPaths: ["committed.txt"] });
+    expect(cleanupCalls).toBe(1);
+    expect(await readTextIfExists(join(workspaceRoot, "committed.txt"))).toBe("committed\n");
+    expect(JSON.parse(await readTextIfExists(join(wave.rootDir, "integration.json")))).toMatchObject({
+      state: "integrated"
+    });
+    expect(await pathExists(join(wave.rootDir, "integration.pending.json"))).toBe(true);
+
+    const restarted = new ParallelWorkspaceManager({ workspaceRoot, taskDir, dataDir: ".parallel-codex" });
+    await expect(restarted.commitWave(wave)).resolves.toEqual({ changedPaths: ["committed.txt"] });
+    expect(await pathExists(join(wave.rootDir, "integration.pending.json"))).toBe(false);
+  });
+
   it("finishes an owned temporary replacement left after the live target was removed", async () => {
     const workspaceRoot = await mkdtemp(join(tmpdir(), "pct-workspace-owned-temp-"));
     const taskDir = join(workspaceRoot, ".parallel-codex", "sessions", "task-owned-temp");
