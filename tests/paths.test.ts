@@ -10,4 +10,12 @@ describe("paths", () => {
     expect(sessionsRoot(root, ".parallel-codex")).toBe(join(root, ".parallel-codex", "sessions"));
     expect(taskDir(root, ".parallel-codex", "task-a")).toBe(join(root, ".parallel-codex", "sessions", "task-a"));
   });
+
+  it("rejects task ids that could escape the sessions directory", () => {
+    const root = "/tmp/parallel-codex";
+
+    expect(() => taskDir(root, ".parallel-codex", "../outside")).toThrow("Invalid task session id");
+    expect(() => taskDir(root, ".parallel-codex", "task-a/../../outside")).toThrow("Invalid task session id");
+    expect(taskDir(root, ".parallel-codex", "main")).toBe(join(root, ".parallel-codex", "sessions", "main"));
+  });
 });

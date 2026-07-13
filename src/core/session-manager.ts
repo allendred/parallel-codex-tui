@@ -15,7 +15,7 @@ import {
   writeText
 } from "./file-store.js";
 import { runWithLeaseFinalization } from "./lease-finalization.js";
-import { formatTaskTimestamp, taskDir } from "./paths.js";
+import { formatTaskTimestamp, taskDir, taskSessionIdIsValid } from "./paths.js";
 import { sessionsRoot } from "./paths.js";
 import type { SessionIndex } from "./session-index.js";
 import { loadCollaborationTimeline, type CollaborationTimeline } from "./collaboration-timeline.js";
@@ -43,6 +43,7 @@ import {
   RetiredNativeSessionSchema,
   type TaskMeta,
   TaskMetaSchema,
+  TaskIdSchema,
   type TaskState,
   type TurnMeta,
   TurnMetaSchema,
@@ -200,7 +201,7 @@ const PENDING_TURN_DIRECTORY = /^\.turn-(\d{4})-.+\.pending$/;
 const PENDING_TASK_CREATION_CLAIM = /^\.(task-.+)\.creating\.json$/;
 const TaskCreationOwnerSchema = z.object({
   version: z.literal(1),
-  task_id: z.string().min(1),
+  task_id: TaskIdSchema,
   pid: z.number().int().positive(),
   started_at: z.string().datetime(),
   process_start_token: z.string().min(1).optional()
@@ -398,8 +399,12 @@ export class SessionManager {
   }
 
   async hasTask(taskId: string): Promise<boolean> {
+    if (!taskSessionIdIsValid(taskId) || taskId === "main") {
+      return false;
+    }
     const task = this.taskFromId(taskId);
-    return Boolean(await readTaskMetaIfValid(task.metaPath));
+    const meta = await readTaskMetaIfValid(task.metaPath);
+    return meta?.id === taskId;
   }
 
   async reconcilePendingTaskCreations(): Promise<PendingTaskCreationRecovery> {
@@ -491,7 +496,7 @@ export class SessionManager {
     const entries = await readdir(root, { withFileTypes: true });
     const recovered: InterruptedTaskRecovery[] = [];
     for (const entry of entries.sort((left, right) => left.name.localeCompare(right.name))) {
-      if (!entry.isDirectory() || !entry.name.startsWith("task-")) {
+      if (!entry.isDirectory() || !TaskIdSchema.safeParse(entry.name).success) {
         continue;
       }
       const task = this.taskFromId(entry.name);
@@ -499,7 +504,7 @@ export class SessionManager {
         continue;
       }
       const meta = await readTaskMetaIfValid(task.metaPath);
-      if (!meta) {
+      if (!meta || meta.id !== task.id) {
         continue;
       }
       const needsTaskRecovery = await this.taskNeedsRecovery(task, meta);
@@ -576,7 +581,7 @@ export class SessionManager {
     const entries = await readdir(root, { withFileTypes: true });
     const tasks: TaskMeta[] = [];
     for (const entry of entries) {
-      if (!entry.isDirectory() || !entry.name.startsWith("task-")) {
+      if (!entry.isDirectory() || !TaskIdSchema.safeParse(entry.name).success) {
         continue;
       }
       const metaPath = join(root, entry.name, "meta.json");
@@ -585,7 +590,7 @@ export class SessionManager {
         if (!meta) {
           continue;
         }
-        if (meta.mode === "complex") {
+        if (meta.id === entry.name && meta.mode === "complex") {
           tasks.push(meta);
         }
       }
@@ -776,7 +781,7 @@ export class SessionManager {
     for (const sessionEntry of sessionEntries) {
       if (
         !sessionEntry.isDirectory()
-        || (sessionEntry.name !== "main" && !sessionEntry.name.startsWith("task-"))
+        || (sessionEntry.name !== "main" && !TaskIdSchema.safeParse(sessionEntry.name).success)
       ) {
         continue;
       }
@@ -1102,7 +1107,7 @@ export class SessionManager {
       return;
     }
     const meta = await readTaskMetaIfValid(task.metaPath);
-    if (meta) {
+    if (meta?.id === task.id) {
       await this.index.upsertTask(meta);
     }
   }
@@ -1119,6 +1124,9 @@ export class SessionManager {
         return [];
       }
       const taskId = match[1];
+      if (!TaskIdSchema.safeParse(taskId).success) {
+        return [];
+      }
       return [{
         taskId,
         stagingDir: join(root, `.${taskId}.creating`),

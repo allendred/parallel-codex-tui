@@ -34,6 +34,12 @@ export const RouterFailureKindSchema = z.enum([
 export const RouterProxySourceSchema = z.enum(["router-config", "environment"]);
 export const RouterTimeoutKindSchema = z.enum(["first-output", "idle", "total"]);
 export const RouterRecoveryTriggerSchema = z.enum(["retry", "auto-retry"]);
+export const TaskIdSchema = z
+  .string()
+  .min(1)
+  .max(255)
+  .regex(/^task-[A-Za-z0-9][A-Za-z0-9._-]*$/);
+export const TaskSessionIdSchema = z.union([z.literal("main"), TaskIdSchema]);
 
 export const TaskStateSchema = z.enum([
   "created",
@@ -120,7 +126,7 @@ export const RouteDecisionSchema = z.object({
 });
 
 export const TaskMetaSchema = z.object({
-  id: z.string().min(1),
+  id: TaskIdSchema,
   title: z.string().min(1),
   created_at: z.string().datetime(),
   cwd: z.string().min(1),
@@ -151,7 +157,7 @@ export const WorkerStatusSchema = z.object({
 
 export const FeatureStatusSchema = z.object({
   feature_id: z.string().min(1),
-  task_id: z.string().min(1),
+  task_id: TaskIdSchema,
   turn_id: z.string().min(1),
   title: z.string().min(1).optional(),
   description: z.string().default(""),
@@ -161,7 +167,7 @@ export const FeatureStatusSchema = z.object({
 });
 
 export const TurnMetaSchema = z.object({
-  task_id: z.string().min(1),
+  task_id: TaskIdSchema,
   turn_id: z.string().regex(/^\d{4}$/),
   created_at: z.string().datetime(),
   request_path: z.string().min(1)
@@ -191,7 +197,7 @@ export const ChatRecordSchema = z.object({
   time: z.string().datetime(),
   from: z.enum(["user", "system"]),
   text: z.string(),
-  task_id: z.string().min(1).optional()
+  task_id: TaskIdSchema.optional()
 });
 
 export const EventRecordSchema = z.object({
@@ -200,7 +206,7 @@ export const EventRecordSchema = z.object({
   message: z.string().optional(),
   worker: z.string().optional(),
   engine: EngineNameSchema.optional(),
-  task_id: z.string().optional(),
+  task_id: TaskSessionIdSchema.optional(),
   transition_id: z.string().min(1).optional(),
   from_state: TaskStateSchema.optional(),
   to_state: TaskStateSchema.optional()

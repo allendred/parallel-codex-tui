@@ -330,6 +330,8 @@ describe("package metadata", () => {
     expect(readme).toContain("A reused PID with a different start fingerprint is never signalled");
     expect(readme).toContain("A detached leader PID reused after exit is never treated as its former process group");
     expect(readme).toContain("Every new Router fallback persists an authoritative `router_failure_kind`");
+    expect(readme).toContain("chat temporarily inserts `route · <mode> · <source>` followed by the Router reason");
+    expect(readme).toContain("CLI `--task` input, persisted metadata, startup scanning, and SQLite rebuilding reject path separators");
     expect(readme).toContain("shows `unknown failure` instead of omitting the cause");
     expect(readme).toContain("Recovery commits cancellation only after every recorded process group is confirmed stopped");
     expect(readme).toContain("An unverifiable or still-running process blocks startup");

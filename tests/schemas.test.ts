@@ -57,6 +57,17 @@ describe("domain schemas", () => {
     expect(result.status).toBe("created");
   });
 
+  it("rejects persisted task metadata with an unsafe task id", () => {
+    expect(TaskMetaSchema.safeParse({
+      id: "task-a/../../outside",
+      title: "Escaped task",
+      created_at: "2026-06-30T03:30:00.000Z",
+      cwd: "/tmp/project",
+      mode: "complex",
+      status: "created"
+    }).success).toBe(false);
+  });
+
   it("validates committed task status transition markers", () => {
     const base = {
       id: "task-20260630-033000-a1b2",

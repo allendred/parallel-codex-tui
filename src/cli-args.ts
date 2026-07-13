@@ -1,6 +1,7 @@
 import { resolve } from "node:path";
 import { homedir } from "node:os";
 import { normalizeTuiThemeName, TUI_THEME_NAMES, type TuiThemeName } from "./tui/theme.js";
+import { TaskIdSchema } from "./domain/schemas.js";
 
 export interface CliArgs {
   appRoot: string;
@@ -99,6 +100,14 @@ export function validateCliArgs(args: string[]): string[] {
   const rawThemeValue = flagValue(optionArgs, themeFlagIndex);
   if (rawThemeValue?.trim() && !normalizeTuiThemeName(rawThemeValue)) {
     errors.push(`Invalid --theme: ${rawThemeValue.trim()} (expected ${TUI_THEME_NAMES.join(", ")})`);
+  }
+  const taskFlagIndex = lastFlagIndex(
+    optionArgs,
+    (arg) => arg === "--task" || arg.startsWith("--task=") || arg === "-t" || arg.startsWith("-t=")
+  );
+  const rawTaskId = flagValue(optionArgs, taskFlagIndex);
+  if (rawTaskId && !TaskIdSchema.safeParse(rawTaskId).success) {
+    errors.push("Invalid --task: expected task- followed by letters, numbers, dot, underscore, or hyphen");
   }
   if (optionArgs.includes("--probe-router") && !optionArgs.includes("--doctor")) {
     errors.push("--probe-router requires --doctor");

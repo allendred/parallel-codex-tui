@@ -228,6 +228,37 @@ describe("SessionIndex", () => {
     index.close();
   });
 
+  it("does not index task metadata whose id differs from its directory", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pct-index-task-identity-"));
+    const dataDir = ".parallel-codex";
+    const sessionDir = join(root, dataDir, "sessions", "task-directory-name");
+    const workerDir = join(sessionDir, "actor-mock");
+    await writeJson(join(sessionDir, "meta.json"), TaskMetaSchema.parse({
+      id: "task-different-id",
+      title: "Mismatched task",
+      created_at: "2026-07-01T01:00:00.000Z",
+      cwd: root,
+      mode: "complex",
+      status: "done"
+    }));
+    await writeJson(join(workerDir, "status.json"), WorkerStatusSchema.parse({
+      worker_id: "actor-mock",
+      role: "actor",
+      engine: "mock",
+      state: "done",
+      phase: "mock-done",
+      last_event_at: "2026-07-01T01:01:00.000Z",
+      summary: "must not be orphaned"
+    }));
+    const index = await SessionIndex.open(root, dataDir);
+
+    await index.rebuildFromFiles();
+
+    await expect(index.listTasks()).resolves.toEqual([]);
+    await expect(index.countRows("workers")).resolves.toBe(0);
+    index.close();
+  });
+
   it("rolls back every index table when a filesystem error interrupts rebuilding", async () => {
     if (process.platform === "win32") {
       return;

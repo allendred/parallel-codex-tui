@@ -121,6 +121,10 @@ export interface Message {
   taskId?: string;
 }
 
+export function routeDecisionChatMessage(route: RouteDecision): string {
+  return `**route · ${route.mode} · ${route.source ?? "router"}**\n${route.reason.trim()}`;
+}
+
 export interface ChatDisplayLine {
   from: Message["from"];
   text: string;
@@ -207,6 +211,7 @@ export function App({
   const [status, setStatus] = useState<StatusLineState | null>(() => restoredWorkerStatusLine(initialTaskId, initialWorkers));
   const [lastRoute, setLastRoute] = useState<RouteDecision | null>(initialRoute);
   const [routePending, setRoutePending] = useState<PendingRouteInfo | null>(null);
+  const [routeAnnouncement, setRouteAnnouncement] = useState<Message | null>(null);
   const [routeElapsedMs, setRouteElapsedMs] = useState(0);
   const [routeFallbackPrompt, setRouteFallbackPrompt] = useState<RouteFallbackInfo | null>(null);
   const [view, setView] = useState<AppView | "workspace">("chat");
@@ -363,6 +368,10 @@ export function App({
   const taskResultMessageIndex = useMemo(
     () => activeTaskId ? latestTaskResultMessageIndex(messages, activeTaskId) : -1,
     [activeTaskId, messages]
+  );
+  const visibleChatMessages = useMemo(
+    () => routeAnnouncement ? [...messages, routeAnnouncement] : messages,
+    [messages, routeAnnouncement]
   );
   const hasTaskResult = taskResultMessageIndex >= 0;
 
@@ -1630,7 +1639,11 @@ export function App({
     }
   }
 
-  function createRunCallbacks(controller: AbortController) {
+  function createRunCallbacks(
+    controller: AbortController,
+    options: { announceRoute?: boolean } = {}
+  ) {
+    const announceRoute = options.announceRoute ?? true;
     return {
       signal: controller.signal,
       onRouteStart: (state: RouteStartInfo) => {
@@ -1644,6 +1657,15 @@ export function App({
       onRoute: (route: RouteDecision) => {
         setRoutePending(null);
         setLastRoute(route);
+        if (announceRoute) {
+          setRouteAnnouncement({
+            from: "system",
+            text: routeDecisionChatMessage(route),
+            ...(activeTaskIdRef.current ? { taskId: activeTaskIdRef.current } : {})
+          });
+          chatScrollOffsetRef.current = 0;
+          setChatScrollOffset(0);
+        }
       },
       onStatus: (nextStatus: WorkerRunStatus) => {
         setStatus(nextStatus);
@@ -1739,6 +1761,7 @@ export function App({
     busyRef.current = true;
     setBusy(true);
     setRoutePending(null);
+    setRouteAnnouncement(null);
     setLastRoute(null);
     setTaskResultExpanded(false);
     const controller = new AbortController();
@@ -1807,6 +1830,7 @@ export function App({
       setCanRetryTask(nextMemory.activeTaskId
         ? await orchestrator.canRetryTask(nextMemory.activeTaskId)
         : false);
+      setRouteAnnouncement(null);
       await appendVisibleMessage(
         { from: "system", text: result.summary },
         nextMemory.activeTaskId ?? undefined
@@ -1815,6 +1839,7 @@ export function App({
         setTaskResultExpanded(true);
       }
     } catch (error) {
+      setRouteAnnouncement(null);
       const retryTaskId = activeTaskIdRef.current;
       if (retryTaskId) {
         setCanRetryTask(await orchestrator.canRetryTask(retryTaskId));
@@ -1828,6 +1853,7 @@ export function App({
         activeRunControllerRef.current = null;
       }
       setRoutePending(null);
+      setRouteAnnouncement(null);
       busyRef.current = false;
       setBusy(false);
     }
@@ -1845,23 +1871,26 @@ export function App({
     setBusy(true);
     setCanRetryTask(false);
     setRoutePending(null);
+    setRouteAnnouncement(null);
     setLastRoute(null);
 
     try {
       const result = await orchestrator.retryTask({
         taskId,
         cwd,
-        ...createRunCallbacks(controller)
+        ...createRunCallbacks(controller, { announceRoute: false })
       });
       activeTaskIdRef.current = taskId;
       setActiveTaskId(taskId);
       setActiveMode("complex");
       setCanRetryTask(false);
+      setRouteAnnouncement(null);
       await appendVisibleMessage({ from: "system", text: result.summary }, taskId);
       if (parseTaskResultSummary(result.summary)) {
         setTaskResultExpanded(true);
       }
     } catch (error) {
+      setRouteAnnouncement(null);
       setCanRetryTask(await orchestrator.canRetryTask(taskId));
       await appendVisibleMessage({
         from: "system",
@@ -1872,6 +1901,7 @@ export function App({
         activeRunControllerRef.current = null;
       }
       setRoutePending(null);
+      setRouteAnnouncement(null);
       busyRef.current = false;
       setBusy(false);
     }
@@ -1896,6 +1926,7 @@ export function App({
     setCanRetryTask(false);
     setStatus(null);
     setRoutePending(null);
+    setRouteAnnouncement(null);
     setLastRoute(null);
     setTaskResultExpanded(false);
     setWorkers([]);
@@ -2421,7 +2452,7 @@ export function App({
           />
         ) : view === "chat" ? (
           <ChatView
-            messages={messages}
+            messages={visibleChatMessages}
             cwd={cwd}
             activeTaskId={activeTaskId}
             terminalWidth={terminalWidth}

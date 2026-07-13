@@ -738,6 +738,43 @@ describe("SessionManager", () => {
     expect(latest?.id).toBe(good.id);
   });
 
+  it("does not resolve unsafe or mismatched task identities", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pct-task-identity-"));
+    const manager = new SessionManager({
+      projectRoot: root,
+      dataDir: ".parallel-codex",
+      now: () => new Date("2026-06-30T03:30:00.000Z"),
+      randomId: () => "good"
+    });
+    const good = await manager.createTask({
+      request: "Good task.",
+      cwd: root,
+      route: {
+        mode: "complex",
+        reason: "Requires workers.",
+        suggested_roles: ["judge", "actor", "critic"],
+        judge_engine: "mock",
+        actor_engine: "mock",
+        critic_engine: "mock"
+      }
+    });
+    await writeJson(
+      join(root, ".parallel-codex", "sessions", "task-directory-name", "meta.json"),
+      TaskMetaSchema.parse({
+        id: "task-different-id",
+        title: "Mismatched task",
+        created_at: "2026-06-30T03:31:00.000Z",
+        cwd: root,
+        mode: "complex",
+        status: "done"
+      })
+    );
+
+    await expect(manager.hasTask("../outside")).resolves.toBe(false);
+    expect(() => manager.taskFromId("../outside")).toThrow("Invalid task session id");
+    await expect(manager.latestTask()).resolves.toMatchObject({ id: good.id });
+  });
+
   it("backfills turn 0001 before appending to legacy tasks with user-request but no turns directory", async () => {
     const root = await mkdtemp(join(tmpdir(), "pct-legacy-turns-"));
     const manager = new SessionManager({

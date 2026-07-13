@@ -7,6 +7,7 @@ import {
   type NativeSession,
   RetiredNativeSessionSchema,
   RouteDecisionSchema,
+  TaskIdSchema,
   TaskMetaSchema,
   type TaskMeta,
   TurnMetaSchema,
@@ -247,11 +248,18 @@ export class SessionIndex {
     if (!row) {
       return undefined;
     }
-    return row.value.trim() || null;
+    const value = row.value.trim();
+    if (!value) {
+      return null;
+    }
+    return TaskIdSchema.safeParse(value).success ? value : undefined;
   }
 
   async setActiveTaskId(taskId: string | null): Promise<void> {
     const value = taskId?.trim() ?? "";
+    if (value && !TaskIdSchema.safeParse(value).success) {
+      throw new Error(`Invalid active task id: ${JSON.stringify(taskId)}`);
+    }
     this.db.prepare(
       `INSERT INTO workspace_state (key, value)
        VALUES ('active_task_id', ?)
@@ -281,7 +289,7 @@ export class SessionIndex {
             await this.rebuildWorkers(join(sessions, taskEntry.name), "main");
             continue;
           }
-          if (!taskEntry.name.startsWith("task-")) {
+          if (!TaskIdSchema.safeParse(taskEntry.name).success) {
             continue;
           }
           await this.rebuildTask(join(sessions, taskEntry.name), taskEntry.name);
@@ -304,12 +312,13 @@ export class SessionIndex {
 
   private async rebuildTask(taskDir: string, taskId: string): Promise<void> {
     const metaPath = join(taskDir, "meta.json");
-    if (await pathExists(metaPath)) {
-      const meta = await readJsonIfValid(metaPath, TaskMetaSchema);
-      if (meta) {
-        await this.upsertTask(meta);
-      }
+    const meta = await pathExists(metaPath)
+      ? await readJsonIfValid(metaPath, TaskMetaSchema)
+      : null;
+    if (!meta || meta.id !== taskId) {
+      return;
     }
+    await this.upsertTask(meta);
 
     const turnsDir = join(taskDir, "turns");
     if (await pathExists(turnsDir)) {

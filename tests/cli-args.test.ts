@@ -202,6 +202,13 @@ describe("validateCliArgs", () => {
     ]);
   });
 
+  it("rejects task ids that contain path separators", () => {
+    expect(validateCliArgs(["--task", "task-a/../../outside"])).toEqual([
+      "Invalid --task: expected task- followed by letters, numbers, dot, underscore, or hyphen"
+    ]);
+    expect(validateCliArgs(["--task=task-safe_01"])).toEqual([]);
+  });
+
   it("validates normalized theme option values", () => {
     expect(validateCliArgs(["--theme", "  graphite  "])).toEqual([]);
   });
