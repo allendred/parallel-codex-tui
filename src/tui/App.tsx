@@ -2783,7 +2783,7 @@ function chatSingleMessageDisplayLines(
   contentWidth: number,
   expandedTaskResult = false
 ): ChatDisplayLine[] {
-  const rawLines = chatMessageMarkdownLines(message, expandedTaskResult);
+  const rawLines = chatMessageMarkdownLines(message, expandedTaskResult, contentWidth);
   const rendered: ChatDisplayLine[] = [];
 
   rawLines.forEach((rawLine, rawIndex) => {
@@ -2828,12 +2828,16 @@ function chatSingleMessageDisplayLines(
   return rendered;
 }
 
-function chatMessageMarkdownLines(message: Message, expandedTaskResult = false): ChatMarkdownLine[] {
+function chatMessageMarkdownLines(
+  message: Message,
+  expandedTaskResult = false,
+  contentWidth = Number.POSITIVE_INFINITY
+): ChatMarkdownLine[] {
   if (message.kind === "route") {
     return routeChatMessageLines(message.text);
   }
   if (message.from === "system" && expandedTaskResult) {
-    const expanded = expandedSupervisorSummaryForChat(message.text);
+    const expanded = expandedSupervisorSummaryForChat(message.text, contentWidth);
     if (expanded) {
       return expanded;
     }
@@ -3214,7 +3218,7 @@ function chatLinePrefix(
   return "";
 }
 
-function expandedSupervisorSummaryForChat(text: string): ChatMarkdownLine[] | null {
+function expandedSupervisorSummaryForChat(text: string, contentWidth: number): ChatMarkdownLine[] | null {
   const result = parseTaskResultSummary(text);
   if (!result) {
     return null;
@@ -3223,13 +3227,7 @@ function expandedSupervisorSummaryForChat(text: string): ChatMarkdownLine[] | nu
   const outcome = taskResultOutcomeDisplay(result.outcome);
   const lines: ChatMarkdownLine[] = [
     {
-      spans: [
-        { text: "done", tone: "success" },
-        { text: " · ", tone: "muted" },
-        { text: "complex task completed", tone: "text" },
-        { text: " · ", tone: "muted" },
-        { text: outcome.label, tone: outcome.tone }
-      ],
+      spans: taskResultHeaderSpans(outcome, contentWidth),
       background: "rail",
       continuationPrefix: "  "
     }
@@ -3301,15 +3299,51 @@ function taskResultSectionMarkdownLines(
 
 function taskResultOutcomeDisplay(outcome: TaskResultOutcome): {
   label: string;
+  shortLabel: string;
   tone: ChatSpanTone;
 } {
   if (outcome === "approved") {
-    return { label: "APPROVED", tone: "success" };
+    return { label: "APPROVED", shortLabel: "APPROVED", tone: "success" };
   }
   if (outcome === "revision-required") {
-    return { label: "REVISION REQUIRED", tone: "danger" };
+    return { label: "REVISION REQUIRED", shortLabel: "REVISION", tone: "danger" };
   }
-  return { label: "COMPLETE", tone: "warning" };
+  return { label: "COMPLETE", shortLabel: "COMPLETE", tone: "warning" };
+}
+
+function taskResultHeaderSpans(
+  outcome: ReturnType<typeof taskResultOutcomeDisplay>,
+  maxWidth: number
+): ChatDisplaySpan[] {
+  const details = ["complex task completed", "complex", null] as const;
+  const titleWith = (detail: typeof details[number], label: string): ChatDisplaySpan[] => (
+    mergeChatSpans([
+      { text: "done", tone: "success" },
+      ...(detail
+        ? [
+            { text: " · ", tone: "muted" as const },
+            { text: detail, tone: "text" as const }
+          ]
+        : []),
+      { text: " · ", tone: "muted" },
+      { text: label, tone: outcome.tone }
+    ])
+  );
+  const candidates: ChatDisplaySpan[][] = [
+    ...details.map((detail) => titleWith(detail, outcome.label)),
+    [{ text: outcome.label, tone: outcome.tone }]
+  ];
+
+  if (outcome.shortLabel !== outcome.label) {
+    candidates.push(
+      ...details.map((detail) => titleWith(detail, outcome.shortLabel)),
+      [{ text: outcome.shortLabel, tone: outcome.tone }]
+    );
+  }
+
+  const width = Math.max(1, Math.trunc(maxWidth));
+  return candidates.find((candidate) => displayWidth(chatSpanText(candidate)) <= width)
+    ?? [{ text: compactEndByDisplayWidth(outcome.shortLabel, width), tone: outcome.tone }];
 }
 
 function compactSupervisorSummaryForChat(text: string): string[] | null {

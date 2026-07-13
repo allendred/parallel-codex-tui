@@ -743,6 +743,13 @@ describe("ChatView", () => {
       "Review",
       "Findings"
     ]);
+    expect(lines[0]?.spans).toEqual([
+      { text: "done", tone: "success" },
+      { text: " · ", tone: "muted" },
+      { text: "complex task completed", tone: "text" },
+      { text: " · ", tone: "muted" },
+      { text: "APPROVED", tone: "success" }
+    ]);
     expect(lines.find((line) => line.text === "  APPROVED")?.spans).toEqual([
       { text: "  ", tone: "prefix" },
       { text: "APPROVED", tone: "success" }
@@ -775,9 +782,51 @@ describe("ChatView", () => {
       lines.findIndex((line) => line.text === "Requirements") + 1,
       lines.findIndex((line) => line.text === "Implementation")
     );
+    expect(lines[0]?.text).toBe("done · complex · APPROVED");
+    expect(lines[1]?.text).toBe("Requirements");
     expect(requirementLines.length).toBeGreaterThan(1);
     expect(requirementLines.every((line) => line.text.startsWith("  "))).toBe(true);
     expect(Math.max(...lines.map((line) => displayWidth(line.text)))).toBeLessThanOrEqual(32);
+  });
+
+  it("preserves the full task outcome before shortening surrounding title text", () => {
+    const result = (review: string, terminalWidth: number) => chatMessageDisplayLines(
+      [{
+        from: "system",
+        taskId: `task-result-${review}`,
+        text: [
+          "Complex task completed.",
+          "Requirements:",
+          "- R",
+          "Actor work:",
+          "- A",
+          "Critic review:",
+          review,
+          "Critic findings:",
+          "(empty)"
+        ].join("\n")
+      }],
+      terminalWidth,
+      30,
+      { expandedTaskResult: true, taskId: `task-result-${review}` }
+    );
+
+    expect(result("REVISION_REQUIRED", 22)[0]).toMatchObject({
+      text: "REVISION REQUIRED",
+      spans: [{ text: "REVISION REQUIRED", tone: "danger" }]
+    });
+    expect(result("REVISION_REQUIRED", 10)[0]).toMatchObject({
+      text: "REVISION",
+      spans: [{ text: "REVISION", tone: "danger" }]
+    });
+    expect(result("No explicit decision", 22)[0]).toMatchObject({
+      text: "done · COMPLETE",
+      spans: [
+        { text: "done", tone: "success" },
+        { text: " · ", tone: "muted" },
+        { text: "COMPLETE", tone: "warning" }
+      ]
+    });
   });
 
   it("focuses a long expanded result from its title and scrolls toward findings", () => {
