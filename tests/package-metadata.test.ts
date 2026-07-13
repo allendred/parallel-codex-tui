@@ -238,6 +238,10 @@ describe("package metadata", () => {
     expect(readme).toContain("partial apply resumes without rerunning completed Workers");
     expect(readme).toContain("Any third-state content or extra live path blocks recovery");
     expect(readme).toContain("`commit_id` scopes deterministic replacement temp files");
+    expect(readme).toContain("New intents use `atomic-claim-v1`");
+    expect(readme).toContain("atomically moved to a commit-scoped `.backup`");
+    expect(readme).toContain("File and symlink publication refuses to replace a path that reappears");
+    expect(readme).toContain("Legacy temp-only intents remain recoverable");
     expect(readme).toContain("content and mode exactly match the integration snapshot");
     expect(readme).toContain("A foreign or mismatched temp file blocks recovery");
     expect(readme).toContain("intent cleanup is best-effort and cannot downgrade the committed task");

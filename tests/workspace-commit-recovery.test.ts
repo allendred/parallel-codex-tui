@@ -34,6 +34,7 @@ describe("reconcileWorkspaceCommitIntents", () => {
     const conflictWave = waveDir(root, "task-conflict", "0001", 1);
     const corruptWave = waveDir(root, "task-corrupt", "0001", 2);
     const incompleteWave = waveDir(root, "task-incomplete", "0001", 3);
+    const protocolWave = waveDir(root, "task-protocol", "0001", 4);
     const conflict = commitEvidence("committing", "0001", 1, "commit-left");
     await writeJson(join(conflictWave, "integration.pending.json"), conflict);
     await writeJson(join(conflictWave, "integration.json"), {
@@ -46,12 +47,22 @@ describe("reconcileWorkspaceCommitIntents", () => {
       join(incompleteWave, "integration.pending.json"),
       commitEvidence("committing", "0001", 3, "commit-incomplete")
     );
+    const protocol = {
+      ...commitEvidence("committing", "0001", 4, "commit-protocol"),
+      commit_protocol: "atomic-claim-v1"
+    };
+    await writeJson(join(protocolWave, "integration.pending.json"), protocol);
+    await writeJson(join(protocolWave, "integration.json"), {
+      ...protocol,
+      state: "integrated",
+      commit_protocol: "legacy-replace"
+    });
 
     await expect(reconcileWorkspaceCommitIntents(root, ".parallel-codex")).resolves.toEqual({
       cleaned: 0,
-      preserved: 3
+      preserved: 4
     });
-    for (const wave of [conflictWave, corruptWave, incompleteWave]) {
+    for (const wave of [conflictWave, corruptWave, incompleteWave, protocolWave]) {
       expect(await pathExists(join(wave, "integration.pending.json"))).toBe(true);
     }
   });

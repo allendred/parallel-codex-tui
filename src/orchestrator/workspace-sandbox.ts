@@ -4,6 +4,7 @@ import {
   chmod,
   constants,
   copyFile,
+  link,
   lstat,
   mkdir,
   readFile,
@@ -20,6 +21,7 @@ import { ensureDir, pathExists, pathIsDirectory, writeJson } from "../core/file-
 const MAX_TEXT_MERGE_BYTES = 10 * 1024 * 1024;
 const FEATURE_ID_PATTERN = /^[a-z0-9][a-z0-9-]{0,63}$/;
 const COMMIT_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9-]{0,63}$/;
+const LIVE_COMMIT_PROTOCOL = "atomic-claim-v1";
 
 export interface ParallelWorkspaceManagerOptions {
   workspaceRoot: string;
@@ -30,6 +32,12 @@ export interface ParallelWorkspaceManagerOptions {
 export interface ParallelWorkspaceManagerDependencies {
   writeIntegrationCheckpoint?: (path: string, value: Record<string, unknown>) => Promise<void>;
   removeIntegrationIntent?: (path: string) => Promise<void>;
+  liveCommitHook?: (event: LiveCommitHookEvent) => Promise<void>;
+}
+
+export interface LiveCommitHookEvent {
+  path: string;
+  phase: "before-claim" | "before-publish";
 }
 
 export interface PrepareWorkspaceWaveInput {
@@ -78,6 +86,7 @@ interface CopyOperation {
   path: string;
   sourcePath?: string;
   content?: Buffer;
+  expected: WorkspaceEntry;
   incoming: WorkspaceEntry;
 }
 
@@ -100,6 +109,7 @@ interface IntegrationCommitIntent {
   wave: number;
   feature_ids: string[];
   commit_id?: string;
+  commit_protocol?: typeof LIVE_COMMIT_PROTOCOL;
   changed_paths: string[];
 }
 
@@ -122,13 +132,18 @@ export class WorkspaceMergeConflictError extends Error {
 export class WorkspaceLiveMutationError extends Error {
   readonly paths: string[];
 
-  constructor(paths: string[], context: "before-commit" | "pending-commit" = "before-commit") {
+  constructor(
+    paths: string[],
+    context: "before-commit" | "during-commit" | "pending-commit" = "before-commit"
+  ) {
     const count = paths.length;
     super(
       `Live workspace changed outside orchestration in ${count} ${count === 1 ? "path" : "paths"}: ${paths.join(", ")}. `
       + (context === "pending-commit"
         ? "Pending integration recovery was blocked and its commit intent was preserved."
-        : "The isolated wave was not integrated.")
+        : context === "during-commit"
+          ? "The integration intent was preserved and the concurrent content was not overwritten."
+          : "The isolated wave was not integrated.")
     );
     this.name = "WorkspaceLiveMutationError";
     this.paths = paths;
@@ -141,6 +156,7 @@ export class ParallelWorkspaceManager {
   private readonly dataRelativePath: string | null;
   private readonly writeIntegrationCheckpoint: (path: string, value: Record<string, unknown>) => Promise<void>;
   private readonly removeIntegrationIntent: (path: string) => Promise<void>;
+  private readonly liveCommitHook: (event: LiveCommitHookEvent) => Promise<void>;
 
   constructor(
     options: ParallelWorkspaceManagerOptions,
@@ -154,6 +170,7 @@ export class ParallelWorkspaceManager {
     this.writeIntegrationCheckpoint = dependencies.writeIntegrationCheckpoint ?? writeJson;
     this.removeIntegrationIntent = dependencies.removeIntegrationIntent
       ?? ((path) => rm(path, { force: true }));
+    this.liveCommitHook = dependencies.liveCommitHook ?? (async () => undefined);
   }
 
   async prepareWave(input: PrepareWorkspaceWaveInput): Promise<FeatureWorkspaceWave> {
@@ -203,7 +220,7 @@ export class ParallelWorkspaceManager {
     }
     const pendingCommit = await this.readPendingCommit(wave);
     if (pendingCommit) {
-      await this.recoverOwnedCommitTempArtifacts(wave, pendingCommit);
+      await this.recoverOwnedCommitArtifacts(wave, pendingCommit);
       await this.assertLiveWorkspaceCommitResumable(wave);
       return wave;
     }
@@ -273,7 +290,7 @@ export class ParallelWorkspaceManager {
   async stageWave(wave: FeatureWorkspaceWave): Promise<WorkspaceIntegrationResult> {
     const pendingCommit = await this.readPendingCommit(wave);
     if (pendingCommit) {
-      await this.recoverOwnedCommitTempArtifacts(wave, pendingCommit);
+      await this.recoverOwnedCommitArtifacts(wave, pendingCommit);
       await this.assertLiveWorkspaceCommitResumable(wave);
       return { changedPaths: pendingCommit.changed_paths };
     }
@@ -340,7 +357,7 @@ export class ParallelWorkspaceManager {
   async commitWave(wave: FeatureWorkspaceWave): Promise<WorkspaceIntegrationResult> {
     const pendingCommit = await this.readPendingCommit(wave);
     if (pendingCommit) {
-      await this.recoverOwnedCommitTempArtifacts(wave, pendingCommit);
+      await this.recoverOwnedCommitArtifacts(wave, pendingCommit);
       await this.assertLiveWorkspaceCommitResumable(wave);
     } else {
       await this.assertLiveWorkspaceUnchanged(wave);
@@ -364,7 +381,7 @@ export class ParallelWorkspaceManager {
     );
     const pendingPath = this.pendingCommitPath(wave);
     const commitId = pendingCommit?.commit_id ?? randomUUID();
-    if (!pendingCommit) {
+    if (!pendingCommit || pendingCommit.commit_protocol !== LIVE_COMMIT_PROTOCOL) {
       await this.writeIntegrationCheckpoint(pendingPath, {
         version: 1,
         state: "committing",
@@ -372,10 +389,11 @@ export class ParallelWorkspaceManager {
         wave: wave.wave,
         feature_ids: wave.featureIds,
         commit_id: commitId,
+        commit_protocol: LIVE_COMMIT_PROTOCOL,
         changed_paths: changedPaths
       });
     }
-    await applyMergePlan(this.workspaceRoot, livePlan, commitId);
+    await applyMergePlan(this.workspaceRoot, livePlan, commitId, this.liveCommitHook);
     const incompletePaths = await workspaceChangedPaths(
       wave.integrationDir,
       this.workspaceRoot,
@@ -391,6 +409,7 @@ export class ParallelWorkspaceManager {
       wave: wave.wave,
       feature_ids: wave.featureIds,
       commit_id: commitId,
+      commit_protocol: LIVE_COMMIT_PROTOCOL,
       changed_paths: changedPaths
     });
     try {
@@ -432,6 +451,9 @@ export class ParallelWorkspaceManager {
     const commitId = typeof record?.commit_id === "string" && COMMIT_ID_PATTERN.test(record.commit_id)
       ? record.commit_id
       : undefined;
+    const commitProtocol = record?.commit_protocol === LIVE_COMMIT_PROTOCOL
+      ? LIVE_COMMIT_PROTOCOL
+      : undefined;
     const expectedChangedPaths = await workspaceChangedPaths(
       wave.baselineDir,
       wave.integrationDir,
@@ -445,6 +467,7 @@ export class ParallelWorkspaceManager {
       || !featureIds
       || !changedPaths
       || (record.commit_id !== undefined && !commitId)
+      || (record.commit_protocol !== undefined && !commitProtocol)
       || !sameStrings(featureIds, wave.featureIds)
       || !sameStrings(changedPaths, expectedChangedPaths)
     ) {
@@ -457,11 +480,12 @@ export class ParallelWorkspaceManager {
       wave: wave.wave,
       feature_ids: featureIds,
       ...(commitId ? { commit_id: commitId } : {}),
+      ...(commitProtocol ? { commit_protocol: commitProtocol } : {}),
       changed_paths: changedPaths
     };
   }
 
-  private async recoverOwnedCommitTempArtifacts(
+  private async recoverOwnedCommitArtifacts(
     wave: FeatureWorkspaceWave,
     intent: IntegrationCommitIntent
   ): Promise<void> {
@@ -470,28 +494,20 @@ export class ParallelWorkspaceManager {
     }
     for (const path of intent.changed_paths) {
       const tempPath = mergeOperationTempPath(this.workspaceRoot, path, intent.commit_id);
-      if (!(await pathExists(tempPath))) {
-        continue;
-      }
-      const [temp, baseline, integration, live] = await Promise.all([
-        inspectEntry(tempPath),
+      const backupPath = mergeOperationBackupPath(this.workspaceRoot, path, intent.commit_id);
+      const [baseline, integration] = await Promise.all([
         inspectEntry(join(wave.baselineDir, path)),
-        inspectEntry(join(wave.integrationDir, path)),
-        inspectEntry(join(this.workspaceRoot, path))
+        inspectEntry(join(wave.integrationDir, path))
       ]);
-      if (integration.type === "missing" || !sameEntry(temp, integration)) {
-        throw new Error(`Pending integration temp does not match the integration snapshot: ${path}`);
-      }
-      if (sameEntry(live, integration)) {
-        await rm(tempPath, { recursive: true, force: true });
-        continue;
-      }
-      if (!sameEntry(live, baseline) && live.type !== "missing") {
-        throw new WorkspaceLiveMutationError([path], "pending-commit");
-      }
-      await rm(join(this.workspaceRoot, path), { recursive: true, force: true });
-      await ensureDir(dirname(join(this.workspaceRoot, path)));
-      await rename(tempPath, join(this.workspaceRoot, path));
+      await recoverOwnedCommitPath({
+        path,
+        targetPath: join(this.workspaceRoot, path),
+        tempPath,
+        backupPath,
+        baseline,
+        integration,
+        commitProtocol: intent.commit_protocol
+      });
     }
   }
 
@@ -651,6 +667,7 @@ async function planWorkspaceMerge(
     if (sameEntry(targetEntry, baselineEntry)) {
       operations.push({
         path,
+        expected: targetEntry,
         incoming: incomingEntry,
         ...(incomingEntry.type !== "missing" ? { sourcePath: join(incomingRoot, path) } : {})
       });
@@ -671,6 +688,7 @@ async function planWorkspaceMerge(
     if (merged?.clean) {
       operations.push({
         path,
+        expected: targetEntry,
         incoming: {
           type: "file",
           hash: hashBuffer(merged.content),
@@ -702,23 +720,111 @@ async function planWorkspaceMerge(
   };
 }
 
-async function applyMergePlan(targetRoot: string, plan: MergePlan, commitId?: string): Promise<void> {
-  for (const operation of plan.operations.filter((item) => item.incoming.type === "missing")) {
-    await rm(join(targetRoot, operation.path), { recursive: true, force: true });
-  }
-  for (const operation of plan.operations.filter((item) => item.incoming.type !== "missing")) {
-    await applyOperation(targetRoot, operation, commitId);
+async function applyMergePlan(
+  targetRoot: string,
+  plan: MergePlan,
+  commitId?: string,
+  liveCommitHook: (event: LiveCommitHookEvent) => Promise<void> = async () => undefined
+): Promise<void> {
+  const operations = [
+    ...plan.operations.filter((item) => item.incoming.type === "missing"),
+    ...plan.operations.filter((item) => item.incoming.type !== "missing")
+  ];
+  for (const operation of operations) {
+    if (commitId) {
+      await applyCommittedOperation(targetRoot, operation, commitId, liveCommitHook);
+    } else if (operation.incoming.type === "missing") {
+      await rm(join(targetRoot, operation.path), { recursive: true, force: true });
+    } else {
+      await applyOperation(targetRoot, operation);
+    }
   }
 }
 
-async function applyOperation(targetRoot: string, operation: CopyOperation, commitId?: string): Promise<void> {
+async function applyOperation(targetRoot: string, operation: CopyOperation): Promise<void> {
   const targetPath = join(targetRoot, operation.path);
-  const tempPath = commitId
-    ? mergeOperationTempPath(targetRoot, operation.path, commitId)
-    : join(
-        dirname(targetPath),
-        `.${basename(targetPath)}.${process.pid}.${Date.now()}.${Math.random().toString(16).slice(2)}.tmp`
-      );
+  const tempPath = join(
+    dirname(targetPath),
+    `.${basename(targetPath)}.${process.pid}.${Date.now()}.${Math.random().toString(16).slice(2)}.tmp`
+  );
+  await prepareOperationTemp(targetPath, tempPath, operation);
+  await rm(targetPath, { recursive: true, force: true });
+  await rename(tempPath, targetPath);
+}
+
+async function applyCommittedOperation(
+  targetRoot: string,
+  operation: CopyOperation,
+  commitId: string,
+  liveCommitHook: (event: LiveCommitHookEvent) => Promise<void>
+): Promise<void> {
+  const targetPath = join(targetRoot, operation.path);
+  const tempPath = mergeOperationTempPath(targetRoot, operation.path, commitId);
+  const backupPath = mergeOperationBackupPath(targetRoot, operation.path, commitId);
+  if (operation.incoming.type !== "missing") {
+    await prepareOperationTemp(targetPath, tempPath, operation);
+  }
+
+  await liveCommitHook({ path: operation.path, phase: "before-claim" });
+  const current = await inspectEntry(targetPath);
+  if (!sameEntry(current, operation.expected)) {
+    await rm(tempPath, { recursive: true, force: true });
+    throw new WorkspaceLiveMutationError([operation.path], "during-commit");
+  }
+
+  let claimed = false;
+  if (operation.expected.type !== "missing") {
+    if ((await inspectEntry(backupPath)).type !== "missing") {
+      throw new WorkspaceLiveMutationError([operation.path], "during-commit");
+    }
+    try {
+      await rename(targetPath, backupPath);
+      claimed = true;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+        throw new WorkspaceLiveMutationError([operation.path], "during-commit");
+      }
+      throw error;
+    }
+    const backup = await inspectEntry(backupPath);
+    if (!sameEntry(backup, operation.expected)) {
+      const restored = await restoreClaimedEntry(targetPath, backupPath, backup);
+      if (restored) {
+        await rm(tempPath, { recursive: true, force: true });
+      }
+      throw new WorkspaceLiveMutationError([operation.path], "during-commit");
+    }
+  }
+
+  await liveCommitHook({ path: operation.path, phase: "before-publish" });
+  if ((await inspectEntry(targetPath)).type !== "missing") {
+    throw new WorkspaceLiveMutationError([operation.path], "during-commit");
+  }
+  if (operation.incoming.type !== "missing") {
+    try {
+      await publishPreparedEntry(tempPath, targetPath, operation.incoming);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "EEXIST") {
+        throw new WorkspaceLiveMutationError([operation.path], "during-commit");
+      }
+      throw error;
+    }
+    await rm(tempPath, { recursive: true, force: true });
+  }
+
+  if (claimed) {
+    if (!sameEntry(await inspectEntry(backupPath), operation.expected)) {
+      throw new WorkspaceLiveMutationError([operation.path], "during-commit");
+    }
+    await rm(backupPath, { recursive: true, force: true });
+  }
+}
+
+async function prepareOperationTemp(
+  targetPath: string,
+  tempPath: string,
+  operation: CopyOperation
+): Promise<void> {
   await ensureDir(dirname(targetPath));
   await rm(tempPath, { recursive: true, force: true });
 
@@ -734,14 +840,150 @@ async function applyOperation(targetRoot: string, operation: CopyOperation, comm
   } else if (operation.incoming.type === "symlink") {
     await symlink(operation.incoming.target, tempPath);
   }
+}
 
-  await rm(targetPath, { recursive: true, force: true });
-  await rename(tempPath, targetPath);
+async function publishPreparedEntry(
+  sourcePath: string,
+  targetPath: string,
+  entry: Exclude<WorkspaceEntry, MissingEntry>
+): Promise<void> {
+  if (entry.type === "file") {
+    await link(sourcePath, targetPath);
+  } else {
+    await symlink(await readlink(sourcePath), targetPath);
+  }
+}
+
+async function restoreClaimedEntry(
+  targetPath: string,
+  backupPath: string,
+  entry: WorkspaceEntry
+): Promise<boolean> {
+  if (entry.type === "missing" || (await inspectEntry(targetPath)).type !== "missing") {
+    return false;
+  }
+  try {
+    await publishPreparedEntry(backupPath, targetPath, entry);
+    await rm(backupPath, { recursive: true, force: true });
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function mergeOperationTempPath(targetRoot: string, path: string, commitId: string): string {
   const targetPath = join(targetRoot, path);
   return join(dirname(targetPath), `.${basename(targetPath)}.parallel-codex-${commitId}.tmp`);
+}
+
+function mergeOperationBackupPath(targetRoot: string, path: string, commitId: string): string {
+  const targetPath = join(targetRoot, path);
+  return join(dirname(targetPath), `.${basename(targetPath)}.parallel-codex-${commitId}.backup`);
+}
+
+interface RecoverOwnedCommitPathInput {
+  path: string;
+  targetPath: string;
+  tempPath: string;
+  backupPath: string;
+  baseline: WorkspaceEntry;
+  integration: WorkspaceEntry;
+  commitProtocol?: typeof LIVE_COMMIT_PROTOCOL;
+}
+
+async function recoverOwnedCommitPath(input: RecoverOwnedCommitPathInput): Promise<void> {
+  const [initialTemp, backup, initialLive] = await Promise.all([
+    inspectEntry(input.tempPath),
+    inspectEntry(input.backupPath),
+    inspectEntry(input.targetPath)
+  ]);
+  let temp = initialTemp;
+  let live = initialLive;
+  if (temp.type !== "missing" && !sameEntry(temp, input.integration)) {
+    throw new Error(`Pending integration temp does not match the integration snapshot: ${input.path}`);
+  }
+  if (backup.type !== "missing" && !sameEntry(backup, input.baseline)) {
+    throw new Error(`Pending integration backup does not match the baseline snapshot: ${input.path}`);
+  }
+
+  if (backup.type !== "missing") {
+    if (sameEntry(live, input.integration)) {
+      await rm(input.tempPath, { recursive: true, force: true });
+      await rm(input.backupPath, { recursive: true, force: true });
+      return;
+    }
+    if (sameEntry(live, input.baseline)) {
+      await rm(input.backupPath, { recursive: true, force: true });
+    } else if (live.type === "missing") {
+      if (input.integration.type === "missing") {
+        await rm(input.backupPath, { recursive: true, force: true });
+        return;
+      }
+      if (temp.type === "missing") {
+        throw new Error(`Pending integration replacement is missing: ${input.path}`);
+      }
+      await publishPendingEntry(input, temp);
+      await rm(input.tempPath, { recursive: true, force: true });
+      if (!sameEntry(await inspectEntry(input.backupPath), input.baseline)) {
+        throw new WorkspaceLiveMutationError([input.path], "pending-commit");
+      }
+      await rm(input.backupPath, { recursive: true, force: true });
+      return;
+    } else {
+      throw new WorkspaceLiveMutationError([input.path], "pending-commit");
+    }
+  }
+
+  temp = await inspectEntry(input.tempPath);
+  if (temp.type === "missing") {
+    return;
+  }
+  live = await inspectEntry(input.targetPath);
+  if (sameEntry(live, input.integration)) {
+    await rm(input.tempPath, { recursive: true, force: true });
+    return;
+  }
+  if (!sameEntry(live, input.baseline) && live.type !== "missing") {
+    throw new WorkspaceLiveMutationError([input.path], "pending-commit");
+  }
+  if (
+    input.commitProtocol === LIVE_COMMIT_PROTOCOL
+    && live.type === "missing"
+    && input.baseline.type !== "missing"
+  ) {
+    throw new WorkspaceLiveMutationError([input.path], "pending-commit");
+  }
+
+  let claimed = false;
+  if (live.type !== "missing") {
+    await rename(input.targetPath, input.backupPath);
+    claimed = true;
+    if (!sameEntry(await inspectEntry(input.backupPath), input.baseline)) {
+      throw new WorkspaceLiveMutationError([input.path], "pending-commit");
+    }
+  }
+  await publishPendingEntry(input, temp);
+  await rm(input.tempPath, { recursive: true, force: true });
+  if (claimed) {
+    if (!sameEntry(await inspectEntry(input.backupPath), input.baseline)) {
+      throw new WorkspaceLiveMutationError([input.path], "pending-commit");
+    }
+    await rm(input.backupPath, { recursive: true, force: true });
+  }
+}
+
+async function publishPendingEntry(
+  input: RecoverOwnedCommitPathInput,
+  entry: Exclude<WorkspaceEntry, MissingEntry>
+): Promise<void> {
+  try {
+    await publishPreparedEntry(input.tempPath, input.targetPath, entry);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "EEXIST") {
+      throw new WorkspaceLiveMutationError([input.path], "pending-commit");
+    }
+    throw error;
+  }
 }
 
 async function workspaceManifest(

@@ -1,4 +1,4 @@
-import { chmod, lstat, mkdtemp, readFile, rm } from "node:fs/promises";
+import { chmod, lstat, mkdtemp, readFile, readlink, rm, symlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -273,6 +273,86 @@ describe("ParallelWorkspaceManager", () => {
     expect(await pathExists(join(wave.rootDir, "integration.pending.json"))).toBe(false);
   });
 
+  it("resumes a replacement after the live target was atomically claimed", async () => {
+    const workspaceRoot = await mkdtemp(join(tmpdir(), "pct-workspace-owned-backup-"));
+    const taskDir = join(workspaceRoot, ".parallel-codex", "sessions", "task-owned-backup");
+    const targetPath = join(workspaceRoot, "replace.txt");
+    await writeText(targetPath, "baseline\n");
+    const manager = new ParallelWorkspaceManager({ workspaceRoot, taskDir, dataDir: ".parallel-codex" });
+    const input = { turnId: "0001", wave: 1, featureIds: ["0001-ui"] };
+    const wave = await manager.prepareWave(input);
+    await writeText(join(wave.featureDirs.get("0001-ui") ?? "", "replace.txt"), "integrated\n");
+    const staged = await manager.stageWave(wave);
+    const commitId = "owned-backup-001";
+    await writePendingCommit(wave, staged.changedPaths, commitId, "atomic-claim-v1");
+    await writeText(commitTempPath(workspaceRoot, "replace.txt", commitId), "integrated\n");
+    await writeText(commitBackupPath(workspaceRoot, "replace.txt", commitId), "baseline\n");
+    await rm(targetPath);
+
+    const restored = await manager.restoreWave(input);
+    expect(restored).not.toBeNull();
+    if (!restored) {
+      throw new Error("Claimed replacement was not restored");
+    }
+    await manager.commitWave(restored);
+
+    expect(await readTextIfExists(targetPath)).toBe("integrated\n");
+    expect(await pathExists(commitTempPath(workspaceRoot, "replace.txt", commitId))).toBe(false);
+    expect(await pathExists(commitBackupPath(workspaceRoot, "replace.txt", commitId))).toBe(false);
+    expect(await pathExists(join(wave.rootDir, "integration.pending.json"))).toBe(false);
+  });
+
+  it("resumes a deletion after the live target was atomically claimed", async () => {
+    const workspaceRoot = await mkdtemp(join(tmpdir(), "pct-workspace-owned-delete-backup-"));
+    const taskDir = join(workspaceRoot, ".parallel-codex", "sessions", "task-owned-delete-backup");
+    const targetPath = join(workspaceRoot, "obsolete.txt");
+    await writeText(targetPath, "baseline\n");
+    const manager = new ParallelWorkspaceManager({ workspaceRoot, taskDir, dataDir: ".parallel-codex" });
+    const input = { turnId: "0001", wave: 1, featureIds: ["0001-cleanup"] };
+    const wave = await manager.prepareWave(input);
+    await rm(join(wave.featureDirs.get("0001-cleanup") ?? "", "obsolete.txt"));
+    const staged = await manager.stageWave(wave);
+    const commitId = "owned-delete-backup-001";
+    await writePendingCommit(wave, staged.changedPaths, commitId, "atomic-claim-v1");
+    await writeText(commitBackupPath(workspaceRoot, "obsolete.txt", commitId), "baseline\n");
+    await rm(targetPath);
+
+    const restored = await manager.restoreWave(input);
+    expect(restored).not.toBeNull();
+    if (!restored) {
+      throw new Error("Claimed deletion was not restored");
+    }
+    await manager.commitWave(restored);
+
+    expect(await pathExists(targetPath)).toBe(false);
+    expect(await pathExists(commitBackupPath(workspaceRoot, "obsolete.txt", commitId))).toBe(false);
+    expect(await pathExists(join(wave.rootDir, "integration.pending.json"))).toBe(false);
+  });
+
+  it("blocks recovery when an owned backup no longer matches the baseline", async () => {
+    const workspaceRoot = await mkdtemp(join(tmpdir(), "pct-workspace-corrupt-backup-"));
+    const taskDir = join(workspaceRoot, ".parallel-codex", "sessions", "task-corrupt-backup");
+    const targetPath = join(workspaceRoot, "replace.txt");
+    await writeText(targetPath, "baseline\n");
+    const manager = new ParallelWorkspaceManager({ workspaceRoot, taskDir, dataDir: ".parallel-codex" });
+    const input = { turnId: "0001", wave: 1, featureIds: ["0001-ui"] };
+    const wave = await manager.prepareWave(input);
+    await writeText(join(wave.featureDirs.get("0001-ui") ?? "", "replace.txt"), "integrated\n");
+    const staged = await manager.stageWave(wave);
+    const commitId = "corrupt-backup-001";
+    await writePendingCommit(wave, staged.changedPaths, commitId, "atomic-claim-v1");
+    await writeText(commitTempPath(workspaceRoot, "replace.txt", commitId), "integrated\n");
+    await writeText(commitBackupPath(workspaceRoot, "replace.txt", commitId), "tampered\n");
+    await rm(targetPath);
+
+    await expect(manager.restoreWave(input)).rejects.toThrow(
+      "Pending integration backup does not match the baseline snapshot: replace.txt"
+    );
+    expect(await readTextIfExists(commitBackupPath(workspaceRoot, "replace.txt", commitId))).toBe("tampered\n");
+    expect(await pathExists(commitTempPath(workspaceRoot, "replace.txt", commitId))).toBe(true);
+    expect(await pathExists(join(wave.rootDir, "integration.pending.json"))).toBe(true);
+  });
+
   it("blocks an owned temporary replacement whose content is not the integration snapshot", async () => {
     const workspaceRoot = await mkdtemp(join(tmpdir(), "pct-workspace-corrupt-temp-"));
     const taskDir = join(workspaceRoot, ".parallel-codex", "sessions", "task-corrupt-temp");
@@ -392,6 +472,7 @@ describe("ParallelWorkspaceManager", () => {
     expect(JSON.parse(await readTextIfExists(join(wave.rootDir, "integration.json")))).toMatchObject({
       state: "integrated",
       commit_id: expect.stringMatching(/^[A-Za-z0-9-]+$/),
+      commit_protocol: "atomic-claim-v1",
       changed_paths: result.changedPaths
     });
     expect(await pathExists(join(wave.rootDir, "integration.pending.json"))).toBe(false);
@@ -419,6 +500,104 @@ describe("ParallelWorkspaceManager", () => {
       name: "WorkspaceLiveMutationError",
       paths: ["late-escape.txt"]
     } satisfies Partial<WorkspaceLiveMutationError>);
+  });
+
+  it("preserves a live edit that races after commit preflight but before path ownership", async () => {
+    const workspaceRoot = await mkdtemp(join(tmpdir(), "pct-workspace-race-before-claim-"));
+    const taskDir = join(workspaceRoot, ".parallel-codex", "sessions", "task-race-before-claim");
+    const targetPath = join(workspaceRoot, "shared.txt");
+    await writeText(targetPath, "baseline\n");
+    let raced = false;
+    const manager = new ParallelWorkspaceManager(
+      { workspaceRoot, taskDir, dataDir: ".parallel-codex" },
+      {
+        liveCommitHook: async ({ path, phase }) => {
+          if (!raced && path === "shared.txt" && phase === "before-claim") {
+            raced = true;
+            await writeText(targetPath, "user edit\n");
+          }
+        }
+      }
+    );
+    const wave = await manager.prepareWave({ turnId: "0001", wave: 1, featureIds: ["0001-ui"] });
+    await writeText(join(wave.featureDirs.get("0001-ui") ?? "", "shared.txt"), "worker edit\n");
+    await manager.stageWave(wave);
+
+    await expect(manager.commitWave(wave)).rejects.toMatchObject({
+      name: "WorkspaceLiveMutationError",
+      paths: ["shared.txt"]
+    });
+    expect(await readTextIfExists(targetPath)).toBe("user edit\n");
+    expect(await pathExists(join(wave.rootDir, "integration.pending.json"))).toBe(true);
+    const intent = JSON.parse(await readTextIfExists(join(wave.rootDir, "integration.pending.json")));
+    expect(await pathExists(commitBackupPath(workspaceRoot, "shared.txt", intent.commit_id))).toBe(false);
+  });
+
+  it("never overwrites a live path created after ownership but before publish", async () => {
+    const workspaceRoot = await mkdtemp(join(tmpdir(), "pct-workspace-race-before-publish-"));
+    const taskDir = join(workspaceRoot, ".parallel-codex", "sessions", "task-race-before-publish");
+    const targetPath = join(workspaceRoot, "shared.txt");
+    await writeText(targetPath, "baseline\n");
+    let raced = false;
+    const manager = new ParallelWorkspaceManager(
+      { workspaceRoot, taskDir, dataDir: ".parallel-codex" },
+      {
+        liveCommitHook: async ({ path, phase }) => {
+          if (!raced && path === "shared.txt" && phase === "before-publish") {
+            raced = true;
+            await writeText(targetPath, "late user edit\n");
+          }
+        }
+      }
+    );
+    const wave = await manager.prepareWave({ turnId: "0001", wave: 1, featureIds: ["0001-ui"] });
+    await writeText(join(wave.featureDirs.get("0001-ui") ?? "", "shared.txt"), "worker edit\n");
+    await manager.stageWave(wave);
+
+    await expect(manager.commitWave(wave)).rejects.toMatchObject({
+      name: "WorkspaceLiveMutationError",
+      paths: ["shared.txt"]
+    });
+    expect(await readTextIfExists(targetPath)).toBe("late user edit\n");
+    const intent = JSON.parse(await readTextIfExists(join(wave.rootDir, "integration.pending.json")));
+    expect(await pathExists(commitBackupPath(workspaceRoot, "shared.txt", intent.commit_id))).toBe(true);
+    expect(await pathExists(commitTempPath(workspaceRoot, "shared.txt", intent.commit_id))).toBe(true);
+  });
+
+  it("does not recover a new-protocol replacement over a concurrent deletion", async () => {
+    const workspaceRoot = await mkdtemp(join(tmpdir(), "pct-workspace-race-delete-crash-"));
+    const taskDir = join(workspaceRoot, ".parallel-codex", "sessions", "task-race-delete-crash");
+    const targetPath = join(workspaceRoot, "shared.txt");
+    await writeText(targetPath, "baseline\n");
+    const manager = new ParallelWorkspaceManager(
+      { workspaceRoot, taskDir, dataDir: ".parallel-codex" },
+      {
+        liveCommitHook: async ({ path, phase }) => {
+          if (path === "shared.txt" && phase === "before-claim") {
+            await rm(targetPath);
+            throw new Error("simulated crash after concurrent deletion");
+          }
+        }
+      }
+    );
+    const input = { turnId: "0001", wave: 1, featureIds: ["0001-ui"] };
+    const wave = await manager.prepareWave(input);
+    await writeText(join(wave.featureDirs.get("0001-ui") ?? "", "shared.txt"), "worker edit\n");
+    await manager.stageWave(wave);
+
+    await expect(manager.commitWave(wave)).rejects.toThrow("simulated crash after concurrent deletion");
+    const intent = JSON.parse(await readTextIfExists(join(wave.rootDir, "integration.pending.json")));
+    expect(intent.commit_protocol).toBe("atomic-claim-v1");
+    expect(await pathExists(targetPath)).toBe(false);
+    expect(await pathExists(commitTempPath(workspaceRoot, "shared.txt", intent.commit_id))).toBe(true);
+
+    const restarted = new ParallelWorkspaceManager({ workspaceRoot, taskDir, dataDir: ".parallel-codex" });
+    await expect(restarted.restoreWave(input)).rejects.toMatchObject({
+      name: "WorkspaceLiveMutationError",
+      paths: ["shared.txt"]
+    });
+    expect(await pathExists(targetPath)).toBe(false);
+    expect(await pathExists(join(wave.rootDir, "integration.pending.json"))).toBe(true);
   });
 
   it("keeps the live workspace unchanged and writes conflict evidence when features overlap", async () => {
@@ -470,12 +649,32 @@ describe("ParallelWorkspaceManager", () => {
     expect((await lstat(join(workspaceRoot, "scripts", "run.sh"))).mode & 0o777).toBe(0o755);
     expect(await readFile(join(workspaceRoot, "asset.bin"))).toEqual(Buffer.from("\u0000\u0001feature"));
   });
+
+  it("publishes new and replacement symlinks through the claimed commit protocol", async () => {
+    const workspaceRoot = await mkdtemp(join(tmpdir(), "pct-workspace-symlink-"));
+    const taskDir = join(workspaceRoot, ".parallel-codex", "sessions", "task-symlink");
+    await writeText(join(workspaceRoot, "old.txt"), "old\n");
+    await writeText(join(workspaceRoot, "new.txt"), "new\n");
+    await symlink("old.txt", join(workspaceRoot, "current.txt"));
+    const manager = new ParallelWorkspaceManager({ workspaceRoot, taskDir, dataDir: ".parallel-codex" });
+    const wave = await manager.prepareWave({ turnId: "0001", wave: 1, featureIds: ["0001-links"] });
+    const featureRoot = wave.featureDirs.get("0001-links") ?? "";
+    await rm(join(featureRoot, "current.txt"));
+    await symlink("new.txt", join(featureRoot, "current.txt"));
+    await symlink("new.txt", join(featureRoot, "alias.txt"));
+
+    await manager.integrateWave(wave);
+
+    expect(await readlink(join(workspaceRoot, "current.txt"))).toBe("new.txt");
+    expect(await readlink(join(workspaceRoot, "alias.txt"))).toBe("new.txt");
+  });
 });
 
 async function writePendingCommit(
   wave: { rootDir: string; turnId: string; wave: number; featureIds: string[] },
   changedPaths: string[],
-  commitId?: string
+  commitId?: string,
+  commitProtocol?: string
 ): Promise<void> {
   await writeJson(join(wave.rootDir, "integration.pending.json"), {
     version: 1,
@@ -484,10 +683,15 @@ async function writePendingCommit(
     wave: wave.wave,
     feature_ids: wave.featureIds,
     ...(commitId ? { commit_id: commitId } : {}),
+    ...(commitProtocol ? { commit_protocol: commitProtocol } : {}),
     changed_paths: changedPaths
   });
 }
 
 function commitTempPath(workspaceRoot: string, path: string, commitId: string): string {
   return join(workspaceRoot, `.${path}.parallel-codex-${commitId}.tmp`);
+}
+
+function commitBackupPath(workspaceRoot: string, path: string, commitId: string): string {
+  return join(workspaceRoot, `.${path}.parallel-codex-${commitId}.backup`);
 }

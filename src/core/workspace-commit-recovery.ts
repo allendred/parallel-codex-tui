@@ -6,6 +6,7 @@ const TASK_DIRECTORY_PATTERN = /^task-/;
 const TURN_DIRECTORY_PATTERN = /^turn-(\d{4,})$/;
 const WAVE_DIRECTORY_PATTERN = /^wave-(\d{4,})$/;
 const COMMIT_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9-]{0,63}$/;
+const COMMIT_PROTOCOL = "atomic-claim-v1";
 
 export interface WorkspaceCommitRecovery {
   cleaned: number;
@@ -19,6 +20,7 @@ interface CommitEvidence {
   wave: number;
   featureIds: string[];
   commitId?: string;
+  commitProtocol?: typeof COMMIT_PROTOCOL;
   changedPaths: string[];
 }
 
@@ -105,6 +107,7 @@ function parseCommitEvidence(
   const featureIds = stringArray(record?.feature_ids);
   const changedPaths = stringArray(record?.changed_paths);
   const commitId = record?.commit_id;
+  const commitProtocol = record?.commit_protocol;
   if (
     record?.version !== 1
     || record.state !== state
@@ -114,6 +117,7 @@ function parseCommitEvidence(
     || !featureIds
     || !changedPaths
     || (commitId !== undefined && (typeof commitId !== "string" || !COMMIT_ID_PATTERN.test(commitId)))
+    || (commitProtocol !== undefined && commitProtocol !== COMMIT_PROTOCOL)
   ) {
     return null;
   }
@@ -124,6 +128,7 @@ function parseCommitEvidence(
     wave: record.wave as number,
     featureIds,
     ...(typeof commitId === "string" ? { commitId } : {}),
+    ...(commitProtocol === COMMIT_PROTOCOL ? { commitProtocol } : {}),
     changedPaths
   };
 }
@@ -139,7 +144,8 @@ function sameCommit(pending: CommitEvidence, integrated: CommitEvidence): boolea
     && pending.wave === integrated.wave
     && sameStrings(pending.featureIds, integrated.featureIds)
     && sameStrings(pending.changedPaths, integrated.changedPaths)
-    && (pending.commitId === undefined || pending.commitId === integrated.commitId);
+    && (pending.commitId === undefined || pending.commitId === integrated.commitId)
+    && (pending.commitProtocol === undefined || pending.commitProtocol === integrated.commitProtocol);
 }
 
 function sameStrings(left: string[], right: string[]): boolean {
