@@ -515,13 +515,83 @@ describe("InputBar", () => {
     roomy.unmount();
 
     const narrow = render(
-      <InputBar mode="workers" value="" terminalWidth={24} onChange={() => {}} />
+      <InputBar mode="workers" value="" terminalWidth={28} onChange={() => {}} />
     );
     const narrowFrame = narrow.lastFrame() ?? "";
-    expect(narrowFrame).toContain("workers · Up/Dn · Esc");
+    expect(narrowFrame).toContain("workers · Up/Dn · Esc back");
     expect(narrowFrame.split("\n")).toHaveLength(1);
-    expect(displayWidth(narrowFrame)).toBeLessThanOrEqual(24);
+    expect(displayWidth(narrowFrame)).toBeLessThanOrEqual(28);
     narrow.unmount();
+  });
+
+  it("keeps Worker overview guidance legible across terminal widths", () => {
+    const overflow: string[] = [];
+    const bareActions: string[] = [];
+    const semanticLoss: string[] = [];
+    const seenSemantics = new Set<string>();
+    const semantics = [
+      ["back", /Esc back/],
+      ["selection", /Up\/Dn/],
+      ["logs", /Enter logs/],
+      ["attach", /\^O attach/],
+      ["features", /F (?:board|features)/],
+      ["timeline", /C (?:flow|timeline)/]
+    ] as const;
+    for (let width = 8; width <= 100; width += 1) {
+      const view = render(
+        <InputBar mode="workers" value="" terminalWidth={width} onChange={() => {}} />
+      );
+      const frame = view.lastFrame() ?? "";
+      if (frame.split("\n").length !== 1 || displayWidth(frame) > width) {
+        overflow.push(`${width}:${displayWidth(frame)}:${frame}`);
+      }
+      if (/(?:^| · )(?:Enter|\^O|Esc)(?= ·|$)/.test(frame)) {
+        bareActions.push(`${width}:${frame}`);
+      }
+      for (const [name, pattern] of semantics) {
+        if (pattern.test(frame)) {
+          seenSemantics.add(name);
+        } else if (seenSemantics.has(name)) {
+          semanticLoss.push(`${width}:${name}:${frame}`);
+        }
+      }
+      view.unmount();
+    }
+
+    expect(overflow).toEqual([]);
+    expect(bareActions).toEqual([]);
+    expect(semanticLoss).toEqual([]);
+  });
+
+  it.each([
+    [8, "wrk"],
+    [15, "wrk"],
+    [16, "wrk · Esc back"],
+    [20, "workers · Esc back"],
+    [28, "workers · Up/Dn · Esc back"],
+    [41, "workers · Up/Dn · Enter logs · Esc back"],
+    [53, "workers · Up/Dn · Enter logs · ^O attach · Esc back"],
+    [72, "workers · Up/Dn · Enter logs · F board · C flow · ^O attach · Esc back"],
+    [86, "workers · Up/Dn select · Enter logs · F features · C timeline · ^O attach · Esc back"],
+    [100, "workers · Up/Dn select · Enter logs · F features · C timeline · ^O attach · Esc back"]
+  ])("uses semantic Worker overview guidance at the %i-column boundary", (width, expected) => {
+    const view = render(
+      <InputBar mode="workers" value="" terminalWidth={width} onChange={() => {}} />
+    );
+
+    expect(view.lastFrame()).toContain(expected);
+    view.unmount();
+  });
+
+  it("labels Worker overview attach and back actions at medium width", () => {
+    const view = render(
+      <InputBar mode="workers" value="" terminalWidth={80} onChange={() => {}} />
+    );
+
+    expect(view.lastFrame()).toContain(
+      "workers · Up/Dn · Enter logs · F board · C flow · ^O attach · Esc back"
+    );
+    view.unmount();
   });
 
   it("shows Feature board selection and timeline guidance", () => {

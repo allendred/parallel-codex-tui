@@ -26,7 +26,7 @@ describe("CLI Worker overview smoke", () => {
       "utf8"
     );
 
-    const screen = new NativeTerminalScreen({ cols: 100, rows: 16, scrollback: 1000 });
+    const screen = new NativeTerminalScreen({ cols: 80, rows: 18, scrollback: 1000 });
     const exits: number[] = [];
     let screenWrites = Promise.resolve();
     const child = spawn(
@@ -34,8 +34,8 @@ describe("CLI Worker overview smoke", () => {
       ["./node_modules/.bin/tsx", "src/cli.tsx", "--app-root", appRoot, "--workspace", workspace],
       {
         cwd: process.cwd(),
-        cols: 100,
-        rows: 16,
+        cols: 80,
+        rows: 18,
         name: "xterm-256color",
         env: { ...process.env, TERM: "xterm-256color" }
       }
@@ -54,15 +54,18 @@ describe("CLI Worker overview smoke", () => {
 
       child.write("实现一个可测试的功能\r");
       await waitForScreenText(() => screenWrites, screen, "done · complex task completed");
-      await waitForScreenText(() => screenWrites, screen, "^B workers");
 
       child.write("\x02");
       await waitForScreenText(() => screenWrites, screen, "Workers");
       await waitForScreenText(() => screenWrites, screen, "Judge (mock)");
-      await waitForScreenText(() => screenWrites, screen, "workers · Up/Dn select · Enter logs");
+      await waitForScreenText(
+        () => screenWrites,
+        screen,
+        "workers · Up/Dn · Enter logs · F board · C flow · ^O attach · Esc back"
+      );
       let snapshot = screen.snapshot();
       expect(snapshot.split("\n")[0]).toContain("workers");
-      expect(snapshot).toContain("workers · Up/Dn select · Enter logs");
+      expect(snapshot).toContain("workers · Up/Dn · Enter logs · F board · C flow · ^O attach · Esc back");
       expect(snapshot).toContain("> Judge (mock)");
 
       child.write("\x1b[B");

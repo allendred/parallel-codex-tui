@@ -623,26 +623,26 @@ function workerInputHints(width: number): { label: string; detail: string } {
 }
 
 function workerOverviewInputHints(width: number): { label: string; detail: string } {
-  if (width < 12) {
+  if (width < 16) {
     return { label: "wrk", detail: "" };
   }
-  if (width < 18) {
-    return { label: "workers", detail: " · Esc" };
+  if (width < 20) {
+    return { label: "wrk", detail: " · Esc back" };
   }
   if (width < 28) {
-    return { label: "workers", detail: " · Up/Dn · Esc" };
+    return { label: "workers", detail: " · Esc back" };
   }
-  if (width < 38) {
-    return { label: "workers", detail: " · Up/Dn · Enter · Esc" };
+  if (width < 41) {
+    return { label: "workers", detail: " · Up/Dn · Esc back" };
   }
-  if (width < 58) {
-    return { label: "workers", detail: " · Up/Dn · Enter logs · ^O · Esc" };
+  if (width < 53) {
+    return { label: "workers", detail: " · Up/Dn · Enter logs · Esc back" };
   }
-  if (width < 74) {
-    return { label: "workers", detail: " · Up/Dn · Enter · F board · C flow · ^O · Esc" };
+  if (width < 72) {
+    return { label: "workers", detail: " · Up/Dn · Enter logs · ^O attach · Esc back" };
   }
-  if (width < 88) {
-    return { label: "workers", detail: " · Up/Dn · Enter · F board · C flow · ^O · Esc" };
+  if (width < 86) {
+    return { label: "workers", detail: " · Up/Dn · Enter logs · F board · C flow · ^O attach · Esc back" };
   }
   return { label: "workers", detail: " · Up/Dn select · Enter logs · F features · C timeline · ^O attach · Esc back" };
 }
