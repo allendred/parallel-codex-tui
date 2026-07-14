@@ -860,16 +860,16 @@ describe("InputBar", () => {
 
   it("keeps worker guidance compact in narrow terminals", () => {
     const { lastFrame } = render(
-      <InputBar mode="worker" value="" terminalWidth={42} onChange={() => {}} />
+      <InputBar mode="worker" value="" terminalWidth={44} onChange={() => {}} />
     );
 
     const frame = lastFrame() ?? "";
-    expect(frame).toContain("logs · scroll · Tab · ^O attach · Esc");
+    expect(frame).toContain("logs · scroll · Tab · ^O attach · Esc chat");
     expect(frame).not.toContain("wheel/Pg");
     expect(frame).toContain("attach");
     expect(frame).not.toContain("read");
     expect(frame.split("\n")).toHaveLength(1);
-    expect(displayWidth(frame)).toBeLessThanOrEqual(42);
+    expect(displayWidth(frame)).toBeLessThanOrEqual(44);
   });
 
   it("keeps actionable worker shortcuts visible in small terminals", () => {
@@ -878,7 +878,7 @@ describe("InputBar", () => {
     );
 
     const frame = lastFrame() ?? "";
-    expect(frame).toContain("logs · Pg · Tab · Esc chat");
+    expect(frame).toContain("logs · scroll · Tab · Esc chat");
     expect(frame).not.toContain("^O");
     expect(frame).not.toContain("read");
     expect(frame.split("\n")).toHaveLength(1);
@@ -892,16 +892,29 @@ describe("InputBar", () => {
 
     const frame = lastFrame() ?? "";
     expect(frame).toContain(
-      "logs · scroll · ^F find · E err · D diff · Tab · ^B workers · ^O attach · Esc"
+      "logs · scroll · ^F find · E err · D diff · Tab · ^O attach · Esc chat"
     );
-    expect(frame).not.toMatch(/(?:^| · )\^(?:B|O)(?= ·|$)/);
+    expect(frame).not.toContain("^B");
+    expect(frame).not.toMatch(/(?:^| · )(?:\^(?:B|O)|Esc)(?= ·|$)/);
     expect(frame.split("\n")).toHaveLength(1);
     expect(displayWidth(frame)).toBeLessThanOrEqual(80);
   });
 
   it("keeps worker guidance legible on one row across terminal widths", () => {
     const overflow: string[] = [];
-    const bareChords: string[] = [];
+    const bareActions: string[] = [];
+    const semanticLoss: string[] = [];
+    const seenSemantics = new Set<string>();
+    const semantics = [
+      ["scroll", /(?:Pg|scroll)/],
+      ["next", /Tab/],
+      ["attach", /\^O attach/],
+      ["find", /\^F find/],
+      ["errors", /E err/],
+      ["diffs", /D diff/],
+      ["workers", /\^B workers/],
+      ["chat", /Esc chat/]
+    ] as const;
     for (let width = 8; width <= 100; width += 1) {
       const view = render(
         <InputBar mode="worker" value="" terminalWidth={width} onChange={() => {}} />
@@ -910,23 +923,35 @@ describe("InputBar", () => {
       if (frame.split("\n").length !== 1 || displayWidth(frame) > width) {
         overflow.push(`${width}:${displayWidth(frame)}:${frame}`);
       }
-      if (/(?:^| · )\^(?:B|O)(?= ·|$)/.test(frame)) {
-        bareChords.push(`${width}:${frame}`);
+      if (/(?:^| · )(?:\^(?:B|O)|Esc)(?= ·|$)/.test(frame)) {
+        bareActions.push(`${width}:${frame}`);
+      }
+      for (const [name, pattern] of semantics) {
+        if (pattern.test(frame)) {
+          seenSemantics.add(name);
+        } else if (seenSemantics.has(name)) {
+          semanticLoss.push(`${width}:${name}:${frame}`);
+        }
       }
       view.unmount();
     }
 
     expect(overflow).toEqual([]);
-    expect(bareChords).toEqual([]);
+    expect(bareActions).toEqual([]);
+    expect(semanticLoss).toEqual([]);
   });
 
   it.each([
+    [8, "log"],
+    [10, "Esc chat"],
+    [16, "log · Esc chat"],
+    [17, "logs · Esc chat"],
+    [22, "logs · Pg · Esc chat"],
     [28, "logs · Pg · Tab · Esc chat"],
-    [36, "logs · scroll · Tab · Esc chat"],
-    [40, "logs · scroll · Tab · ^O attach · Esc"],
-    [58, "logs · scroll · ^F find · Tab · ^O attach · Esc chat"],
-    [72, "logs · scroll · ^F find · E err · D diff · Tab · ^O attach · Esc chat"],
-    [79, "logs · scroll · ^F find · E err · D diff · Tab · ^B workers · ^O attach · Esc"],
+    [32, "logs · scroll · Tab · Esc chat"],
+    [44, "logs · scroll · Tab · ^O attach · Esc chat"],
+    [54, "logs · scroll · ^F find · Tab · ^O attach · Esc chat"],
+    [71, "logs · scroll · ^F find · E err · D diff · Tab · ^O attach · Esc chat"],
     [84, "logs · scroll · ^F find · E err · D diff · Tab · ^B workers · ^O attach · Esc chat"],
     [100, "logs · scroll · ^F find · E err · D diff · Tab · ^B workers · ^O attach · Esc chat"]
   ])("uses semantic worker guidance at the %i-column boundary", (width, expected) => {
@@ -944,7 +969,7 @@ describe("InputBar", () => {
     );
 
     const frame = lastFrame() ?? "";
-    expect(frame).toContain("logs · Pg · Esc");
+    expect(frame).toContain("logs · Pg · Esc chat");
     expect(frame).not.toContain("Tab");
     expect(frame).not.toContain("^O");
     expect(frame.split("\n")).toHaveLength(1);
@@ -957,20 +982,21 @@ describe("InputBar", () => {
     );
 
     const frame = lastFrame() ?? "";
-    expect(frame).toContain("log · Pg · Esc");
+    expect(frame).toContain("log · Esc chat");
     expect(frame).not.toContain("logs");
     expect(frame).not.toContain("read");
+    expect(frame).not.toContain("Pg");
     expect(frame).not.toContain("^O");
     expect(frame.split("\n")).toHaveLength(1);
   });
 
-  it("keeps the chat return shortcut visible in sub-15-column worker terminals", () => {
+  it("keeps the chat return shortcut explicit in sub-15-column worker terminals", () => {
     const { lastFrame } = render(
       <InputBar mode="worker" value="" terminalWidth={13} onChange={() => {}} />
     );
 
     const frame = lastFrame() ?? "";
-    expect(frame).toContain("log · Esc");
+    expect(frame).toContain("Esc chat");
     expect(frame).not.toContain("read");
     expect(frame).not.toContain("Pg");
     expect(frame).not.toContain("^O");
@@ -978,13 +1004,14 @@ describe("InputBar", () => {
     expect(displayWidth(frame)).toBeLessThanOrEqual(13);
   });
 
-  it("keeps worker hints to one short token in nano terminals", () => {
+  it("prioritizes the explicit chat return in nano worker terminals", () => {
     const { lastFrame } = render(
       <InputBar mode="worker" value="" terminalWidth={10} onChange={() => {}} />
     );
 
     const frame = lastFrame() ?? "";
-    expect(frame).toContain("log");
+    expect(frame).toContain("Esc chat");
+    expect(frame).not.toContain("log");
     expect(frame).not.toContain("read");
     expect(frame.split("\n")).toHaveLength(1);
     expect(displayWidth(frame)).toBeLessThanOrEqual(10);

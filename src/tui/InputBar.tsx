@@ -591,35 +591,35 @@ export function chatStartingDisplayValue(terminalWidth: number): string {
 }
 
 function workerInputHints(width: number): { label: string; detail: string } {
-  if (width < 12) {
+  if (width < 10) {
     return { label: "log", detail: "" };
   }
   if (width < 16) {
-    return { label: "log", detail: " · Esc" };
+    return { label: "Esc chat", detail: "" };
   }
-  if (width < 18) {
-    return { label: "log", detail: " · Pg · Esc" };
+  if (width < 17) {
+    return { label: "log", detail: " · Esc chat" };
+  }
+  if (width < 22) {
+    return { label: "logs", detail: " · Esc chat" };
   }
   if (width < 28) {
-    return { label: "logs", detail: " · Pg · Esc" };
+    return { label: "logs", detail: " · Pg · Esc chat" };
   }
-  if (width < 36) {
+  if (width < 32) {
     return { label: "logs", detail: " · Pg · Tab · Esc chat" };
   }
-  if (width < 40) {
+  if (width < 44) {
     return { label: "logs", detail: " · scroll · Tab · Esc chat" };
   }
-  if (width < 58) {
-    return { label: "logs", detail: " · scroll · Tab · ^O attach · Esc" };
+  if (width < 54) {
+    return { label: "logs", detail: " · scroll · Tab · ^O attach · Esc chat" };
   }
-  if (width < 72) {
+  if (width < 71) {
     return { label: "logs", detail: " · scroll · ^F find · Tab · ^O attach · Esc chat" };
   }
-  if (width < 79) {
-    return { label: "logs", detail: " · scroll · ^F find · E err · D diff · Tab · ^O attach · Esc chat" };
-  }
   if (width < 84) {
-    return { label: "logs", detail: " · scroll · ^F find · E err · D diff · Tab · ^B workers · ^O attach · Esc" };
+    return { label: "logs", detail: " · scroll · ^F find · E err · D diff · Tab · ^O attach · Esc chat" };
   }
   return { label: "logs", detail: " · scroll · ^F find · E err · D diff · Tab · ^B workers · ^O attach · Esc chat" };
 }
