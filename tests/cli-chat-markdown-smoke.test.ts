@@ -197,7 +197,7 @@ describe("CLI chat Markdown smoke", () => {
       ));
       const observedStatusText = observedStatusLines.join("\n");
       expect(observedStatusText).toMatch(
-        /@ main\/codex waiting output · \d+s \/ 5s first · route simple · forced ·/
+        /@ main\/codex waiting output · \d+s \/ 5s first · route simple · forced(?:\n|$)/
       );
       expect(observedStatusText).toContain("@ main/codex responding");
       expect(observedStatusText).not.toContain("@ main/codex run ·");

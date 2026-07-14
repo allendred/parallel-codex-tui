@@ -135,6 +135,7 @@ describe("formatStatusLine", () => {
 
     expect(formatRouteStatus).toBeTypeOf("function");
     expect(formatRouteStatus?.({ mode: "simple", source: "codex", duration_ms: 42 })).toBe("route simple · 42ms");
+    expect(formatRouteStatus?.({ mode: "simple", source: "forced", duration_ms: 0 })).toBe("route simple · forced");
     expect(formatRouteStatus?.({
       mode: "simple",
       source: "codex",

@@ -189,7 +189,10 @@ export function formatRouteStatus(route: RouteDecision | null): string {
     && route.router_attempt > 1
   ) {
     details.push(`${formatRouteDuration(route.router_total_duration_ms)} total`);
-  } else if (typeof route.duration_ms === "number") {
+  } else if (
+    typeof route.duration_ms === "number"
+    && (route.source !== "forced" || route.duration_ms > 0)
+  ) {
     details.push(formatRouteDuration(route.duration_ms));
   }
   return `route ${details.join(" · ")}`;
