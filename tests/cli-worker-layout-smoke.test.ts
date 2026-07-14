@@ -447,6 +447,7 @@ describe("CLI worker layout smoke", () => {
       await waitForScreenText(() => screenWrites, screen, "^W logs");
       child.write("\x17");
       await waitForScreenText(() => screenWrites, screen, "const x = 1");
+      await waitForScreenText(() => screenWrites, screen, "^B workers · ^O attach · Esc chat");
       await screenWrites;
 
       const lines = screen.styledSnapshotLines();

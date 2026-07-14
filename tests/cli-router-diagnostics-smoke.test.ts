@@ -6,7 +6,9 @@ import { spawn } from "node-pty";
 import { ensureDir } from "../src/core/file-store.js";
 import { prepareWorkspace } from "../src/core/workspace.js";
 import type { RouterAuditRecord } from "../src/core/router-audit.js";
+import { displayWidth } from "../src/tui/display-width.js";
 import { NativeTerminalScreen } from "../src/tui/terminal-screen.js";
+import { resizeAndWaitForFreshScreenText } from "./pty-resize.js";
 
 describe("CLI Router diagnostics smoke", () => {
   it("opens the global audit, scrolls, preserves the draft, refreshes, and exits", async () => {
@@ -48,6 +50,7 @@ describe("CLI Router diagnostics smoke", () => {
     const screen = new NativeTerminalScreen({ cols: 100, rows: 16, scrollback: 1000 });
     const exits: number[] = [];
     let screenWrites = Promise.resolve();
+    let outputRevision = 0;
     const child = spawn(
       process.execPath,
       ["./node_modules/.bin/tsx", "src/cli.tsx", "--app-root", appRoot, "--workspace", workspace],
@@ -60,6 +63,7 @@ describe("CLI Router diagnostics smoke", () => {
       }
     );
     child.onData((chunk) => {
+      outputRevision += 1;
       screenWrites = screenWrites.then(() => screen.write(chunk));
     });
     child.onExit(({ exitCode }) => exits.push(exitCode));
@@ -71,6 +75,36 @@ describe("CLI Router diagnostics smoke", () => {
 
       child.write("\x07");
       await waitForScreenText(() => screenWrites, screen, "Router diagnostics");
+      await waitForScreenText(() => screenWrites, screen, "newest-visible");
+      await resizeAndWaitForFreshScreenText({
+        child,
+        screen,
+        screenWrites: () => screenWrites,
+        revision: () => outputRevision,
+        cols: 31,
+        rows: 16,
+        text: "routes · Pg scroll · Esc chat"
+      });
+      expect(Math.max(...screen.snapshot().split("\n").map((line) => displayWidth(line)))).toBeLessThanOrEqual(31);
+      await resizeAndWaitForFreshScreenText({
+        child,
+        screen,
+        screenWrites: () => screenWrites,
+        revision: () => outputRevision,
+        cols: 41,
+        rows: 16,
+        text: "routes · scroll · ^G refresh · Esc chat"
+      });
+      expect(Math.max(...screen.snapshot().split("\n").map((line) => displayWidth(line)))).toBeLessThanOrEqual(41);
+      await resizeAndWaitForFreshScreenText({
+        child,
+        screen,
+        screenWrites: () => screenWrites,
+        revision: () => outputRevision,
+        cols: 100,
+        rows: 16,
+        text: "routes · scroll · Tab scope · ^G refresh · Esc chat"
+      });
       await waitForScreenText(() => screenWrites, screen, "newest-visible");
       let snapshot = screen.snapshot();
       expect(snapshot.split("\n")[0]).toContain("routes");
@@ -85,6 +119,7 @@ describe("CLI Router diagnostics smoke", () => {
       await waitForScreenText(() => screenWrites, screen, "evidence · timeout · limit 30s");
       await waitForScreenText(() => screenWrites, screen, "diagnosis · Router timed out before a valid route response");
       await waitForScreenText(() => screenWrites, screen, "next · run parallel-codex-tui --doctor --probe-router");
+      await waitForScreenText(() => screenWrites, screen, "routes · scroll · Tab scope · ^G refresh · Esc chat");
       snapshot = screen.snapshot();
       expect(snapshot).not.toContain("other-workspace-route");
       expect(snapshot).toContain("Tab scope");

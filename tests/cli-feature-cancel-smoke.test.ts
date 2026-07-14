@@ -5,7 +5,9 @@ import { describe, expect, it } from "vitest";
 import { spawn } from "node-pty";
 import { pathExists, readJson, readTextIfExists } from "../src/core/file-store.js";
 import { TaskMetaSchema, WorkerStatusSchema } from "../src/domain/schemas.js";
+import { displayWidth } from "../src/tui/display-width.js";
 import { NativeTerminalScreen } from "../src/tui/terminal-screen.js";
+import { resizeAndWaitForFreshScreenText } from "./pty-resize.js";
 
 describe("CLI Feature cancel smoke", () => {
   it("confirms and cancels only the selected active Feature from the board", async () => {
@@ -15,6 +17,7 @@ describe("CLI Feature cancel smoke", () => {
     const screen = new NativeTerminalScreen({ cols: 100, rows: 20, scrollback: 1000 });
     const exits: number[] = [];
     let screenWrites = Promise.resolve();
+    let outputRevision = 0;
 
     await mkdir(join(appRoot, ".parallel-codex"), { recursive: true });
     await writeFile(agentScript, featureCancelAgentSource());
@@ -57,6 +60,7 @@ describe("CLI Feature cancel smoke", () => {
       }
     );
     child.onData((chunk) => {
+      outputRevision += 1;
       screenWrites = screenWrites.then(() => screen.write(chunk));
     });
     child.onExit(({ exitCode }) => exits.push(exitCode));
@@ -89,8 +93,38 @@ describe("CLI Feature cancel smoke", () => {
       await waitForScreenText(() => screenWrites, screen, "> T0001 · Alpha · actor running");
       await waitForScreenText(() => screenWrites, screen, "X cancel");
 
+      await resizeAndWaitForFreshScreenText({
+        child,
+        screen,
+        screenWrites: () => screenWrites,
+        revision: () => outputRevision,
+        cols: 40,
+        rows: 20,
+        text: "features · X cancel · Esc workers"
+      });
+      expect(Math.max(...screen.snapshot().split("\n").map((line) => displayWidth(line)))).toBeLessThanOrEqual(40);
+
       child.write("x");
       await waitForScreenText(() => screenWrites, screen, "cancel feature? · X confirm · Esc keep");
+      await resizeAndWaitForFreshScreenText({
+        child,
+        screen,
+        screenWrites: () => screenWrites,
+        revision: () => outputRevision,
+        cols: 32,
+        rows: 20,
+        text: "cancel? · X confirm · Esc keep"
+      });
+      expect(Math.max(...screen.snapshot().split("\n").map((line) => displayWidth(line)))).toBeLessThanOrEqual(32);
+      await resizeAndWaitForFreshScreenText({
+        child,
+        screen,
+        screenWrites: () => screenWrites,
+        revision: () => outputRevision,
+        cols: 100,
+        rows: 20,
+        text: "cancel feature? · X confirm · Esc keep"
+      });
       await waitForScreenText(() => screenWrites, screen, "Cancel Alpha? Active peers will finish; integration stays blocked.");
       child.write("\x1b");
       await waitForScreenText(() => screenWrites, screen, "X cancel");

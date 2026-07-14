@@ -5,7 +5,9 @@ import { describe, expect, it } from "vitest";
 import { spawn } from "node-pty";
 import { readJson, writeJson } from "../src/core/file-store.js";
 import { NativeSessionSchema, TaskMetaSchema, WorkerStatusSchema } from "../src/domain/schemas.js";
+import { displayWidth } from "../src/tui/display-width.js";
 import { NativeTerminalScreen } from "../src/tui/terminal-screen.js";
+import { resizeAndWaitForFreshScreenText } from "./pty-resize.js";
 
 describe("CLI Task sessions smoke", () => {
   it("restores an older task and native session, remembers it, and persists a cleared context", async () => {
@@ -58,6 +60,36 @@ describe("CLI Task sessions smoke", () => {
 
       firstRun.child.write("\x14");
       await waitForScreenText(firstRun, "Task sessions");
+      await waitForScreenText(firstRun, "2 tasks · 2 done");
+      await resizeAndWaitForFreshScreenText({
+        child: firstRun.child,
+        screen: firstRun.screen,
+        screenWrites: firstRun.screenWrites,
+        revision: firstRun.outputRevision,
+        cols: 36,
+        rows: 18,
+        text: "sessions · Up/Dn select · Esc back"
+      });
+      expect(Math.max(...firstRun.screen.snapshot().split("\n").map((line) => displayWidth(line)))).toBeLessThanOrEqual(36);
+      await resizeAndWaitForFreshScreenText({
+        child: firstRun.child,
+        screen: firstRun.screen,
+        screenWrites: firstRun.screenWrites,
+        revision: firstRun.outputRevision,
+        cols: 52,
+        rows: 18,
+        text: "sessions · Up/Dn select · Enter restore · Esc back"
+      });
+      expect(Math.max(...firstRun.screen.snapshot().split("\n").map((line) => displayWidth(line)))).toBeLessThanOrEqual(52);
+      await resizeAndWaitForFreshScreenText({
+        child: firstRun.child,
+        screen: firstRun.screen,
+        screenWrites: firstRun.screenWrites,
+        revision: firstRun.outputRevision,
+        cols: 110,
+        rows: 18,
+        text: "sessions · Up/Dn select · Enter restore · ^N new · Esc back"
+      });
       await waitForScreenText(firstRun, "2 tasks · 2 done");
       let snapshot = firstRun.screen.snapshot();
       expect(snapshot.split("\n")[0]).toContain("sessions");
@@ -138,6 +170,7 @@ function startCli(appRoot: string, workspace: string) {
   const screen = new NativeTerminalScreen({ cols: 110, rows: 18, scrollback: 1000 });
   const exits: number[] = [];
   let screenWrites = Promise.resolve();
+  let outputRevision = 0;
   const child = spawn(
     process.execPath,
     ["./node_modules/.bin/tsx", "src/cli.tsx", "--app-root", appRoot, "--workspace", workspace],
@@ -150,10 +183,17 @@ function startCli(appRoot: string, workspace: string) {
     }
   );
   child.onData((chunk) => {
+    outputRevision += 1;
     screenWrites = screenWrites.then(() => screen.write(chunk));
   });
   child.onExit(({ exitCode }) => exits.push(exitCode));
-  return { child, screen, exits, screenWrites: () => screenWrites };
+  return {
+    child,
+    screen,
+    exits,
+    screenWrites: () => screenWrites,
+    outputRevision: () => outputRevision
+  };
 }
 
 function stopCli(run: ReturnType<typeof startCli>): void {

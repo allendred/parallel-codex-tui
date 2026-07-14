@@ -17,6 +17,54 @@ import {
 import { displayWidth } from "../src/tui/display-width.js";
 
 describe("App Router reason", () => {
+  it("reconciles a terminal resize that lands while the root resize listener mounts", async () => {
+    const testInput = installTestInputStream();
+    const stdout = process.stdout as NodeJS.WriteStream & {
+      columns: number;
+      rows: number;
+    };
+    const previousColumns = stdout.columns;
+    const previousRows = stdout.rows;
+    const originalOn = stdout.on;
+    let intercepted = false;
+    stdout.columns = 100;
+    stdout.rows = 30;
+    stdout.on = function on(
+      this: NodeJS.WriteStream,
+      event: string | symbol,
+      listener: (...args: unknown[]) => void
+    ) {
+      if (event === "resize" && listener.name === "updateTerminalSize") {
+        intercepted = true;
+        stdout.columns = 24;
+        stdout.rows = 12;
+      }
+      return Reflect.apply(originalOn, this, [event, listener]) as NodeJS.WriteStream;
+    } as typeof stdout.on;
+
+    const view = render(
+      <App
+        config={defaultConfig("/tmp/pct-app-resize-race")}
+        orchestrator={{} as Orchestrator}
+        cwd="/tmp/pct-resize-workspace"
+      />
+    );
+
+    try {
+      await settleEffects();
+      const frame = view.lastFrame() ?? "";
+      expect(intercepted).toBe(true);
+      expect(frame).not.toContain("^G routes");
+      expect(Math.max(...frame.split("\n").map((line) => displayWidth(line)))).toBeLessThanOrEqual(24);
+    } finally {
+      view.unmount();
+      testInput.restore();
+      stdout.on = originalOn;
+      stdout.columns = previousColumns;
+      stdout.rows = previousRows;
+    }
+  });
+
   it("renders the transient route as a distinct rail with an indented reason", () => {
     const route: RouteDecision = {
       mode: "simple",

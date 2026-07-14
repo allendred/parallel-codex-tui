@@ -204,6 +204,7 @@ export function App({
   const [input, setInput] = useState("");
   const [inputCursor, setInputCursor] = useState(0);
   const [inputReady, setInputReady] = useState(false);
+  const [terminalSize, setTerminalSize] = useState(readTerminalSize);
   const [messages, setMessages] = useState<Message[]>(() => [...initialMessages]);
   const [taskResultExpanded, setTaskResultExpanded] = useState(() => (
     Boolean(initialTaskId) && latestTaskResultMessageIndex(initialMessages, initialTaskId) >= 0
@@ -333,9 +334,9 @@ export function App({
     draft: { value: "", cursor: 0 }
   });
 
-  const contentHeight = appContentHeight(process.stdout.rows || 30, Boolean(attachError), config.ui.showStatusBar);
+  const contentHeight = appContentHeight(terminalSize.rows, Boolean(attachError), config.ui.showStatusBar);
   const outputHeight = Math.max(1, contentHeight);
-  const terminalWidth = process.stdout.columns || 120;
+  const terminalWidth = terminalSize.columns;
   const workerActivityPolicies = useMemo<WorkerActivityPolicies>(() => ({
     codex: {
       idleTimeoutMs: config.workers.codex.idleTimeoutMs,
@@ -377,6 +378,20 @@ export function App({
   useEffect(() => {
     inputRef.current = input;
   }, [input]);
+
+  useEffect(() => {
+    const updateTerminalSize = () => {
+      const next = readTerminalSize();
+      setTerminalSize((current) => (
+        current.columns === next.columns && current.rows === next.rows ? current : next
+      ));
+    };
+    process.stdout.on("resize", updateTerminalSize);
+    updateTerminalSize();
+    return () => {
+      process.stdout.off("resize", updateTerminalSize);
+    };
+  }, []);
 
   useEffect(() => {
     inputCursorRef.current = inputCursor;
@@ -2322,11 +2337,11 @@ export function App({
 
   if (view === "workspace") {
     return (
-      <Box flexDirection="column" height={Math.max(1, process.stdout.rows || 30)}>
+      <Box flexDirection="column" height={terminalSize.rows}>
         <WorkspacePicker
           cwd={cwd}
           choices={workspaceChoices}
-          terminalHeight={process.stdout.rows || 30}
+          terminalHeight={terminalSize.rows}
           terminalWidth={terminalWidth}
           onCancel={closeWorkspacePicker}
           onSelect={(workspace) => void selectWorkspace(workspace)}
@@ -2485,6 +2500,13 @@ export function App({
         )}
     </AppShell>
   );
+}
+
+function readTerminalSize(): { columns: number; rows: number } {
+  return {
+    columns: Math.max(1, Math.trunc(process.stdout.columns || 120)),
+    rows: Math.max(1, Math.trunc(process.stdout.rows || 30))
+  };
 }
 
 export function ChatView({

@@ -5,7 +5,9 @@ import { describe, expect, it } from "vitest";
 import { spawn } from "node-pty";
 import { appendJsonLine, writeJson, writeText } from "../src/core/file-store.js";
 import { RouteDecisionSchema, TaskMetaSchema, WorkerStatusSchema } from "../src/domain/schemas.js";
+import { displayWidth } from "../src/tui/display-width.js";
 import { NativeTerminalScreen } from "../src/tui/terminal-screen.js";
+import { resizeAndWaitForFreshScreenText } from "./pty-resize.js";
 
 describe("CLI collaboration timeline smoke", () => {
   it("inspects and filters live collaboration evidence from Worker overview", async () => {
@@ -72,6 +74,7 @@ describe("CLI collaboration timeline smoke", () => {
     const screen = new NativeTerminalScreen({ cols: 100, rows: 16, scrollback: 1000 });
     const exits: number[] = [];
     let screenWrites = Promise.resolve();
+    let outputRevision = 0;
     const child = spawn(
       process.execPath,
       ["./node_modules/.bin/tsx", "src/cli.tsx", "--app-root", appRoot, "--workspace", workspace, "--task", taskId],
@@ -84,6 +87,7 @@ describe("CLI collaboration timeline smoke", () => {
       }
     );
     child.onData((chunk) => {
+      outputRevision += 1;
       screenWrites = screenWrites.then(() => screen.write(chunk));
     });
     child.onExit(({ exitCode }) => exits.push(exitCode));
@@ -97,6 +101,25 @@ describe("CLI collaboration timeline smoke", () => {
       await waitForScreenText(() => screenWrites, screen, "Feature board");
       await waitForScreenText(() => screenWrites, screen, "2 features · 1 approved · 1 revision");
       await waitForScreenText(() => screenWrites, screen, "features · Up/Dn select · Enter timeline · R refresh · Esc workers");
+      await resizeAndWaitForFreshScreenText({
+        child,
+        screen,
+        screenWrites: () => screenWrites,
+        revision: () => outputRevision,
+        cols: 49,
+        rows: 16,
+        text: "features · Up/Dn select · Esc workers"
+      });
+      expect(Math.max(...screen.snapshot().split("\n").map((line) => displayWidth(line)))).toBeLessThanOrEqual(49);
+      await resizeAndWaitForFreshScreenText({
+        child,
+        screen,
+        screenWrites: () => screenWrites,
+        revision: () => outputRevision,
+        cols: 100,
+        rows: 16,
+        text: "features · Up/Dn select · Enter timeline · R refresh · Esc workers"
+      });
       child.write("\x1b[B");
       await waitForScreenText(() => screenWrites, screen, "> T0001 · Game UI · approved");
       child.write("\r");
@@ -120,6 +143,36 @@ describe("CLI collaboration timeline smoke", () => {
         "timeline · Up/Dn event · Enter detail · Tab feature · U unresolved · R refresh · Esc workers"
       );
       expect(snapshot).toContain("Supervisor · Game UI");
+
+      await resizeAndWaitForFreshScreenText({
+        child,
+        screen,
+        screenWrites: () => screenWrites,
+        revision: () => outputRevision,
+        cols: 40,
+        rows: 16,
+        text: "timeline · Enter detail · Esc workers"
+      });
+      expect(Math.max(...screen.snapshot().split("\n").map((line) => displayWidth(line)))).toBeLessThanOrEqual(40);
+      await resizeAndWaitForFreshScreenText({
+        child,
+        screen,
+        screenWrites: () => screenWrites,
+        revision: () => outputRevision,
+        cols: 80,
+        rows: 16,
+        text: "timeline · Up/Dn event · Enter detail · Tab feature · U open · Esc workers"
+      });
+      expect(Math.max(...screen.snapshot().split("\n").map((line) => displayWidth(line)))).toBeLessThanOrEqual(80);
+      await resizeAndWaitForFreshScreenText({
+        child,
+        screen,
+        screenWrites: () => screenWrites,
+        revision: () => outputRevision,
+        cols: 100,
+        rows: 16,
+        text: "timeline · Up/Dn event · Enter detail · Tab feature · U unresolved · R refresh · Esc workers"
+      });
 
       child.write("\t");
       await waitForScreenText(() => screenWrites, screen, "Game Engine · revision pending · 4 events");
@@ -145,6 +198,25 @@ describe("CLI collaboration timeline smoke", () => {
       await waitForScreenText(() => screenWrites, screen, "> 07:06:00 · T0001 · Supervisor · Game UI");
       child.write("\r");
       await waitForScreenText(() => screenWrites, screen, "Collaboration event");
+      await resizeAndWaitForFreshScreenText({
+        child,
+        screen,
+        screenWrites: () => screenWrites,
+        revision: () => outputRevision,
+        cols: 40,
+        rows: 16,
+        text: "event · Pg scroll · Enter/Esc timeline"
+      });
+      expect(Math.max(...screen.snapshot().split("\n").map((line) => displayWidth(line)))).toBeLessThanOrEqual(40);
+      await resizeAndWaitForFreshScreenText({
+        child,
+        screen,
+        screenWrites: () => screenWrites,
+        revision: () => outputRevision,
+        cols: 100,
+        rows: 16,
+        text: "event detail · scroll · Enter/Esc timeline"
+      });
       await waitForScreenText(() => screenWrites, screen, "artifact · status");
       await waitForScreenText(() => screenWrites, screen, "status.json");
 
