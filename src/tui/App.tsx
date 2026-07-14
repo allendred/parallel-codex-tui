@@ -9,7 +9,7 @@ import type { RouterAuditRecord } from "../core/router-audit.js";
 import type { RouterExecutionProgress } from "../core/router.js";
 import type { TaskIndexSummary } from "../core/session-index.js";
 import type { WorkspaceChoice } from "../core/workspace.js";
-import { WorkerStatusSchema, type RouteDecision } from "../domain/schemas.js";
+import { WorkerStatusSchema, type RouteDecision, type WorkerStatus } from "../domain/schemas.js";
 import type {
   Orchestrator,
   RouteFallbackChoice,
@@ -19,6 +19,7 @@ import type {
   WorkerRunStatus
 } from "../orchestrator/orchestrator.js";
 import {
+  effectiveWorkerWatchdog,
   formatRoutePendingStatus,
   formatSelectedWorkerStatus,
   formatRouteStatus,
@@ -339,14 +340,17 @@ export function App({
   const terminalWidth = terminalSize.columns;
   const workerActivityPolicies = useMemo<WorkerActivityPolicies>(() => ({
     codex: {
+      timeoutMs: config.workers.codex.timeoutMs,
       idleTimeoutMs: config.workers.codex.idleTimeoutMs,
       firstOutputTimeoutMs: config.workers.codex.firstOutputTimeoutMs
     },
     claude: {
+      timeoutMs: config.workers.claude.timeoutMs,
       idleTimeoutMs: config.workers.claude.idleTimeoutMs,
       firstOutputTimeoutMs: config.workers.claude.firstOutputTimeoutMs
     },
     mock: {
+      timeoutMs: config.workers.mock.timeoutMs,
       idleTimeoutMs: config.workers.mock.idleTimeoutMs,
       firstOutputTimeoutMs: config.workers.mock.firstOutputTimeoutMs
     }
@@ -625,90 +629,137 @@ export function App({
     }
 
     let active = true;
+    let refreshInFlight = false;
 
     async function refreshWorkerStatuses() {
-      const updates = await Promise.all(
-        workers.map(async (worker) => {
-          try {
-            const workerStatus = await readJson(worker.statusPath, WorkerStatusSchema);
-            return {
-              id: worker.id,
-              label: worker.label,
-              role: worker.role,
-              engine: worker.engine,
-              state: workerStatus.state,
-              status: formatWorkerRuntimeStatus(workerStatus),
-              runtimeStatus: workerStatus
-            };
-          } catch {
-            return null;
-          }
-        })
-      );
-
-      if (!active) {
+      if (refreshInFlight) {
         return;
       }
+      refreshInFlight = true;
+      try {
+        const updates = await Promise.all(
+          workers.map(async (worker) => {
+            try {
+              const workerStatus = await readJson(worker.statusPath, WorkerStatusSchema);
+              return {
+                id: worker.id,
+                label: worker.label,
+                role: worker.role,
+                engine: worker.engine,
+                state: workerStatus.state,
+                status: formatWorkerRuntimeStatus(workerStatus),
+                runtimeStatus: workerStatus
+              };
+            } catch {
+              return null;
+            }
+          })
+        );
 
-      setStatus((current) => {
-        if (!current) {
-          return current;
+        if (!active) {
+          return;
         }
+        const currentWorkersById = new Map(workersRef.current.map((worker) => [worker.id, worker]));
+        const effectiveUpdates = updates.map((update) => {
+          if (!update) {
+            return null;
+          }
+          const currentWorker = currentWorkersById.get(update.id);
+          const currentRuntime = currentWorker?.runtimeStatus;
+          if (!currentWorker || !currentRuntime || !newerTerminalRuntime(currentRuntime, update.runtimeStatus)) {
+            return update;
+          }
+          return {
+            id: currentWorker.id,
+            label: currentWorker.label,
+            role: currentWorker.role,
+            engine: currentWorker.engine,
+            state: currentRuntime.state,
+            status: formatWorkerRuntimeStatus(currentRuntime),
+            runtimeStatus: currentRuntime
+          };
+        });
 
-        const next: StatusLineState = { ...current };
-        next.workers = updates
-          .filter((update): update is NonNullable<typeof update> => update !== null)
-          .map((update) => ({
-            label: update.label,
-            status: update.status
-          }));
-        for (const update of updates) {
-          if (update) {
-            next[update.role] = update.status;
-            if (update.role === "main") {
-              next.mainEngine = update.engine;
+        setStatus((current) => {
+          if (!current) {
+            return current;
+          }
+
+          const next: StatusLineState = { ...current };
+          next.workers = effectiveUpdates
+            .filter((update): update is NonNullable<typeof update> => update !== null)
+            .map((update) => ({
+              label: update.label,
+              status: update.status
+            }));
+          for (const update of effectiveUpdates) {
+            if (update) {
+              if (
+                update.role === "main"
+                && terminalMainStatus(current.main)
+                && activeWorkerRuntime(update.runtimeStatus)
+              ) {
+                continue;
+              }
+              next[update.role] = update.status;
+              if (update.role === "main") {
+                next.mainEngine = update.engine;
+                next.mainProgress = mainWorkerProgress(
+                  update.runtimeStatus,
+                  workerActivityPolicies[update.engine]
+                );
+              }
             }
           }
-        }
-        return next;
-      });
-      const runtimeStatusById = new Map(
-        updates
-          .filter((update): update is NonNullable<typeof update> => update !== null)
-          .map((update) => [update.id, update.runtimeStatus])
-      );
-      setWorkers((current) => {
-        let changed = false;
-        const next = current.map((worker) => {
-          const runtimeStatus = runtimeStatusById.get(worker.id);
-          if (!runtimeStatus || sameWorkerRuntimeStatus(worker.runtimeStatus, runtimeStatus)) {
-            return worker;
-          }
-          changed = true;
-          return { ...worker, runtimeStatus };
+          return next;
         });
-        return changed ? next : current;
-      });
-      const failedWorkerIndex = updates.findIndex((update) => update?.state === "failed");
-      if (
-        config.ui.autoOpenFailedWorker &&
-        failedWorkerIndex >= 0 &&
-        !autoSelectedFailedWorkerRef.current &&
-        !userSelectedWorkerRef.current
-      ) {
-        autoSelectedFailedWorkerRef.current = true;
-        selectedWorkerIndexRef.current = failedWorkerIndex;
-        setSelectedWorkerIndex(failedWorkerIndex);
-        setWorkerScrollOffset(0);
+        const runtimeStatusById = new Map(
+          effectiveUpdates
+            .filter((update): update is NonNullable<typeof update> => update !== null)
+            .map((update) => [update.id, update.runtimeStatus])
+        );
+        setWorkers((current) => {
+          let changed = false;
+          const next = current.map((worker) => {
+            const runtimeStatus = runtimeStatusById.get(worker.id);
+            if (
+              !runtimeStatus
+              || sameWorkerRuntimeStatus(worker.runtimeStatus, runtimeStatus)
+              || newerTerminalRuntime(worker.runtimeStatus, runtimeStatus)
+            ) {
+              return worker;
+            }
+            changed = true;
+            return { ...worker, runtimeStatus };
+          });
+          if (changed) {
+            workersRef.current = next;
+          }
+          return changed ? next : current;
+        });
+        const failedWorkerIndex = effectiveUpdates.findIndex((update) => update?.state === "failed");
         if (
-          viewRef.current !== "native" &&
-          viewRef.current !== "router" &&
-          viewRef.current !== "sessions" &&
-          viewRef.current !== "workers" &&
-          viewRef.current !== "workspace"
+          config.ui.autoOpenFailedWorker &&
+          failedWorkerIndex >= 0 &&
+          !autoSelectedFailedWorkerRef.current &&
+          !userSelectedWorkerRef.current
         ) {
-          setView("worker");
+          autoSelectedFailedWorkerRef.current = true;
+          selectedWorkerIndexRef.current = failedWorkerIndex;
+          setSelectedWorkerIndex(failedWorkerIndex);
+          setWorkerScrollOffset(0);
+          if (
+            viewRef.current !== "native" &&
+            viewRef.current !== "router" &&
+            viewRef.current !== "sessions" &&
+            viewRef.current !== "workers" &&
+            viewRef.current !== "workspace"
+          ) {
+            setView("worker");
+          }
         }
+      } finally {
+        refreshInFlight = false;
       }
     }
 
@@ -721,7 +772,7 @@ export function App({
       active = false;
       clearInterval(interval);
     };
-  }, [config.ui.autoOpenFailedWorker, status?.taskId, workerRefreshKey]);
+  }, [config.ui.autoOpenFailedWorker, status?.taskId, workerActivityPolicies, workerRefreshKey]);
 
   useEffect(() => {
     setRawMode(true);
@@ -1694,7 +1745,18 @@ export function App({
         }
       },
       onWorker: (worker: WorkerLogRef) => {
-        setWorkers((current) => upsertWorker(current, worker));
+        setWorkers((current) => {
+          const next = upsertWorker(current, worker);
+          workersRef.current = next;
+          return next;
+        });
+        if (worker.role === "main" && worker.runtimeStatus) {
+          setStatus((current) => applyMainRuntimeStatus(
+            current,
+            worker,
+            workerActivityPolicies[worker.engine]
+          ));
+        }
       }
     };
   }
@@ -3627,6 +3689,102 @@ function sameWorkerRuntimeStatus(
     left.last_event_at === right.last_event_at &&
     left.summary === right.summary &&
     left.native_session_id === right.native_session_id;
+}
+
+function mainWorkerProgress(
+  status: WorkerStatus,
+  policy: WorkerActivityPolicies[WorkerStatus["engine"]],
+  nowMs = Date.now()
+): StatusLineState["mainProgress"] {
+  const initialized = status.state === "idle" && status.phase === "initialized";
+  if (!initialized && status.state !== "starting" && status.state !== "running") {
+    return undefined;
+  }
+  const lastEventMs = Date.parse(status.last_event_at);
+  const firstOutputTimeoutMs = effectiveWorkerWatchdog(
+    policy?.firstOutputTimeoutMs,
+    policy?.timeoutMs
+  );
+  const idleTimeoutMs = effectiveWorkerWatchdog(
+    policy?.idleTimeoutMs,
+    policy?.timeoutMs
+  );
+  return {
+    phase: status.phase,
+    elapsedMs: Number.isFinite(lastEventMs) ? Math.max(0, nowMs - lastEventMs) : 0,
+    ...(firstOutputTimeoutMs
+      ? { firstOutputTimeoutMs }
+      : {}),
+    ...(idleTimeoutMs
+      ? { idleTimeoutMs }
+      : {})
+  };
+}
+
+function applyMainRuntimeStatus(
+  current: StatusLineState | null,
+  worker: WorkerLogRef,
+  policy: WorkerActivityPolicies[WorkerStatus["engine"]],
+  nowMs = Date.now()
+): StatusLineState | null {
+  const runtimeStatus = worker.runtimeStatus;
+  if (!current || !runtimeStatus) {
+    return current;
+  }
+  if (
+    terminalMainStatus(current.main)
+    && activeWorkerRuntime(runtimeStatus)
+    && !recoveringWorkerRuntime(runtimeStatus)
+  ) {
+    return current;
+  }
+  return {
+    ...current,
+    main: formatWorkerRuntimeStatus(runtimeStatus),
+    mainEngine: worker.engine,
+    mainProgress: mainWorkerProgress(runtimeStatus, policy, nowMs)
+  };
+}
+
+function terminalMainStatus(status: string | undefined): boolean {
+  const state = status?.trim().split(/[\s/:·]/, 1)[0]?.toLowerCase();
+  return state === "done"
+    || state === "fail"
+    || state === "failed"
+    || state === "error"
+    || state === "stop"
+    || state === "cancelled"
+    || state === "canceled";
+}
+
+function activeWorkerRuntime(status: WorkerStatus): boolean {
+  return status.state === "idle" || status.state === "starting" || status.state === "running";
+}
+
+function recoveringWorkerRuntime(status: WorkerStatus): boolean {
+  return activeWorkerRuntime(status) && status.phase === "native-resume-fallback";
+}
+
+function newerTerminalRuntime(
+  current: WorkerLogRef["runtimeStatus"],
+  incoming: WorkerStatus
+): boolean {
+  if (!current) {
+    return false;
+  }
+  const currentTime = Date.parse(current.last_event_at);
+  const incomingTime = Date.parse(incoming.last_event_at);
+  if (!activeWorkerRuntime(current) && activeWorkerRuntime(incoming)) {
+    if (recoveringWorkerRuntime(incoming)) {
+      return Number.isFinite(currentTime)
+        && Number.isFinite(incomingTime)
+        && currentTime > incomingTime;
+    }
+    return true;
+  }
+  return Number.isFinite(currentTime)
+    && Number.isFinite(incomingTime)
+    && currentTime > incomingTime;
 }
 
 function sameWorkerNavigationTargets(

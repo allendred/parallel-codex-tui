@@ -20,23 +20,15 @@ interface Segment {
 export type StatusTone = "idle" | "run" | "done" | "fail" | "wait";
 type StatusSegmentTheme = Pick<TextProps, "backgroundColor" | "bold" | "color">;
 
+interface ResolvedStatusBar {
+  segments: Segment[];
+  compact: boolean;
+}
+
 export function StatusBar({ text, terminalWidth: providedTerminalWidth, showTask = false, fillRail: providedFillRail }: StatusBarProps) {
   const terminalWidth = providedTerminalWidth ?? process.stdout.columns ?? 120;
   const fillRail = providedFillRail ?? (providedTerminalWidth !== undefined || typeof process.stdout.columns === "number");
-  const parsedSegments = parseStatusText(text, { hideTask: !showTask || terminalWidth < 40 });
-  if (isIdleStatus(parsedSegments)) {
-    return <IdleStatusRail terminalWidth={terminalWidth} fill={fillRail} />;
-  }
-
-  const baseSegments = omitTinyCurrentSegment(
-    readableCompletedSegments(parsedSegments, terminalWidth),
-    terminalWidth
-  );
-  const segments = fitMainIdentityBesideRoute(baseSegments, terminalWidth);
-  const compact = !segments.some((segment) => segment.hideLabel)
-    && shouldUseCompactStatus(segments, terminalWidth);
-  const fittedSegments = fitStatusSegments(segments, terminalWidth, compact);
-
+  const { segments: fittedSegments, compact } = resolveStatusBar(text, terminalWidth, showTask);
   if (isIdleStatus(fittedSegments)) {
     return <IdleStatusRail terminalWidth={terminalWidth} fill={fillRail} />;
   }
@@ -61,6 +53,36 @@ export function StatusBar({ text, terminalWidth: providedTerminalWidth, showTask
       {trailingWidth > 0 ? <Text backgroundColor={TUI_THEME.rail}>{" ".repeat(trailingWidth)}</Text> : null}
     </Box>
   );
+}
+
+export function statusBarDisplayText(text: string, terminalWidth: number, showTask = false): string {
+  const resolved = resolveStatusBar(text, terminalWidth, showTask);
+  if (isIdleStatus(resolved.segments)) {
+    return "";
+  }
+  return resolved.segments.map((segment, index) => {
+    const display = statusSegmentDisplay(segment, resolved.compact);
+    return `${display.label}${display.separator}${display.value}${
+      index < resolved.segments.length - 1 ? statusSegmentSeparator(resolved.compact) : ""
+    }`;
+  }).join("");
+}
+
+function resolveStatusBar(text: string, terminalWidth: number, showTask: boolean): ResolvedStatusBar {
+  const parsedSegments = parseStatusText(text, { hideTask: !showTask || terminalWidth < 40 });
+  if (isIdleStatus(parsedSegments)) {
+    return { segments: parsedSegments, compact: false };
+  }
+
+  const baseSegments = omitTinyCurrentSegment(
+    readableCompletedSegments(parsedSegments, terminalWidth),
+    terminalWidth
+  );
+  const segments = fitCompletedMainIdentityBesideRoute(baseSegments, terminalWidth);
+  const compact = !segments.some((segment) => segment.hideLabel)
+    && shouldUseCompactStatus(segments, terminalWidth);
+  const fittedSegments = fitStatusSegments(segments, terminalWidth, compact);
+  return { segments: fittedSegments, compact };
 }
 
 function IdleStatusRail({ terminalWidth, fill }: { terminalWidth: number; fill: boolean }) {
@@ -95,6 +117,14 @@ export function statusRailLayout(
 
 function omitTinyCurrentSegment(segments: Segment[], terminalWidth: number): Segment[] {
   if (terminalWidth >= 24 || segments.length <= 1) {
+    return segments;
+  }
+  const activeCurrent = segments.find((segment) => (
+    segment.label.toLowerCase() === "current"
+    && (segment.tone === "run" || segment.tone === "wait" || segment.tone === "fail")
+    && workerIdentityStatus(segment.value)?.role === "main"
+  ));
+  if (activeCurrent) {
     return segments;
   }
   const compacted = segments.filter((segment) => segment.label.toLowerCase() !== "current");
@@ -141,7 +171,7 @@ function readableCompletedSegments(segments: Segment[], terminalWidth: number): 
     : segments;
 }
 
-function fitMainIdentityBesideRoute(segments: Segment[], terminalWidth: number): Segment[] {
+function fitCompletedMainIdentityBesideRoute(segments: Segment[], terminalWidth: number): Segment[] {
   if (terminalWidth < 56 || segments.length !== 2) {
     return segments;
   }
@@ -152,7 +182,13 @@ function fitMainIdentityBesideRoute(segments: Segment[], terminalWidth: number):
   }
   const current = segments[currentIndex];
   const identity = current ? workerIdentityStatus(current.value) : null;
-  if (!current || identity?.role !== "main") {
+  if (
+    !current
+    || identity?.role !== "main"
+    || current.tone === "run"
+    || current.tone === "wait"
+    || current.tone === "fail"
+  ) {
     return segments;
   }
 
@@ -212,6 +248,11 @@ function fitStatusSegments(segments: Segment[], terminalWidth: number, compact: 
     return semanticSegments;
   }
 
+  const activeMainPair = fitActiveMainWithCompletedRoute(semanticSegments, contentWidth, compact);
+  if (activeMainPair) {
+    return activeMainPair;
+  }
+
   const displays = semanticSegments.map((segment) => statusSegmentDisplay(segment, compact));
   const totalWidth = statusSegmentsDisplayWidth(displays, compact);
   const currentIndex = semanticSegments.map((segment) => segment.label.toLowerCase()).lastIndexOf("current");
@@ -241,6 +282,130 @@ function fitStatusSegments(segments: Segment[], terminalWidth: number, compact: 
   }
 
   return selectStatusSegmentsThatFit(semanticSegments, contentWidth, compact);
+}
+
+function fitActiveMainWithCompletedRoute(
+  segments: Segment[],
+  contentWidth: number,
+  compact: boolean
+): Segment[] | null {
+  if (segments.length !== 2) {
+    return null;
+  }
+  const currentIndex = segments.findIndex((segment) => segment.label.toLowerCase() === "current");
+  const routeIndex = segments.findIndex((segment) => segment.label.toLowerCase() === "route");
+  const current = segments[currentIndex];
+  const route = segments[routeIndex];
+  if (
+    currentIndex < 0
+    || routeIndex < 0
+    || !current
+    || !route
+    || (current.tone !== "run" && current.tone !== "wait" && current.tone !== "fail")
+    || !/^(?:simple|complex)(?:\s+·\s+|$)/i.test(route.value)
+    || workerIdentityStatus(current.value)?.role !== "main"
+  ) {
+    return null;
+  }
+
+  const currentDisplay = statusSegmentDisplay(current, compact);
+  const currentValueWidth = Math.max(
+    1,
+    contentWidth - displayWidth(`${currentDisplay.label}${currentDisplay.separator}`)
+  );
+  const fittedCurrent = {
+    ...current,
+    value: compactActiveMainStatusValue(current.value, currentValueWidth)
+  };
+  if (statusSegmentsWidth([fittedCurrent], compact) > contentWidth) {
+    return null;
+  }
+
+  const remaining = contentWidth
+    - statusSegmentsWidth([fittedCurrent], compact)
+    - displayWidth(statusSegmentSeparator(compact));
+  const fittedRoute = fitCompletedRouteSegment(route, remaining, compact);
+  if (!fittedRoute) {
+    return [fittedCurrent];
+  }
+  const pair = segments.map((segment, index) => (
+    index === currentIndex ? fittedCurrent : fittedRoute
+  ));
+  return statusSegmentsWidth(pair, compact) <= contentWidth ? pair : [fittedCurrent];
+}
+
+function fitCompletedRouteSegment(segment: Segment, maxWidth: number, compact: boolean): Segment | null {
+  if (maxWidth <= 0) {
+    return null;
+  }
+  const display = statusSegmentDisplay(segment, compact);
+  const valueWidth = maxWidth - displayWidth(`${display.label}${display.separator}`);
+  if (valueWidth < 1) {
+    return null;
+  }
+  const value = compactCompletedRouteStatusValue(segment.value, valueWidth);
+  return value ? { ...segment, value } : null;
+}
+
+function compactCompletedRouteStatusValue(value: string, maxWidth: number): string | null {
+  const parts = value.split(/\s+·\s+/).map((part) => part.trim()).filter(Boolean);
+  const mode = /^(?:simple|complex)$/i.test(parts[0] ?? "") ? parts[0] : null;
+  const duration = parts.find((part) => /^\d+(?:\.\d+)?(?:ms|s|m)(?:\s+total)?$/i.test(part));
+  const compactFailure = compactRouteStatusValue(value, true);
+  const exceptional = /(?:^|\s·\s)(?:fallback|forced)(?:\s·\s|$)/i.test(value);
+  const candidates = [
+    value,
+    ...(mode && exceptional && compactFailure !== value
+      ? [`${mode} · ${compactFailure}${duration ? ` · ${duration}` : ""}`]
+      : []),
+    ...(mode && duration ? [`${mode} · ${duration}`] : []),
+    ...(mode ? [mode] : []),
+    ...(compactFailure !== value ? [compactFailure] : []),
+    ...(duration ? [duration] : [])
+  ];
+  return candidates.find((candidate) => displayWidth(candidate) <= maxWidth) ?? null;
+}
+
+function compactActiveMainStatusValue(text: string, maxWidth: number): string {
+  if (displayWidth(text) <= maxWidth) {
+    return text;
+  }
+  const identity = workerIdentityStatus(text);
+  if (!identity) {
+    return compactCurrentStatusValue(text, maxWidth);
+  }
+  const fullIdentity = `${identity.role}/${identity.engine}`;
+  const detail = text.slice(fullIdentity.length).trim();
+  const progress = detail.match(/^(waiting output|responding)\s+·\s+(\d+(?:\.\d+)?s)\s*\/\s*(\d+(?:\.\d+)?(?:ms|s|m))\s+(?:first|idle)$/i);
+  const rawAlias = /^(starting|stopping|run|done|fail|failed|idle)\b/i.exec(detail)?.[1]?.toLowerCase();
+  const alias = progress?.[1]?.toLowerCase() === "responding"
+    ? "reply"
+    : progress
+      ? "wait"
+      : rawAlias === "starting"
+        ? "start"
+        : rawAlias === "stopping"
+          ? "stop"
+          : rawAlias === "failed"
+            ? "fail"
+            : rawAlias;
+  const elapsedBudget = progress ? `${progress[2]}/${progress[3]}` : null;
+  const role = workerIdentityRole(text);
+  const candidates = [
+    ...(alias && elapsedBudget ? [
+      `${fullIdentity} ${alias} ${elapsedBudget}`,
+      `${identity.engine} ${alias} ${elapsedBudget}`
+    ] : []),
+    ...(alias ? [
+      `${fullIdentity} ${alias}`,
+      `${identity.engine} ${alias}`
+    ] : []),
+    fullIdentity,
+    identity.engine,
+    ...(role ? [role] : [])
+  ];
+  return candidates.find((candidate) => displayWidth(candidate) <= maxWidth)
+    ?? compactStatusTextEnd(text, maxWidth);
 }
 
 function fitAtomicStatusSegment(segment: Segment, contentWidth: number, compact: boolean): Segment {
@@ -741,13 +906,13 @@ function parseMainEngineStatus(part: string): Segment | null {
   const status = (match[2] ?? "idle").toLowerCase();
   return {
     label: "CURRENT",
-    value: `main/${match[1]} ${status}`,
+    value: part,
     tone: runtimeStatusTone(status)
   };
 }
 
 function runtimeStatusTone(status: string): StatusTone | undefined {
-  if (status === "run" || status === "running" || status === "starting") {
+  if (status === "run" || status === "running" || status === "starting" || status === "responding") {
     return "run";
   }
   if (status === "done") {
@@ -756,7 +921,7 @@ function runtimeStatusTone(status: string): StatusTone | undefined {
   if (status === "fail" || status === "failed" || status === "error") {
     return "fail";
   }
-  if (status === "wait" || status === "waiting" || status === "queued") {
+  if (status === "wait" || status === "waiting" || status === "queued" || status === "stopping") {
     return "wait";
   }
   if (status === "idle") {

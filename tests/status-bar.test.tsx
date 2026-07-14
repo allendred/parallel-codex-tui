@@ -1,7 +1,7 @@
 import React from "react";
 import { render } from "ink-testing-library";
 import { describe, expect, it } from "vitest";
-import { StatusBar, statusRailLayout, statusSegmentLabelTheme, statusSegmentValueTheme } from "../src/tui/StatusBar.js";
+import { StatusBar, statusBarDisplayText, statusRailLayout, statusSegmentLabelTheme, statusSegmentValueTheme } from "../src/tui/StatusBar.js";
 import { displayWidth } from "../src/tui/display-width.js";
 import { formatRouteStatus, formatStatusLine } from "../src/tui/status-line.js";
 import { TUI_THEME_PRESETS } from "../src/tui/theme.js";
@@ -26,6 +26,10 @@ describe("StatusBar", () => {
       ["custom-router", "route waiting output · runner acme-router · direct · 7s / 30s"],
       ["retrying", "route retry 2/2 · via proxy.test:8443 · 500ms backoff"],
       ["follow-up", "workers 3 | done 3 | route follow-up · 20s max"],
+      ["main-first-output", "main | main/claude waiting output · 12s / 2m first | route simple · via 127.0.0.1:7890 · 12s"],
+      ["main-responding", "main | main/claude responding · 4s / 5m idle | route simple · via 127.0.0.1:7890 · 12s"],
+      ["main-failed", "main | main/claude fail | route simple · via 127.0.0.1:7890 · 12s"],
+      ["main-unicode-proxy", "main | main/claude waiting output · 12s / 2m first | route simple · via 代理.local:7890 · 12s"],
       ["wave", "wave 2/3 · verification 0/1 | workers 4 | run 1 done 3"],
       ["roles", "judge done | actor run | critic wait"],
       ["provider", "workers 1 | fail 1 | actor/super-long-third-party-provider-name fail"]
@@ -33,13 +37,19 @@ describe("StatusBar", () => {
     const invalid: string[] = [];
 
     for (const [name, text] of states) {
-      for (let width = 8; width <= 100; width += 1) {
-        const view = render(<StatusBar text={text} terminalWidth={width} />);
-        const frame = view.lastFrame() ?? "";
-        if (frame.split("\n").length !== 1 || displayWidth(frame) > width || frame.includes("...")) {
-          invalid.push(`${name}:${width}:${displayWidth(frame)}:${frame}`);
+      for (let width = 8; width <= 136; width += 1) {
+        const layout = statusBarDisplayText(text, width);
+        if (displayWidth(layout) > Math.max(1, width - 2) || layout.includes("...")) {
+          invalid.push(`${name}:${width}:${displayWidth(layout)}:${layout}`);
         }
-        view.unmount();
+        if (width <= 100) {
+          const view = render(<StatusBar text={text} terminalWidth={width} />);
+          const frame = view.lastFrame() ?? "";
+          if (frame.split("\n").length !== 1 || displayWidth(frame) > width || frame.includes("...")) {
+            invalid.push(`${name}:${width}:${displayWidth(frame)}:${frame}`);
+          }
+          view.unmount();
+        }
       }
     }
 
@@ -426,6 +436,65 @@ describe("StatusBar", () => {
     expect(frame).toContain("@ main/claude starting");
     expect(frame).toContain("route simple · 42ms");
     expect(frame).not.toContain("chat starting");
+  });
+
+  it("keeps Main first-output progress distinct from completed Router evidence", () => {
+    const { lastFrame } = render(
+      <StatusBar
+        text="main | main/claude waiting output · 12s / 2m first | route simple · via 127.0.0.1:7890 · 12s"
+        terminalWidth={136}
+      />
+    );
+
+    const frame = lastFrame() ?? "";
+    expect(frame).toContain("@ main/claude waiting output · 12s / 2m first");
+    expect(frame).toContain("route simple · via 127.0.0.1:7890 · 12s");
+    expect(displayWidth(frame)).toBeLessThanOrEqual(136);
+  });
+
+  it("prioritizes active Main progress over completed Router detail as width shrinks", () => {
+    const text = "main | main/claude waiting output · 12s / 2m first | route simple · via 127.0.0.1:7890 · 12s";
+    const frame = (terminalWidth: number): string => {
+      const view = render(<StatusBar text={text} terminalWidth={terminalWidth} />);
+      const value = view.lastFrame() ?? "";
+      view.unmount();
+      return value;
+    };
+
+    expect(frame(80)).toContain("@ main/claude waiting output · 12s / 2m first");
+    expect(frame(80)).toContain("r:simple · 12s");
+    expect(frame(56)).toContain("@ main/claude waiting output · 12s / 2m first");
+    expect(frame(40)).toContain("@ main/claude wait 12s/2m");
+    expect(frame(24)).toContain("@ claude wait 12s/2m");
+    expect(frame(16)).toContain("@ claude wait");
+    expect(frame(8)).toContain("@ chat");
+
+    for (const width of [80, 56, 40, 24, 16, 8]) {
+      expect(frame(width)).not.toContain("...");
+      expect(displayWidth(frame(width))).toBeLessThanOrEqual(width);
+    }
+  });
+
+  it("keeps a streaming Main response ahead of completed Router detail", () => {
+    const text = "main | main/claude responding · 4s / 5m idle | route simple · via 127.0.0.1:7890 · 12s";
+    const view = render(<StatusBar text={text} terminalWidth={40} />);
+    const frame = view.lastFrame() ?? "";
+    view.unmount();
+
+    expect(frame).toContain("@ main/claude reply 4s/5m");
+    expect(frame).not.toContain("...");
+    expect(displayWidth(frame)).toBeLessThanOrEqual(40);
+  });
+
+  it("keeps a failed Main ahead of completed Router detail", () => {
+    const text = "main | main/claude fail | route simple · via 127.0.0.1:7890 · 12s";
+    const view = render(<StatusBar text={text} terminalWidth={16} />);
+    const frame = view.lastFrame() ?? "";
+    view.unmount();
+
+    expect(frame).toContain("@ claude fail");
+    expect(frame).not.toContain("...");
+    expect(displayWidth(frame)).toBeLessThanOrEqual(16);
   });
 
   it("degrades Main engine identity cleanly in narrow terminals", () => {

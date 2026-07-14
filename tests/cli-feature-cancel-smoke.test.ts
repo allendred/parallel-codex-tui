@@ -33,7 +33,7 @@ describe("CLI Feature cancel smoke", () => {
         "[workers.codex]",
         `command = "${escapeToml(process.execPath)}"`,
         `args = ["${escapeToml(agentScript)}"]`,
-        "timeoutMs = 15000",
+        "timeoutMs = 30000",
         "idleTimeoutMs = 15000",
         "firstOutputTimeoutMs = 3000",
         "",

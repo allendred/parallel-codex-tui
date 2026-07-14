@@ -77,7 +77,7 @@ describe("Orchestrator task-question status", () => {
       onStatus: (status) => updates.push(status)
     })).rejects.toBeInstanceOf(Error);
 
-    expect(updates.map((status) => status.main).filter(Boolean)).toEqual(["running", terminal]);
+    expect(updates.map((status) => status.main).filter(Boolean)).toEqual(["starting", terminal]);
     expect(await pathExists(taskRunOwnerPath(task.dir))).toBe(false);
     expect(await pathExists(taskRunOwnerPath(manager.mainSessionDir()))).toBe(false);
 

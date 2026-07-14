@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import { pathExists, readJson, readTextIfExists, writeText } from "../src/core/file-store.js";
 import { processIsAlive, workerProcessRecordPath } from "../src/core/process-ownership.js";
-import { WorkerStatusSchema } from "../src/domain/schemas.js";
+import { WorkerStatusSchema, type WorkerStatus } from "../src/domain/schemas.js";
 import { ProcessWorkerAdapter } from "../src/workers/process-adapter.js";
 
 describe("ProcessWorkerAdapter", () => {
@@ -336,6 +336,7 @@ describe("ProcessWorkerAdapter", () => {
     await writeText(promptPath, "hello process");
 
     const adapter = new ProcessWorkerAdapter(process.execPath, ["-e", script]);
+    const statusEvents: WorkerStatus[] = [];
     const resultPromise = adapter.run({
       workerId: "actor-node",
       role: "actor",
@@ -345,7 +346,10 @@ describe("ProcessWorkerAdapter", () => {
       promptPath,
       outputLogPath,
       statusPath,
-      prompt: "hello process"
+      prompt: "hello process",
+      onStatus: (status) => {
+        statusEvents.push(status);
+      }
     });
 
     const runningStatus = await waitForStatusPhase(statusPath, "process-output");
@@ -355,6 +359,44 @@ describe("ProcessWorkerAdapter", () => {
 
     const result = await resultPromise;
     expect(result.exitCode).toBe(0);
+    expect(statusEvents.map((status) => status.phase)).toEqual([
+      "process-starting",
+      "process-output",
+      "process-exited"
+    ]);
+  });
+
+  it("does not let a status observer failure change a successful process result", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pct-process-status-observer-"));
+    const filesDir = join(root, "actor-mock");
+    const promptPath = join(filesDir, "prompt.md");
+    const outputLogPath = join(filesDir, "output.log");
+    const statusPath = join(filesDir, "status.json");
+    await writeText(promptPath, "hello observer");
+
+    const adapter = new ProcessWorkerAdapter(process.execPath, ["-e", "console.log('success')"]);
+    const result = await adapter.run({
+      workerId: "actor-node",
+      role: "actor",
+      engine: "mock",
+      cwd: root,
+      filesDir,
+      promptPath,
+      outputLogPath,
+      statusPath,
+      prompt: "hello observer",
+      onStatus: (status) => {
+        if (status.phase === "process-output") {
+          throw new Error("observer failed");
+        }
+      }
+    });
+
+    expect(result.exitCode).toBe(0);
+    expect(await readJson(statusPath, WorkerStatusSchema)).toMatchObject({
+      state: "done",
+      phase: "process-exited"
+    });
   });
 
   it("keeps a silent worker in starting state until its first output", async () => {

@@ -3,6 +3,7 @@ import { Box, Text, type TextProps } from "ink";
 import type { WorkerLogRef } from "../orchestrator/orchestrator.js";
 import type { EngineName, WorkerState } from "../domain/schemas.js";
 import { compactEndByDisplayWidth, displayWidth } from "./display-width.js";
+import { effectiveWorkerWatchdog } from "./status-line.js";
 import { TUI_THEME } from "./theme.js";
 
 export type WorkerOverviewLineTone = "heading" | "muted" | "text" | "active" | "success" | "warning" | "danger";
@@ -14,6 +15,7 @@ export interface WorkerOverviewLine {
 }
 
 export interface WorkerActivityPolicy {
+  timeoutMs?: number;
   idleTimeoutMs?: number;
   firstOutputTimeoutMs?: number;
 }
@@ -146,7 +148,10 @@ export function workerOverviewActivityLine(
     };
   }
   const starting = status.state === "starting";
-  const limitMs = starting ? policy.firstOutputTimeoutMs : policy.idleTimeoutMs;
+  const limitMs = effectiveWorkerWatchdog(
+    starting ? policy.firstOutputTimeoutMs : policy.idleTimeoutMs,
+    policy.timeoutMs
+  );
   const activity = starting ? "started" : "output";
   const timeout = starting ? "first output timeout" : "idle timeout";
 

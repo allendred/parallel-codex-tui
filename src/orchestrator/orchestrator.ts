@@ -227,7 +227,7 @@ export class Orchestrator {
 
     if (route.mode === "simple") {
       try {
-        input.onStatus?.({ taskId: "main", main: "running" });
+        input.onStatus?.({ taskId: "main", main: "starting" });
         const output = await this.runMain(input, workers);
         input.onStatus?.({ taskId: "main", main: "done" });
         return {
@@ -452,7 +452,7 @@ export class Orchestrator {
     });
     const workers: WorkerLogRef[] = [];
 
-    input.onStatus?.({ taskId: task.id, main: "running" });
+    input.onStatus?.({ taskId: task.id, main: "starting" });
     try {
       const output = await this.runMain(input, workers, context);
       input.onStatus?.({ taskId: task.id, main: "done" });
@@ -1666,14 +1666,15 @@ export class Orchestrator {
       summary: "Main chat worker initialized"
     } satisfies WorkerStatus);
 
-    this.recordWorker(input, workers, {
+    const worker: WorkerLogRef = {
       id: workerId,
       role: "main",
       engine,
       label: `Main (${engine})`,
       logPath: outputLogPath,
       statusPath
-    });
+    };
+    this.recordWorker(input, workers, worker);
 
     const result = await this.runWorkerWithNativeSession(engine, {
       workerId,
@@ -1685,7 +1686,10 @@ export class Orchestrator {
       outputLogPath,
       statusPath,
       prompt,
-      signal: input.signal
+      signal: input.signal,
+      onStatus: (runtimeStatus) => {
+        this.recordWorker(input, workers, { ...worker, runtimeStatus });
+      }
     }, "main");
     ensureWorkerSuccess(result);
     throwIfCancelled(input.signal);

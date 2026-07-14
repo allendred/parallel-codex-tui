@@ -1,4 +1,4 @@
-import type { EngineName, NativeSession, WorkerRole } from "../domain/schemas.js";
+import type { EngineName, NativeSession, WorkerRole, WorkerStatus } from "../domain/schemas.js";
 
 export interface NativeSessionRunConfig {
   enabled: boolean;
@@ -35,6 +35,7 @@ export interface WorkerRunSpec {
   nativeSession?: NativeSession | null;
   nativeSessionConfig?: NativeSessionRunConfig;
   modelConfig?: WorkerModelRunConfig;
+  onStatus?: (status: WorkerStatus) => void | Promise<void>;
   onNativeSession?: (sessionId: string) => void | Promise<void>;
   onNativeSessionRetired?: (sessionId: string, reason: string) => void | Promise<void>;
 }

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import * as statusLineModule from "../src/tui/status-line.js";
 import {
+  effectiveWorkerWatchdog,
   formatFooterHelp,
   formatSelectedWorkerStatus,
   formatStatusLine,
@@ -10,6 +11,13 @@ import {
 import { displayWidth } from "../src/tui/display-width.js";
 
 describe("formatStatusLine", () => {
+  it("matches the worker runtime rules for effective watchdogs", () => {
+    expect(effectiveWorkerWatchdog(120_000, 45 * 60_000)).toBe(120_000);
+    expect(effectiveWorkerWatchdog(120_000, 60_000)).toBeUndefined();
+    expect(effectiveWorkerWatchdog(120_000, 120_000)).toBeUndefined();
+    expect(effectiveWorkerWatchdog(undefined, 60_000)).toBeUndefined();
+  });
+
   it("formats idle state", () => {
     expect(formatStatusLine(null)).toBe("idle");
   });
@@ -42,6 +50,68 @@ describe("formatStatusLine", () => {
         mainEngine: "claude"
       })
     ).toBe("main | main/claude starting");
+  });
+
+  it("distinguishes a silent Main worker from an active Router request", () => {
+    expect(
+      formatStatusLine({
+        taskId: "main",
+        main: "starting · process starting · Starting claude",
+        mainEngine: "claude",
+        mainProgress: {
+          phase: "process-starting",
+          elapsedMs: 12_700,
+          firstOutputTimeoutMs: 120_000,
+          idleTimeoutMs: 300_000
+        }
+      })
+    ).toBe("main | main/claude waiting output · 12s / 2m first");
+  });
+
+  it("keeps the first second of Main progress visually stable", () => {
+    expect(
+      formatStatusLine({
+        taskId: "main",
+        main: "starting",
+        mainEngine: "claude",
+        mainProgress: {
+          phase: "process-starting",
+          elapsedMs: 480,
+          firstOutputTimeoutMs: 5_000
+        }
+      })
+    ).toBe("main | main/claude waiting output · 0s / 5s first");
+  });
+
+  it("does not present an initialized Main worker as idle", () => {
+    expect(
+      formatStatusLine({
+        taskId: "main",
+        main: "idle · initialized · Main chat worker initialized",
+        mainEngine: "claude",
+        mainProgress: {
+          phase: "initialized",
+          elapsedMs: 20,
+          firstOutputTimeoutMs: 5_000
+        }
+      })
+    ).toBe("main | main/claude starting");
+  });
+
+  it("shows Main idle progress after the first output arrives", () => {
+    expect(
+      formatStatusLine({
+        taskId: "main",
+        main: "running · process output · Working",
+        mainEngine: "claude",
+        mainProgress: {
+          phase: "process-output",
+          elapsedMs: 4_900,
+          firstOutputTimeoutMs: 120_000,
+          idleTimeoutMs: 300_000
+        }
+      })
+    ).toBe("main | main/claude responding · 4s / 5m idle");
   });
 
   it("keeps the current Main turn ahead of completed historical task workers", () => {

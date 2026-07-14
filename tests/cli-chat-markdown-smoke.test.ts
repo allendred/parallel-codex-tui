@@ -126,6 +126,86 @@ describe("CLI chat Markdown smoke", () => {
     }
   }, 10000);
 
+  it("shows Main first-output progress after the Router decision", async () => {
+    const workspace = await mkdtemp(join(tmpdir(), "pct-cli-main-progress-"));
+    const appRoot = await mkdtemp(join(tmpdir(), "pct-cli-main-progress-app-"));
+    const mainScript = join(appRoot, "delayed-main.cjs");
+    const screen = new NativeTerminalScreen({ cols: 120, rows: 12, scrollback: 1000 });
+    let screenWrites = Promise.resolve();
+    const observedScreens: string[] = [];
+
+    await mkdir(join(appRoot, ".parallel-codex"), { recursive: true });
+    await writeFile(
+      mainScript,
+      [
+        "process.stdin.resume();",
+        "process.stdin.on('end', () => {",
+        "  setTimeout(() => {",
+        "    process.stdout.write('Delayed Main');",
+        "    setTimeout(() => process.stdout.write(' response\\n'), 600);",
+        "  }, 3200);",
+        "});"
+      ].join("\n")
+    );
+    await writeFile(
+      join(appRoot, ".parallel-codex", "config.toml"),
+      [
+        "[router]",
+        'defaultMode = "simple"',
+        "",
+        "[workers.codex]",
+        `command = "${escapeToml(process.execPath)}"`,
+        `args = ["${escapeToml(mainScript)}"]`,
+        "firstOutputTimeoutMs = 5000",
+        "idleTimeoutMs = 5000",
+        "",
+        "[pairing]",
+        'main = "codex"',
+        'judge = "codex"',
+        'actor = "codex"',
+        'critic = "codex"'
+      ].join("\n") + "\n"
+    );
+
+    const child = spawn(
+      process.execPath,
+      ["./node_modules/.bin/tsx", "src/cli.tsx", "--app-root", appRoot, "--workspace", workspace],
+      {
+        cwd: process.cwd(),
+        cols: 120,
+        rows: 12,
+        name: "xterm-256color",
+        env: { ...process.env, TERM: "xterm-256color" }
+      }
+    );
+    child.onData((chunk) => {
+      screenWrites = screenWrites.then(async () => {
+        await screen.write(chunk);
+        observedScreens.push(screen.snapshot());
+      });
+    });
+
+    try {
+      await waitForScreenText(() => screenWrites, screen, "> | message");
+      child.write("hello\r");
+      await waitForScreenText(() => screenWrites, screen, "Delayed Main response");
+      const observedStatusLines = Array.from(new Set(
+        observedScreens.flatMap((snapshot) => snapshot
+          .split("\n")
+          .map((line) => line.trim())
+          .filter((line) => line.includes("main/codex") || line.includes("route")))
+      ));
+      const observedStatusText = observedStatusLines.join("\n");
+      expect(observedStatusText).toMatch(
+        /@ main\/codex waiting output · \d+s \/ 5s first · route simple · forced ·/
+      );
+      expect(observedStatusText).toContain("@ main/codex responding");
+      expect(observedStatusText).not.toContain("@ main/codex run ·");
+    } finally {
+      child.kill("SIGTERM");
+    }
+  }, 10000);
+
   it("shows live Router wait progress and the timeout cause after fallback reaches Main", async () => {
     const workspace = await mkdtemp(join(tmpdir(), "pct-cli-router-timeout-"));
     const appRoot = await mkdtemp(join(tmpdir(), "pct-cli-router-timeout-app-"));

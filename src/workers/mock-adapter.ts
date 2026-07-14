@@ -91,7 +91,7 @@ async function setStatus(
   summary: string,
   nativeSessionId?: string
 ): Promise<void> {
-  await writeJson(spec.statusPath, {
+  const status = {
     worker_id: spec.workerId,
     ...(spec.featureId ? { feature_id: spec.featureId } : {}),
     ...(spec.featureTitle ? { feature_title: spec.featureTitle } : {}),
@@ -102,5 +102,15 @@ async function setStatus(
     last_event_at: new Date().toISOString(),
     summary,
     ...(nativeSessionId ? { native_session_id: nativeSessionId } : {})
-  } satisfies WorkerStatus);
+  } satisfies WorkerStatus;
+  await writeJson(spec.statusPath, status);
+  notifyStatus(spec, status);
+}
+
+function notifyStatus(spec: WorkerRunSpec, status: WorkerStatus): void {
+  try {
+    void Promise.resolve(spec.onStatus?.(status)).catch(() => {});
+  } catch {
+    // Status observers cannot change the worker outcome.
+  }
 }

@@ -7,6 +7,12 @@ export interface StatusLineState {
   taskId: string;
   main?: string;
   mainEngine?: EngineName;
+  mainProgress?: {
+    phase: string;
+    elapsedMs: number;
+    firstOutputTimeoutMs?: number;
+    idleTimeoutMs?: number;
+  };
   judge?: string;
   actor?: string;
   critic?: string;
@@ -32,6 +38,19 @@ export interface RuntimeWorkerStatus {
 
 export type FooterHelpMode = "chat" | "worker" | "native";
 
+export function effectiveWorkerWatchdog(
+  watchdogMs: number | undefined,
+  totalTimeoutMs: number | undefined
+): number | undefined {
+  if (!watchdogMs || watchdogMs <= 0) {
+    return undefined;
+  }
+  if (totalTimeoutMs && totalTimeoutMs > 0 && watchdogMs >= totalTimeoutMs) {
+    return undefined;
+  }
+  return watchdogMs;
+}
+
 export function formatStatusLine(state: StatusLineState | null): string {
   if (!state) {
     return "idle";
@@ -40,7 +59,7 @@ export function formatStatusLine(state: StatusLineState | null): string {
   const parts = [compactTaskId(state.taskId)];
   if (state.main) {
     const mainIdentity = state.mainEngine ? `main/${state.mainEngine}` : "main";
-    parts.push(`${mainIdentity} ${compactStatus(state.main)}`);
+    parts.push(`${mainIdentity} ${formatMainStatus(state.main, state.mainProgress)}`);
     return parts.join(" | ");
   }
   if (state.featureProgress) {
@@ -62,6 +81,64 @@ export function formatStatusLine(state: StatusLineState | null): string {
   }
 
   return parts.join(" | ");
+}
+
+function formatMainStatus(
+  status: string,
+  progress: StatusLineState["mainProgress"]
+): string {
+  const state = compactStatus(status);
+  if (!progress || state === "done" || state === "fail" || state === "stop") {
+    return state;
+  }
+
+  if (progress.phase === "initialized") {
+    return "starting";
+  }
+  if (progress.phase === "process-starting" || progress.phase === "native-resume-fallback") {
+    return formatMainWaitProgress(
+      "waiting output",
+      progress.elapsedMs,
+      progress.firstOutputTimeoutMs,
+      "first"
+    );
+  }
+  if (progress.phase === "process-output") {
+    return formatMainWaitProgress(
+      "responding",
+      progress.elapsedMs,
+      progress.idleTimeoutMs,
+      "idle"
+    );
+  }
+  if (progress.phase === "process-stopping") {
+    return "stopping";
+  }
+  return state;
+}
+
+function formatMainWaitProgress(
+  label: string,
+  elapsedMs: number,
+  budgetMs: number | undefined,
+  budgetLabel: "first" | "idle"
+): string {
+  if (!budgetMs || budgetMs <= 0) {
+    return label;
+  }
+  const elapsed = Math.min(Math.max(0, elapsedMs), budgetMs);
+  return `${label} · ${formatMainElapsed(elapsed)} / ${formatMainBudget(budgetMs)} ${budgetLabel}`;
+}
+
+function formatMainElapsed(durationMs: number): string {
+  return `${Math.floor(durationMs / 1000)}s`;
+}
+
+function formatMainBudget(durationMs: number): string {
+  if (durationMs >= 60_000 && durationMs % 60_000 === 0) {
+    return `${durationMs / 60_000}m`;
+  }
+  return formatRouteDuration(durationMs);
 }
 
 function formatFeatureProgress(progress: NonNullable<StatusLineState["featureProgress"]>): string {

@@ -40,7 +40,7 @@ describe("WorkerOverviewView", () => {
           terminalWidth: number,
           activity?: {
             nowMs: number;
-            policies: Record<string, { idleTimeoutMs?: number; firstOutputTimeoutMs?: number }>;
+            policies: Record<string, { timeoutMs?: number; idleTimeoutMs?: number; firstOutputTimeoutMs?: number }>;
           }
         ) => Array<{ text: string; workerIndex?: number }>;
       }
@@ -76,7 +76,7 @@ describe("WorkerOverviewView", () => {
         workerOverviewActivityLine?: (
           worker: WorkerLogRef,
           nowMs: number,
-          policy: { idleTimeoutMs?: number; firstOutputTimeoutMs?: number }
+          policy: { timeoutMs?: number; idleTimeoutMs?: number; firstOutputTimeoutMs?: number }
         ) => { text: string; tone: string } | null;
       }
     ).workerOverviewActivityLine;
@@ -109,6 +109,21 @@ describe("WorkerOverviewView", () => {
     )).toEqual({
       text: "activity · output 4m 10s ago · idle timeout in 50s",
       tone: "warning"
+    });
+    expect(activityLine?.(
+      worker({
+        id: "total-before-first-output",
+        label: "Critic (codex)",
+        role: "critic",
+        state: "starting",
+        phase: "process-starting",
+        summary: "starting"
+      }),
+      Date.parse("2026-07-11T08:00:45.000Z"),
+      { timeoutMs: 60_000, firstOutputTimeoutMs: 2 * 60 * 1000 }
+    )).toEqual({
+      text: "activity · started 45s ago · no first output timeout",
+      tone: "muted"
     });
     expect(activityLine?.(
       worker({

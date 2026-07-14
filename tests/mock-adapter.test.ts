@@ -25,7 +25,10 @@ describe("MockWorkerAdapter", () => {
       promptPath,
       outputLogPath,
       statusPath,
-      prompt: "Judge prompt"
+      prompt: "Judge prompt",
+      onStatus: () => {
+        throw new Error("observer failed");
+      }
     });
 
     expect(result.exitCode).toBe(0);

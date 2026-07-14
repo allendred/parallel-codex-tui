@@ -1,5 +1,8 @@
 import React from "react";
 import { EventEmitter } from "node:events";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { render } from "ink-testing-library";
 import { describe, expect, it, vi } from "vitest";
 import { defaultConfig } from "../src/core/config.js";
@@ -203,6 +206,209 @@ describe("App Router reason", () => {
       });
       view.unmount();
       testInput.restore();
+    }
+  });
+
+  it("shows the live Main first-output budget after the Router decision", async () => {
+    const testInput = installTestInputStream();
+    const root = await mkdtemp(join(tmpdir(), "pct-app-main-progress-"));
+    const statusPath = join(root, "status.json");
+    const completion = deferred<HandleRequestResult>();
+    const route: RouteDecision = {
+      mode: "simple",
+      reason: "Short conversation without project work.",
+      source: "codex",
+      duration_ms: 12_000,
+      suggested_roles: [],
+      judge_engine: "mock",
+      actor_engine: "mock",
+      critic_engine: "mock"
+    };
+    await writeFile(statusPath, JSON.stringify({
+      worker_id: "main-claude",
+      role: "main",
+      engine: "claude",
+      state: "starting",
+      phase: "process-starting",
+      last_event_at: new Date(Date.now() - 12_000).toISOString(),
+      summary: "Starting claude"
+    }));
+    const handleRequest = vi.fn((input: HandleRequestInput) => {
+      input.onRoute?.(route);
+      input.onStatus?.({ taskId: "main", main: "running" });
+      input.onWorker?.({
+        id: "main-claude",
+        role: "main",
+        engine: "claude",
+        label: "Main (claude)",
+        logPath: join(root, "output.log"),
+        statusPath
+      });
+      return completion.promise;
+    });
+    const view = render(
+      <App
+        config={defaultConfig(root)}
+        orchestrator={{ handleRequest } as unknown as Orchestrator}
+        cwd={root}
+      />
+    );
+
+    try {
+      await waitForFrame(view.lastFrame, "ready");
+      await settleEffects();
+      testInput.send(view.stdin, "hello\r");
+
+      await waitForFrame(view.lastFrame, "waiting output");
+      const frame = view.lastFrame() ?? "";
+      expect(frame).toContain("main/claude waiting output");
+      expect(frame).toContain("/ 2m first");
+      expect(frame).toContain("route simple");
+    } finally {
+      completion.resolve({
+        mode: "simple",
+        taskId: null,
+        summary: "Final Main answer.",
+        workers: []
+      });
+      view.unmount();
+      testInput.restore();
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("does not let a stale active-worker poll overwrite a terminal Main state", async () => {
+    const testInput = installTestInputStream();
+    const root = await mkdtemp(join(tmpdir(), "pct-app-main-terminal-precedence-"));
+    const statusPath = join(root, "status.json");
+    const completion = deferred<HandleRequestResult>();
+    const route: RouteDecision = {
+      mode: "simple",
+      reason: "Short conversation without project work.",
+      source: "codex",
+      duration_ms: 12,
+      suggested_roles: [],
+      judge_engine: "mock",
+      actor_engine: "mock",
+      critic_engine: "mock"
+    };
+    await writeFile(statusPath, JSON.stringify({
+      worker_id: "main-claude",
+      role: "main",
+      engine: "claude",
+      state: "running",
+      phase: "process-output",
+      last_event_at: new Date(Date.now() - 2_000).toISOString(),
+      summary: "Working"
+    }));
+    const handleRequest = vi.fn((input: HandleRequestInput) => {
+      input.onRoute?.(route);
+      input.onStatus?.({ taskId: "main", main: "starting" });
+      input.onWorker?.({
+        id: "main-claude",
+        role: "main",
+        engine: "claude",
+        label: "Main (claude)",
+        logPath: join(root, "output.log"),
+        statusPath
+      });
+      input.onStatus?.({ taskId: "main", main: "done" });
+      return completion.promise;
+    });
+    const view = render(
+      <App
+        config={defaultConfig(root)}
+        orchestrator={{ handleRequest } as unknown as Orchestrator}
+        cwd={root}
+      />
+    );
+
+    try {
+      await waitForFrame(view.lastFrame, "ready");
+      await settleEffects();
+      testInput.send(view.stdin, "hello\r");
+      await waitForFrame(view.lastFrame, "main/claude done");
+      await new Promise((resolve) => setTimeout(resolve, 1_200));
+
+      const frame = view.lastFrame() ?? "";
+      expect(frame).toContain("main/claude done");
+      expect(frame).not.toContain("responding");
+    } finally {
+      completion.resolve({
+        mode: "simple",
+        taskId: null,
+        summary: "Final Main answer.",
+        workers: []
+      });
+      view.unmount();
+      testInput.restore();
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("allows a newer native-session fallback to recover from a failed Main attempt", async () => {
+    const testInput = installTestInputStream();
+    const root = await mkdtemp(join(tmpdir(), "pct-app-main-native-fallback-"));
+    const completion = deferred<HandleRequestResult>();
+    const route: RouteDecision = {
+      mode: "simple",
+      reason: "Short conversation without project work.",
+      source: "codex",
+      duration_ms: 12,
+      suggested_roles: [],
+      judge_engine: "mock",
+      actor_engine: "mock",
+      critic_engine: "mock"
+    };
+    const handleRequest = vi.fn((input: HandleRequestInput) => {
+      input.onRoute?.(route);
+      input.onStatus?.({ taskId: "main", main: "failed" });
+      input.onWorker?.({
+        id: "main-claude",
+        role: "main",
+        engine: "claude",
+        label: "Main (claude)",
+        logPath: join(root, "output.log"),
+        statusPath: join(root, "status.json"),
+        runtimeStatus: {
+          worker_id: "main-claude",
+          role: "main",
+          engine: "claude",
+          state: "starting",
+          phase: "native-resume-fallback",
+          last_event_at: new Date().toISOString(),
+          summary: "Starting fresh session"
+        }
+      });
+      return completion.promise;
+    });
+    const view = render(
+      <App
+        config={defaultConfig(root)}
+        orchestrator={{ handleRequest } as unknown as Orchestrator}
+        cwd={root}
+      />
+    );
+
+    try {
+      await waitForFrame(view.lastFrame, "ready");
+      await settleEffects();
+      testInput.send(view.stdin, "hello\r");
+      await waitForFrame(view.lastFrame, "waiting output");
+
+      const frame = view.lastFrame() ?? "";
+      expect(frame).toContain("main/claude waiting output");
+      expect(frame).not.toContain("main/claude fail");
+    } finally {
+      completion.resolve({
+        mode: "simple",
+        taskId: null,
+        summary: "Final Main answer.",
+        workers: []
+      });
+      view.unmount();
+      testInput.restore();
+      await rm(root, { recursive: true, force: true });
     }
   });
 
