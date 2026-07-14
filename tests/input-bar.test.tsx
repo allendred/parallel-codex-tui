@@ -236,12 +236,12 @@ describe("InputBar", () => {
     expect(chatPlaceholderDisplayValue(80, { hasWorkers: true })).toBe("message · ^W logs · ^B workers · ^T tasks · Tab · ^O attach · ^G routes");
     expect(chatPlaceholderDisplayValue(42, { hasWorkers: true })).toBe("message · ^W logs · Tab · ^O attach");
     expect(chatPlaceholderDisplayValue(41, { hasWorkers: true })).toBe("message · ^W logs · Tab · ^O attach");
-    expect(chatPlaceholderDisplayValue(40, { hasWorkers: true })).toBe("message · ^W · ^O");
-    expect(chatPlaceholderDisplayValue(30, { hasWorkers: true })).toBe("message · ^W · ^O");
-    expect(chatPlaceholderDisplayValue(20, { hasWorkers: true })).toBe("msg · ^W · ^O");
-    expect(chatPlaceholderDisplayValue(19, { hasWorkers: true })).toBe("msg · ^W · ^O");
-    expect(chatPlaceholderDisplayValue(18, { hasWorkers: true })).toBe("msg · ^W");
-    expect(chatPlaceholderDisplayValue(16, { hasWorkers: true })).toBe("msg · ^W");
+    expect(chatPlaceholderDisplayValue(40, { hasWorkers: true })).toBe("message · ^W logs · ^O attach");
+    expect(chatPlaceholderDisplayValue(30, { hasWorkers: true })).toBe("^W logs · ^O attach");
+    expect(chatPlaceholderDisplayValue(20, { hasWorkers: true })).toBe("msg · ^W logs");
+    expect(chatPlaceholderDisplayValue(19, { hasWorkers: true })).toBe("msg · ^W logs");
+    expect(chatPlaceholderDisplayValue(18, { hasWorkers: true })).toBe("^W logs");
+    expect(chatPlaceholderDisplayValue(16, { hasWorkers: true })).toBe("^W logs");
 
     const { lastFrame } = render(
       <InputBar mode="chat" value="" hasWorkers terminalWidth={80} onChange={() => {}} />
@@ -256,6 +256,52 @@ describe("InputBar", () => {
     expect(frame).toContain("^B workers");
     expect(frame).toContain("^T tasks");
     expect(frame).toContain("^G routes");
+  });
+
+  it("keeps Worker chat actions semantic across terminal widths", () => {
+    const states = [
+      ["workers", { hasWorkers: true }],
+      ["active", { hasWorkers: true, hasActiveTask: true }],
+      ["scrollable", { hasWorkers: true, maxScrollOffset: 20 }],
+      ["active-scrollable", { hasWorkers: true, hasActiveTask: true, maxScrollOffset: 20 }]
+    ] as const;
+    const semantics = [
+      ["logs", /\^W logs?/],
+      ["attach", /\^O attach/],
+      ["workers", /\^B workers/],
+      ["scroll", /(?:scroll|Pg(?:Up\/Dn)?)/]
+    ] as const;
+    const overflow: string[] = [];
+    const bareActions: string[] = [];
+    const semanticLoss: string[] = [];
+
+    for (const [stateName, props] of states) {
+      const seenSemantics = new Set<string>();
+      for (let width = 8; width <= 100; width += 1) {
+        const view = render(
+          <InputBar mode="chat" value="" terminalWidth={width} onChange={() => {}} {...props} />
+        );
+        const frame = view.lastFrame() ?? "";
+        if (frame.split("\n").length !== 1 || displayWidth(frame) > width) {
+          overflow.push(`${stateName}:${width}:${displayWidth(frame)}:${frame}`);
+        }
+        if (/(?:^| · )\^(?:W|O|B)(?= ·|$)/.test(frame)) {
+          bareActions.push(`${stateName}:${width}:${frame}`);
+        }
+        for (const [name, pattern] of semantics) {
+          if (pattern.test(frame)) {
+            seenSemantics.add(name);
+          } else if (seenSemantics.has(name)) {
+            semanticLoss.push(`${stateName}:${width}:${name}:${frame}`);
+          }
+        }
+        view.unmount();
+      }
+    }
+
+    expect(overflow).toEqual([]);
+    expect(bareActions).toEqual([]);
+    expect(semanticLoss).toEqual([]);
   });
 
   it("prioritizes the task-result toggle after a complex task completes", () => {
@@ -299,7 +345,7 @@ describe("InputBar", () => {
     );
 
     const frame = lastFrame() ?? "";
-    expect(frame).toContain("> | message · ^W · ^O");
+    expect(frame).toContain("> | message · ^W logs · ^O attach");
     expect(frame).not.toContain("...age");
     expect(displayWidth(frame)).toBeLessThanOrEqual(40);
   });
@@ -362,12 +408,12 @@ describe("InputBar", () => {
       hasWorkers: true,
       hasActiveTask: true,
       maxScrollOffset: 20
-    })).toBe("PgUp/Dn · ^W log · Tab · ^O attach");
+    })).toBe("scroll · ^W logs · Tab · ^O attach");
     expect(chatPlaceholderDisplayValue(24, {
       hasWorkers: true,
       hasActiveTask: true,
       maxScrollOffset: 20
-    })).toBe("msg · Pg · ^W · ^O");
+    })).toBe("message · ^W logs");
     expect(chatPlaceholderDisplayValue(22, { canRetry: true })).toBe("^R retry");
   });
 
@@ -378,7 +424,7 @@ describe("InputBar", () => {
 
     try {
       const frame = eighteen.lastFrame() ?? "";
-      expect(frame).toContain("> | msg · ^W");
+      expect(frame).toContain("> | ^W logs");
       expect(frame).not.toContain("^O");
       expect(displayWidth(frame)).toBeLessThanOrEqual(18);
     } finally {
@@ -391,7 +437,7 @@ describe("InputBar", () => {
 
     try {
       const frame = nineteen.lastFrame() ?? "";
-      expect(frame).toContain("> | msg · ^W · ^O");
+      expect(frame).toContain("> | msg · ^W logs");
       expect(displayWidth(frame)).toBeLessThanOrEqual(19);
     } finally {
       nineteen.unmount();
@@ -404,9 +450,7 @@ describe("InputBar", () => {
     );
 
     const frame = lastFrame() ?? "";
-    expect(frame).toContain("> | message · ^W · ^O");
-    expect(frame).not.toContain("logs");
-    expect(frame).not.toContain("attach");
+    expect(frame).toContain("> | ^W logs · ^O attach");
     expect(frame.split("\n")).toHaveLength(1);
     expect(displayWidth(frame)).toBeLessThanOrEqual(30);
   });
@@ -417,7 +461,8 @@ describe("InputBar", () => {
     );
 
     const frame = lastFrame() ?? "";
-    expect(frame).toContain("> | msg · ^W · ^O");
+    expect(frame).toContain("> | msg · ^W logs");
+    expect(frame).not.toContain("^O");
     expect(frame).not.toContain("message");
     expect(frame.split("\n")).toHaveLength(1);
     expect(displayWidth(frame)).toBeLessThanOrEqual(20);

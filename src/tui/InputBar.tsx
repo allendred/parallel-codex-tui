@@ -511,12 +511,12 @@ function chatTaskPlaceholderDisplayValue(terminalWidth: number, scrollable = fal
           "message · scroll · ^W logs · ^B workers · Tab · ^O attach · ^G routes",
           "message · scroll · ^W logs · Tab · ^O attach · ^G routes",
           "message · scroll · ^W logs · Tab · ^O attach",
-          "PgUp/Dn · ^W log · Tab · ^O attach",
-          "PgUp/Dn · ^W logs · Tab · ^O",
-          "message · Pg · ^W · ^O",
-          "msg · Pg · ^W · ^O",
-          "msg · ^W · ^O",
-          "msg · ^W",
+          "scroll · ^W logs · Tab · ^O attach",
+          "scroll · ^W logs · ^O attach",
+          "^W logs · ^O attach",
+          "message · ^W logs",
+          "msg · ^W logs",
+          "^W logs",
           "msg"
         ]
       : [
@@ -524,9 +524,11 @@ function chatTaskPlaceholderDisplayValue(terminalWidth: number, scrollable = fal
           "message · ^W logs · ^B workers · Tab · ^O attach · ^G routes",
           "message · ^W logs · Tab · ^O attach · ^G routes",
           "message · ^W logs · Tab · ^O attach",
-          "message · ^W · ^O",
-          "msg · ^W · ^O",
-          "msg · ^W",
+          "message · ^W logs · ^O attach",
+          "^W logs · ^O attach",
+          "message · ^W logs",
+          "msg · ^W logs",
+          "^W logs",
           "msg"
         ]
   );
