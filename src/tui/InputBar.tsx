@@ -602,19 +602,22 @@ function workerInputHints(width: number): { label: string; detail: string } {
     return { label: "logs", detail: " · Pg · Esc" };
   }
   if (width < 36) {
-    return { label: "logs", detail: " · Pg · Tab · ^O · Esc" };
+    return { label: "logs", detail: " · Pg · Tab · Esc chat" };
   }
   if (width < 40) {
-    return { label: "logs", detail: " · scroll · Tab · ^O · Esc" };
+    return { label: "logs", detail: " · scroll · Tab · Esc chat" };
   }
   if (width < 58) {
     return { label: "logs", detail: " · scroll · Tab · ^O attach · Esc" };
   }
   if (width < 72) {
-    return { label: "logs", detail: " · scroll · ^F find · Tab · ^O · Esc" };
+    return { label: "logs", detail: " · scroll · ^F find · Tab · ^O attach · Esc chat" };
   }
-  if (width < 96) {
-    return { label: "logs", detail: " · scroll · ^F find · E err · D diff · Tab · ^B · ^O · Esc" };
+  if (width < 79) {
+    return { label: "logs", detail: " · scroll · ^F find · E err · D diff · Tab · ^O attach · Esc chat" };
+  }
+  if (width < 84) {
+    return { label: "logs", detail: " · scroll · ^F find · E err · D diff · Tab · ^B workers · ^O attach · Esc" };
   }
   return { label: "logs", detail: " · scroll · ^F find · E err · D diff · Tab · ^B workers · ^O attach · Esc chat" };
 }

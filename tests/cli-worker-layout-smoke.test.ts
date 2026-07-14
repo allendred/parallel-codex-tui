@@ -455,10 +455,14 @@ describe("CLI worker layout smoke", () => {
       const codeLine = lines.find((line) => line.chunks.map((chunk) => chunk.text).join("").includes("| const x = 1"));
       const codeLineText = codeLine?.chunks.map((chunk) => chunk.text).join("") ?? "";
       const codeBodyChunks = codeLine?.chunks.filter((chunk) => chunk.text.trim().length > 0 || chunk.style.backgroundColor === TUI_THEME_PRESETS.codex.rail) ?? [];
+      const inputLine = lines.find((line) => line.chunks.map((chunk) => chunk.text).join("").includes("logs · scroll"));
+      const inputLineText = inputLine?.chunks.map((chunk) => chunk.text).join("") ?? "";
 
       expect(codeLineText).toContain("| const x = 1");
       expect(displayWidth(codeLineText)).toBe(displayWidth(workerTitleLineText));
       expect(codeBodyChunks.every((chunk) => chunk.style.backgroundColor === TUI_THEME_PRESETS.codex.rail)).toBe(true);
+      expect(inputLineText).toContain("^B workers · ^O attach · Esc");
+      expect(inputLineText).not.toMatch(/(?:^| · )\^(?:B|O)(?= ·|$)/);
     } finally {
       child.kill("SIGTERM");
     }

@@ -763,10 +763,64 @@ describe("InputBar", () => {
     );
 
     const frame = lastFrame() ?? "";
-    expect(frame).toContain("logs · Pg · Tab · ^O · Esc");
+    expect(frame).toContain("logs · Pg · Tab · Esc chat");
+    expect(frame).not.toContain("^O");
     expect(frame).not.toContain("read");
     expect(frame.split("\n")).toHaveLength(1);
     expect(displayWidth(frame)).toBeLessThanOrEqual(32);
+  });
+
+  it("keeps medium-width worker shortcuts self-describing", () => {
+    const { lastFrame } = render(
+      <InputBar mode="worker" value="" terminalWidth={80} onChange={() => {}} />
+    );
+
+    const frame = lastFrame() ?? "";
+    expect(frame).toContain(
+      "logs · scroll · ^F find · E err · D diff · Tab · ^B workers · ^O attach · Esc"
+    );
+    expect(frame).not.toMatch(/(?:^| · )\^(?:B|O)(?= ·|$)/);
+    expect(frame.split("\n")).toHaveLength(1);
+    expect(displayWidth(frame)).toBeLessThanOrEqual(80);
+  });
+
+  it("keeps worker guidance legible on one row across terminal widths", () => {
+    const overflow: string[] = [];
+    const bareChords: string[] = [];
+    for (let width = 8; width <= 100; width += 1) {
+      const view = render(
+        <InputBar mode="worker" value="" terminalWidth={width} onChange={() => {}} />
+      );
+      const frame = view.lastFrame() ?? "";
+      if (frame.split("\n").length !== 1 || displayWidth(frame) > width) {
+        overflow.push(`${width}:${displayWidth(frame)}:${frame}`);
+      }
+      if (/(?:^| · )\^(?:B|O)(?= ·|$)/.test(frame)) {
+        bareChords.push(`${width}:${frame}`);
+      }
+      view.unmount();
+    }
+
+    expect(overflow).toEqual([]);
+    expect(bareChords).toEqual([]);
+  });
+
+  it.each([
+    [28, "logs · Pg · Tab · Esc chat"],
+    [36, "logs · scroll · Tab · Esc chat"],
+    [40, "logs · scroll · Tab · ^O attach · Esc"],
+    [58, "logs · scroll · ^F find · Tab · ^O attach · Esc chat"],
+    [72, "logs · scroll · ^F find · E err · D diff · Tab · ^O attach · Esc chat"],
+    [79, "logs · scroll · ^F find · E err · D diff · Tab · ^B workers · ^O attach · Esc"],
+    [84, "logs · scroll · ^F find · E err · D diff · Tab · ^B workers · ^O attach · Esc chat"],
+    [100, "logs · scroll · ^F find · E err · D diff · Tab · ^B workers · ^O attach · Esc chat"]
+  ])("uses semantic worker guidance at the %i-column boundary", (width, expected) => {
+    const view = render(
+      <InputBar mode="worker" value="" terminalWidth={width} onChange={() => {}} />
+    );
+
+    expect(view.lastFrame()).toContain(expected);
+    view.unmount();
   });
 
   it("falls back to essential worker shortcuts in tiny terminals", () => {
