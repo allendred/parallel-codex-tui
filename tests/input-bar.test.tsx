@@ -531,25 +531,63 @@ describe("InputBar", () => {
       <InputBar mode="router" value="" terminalWidth={24} onChange={() => {}} />
     );
     const narrowFrame = narrow.lastFrame() ?? "";
-    expect(narrowFrame).toContain("routes · Pg · Esc");
+    expect(narrowFrame).toContain("routes · Esc chat");
     expect(narrowFrame.split("\n")).toHaveLength(1);
     expect(displayWidth(narrowFrame)).toBeLessThanOrEqual(24);
     narrow.unmount();
   });
 
-  it("keeps Router diagnostics guidance on one row at every terminal width", () => {
+  it("keeps Router diagnostics actions semantic across every terminal width", () => {
     const overflow: string[] = [];
+    const bareActions: string[] = [];
+    const semanticLoss: string[] = [];
+    const seenSemantics = new Set<string>();
+    const semantics = [
+      ["scroll", /(?:Pg scroll|scroll)/],
+      ["scope", /Tab scope/],
+      ["refresh", /\^G refresh/],
+      ["chat", /Esc chat/]
+    ] as const;
     for (let width = 8; width <= 100; width += 1) {
       const view = render(
         <InputBar mode="router" value="" terminalWidth={width} onChange={() => {}} />
       );
       const frame = view.lastFrame() ?? "";
-      if (frame.split("\n").length > 1 || displayWidth(frame) > width) {
+      const guidance = frame.trimStart();
+      if (frame.split("\n").length !== 1 || displayWidth(frame) > width) {
         overflow.push(`${width}:${displayWidth(frame)}:${frame}`);
+      }
+      if (/(?:^| · )(?:Pg|Esc|Tab|\^G)(?= ·|$)/.test(guidance)) {
+        bareActions.push(`${width}:${frame}`);
+      }
+      for (const [name, pattern] of semantics) {
+        if (pattern.test(guidance)) {
+          seenSemantics.add(name);
+        } else if (seenSemantics.has(name)) {
+          semanticLoss.push(`${width}:${name}:${frame}`);
+        }
       }
       view.unmount();
     }
     expect(overflow).toEqual([]);
+    expect(bareActions).toEqual([]);
+    expect(semanticLoss).toEqual([]);
+  });
+
+  it.each([
+    [8, "routes"],
+    [10, "Esc chat"],
+    [19, "routes · Esc chat"],
+    [31, "routes · Pg scroll · Esc chat"],
+    [41, "routes · scroll · ^G refresh · Esc chat"],
+    [53, "routes · scroll · Tab scope · ^G refresh · Esc chat"]
+  ])("uses semantic Router diagnostics guidance at the %i-column boundary", (width, expected) => {
+    const view = render(
+      <InputBar mode="router" value="" terminalWidth={width} onChange={() => {}} />
+    );
+
+    expect(view.lastFrame()).toContain(expected);
+    view.unmount();
   });
 
   it("shows Worker overview selection and action guidance", () => {
@@ -728,6 +766,97 @@ describe("InputBar", () => {
     expect(overflow).toEqual([]);
   });
 
+  it("keeps every Feature board action explicit and monotonic across terminal widths", () => {
+    const featureMode = "features" as Parameters<typeof InputBar>[0]["mode"];
+    const states = [
+      ["default", {}, [
+        ["select", /Up\/Dn select/],
+        ["timeline", /Enter timeline/],
+        ["refresh", /R refresh/],
+        ["back", /Esc workers/]
+      ]],
+      ["cancel", { featureCanCancel: true }, [
+        ["select", /Up\/Dn select/],
+        ["timeline", /Enter timeline/],
+        ["cancel", /X cancel/],
+        ["refresh", /R refresh/],
+        ["back", /Esc workers/]
+      ]],
+      ["retry", { canRetry: true }, [
+        ["select", /Up\/Dn select/],
+        ["timeline", /Enter timeline/],
+        ["retry", /\^R retry(?: task)?/],
+        ["refresh", /R refresh/],
+        ["back", /Esc workers/]
+      ]],
+      ["confirm", { featureCancelConfirm: true }, [
+        ["confirm", /X confirm/],
+        ["keep", /Esc keep/]
+      ]]
+    ] as const;
+    const overflow: string[] = [];
+    const bareActions: string[] = [];
+    const semanticLoss: string[] = [];
+
+    for (const [stateName, props, semantics] of states) {
+      const seenSemantics = new Set<string>();
+      for (let width = 8; width <= 100; width += 1) {
+        const view = render(
+          <InputBar mode={featureMode} value="" terminalWidth={width} onChange={() => {}} {...props} />
+        );
+        const frame = view.lastFrame() ?? "";
+        const guidance = frame.trimStart();
+        if (frame.split("\n").length !== 1 || displayWidth(frame) > width) {
+          overflow.push(`${stateName}:${width}:${displayWidth(frame)}:${frame}`);
+        }
+        if (/(?:^| · )(?:Up\/Dn|X\/Esc|Esc|Enter|R|\^R)(?= ·|$)/.test(guidance)) {
+          bareActions.push(`${stateName}:${width}:${frame}`);
+        }
+        for (const [name, pattern] of semantics) {
+          if (pattern.test(guidance)) {
+            seenSemantics.add(name);
+          } else if (seenSemantics.has(name)) {
+            semanticLoss.push(`${stateName}:${width}:${name}:${frame}`);
+          }
+        }
+        view.unmount();
+      }
+    }
+
+    expect(overflow).toEqual([]);
+    expect(bareActions).toEqual([]);
+    expect(semanticLoss).toEqual([]);
+  });
+
+  it.each([
+    [8, {}, "ft"],
+    [10, {}, "features"],
+    [24, {}, "features · Esc workers"],
+    [39, {}, "features · Up/Dn select · Esc workers"],
+    [56, {}, "features · Up/Dn select · Enter timeline · Esc workers"],
+    [68, {}, "features · Up/Dn select · Enter timeline · R refresh · Esc workers"],
+    [35, { featureCanCancel: true }, "features · X cancel · Esc workers"],
+    [50, { featureCanCancel: true }, "features · Up/Dn select · X cancel · Esc workers"],
+    [62, { featureCanCancel: true }, "features · Up/Dn select · X cancel · R refresh · Esc workers"],
+    [79, { featureCanCancel: true }, "features · Up/Dn select · Enter timeline · X cancel · R refresh · Esc workers"],
+    [35, { canRetry: true }, "features · ^R retry · Esc workers"],
+    [50, { canRetry: true }, "features · Up/Dn select · ^R retry · Esc workers"],
+    [67, { canRetry: true }, "features · Up/Dn select · ^R retry task · R refresh · Esc workers"],
+    [84, { canRetry: true }, "features · Up/Dn select · Enter timeline · ^R retry task · R refresh · Esc workers"],
+    [8, { featureCancelConfirm: true }, "stop?"],
+    [10, { featureCancelConfirm: true }, "Esc keep"],
+    [20, { featureCancelConfirm: true }, "cancel? · Esc keep"],
+    [32, { featureCancelConfirm: true }, "cancel? · X confirm · Esc keep"],
+    [40, { featureCancelConfirm: true }, "cancel feature? · X confirm · Esc keep"]
+  ])("uses semantic Feature board guidance at the %i-column boundary", (width, props, expected) => {
+    const view = render(
+      <InputBar mode="features" value="" terminalWidth={width} onChange={() => {}} {...props} />
+    );
+
+    expect(view.lastFrame()).toContain(expected);
+    view.unmount();
+  });
+
   it("shows collaboration timeline filtering and refresh guidance", () => {
     const collaborationMode = "collaboration" as Parameters<typeof InputBar>[0]["mode"];
     const roomy = render(
@@ -775,32 +904,96 @@ describe("InputBar", () => {
     expect(detail.lastFrame()).toContain("event detail · scroll · Enter/Esc timeline");
     detail.unmount();
 
+    const states = [
+      ["timeline", {}, [
+        ["back", /Esc workers/],
+        ["select", /Up\/Dn event/],
+        ["detail", /Enter detail/],
+        ["feature", /Tab feature/],
+        ["filter", /U (?:open|unresolved)/],
+        ["refresh", /R refresh/]
+      ]],
+      ["timeline-unresolved", { collaborationUnresolved: true }, [
+        ["back", /Esc workers/],
+        ["select", /Up\/Dn event/],
+        ["detail", /Enter detail/],
+        ["feature", /Tab feature/],
+        ["filter", /U all/],
+        ["refresh", /R refresh/]
+      ]],
+      ["timeline-features", { collaborationBack: "features" as const }, [
+        ["back", /Esc features/],
+        ["select", /Up\/Dn event/],
+        ["detail", /Enter detail/],
+        ["feature", /Tab feature/],
+        ["filter", /U (?:open|unresolved)/],
+        ["refresh", /R refresh/]
+      ]],
+      ["detail", { collaborationDetail: true }, [
+        ["back", /Esc timeline/],
+        ["scroll", /(?:Pg scroll|scroll)/],
+        ["close", /Enter\/Esc timeline/]
+      ]]
+    ] as const;
     const overflow: string[] = [];
-    for (let width = 8; width <= 100; width += 1) {
-      const view = render(
-        <InputBar mode={collaborationMode} value="" terminalWidth={width} onChange={() => {}} />
-      );
-      const frame = view.lastFrame() ?? "";
-      if (frame.split("\n").length > 1 || displayWidth(frame) > width) {
-        overflow.push(`${width}:${displayWidth(frame)}:${frame}`);
+    const bareActions: string[] = [];
+    const semanticLoss: string[] = [];
+
+    for (const [stateName, props, semantics] of states) {
+      const seenSemantics = new Set<string>();
+      for (let width = 8; width <= 100; width += 1) {
+        const view = render(
+          <InputBar mode={collaborationMode} value="" terminalWidth={width} onChange={() => {}} {...props} />
+        );
+        const frame = view.lastFrame() ?? "";
+        const guidance = frame.trimStart();
+        if (frame.split("\n").length !== 1 || displayWidth(frame) > width) {
+          overflow.push(`${stateName}:${width}:${displayWidth(frame)}:${frame}`);
+        }
+        if (/(?:^| · )(?:Up\/Dn|Pg|Esc|Enter|Tab|U|R)(?= ·|$)/.test(guidance)) {
+          bareActions.push(`${stateName}:${width}:${frame}`);
+        }
+        for (const [name, pattern] of semantics) {
+          if (pattern.test(guidance)) {
+            seenSemantics.add(name);
+          } else if (seenSemantics.has(name)) {
+            semanticLoss.push(`${stateName}:${width}:${name}:${frame}`);
+          }
+        }
+        view.unmount();
       }
-      view.unmount();
-      const detailView = render(
-        <InputBar
-          mode={collaborationMode}
-          collaborationDetail
-          value=""
-          terminalWidth={width}
-          onChange={() => {}}
-        />
-      );
-      const detailFrame = detailView.lastFrame() ?? "";
-      if (detailFrame.split("\n").length > 1 || displayWidth(detailFrame) > width) {
-        overflow.push(`${width}:${displayWidth(detailFrame)}:${detailFrame}`);
-      }
-      detailView.unmount();
     }
+
     expect(overflow).toEqual([]);
+    expect(bareActions).toEqual([]);
+    expect(semanticLoss).toEqual([]);
+  });
+
+  it.each([
+    [8, {}, "flow"],
+    [13, {}, "Esc workers"],
+    [24, {}, "timeline · Esc workers"],
+    [39, {}, "timeline · Enter detail · Esc workers"],
+    [53, {}, "timeline · Up/Dn event · Enter detail · Esc workers"],
+    [67, {}, "timeline · Up/Dn event · Enter detail · Tab feature · Esc workers"],
+    [76, {}, "timeline · Up/Dn event · Enter detail · Tab feature · U open · Esc workers"],
+    [88, {}, "timeline · Up/Dn event · Enter detail · Tab feature · U open · R refresh · Esc workers"],
+    [94, {}, "timeline · Up/Dn event · Enter detail · Tab feature · U unresolved · R refresh · Esc workers"],
+    [100, { collaborationUnresolved: true }, "timeline · Up/Dn event · Enter detail · Tab feature · U all · R refresh · Esc workers"],
+    [100, { collaborationBack: "features" as const }, "timeline · Up/Dn event · Enter detail · Tab feature · U unresolved · R refresh · Esc features"],
+    [8, { collaborationDetail: true }, "event"],
+    [14, { collaborationDetail: true }, "Esc timeline"],
+    [22, { collaborationDetail: true }, "event · Esc timeline"],
+    [34, { collaborationDetail: true }, "event · Pg scroll · Esc timeline"],
+    [40, { collaborationDetail: true }, "event · Pg scroll · Enter/Esc timeline"],
+    [44, { collaborationDetail: true }, "event detail · scroll · Enter/Esc timeline"]
+  ])("uses semantic collaboration guidance at the %i-column boundary", (width, props, expected) => {
+    const view = render(
+      <InputBar mode="collaboration" value="" terminalWidth={width} onChange={() => {}} {...props} />
+    );
+
+    expect(view.lastFrame()).toContain(expected);
+    view.unmount();
   });
 
   it("shows Task session restore and new-task guidance", () => {
@@ -818,10 +1011,65 @@ describe("InputBar", () => {
       <InputBar mode="sessions" value="" terminalWidth={24} onChange={() => {}} />
     );
     const narrowFrame = narrow.lastFrame() ?? "";
-    expect(narrowFrame).toContain("sessions · Up/Dn · Esc");
+    expect(narrowFrame).toContain("sessions · Esc back");
     expect(narrowFrame.split("\n")).toHaveLength(1);
     expect(displayWidth(narrowFrame)).toBeLessThanOrEqual(24);
     narrow.unmount();
+  });
+
+  it("keeps Task session actions semantic across every terminal width", () => {
+    const overflow: string[] = [];
+    const bareActions: string[] = [];
+    const semanticLoss: string[] = [];
+    const seenSemantics = new Set<string>();
+    const semantics = [
+      ["select", /Up\/Dn select/],
+      ["restore", /Enter restore/],
+      ["new", /\^N new/],
+      ["back", /Esc back/]
+    ] as const;
+
+    for (let width = 8; width <= 100; width += 1) {
+      const view = render(
+        <InputBar mode="sessions" value="" terminalWidth={width} onChange={() => {}} />
+      );
+      const frame = view.lastFrame() ?? "";
+      const guidance = frame.trimStart();
+      if (frame.split("\n").length !== 1 || displayWidth(frame) > width) {
+        overflow.push(`${width}:${displayWidth(frame)}:${frame}`);
+      }
+      if (/(?:^| · )(?:Up\/Dn|Esc|Enter|\^N)(?= ·|$)/.test(guidance)) {
+        bareActions.push(`${width}:${frame}`);
+      }
+      for (const [name, pattern] of semantics) {
+        if (pattern.test(guidance)) {
+          seenSemantics.add(name);
+        } else if (seenSemantics.has(name)) {
+          semanticLoss.push(`${width}:${name}:${frame}`);
+        }
+      }
+      view.unmount();
+    }
+
+    expect(overflow).toEqual([]);
+    expect(bareActions).toEqual([]);
+    expect(semanticLoss).toEqual([]);
+  });
+
+  it.each([
+    [8, "ses"],
+    [10, "Esc back"],
+    [21, "sessions · Esc back"],
+    [36, "sessions · Up/Dn select · Esc back"],
+    [52, "sessions · Up/Dn select · Enter restore · Esc back"],
+    [61, "sessions · Up/Dn select · Enter restore · ^N new · Esc back"]
+  ])("uses semantic Task session guidance at the %i-column boundary", (width, expected) => {
+    const view = render(
+      <InputBar mode="sessions" value="" terminalWidth={width} onChange={() => {}} />
+    );
+
+    expect(view.lastFrame()).toContain(expected);
+    view.unmount();
   });
 
   it("renders a Unicode Worker log search cursor and match position", () => {

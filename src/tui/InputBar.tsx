@@ -654,51 +654,49 @@ function featureBoardInputHints(
   options: { canCancel: boolean; confirmCancel: boolean; canRetry: boolean }
 ): { label: string; detail: string } {
   if (options.confirmCancel) {
-    if (width < 10) {
-      return { label: "stop?", detail: "" };
-    }
-    if (width < 18) {
-      return { label: "cancel?", detail: "" };
-    }
-    if (width < 28) {
-      return { label: "cancel?", detail: " · X/Esc" };
-    }
-    if (width < 42) {
-      return { label: "cancel?", detail: " · X confirm · Esc" };
-    }
-    return { label: "cancel feature?", detail: " · X confirm · Esc keep" };
-  }
-  if (width < 10) {
-    return { label: "ft", detail: "" };
-  }
-  if (width < 16) {
-    return { label: "features", detail: "" };
-  }
-  if (width < 24) {
-    return { label: "features", detail: " · Esc" };
-  }
-  if (width < 34) {
-    return { label: "features", detail: " · Up/Dn · Esc" };
-  }
-  if (width < 46) {
-    return { label: "features", detail: " · Up/Dn · Enter · Esc" };
+    return selectInputHints(width, [
+      { label: "cancel feature?", detail: " · X confirm · Esc keep" },
+      { label: "cancel?", detail: " · X confirm · Esc keep" },
+      { label: "cancel?", detail: " · Esc keep" },
+      { label: "Esc keep", detail: "" },
+      { label: "stop?", detail: "" },
+      { label: "?", detail: "" }
+    ]);
   }
   if (options.canCancel) {
-    if (width < 72) {
-      return { label: "features", detail: " · Up/Dn · X cancel · R · Esc" };
-    }
-    return { label: "features", detail: " · Up/Dn · Enter · X cancel · R refresh · Esc" };
+    return selectInputHints(width, [
+      { label: "features", detail: " · Up/Dn select · Enter timeline · X cancel · R refresh · Esc workers" },
+      { label: "features", detail: " · Up/Dn select · X cancel · R refresh · Esc workers" },
+      { label: "features", detail: " · Up/Dn select · X cancel · Esc workers" },
+      { label: "features", detail: " · X cancel · Esc workers" },
+      { label: "features", detail: " · Esc workers" },
+      { label: "features", detail: "" },
+      { label: "ft", detail: "" },
+      { label: "f", detail: "" }
+    ]);
   }
   if (options.canRetry) {
-    if (width < 72) {
-      return { label: "features", detail: " · Up/Dn · ^R retry · R · Esc" };
-    }
-    return { label: "features", detail: " · Up/Dn · Enter · ^R retry task · R refresh · Esc" };
+    return selectInputHints(width, [
+      { label: "features", detail: " · Up/Dn select · Enter timeline · ^R retry task · R refresh · Esc workers" },
+      { label: "features", detail: " · Up/Dn select · ^R retry task · R refresh · Esc workers" },
+      { label: "features", detail: " · Up/Dn select · ^R retry · R refresh · Esc workers" },
+      { label: "features", detail: " · Up/Dn select · ^R retry · Esc workers" },
+      { label: "features", detail: " · ^R retry · Esc workers" },
+      { label: "features", detail: " · Esc workers" },
+      { label: "features", detail: "" },
+      { label: "ft", detail: "" },
+      { label: "f", detail: "" }
+    ]);
   }
-  if (width < 72) {
-    return { label: "features", detail: " · Up/Dn · Enter flow · R · Esc" };
-  }
-  return { label: "features", detail: " · Up/Dn select · Enter timeline · R refresh · Esc workers" };
+  return selectInputHints(width, [
+    { label: "features", detail: " · Up/Dn select · Enter timeline · R refresh · Esc workers" },
+    { label: "features", detail: " · Up/Dn select · Enter timeline · Esc workers" },
+    { label: "features", detail: " · Up/Dn select · Esc workers" },
+    { label: "features", detail: " · Esc workers" },
+    { label: "features", detail: "" },
+    { label: "ft", detail: "" },
+    { label: "f", detail: "" }
+  ]);
 }
 
 function collaborationTimelineInputHints(
@@ -706,72 +704,56 @@ function collaborationTimelineInputHints(
   unresolvedOnly: boolean,
   back: "workers" | "features"
 ): { label: string; detail: string } {
-  if (width < 10) {
-    return { label: "tl", detail: "" };
-  }
-  if (width < 12) {
-    return { label: "flow", detail: "" };
-  }
-  if (width < 16) {
-    return { label: "flow", detail: " · Esc" };
-  }
-  if (width < 24) {
-    return { label: "timeline", detail: " · Esc" };
-  }
-  if (width < 36) {
-    return { label: "timeline", detail: " · Enter · Esc" };
-  }
-  if (width < 41) {
-    return { label: "timeline", detail: " · Up/Dn · Enter · Esc" };
-  }
-  if (width < 56) {
-    return { label: "timeline", detail: ` · Up/Dn · Enter · Tab · U · Esc` };
-  }
-  if (width < 76) {
-    return { label: "timeline", detail: ` · Up/Dn event · Enter · Tab · ${unresolvedOnly ? "U all" : "U open"} · R · Esc` };
-  }
-  if (width < 96) {
-    return {
+  const backAction = `Esc ${back}`;
+  const filterAction = unresolvedOnly ? "U all" : "U unresolved";
+  const compactFilterAction = unresolvedOnly ? "U all" : "U open";
+  return selectInputHints(width, [
+    {
       label: "timeline",
-      detail: ` · Up/Dn event · Enter detail · Tab · ${unresolvedOnly ? "U all" : "U unresolved"} · R · Esc`
-    };
-  }
-  return {
-    label: "timeline",
-    detail: ` · Up/Dn event · Enter detail · Tab feature · ${unresolvedOnly ? "U all" : "U unresolved"} · R refresh · Esc ${back}`
-  };
+      detail: ` · Up/Dn event · Enter detail · Tab feature · ${filterAction} · R refresh · ${backAction}`
+    },
+    {
+      label: "timeline",
+      detail: ` · Up/Dn event · Enter detail · Tab feature · ${compactFilterAction} · R refresh · ${backAction}`
+    },
+    {
+      label: "timeline",
+      detail: ` · Up/Dn event · Enter detail · Tab feature · ${compactFilterAction} · ${backAction}`
+    },
+    { label: "timeline", detail: ` · Up/Dn event · Enter detail · Tab feature · ${backAction}` },
+    { label: "timeline", detail: ` · Up/Dn event · Enter detail · ${backAction}` },
+    { label: "timeline", detail: ` · Enter detail · ${backAction}` },
+    { label: "timeline", detail: ` · ${backAction}` },
+    { label: backAction, detail: "" },
+    { label: "flow", detail: "" },
+    { label: "tl", detail: "" },
+    { label: "t", detail: "" }
+  ]);
 }
 
 function collaborationDetailInputHints(width: number): { label: string; detail: string } {
-  if (width < 13) {
-    return { label: "event", detail: "" };
-  }
-  if (width < 18) {
-    return { label: "detail", detail: " · Esc" };
-  }
-  if (width < 43) {
-    return { label: "event", detail: " · Pg · Esc" };
-  }
-  return { label: "event detail", detail: " · scroll · Enter/Esc timeline" };
+  return selectInputHints(width, [
+    { label: "event detail", detail: " · scroll · Enter/Esc timeline" },
+    { label: "event", detail: " · Pg scroll · Enter/Esc timeline" },
+    { label: "event", detail: " · Pg scroll · Esc timeline" },
+    { label: "event", detail: " · Esc timeline" },
+    { label: "Esc timeline", detail: "" },
+    { label: "event", detail: "" },
+    { label: "e", detail: "" }
+  ]);
 }
 
 function taskSessionsInputHints(width: number): { label: string; detail: string } {
-  if (width < 12) {
-    return { label: "ses", detail: "" };
-  }
-  if (width < 18) {
-    return { label: "sessions", detail: " · Esc" };
-  }
-  if (width < 28) {
-    return { label: "sessions", detail: " · Up/Dn · Esc" };
-  }
-  if (width < 42) {
-    return { label: "sessions", detail: " · Up/Dn · Enter · Esc" };
-  }
-  if (width < 62) {
-    return { label: "sessions", detail: " · Up/Dn · Enter restore · ^N · Esc" };
-  }
-  return { label: "sessions", detail: " · Up/Dn select · Enter restore · ^N new · Esc back" };
+  return selectInputHints(width, [
+    { label: "sessions", detail: " · Up/Dn select · Enter restore · ^N new · Esc back" },
+    { label: "sessions", detail: " · Up/Dn select · Enter restore · Esc back" },
+    { label: "sessions", detail: " · Up/Dn select · Esc back" },
+    { label: "sessions", detail: " · Esc back" },
+    { label: "Esc back", detail: "" },
+    { label: "sessions", detail: "" },
+    { label: "ses", detail: "" },
+    { label: "s", detail: "" }
+  ]);
 }
 
 function workerSearchInputSuffix(width: number, matchIndex: number, matchCount: number): string {
@@ -824,23 +806,24 @@ function nativeInputHints(width: number, closed = false): { label: string; detai
 }
 
 function routerInputHints(width: number): { label: string; detail: string } {
-  if (width < 12) {
-    return { label: "rt", detail: "" };
-  }
-  if (width < 14) {
-    return { label: "rt", detail: " · Esc" };
-  }
-  if (width < 18) {
-    return { label: "routes", detail: " · Esc" };
-  }
-  if (width < 28) {
-    return { label: "routes", detail: " · Pg · Esc" };
-  }
-  if (width < 44) {
-    return { label: "routes", detail: " · scroll · ^G · Esc" };
-  }
-  if (width < 58) {
-    return { label: "routes", detail: " · scroll · Tab · ^G · Esc" };
-  }
-  return { label: "routes", detail: " · scroll · Tab scope · ^G refresh · Esc chat" };
+  return selectInputHints(width, [
+    { label: "routes", detail: " · scroll · Tab scope · ^G refresh · Esc chat" },
+    { label: "routes", detail: " · scroll · ^G refresh · Esc chat" },
+    { label: "routes", detail: " · Pg scroll · Esc chat" },
+    { label: "routes", detail: " · Esc chat" },
+    { label: "Esc chat", detail: "" },
+    { label: "routes", detail: "" },
+    { label: "rt", detail: "" },
+    { label: "r", detail: "" }
+  ]);
+}
+
+function selectInputHints(
+  width: number,
+  candidates: ReadonlyArray<{ label: string; detail: string }>
+): { label: string; detail: string } {
+  const contentWidth = Math.max(1, Math.trunc(width) - (width > 1 ? 2 : 0));
+  return candidates.find((candidate) => displayWidth(`${candidate.label}${candidate.detail}`) <= contentWidth)
+    ?? candidates.at(-1)
+    ?? { label: "", detail: "" };
 }
