@@ -392,7 +392,7 @@ describe("CLI worker layout smoke", () => {
       await waitForScreenText(() => screenWrites, screen, "ready");
       await waitForScreenText(() => screenWrites, screen, "w1");
       await waitForScreenText(() => screenWrites, screen, "d1");
-      await waitForScreenText(() => screenWrites, screen, "^O");
+      await waitForScreenText(() => screenWrites, screen, "^W logs");
       child.write("\x0f");
       await waitForScreenText(() => screenWrites, screen, "no session · critic");
 
@@ -416,7 +416,7 @@ describe("CLI worker layout smoke", () => {
     const taskDir = join(workspace, ".parallel-codex", "sessions", taskId);
     const workerDir = join(taskDir, "actor-mock");
     const chunks: string[] = [];
-    const screen = new NativeTerminalScreen({ cols: 80, rows: 18, scrollback: 1000 });
+    const screen = new NativeTerminalScreen({ cols: 84, rows: 18, scrollback: 1000 });
     let screenWrites = Promise.resolve();
 
     await mkdir(workerDir, { recursive: true });
@@ -427,7 +427,7 @@ describe("CLI worker layout smoke", () => {
       ["./node_modules/.bin/tsx", "src/cli.tsx", "--app-root", workspace, "--workspace", workspace, "--task", taskId],
       {
         cwd: process.cwd(),
-        cols: 80,
+        cols: 84,
         rows: 18,
         name: "xterm-256color",
         env: {
@@ -461,8 +461,8 @@ describe("CLI worker layout smoke", () => {
       expect(codeLineText).toContain("| const x = 1");
       expect(displayWidth(codeLineText)).toBe(displayWidth(workerTitleLineText));
       expect(codeBodyChunks.every((chunk) => chunk.style.backgroundColor === TUI_THEME_PRESETS.codex.rail)).toBe(true);
-      expect(inputLineText).toContain("^B workers · ^O attach · Esc");
-      expect(inputLineText).not.toMatch(/(?:^| · )\^(?:B|O)(?= ·|$)/);
+      expect(inputLineText).toContain("^B workers · ^O attach · Esc chat");
+      expect(inputLineText).not.toMatch(/(?:^| · )(?:\^(?:B|O)|Esc)(?= ·|$)/);
     } finally {
       child.kill("SIGTERM");
     }
@@ -665,12 +665,13 @@ describe("CLI worker layout smoke", () => {
     try {
       await waitForText(chunks, "ready");
       await waitForScreenText(() => screenWrites, screen, "1 worker · done");
-      await waitForScreenText(() => screenWrites, screen, "> | message · ^W · ^O");
+      await waitForScreenText(() => screenWrites, screen, "> | message · ^W logs · ^O attach");
       child.write("\x17");
-      await waitForScreenText(() => screenWrites, screen, "logs · scroll · Tab · ^O attach · Esc");
+      await waitForScreenText(() => screenWrites, screen, "logs · scroll · Tab · Esc chat");
 
       const snapshot = screen.snapshot();
-      expect(snapshot).toContain("logs · scroll · Tab · ^O attach · Esc");
+      expect(snapshot).toContain("logs · scroll · Tab · Esc chat");
+      expect(snapshot).not.toContain("^O");
       expect(snapshot).not.toContain("logs · wheel/Pg");
       expect(snapshot).toContain("1 worker · done");
       expect(snapshot).not.toContain("w1");
@@ -682,14 +683,80 @@ describe("CLI worker layout smoke", () => {
       expect(snapshot).not.toContain("Type a message");
 
       child.write("\x1b");
-      await waitForScreenText(() => screenWrites, screen, "> | message · ^W · ^O");
+      await waitForScreenText(() => screenWrites, screen, "> | message · ^W logs · ^O attach");
       const chatSnapshot = screen.snapshot();
-      expect(chatSnapshot).toContain("> | message · ^W · ^O");
+      expect(chatSnapshot).toContain("> | message · ^W logs · ^O attach");
       expect(chatSnapshot).not.toContain("...age");
       expect(chatSnapshot).not.toContain("@ critic/mock");
       expect(Math.max(...chatSnapshot.split("\n").map((line) => line.length))).toBeLessThanOrEqual(40);
     } finally {
       child.kill("SIGTERM");
+    }
+  }, 10000);
+
+  it("keeps semantic chat and log actions in an 80-column terminal", async () => {
+    const workspace = await mkdtemp(join(tmpdir(), "pct-cli-worker-semantic-actions-"));
+    const taskId = "task-20260714-000000-semantic-actions";
+    const taskDir = join(workspace, ".parallel-codex", "sessions", taskId);
+    const workerDir = join(taskDir, "critic-mock");
+    const screen = new NativeTerminalScreen({ cols: 80, rows: 18, scrollback: 1000 });
+    const exits: number[] = [];
+    let screenWrites = Promise.resolve();
+
+    await mkdir(workerDir, { recursive: true });
+    await writeTaskFiles({ workspace, taskId, taskDir, workerDir });
+
+    const child = spawn(
+      process.execPath,
+      ["./node_modules/.bin/tsx", "src/cli.tsx", "--app-root", workspace, "--workspace", workspace, "--task", taskId],
+      {
+        cwd: process.cwd(),
+        cols: 80,
+        rows: 18,
+        name: "xterm-256color",
+        env: {
+          ...process.env,
+          TERM: "xterm-256color"
+        }
+      }
+    );
+
+    child.onData((chunk) => {
+      screenWrites = screenWrites.then(() => screen.write(chunk));
+    });
+    child.onExit(({ exitCode }) => exits.push(exitCode));
+
+    try {
+      await waitForScreenText(
+        () => screenWrites,
+        screen,
+        "> | message · ^N new · ^W logs · ^B workers · Tab · ^O attach · ^G routes"
+      );
+      child.write("\x17");
+      await waitForScreenText(
+        () => screenWrites,
+        screen,
+        "logs · scroll · ^F find · E err · D diff · Tab · ^O attach · Esc chat"
+      );
+      const logSnapshot = screen.snapshot();
+      expect(logSnapshot).toContain(
+        "logs · scroll · ^F find · E err · D diff · Tab · ^O attach · Esc chat"
+      );
+      expect(logSnapshot).not.toMatch(/(?:^| · )(?:\^(?:B|O)|Esc)(?= ·|$)/);
+
+      child.write("\x1b");
+      await waitForScreenText(
+        () => screenWrites,
+        screen,
+        "> | message · ^N new · ^W logs · ^B workers · Tab · ^O attach · ^G routes"
+      );
+      child.write("\x03");
+      await waitForExit(exits);
+      expect(exits[0]).toBe(0);
+    } finally {
+      if (exits.length === 0) {
+        child.kill("SIGTERM");
+      }
     }
   }, 10000);
 
@@ -737,9 +804,9 @@ describe("CLI worker layout smoke", () => {
       expect(Math.max(...snapshot.split("\n").map((line) => displayWidth(line)))).toBeLessThanOrEqual(18);
 
       child.write("\x1b");
-      await waitForScreenText(() => screenWrites, screen, "> | msg · ^W");
+      await waitForScreenText(() => screenWrites, screen, "> | ^W logs");
       const chatSnapshot = screen.snapshot();
-      expect(chatSnapshot).toContain("> | msg · ^W");
+      expect(chatSnapshot).toContain("> | ^W logs");
       expect(chatSnapshot).not.toContain("^O");
       expect(Math.max(...chatSnapshot.split("\n").map((line) => displayWidth(line)))).toBeLessThanOrEqual(18);
     } finally {
@@ -1199,6 +1266,16 @@ async function waitForScreenTextGone(
     await new Promise((resolve) => setTimeout(resolve, 50));
   }
   throw new Error(`Timed out waiting to remove screen text ${text}\nSnapshot:\n${screen.snapshot()}`);
+}
+
+async function waitForExit(exits: number[]): Promise<void> {
+  for (let attempt = 0; attempt < 120; attempt += 1) {
+    if (exits.length > 0) {
+      return;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+  throw new Error("Timed out waiting for TUI to exit");
 }
 
 async function openWorkerLogs(
