@@ -16,13 +16,14 @@ describe("InputBar", () => {
       ["retry-task", { canRetry: true, hasActiveTask: true }],
       ["back", { hasWorkers: true, scrollOffset: 3, maxScrollOffset: 20 }],
       ["history", { maxScrollOffset: 20 }],
-      ["result", { hasWorkers: true, hasActiveTask: true, hasTaskResult: true, taskResultExpanded: true }],
+      ["result", { hasWorkers: true, hasActiveTask: true, hasTaskResult: true }],
+      ["result-expanded", { hasWorkers: true, hasActiveTask: true, hasTaskResult: true, taskResultExpanded: true }],
       ["result-scroll", { hasWorkers: true, hasActiveTask: true, hasTaskResult: true, taskResultExpanded: true, scrollOffset: 4, maxScrollOffset: 12 }]
     ] as const;
     const clipped: string[] = [];
 
     for (const [name, options] of states) {
-      for (let width = 8; width <= 80; width += 1) {
+      for (let width = 8; width <= 100; width += 1) {
         const value = chatPlaceholderDisplayValue(width, options);
         if (value.includes("...")) {
           clipped.push(`${name}:${width}:${value}`);
@@ -43,12 +44,15 @@ describe("InputBar", () => {
       ["retry", { canRetry: true }],
       ["retry-task", { canRetry: true, hasActiveTask: true }],
       ["back", { hasWorkers: true, chatScrollOffset: 3, chatMaxScrollOffset: 20 }],
-      ["history", { chatMaxScrollOffset: 20 }]
+      ["history", { chatMaxScrollOffset: 20 }],
+      ["result", { hasWorkers: true, hasActiveTask: true, hasTaskResult: true }],
+      ["result-expanded", { hasWorkers: true, hasActiveTask: true, hasTaskResult: true, taskResultExpanded: true }],
+      ["result-scroll", { hasWorkers: true, hasActiveTask: true, hasTaskResult: true, taskResultExpanded: true, chatScrollOffset: 4, chatMaxScrollOffset: 12 }]
     ] as const;
     const invalid: string[] = [];
 
     for (const [name, props] of states) {
-      for (let width = 8; width <= 80; width += 1) {
+      for (let width = 8; width <= 100; width += 1) {
         const view = render(
           <InputBar mode="chat" value="" terminalWidth={width} onChange={() => {}} {...props} />
         );
@@ -282,14 +286,16 @@ describe("InputBar", () => {
           <InputBar mode="chat" value="" terminalWidth={width} onChange={() => {}} {...props} />
         );
         const frame = view.lastFrame() ?? "";
+        const separatorIndex = frame.indexOf("|");
+        const guidance = (separatorIndex >= 0 ? frame.slice(separatorIndex + 1) : frame).trimStart();
         if (frame.split("\n").length !== 1 || displayWidth(frame) > width) {
           overflow.push(`${stateName}:${width}:${displayWidth(frame)}:${frame}`);
         }
-        if (/(?:^| · )\^(?:W|O|B)(?= ·|$)/.test(frame)) {
+        if (/(?:^| · )\^(?:W|O|B)(?= ·|$)/.test(guidance)) {
           bareActions.push(`${stateName}:${width}:${frame}`);
         }
         for (const [name, pattern] of semantics) {
-          if (pattern.test(frame)) {
+          if (pattern.test(guidance)) {
             seenSemantics.add(name);
           } else if (seenSemantics.has(name)) {
             semanticLoss.push(`${stateName}:${width}:${name}:${frame}`);
@@ -920,14 +926,15 @@ describe("InputBar", () => {
         <InputBar mode="worker" value="" terminalWidth={width} onChange={() => {}} />
       );
       const frame = view.lastFrame() ?? "";
+      const guidance = frame.trimStart();
       if (frame.split("\n").length !== 1 || displayWidth(frame) > width) {
         overflow.push(`${width}:${displayWidth(frame)}:${frame}`);
       }
-      if (/(?:^| · )(?:\^(?:B|O)|Esc)(?= ·|$)/.test(frame)) {
+      if (/(?:^| · )(?:\^(?:B|O)|Esc)(?= ·|$)/.test(guidance)) {
         bareActions.push(`${width}:${frame}`);
       }
       for (const [name, pattern] of semantics) {
-        if (pattern.test(frame)) {
+        if (pattern.test(guidance)) {
           seenSemantics.add(name);
         } else if (seenSemantics.has(name)) {
           semanticLoss.push(`${width}:${name}:${frame}`);

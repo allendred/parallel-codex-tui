@@ -793,13 +793,15 @@ describe("CLI worker layout smoke", () => {
     });
 
     try {
-      await waitForScreenText(() => screenWrites, screen, "^W");
+      await waitForScreenText(() => screenWrites, screen, "^W logs");
       child.write("\x17");
       await waitForScreenText(() => screenWrites, screen, "tests 30/30");
+      await waitForScreenText(() => screenWrites, screen, "logs · Esc chat");
       const snapshot = screen.snapshot();
       expect(snapshot).toContain("tests 30/30");
       expect(snapshot).toContain("smoke");
       expect(snapshot).toContain("build+dev");
+      expect(snapshot).toContain("logs · Esc chat");
       expect(snapshot).not.toContain("Verify:");
       expect(Math.max(...snapshot.split("\n").map((line) => displayWidth(line)))).toBeLessThanOrEqual(18);
 
