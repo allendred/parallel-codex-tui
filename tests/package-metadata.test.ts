@@ -506,7 +506,7 @@ describe("package metadata", () => {
     expect(workflow).toMatch(/- os: ubuntu-latest\s+node-version: "24\.15\.x"/);
     expect(workflow).toMatch(/- os: macos-latest\s+node-version: "24\.15\.x"/);
     expect(workflow).toContain("node-version: ${{ matrix.node-version }}");
-    expect(workflow).toContain('test-args: "--maxWorkers=1"');
+    expect(workflow.match(/test-args: "--maxWorkers=1"/g)).toHaveLength(3);
     expect(workflow).toContain("npm ci");
     expect(workflow).toContain("npm run typecheck");
     expect(workflow).toContain("npm run verify:package");
