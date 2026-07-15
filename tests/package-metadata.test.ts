@@ -475,10 +475,11 @@ describe("package metadata", () => {
     );
     expect(readme).toContain("may require npm two-factor authentication");
     expect(readme).toContain("allowed action `npm publish`");
+    expect(readme).toContain("runs on Node `24.15.x`");
     expect(readme).toContain("npm returns `ENEEDAUTH` or `E401`");
     expect(readme).toContain("fix the npm Trusted Publishing package settings rather than adding a token fallback");
-    expect(readme).toContain("git tag v0.1.4");
-    expect(readme).toContain("git push origin v0.1.4");
+    expect(readme).toContain("git tag v0.1.5");
+    expect(readme).toContain("git push origin v0.1.5");
     expect(readme).toContain("The release tag must match `package.json`");
   });
 
@@ -502,6 +503,8 @@ describe("package metadata", () => {
     expect(workflow).toContain("os: macos-latest");
     expect(workflow).toContain('node-version: "24.15.x"');
     expect(workflow).toContain('node-version: "26.x"');
+    expect(workflow).toMatch(/- os: ubuntu-latest\s+node-version: "24\.15\.x"/);
+    expect(workflow).toMatch(/- os: macos-latest\s+node-version: "24\.15\.x"/);
     expect(workflow).toContain("node-version: ${{ matrix.node-version }}");
     expect(workflow).toContain('test-args: "--maxWorkers=1"');
     expect(workflow).toContain("npm ci");
@@ -526,7 +529,7 @@ describe("package metadata", () => {
     expect(workflow).toContain("id-token: write");
     expect(workflow).toContain("actions/checkout@v6");
     expect(workflow).toContain("actions/setup-node@v6");
-    expect(workflow).toContain('node-version: "26.x"');
+    expect(workflow).toContain('node-version: "24.15.x"');
     expect(workflow).toContain("package-manager-cache: false");
     expect(workflow).toContain("npm install -g npm@^11.5.1");
     expect(workflow).toContain("npm --version");

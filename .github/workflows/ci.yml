@@ -23,12 +23,12 @@ jobs:
           - os: ubuntu-latest
             node-version: "24.15.x"
             test-args: ""
+          - os: macos-latest
+            node-version: "24.15.x"
+            test-args: "--maxWorkers=1"
           - os: ubuntu-latest
             node-version: "26.x"
             test-args: ""
-          - os: macos-latest
-            node-version: "26.x"
-            test-args: "--maxWorkers=1"
 
     steps:
       - name: Checkout

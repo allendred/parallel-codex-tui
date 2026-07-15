@@ -446,16 +446,16 @@ npm trust github parallel-codex-tui --repo allendred/parallel-codex-tui --file r
 
 Creating or listing trusted publishers may require npm two-factor authentication in the browser.
 
-The release job installs npm `^11.5.1`, runs on Node `26.x`, publishes the prepared tarball through OIDC, waits for the package to become visible on npm, installs it globally in a temporary prefix, and checks `parallel-codex-tui --version` before creating the GitHub Release. If npm returns `ENEEDAUTH` or `E401`, fix the npm Trusted Publishing package settings rather than adding a token fallback.
+The release job installs npm `^11.5.1`, runs on Node `24.15.x`, publishes the prepared tarball through OIDC, waits for the package to become visible on npm, installs it globally in a temporary prefix, and checks `parallel-codex-tui --version` before creating the GitHub Release. If npm returns `ENEEDAUTH` or `E401`, fix the npm Trusted Publishing package settings rather than adding a token fallback.
 
 To publish a release, update `package.json` and `src/version.ts` to the same version, then push a matching tag:
 
 ```bash
-git tag v0.1.4
-git push origin v0.1.4
+git tag v0.1.5
+git push origin v0.1.5
 ```
 
-You can also run the Release workflow manually and enter the same tag value. The release tag must match `package.json`; for example, package version `0.1.4` requires tag `v0.1.4`.
+You can also run the Release workflow manually and enter the same tag value. The release tag must match `package.json`; for example, package version `0.1.5` requires tag `v0.1.5`.
 
 ## Publishing Hygiene
 

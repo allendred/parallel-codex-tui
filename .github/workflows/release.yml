@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: "Release version, for example v0.1.4"
+        description: "Release version, for example v0.1.5"
         required: true
         type: string
 
@@ -33,7 +33,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v6
         with:
-          node-version: "26.x"
+          node-version: "24.15.x"
           registry-url: https://registry.npmjs.org
           package-manager-cache: false
 
