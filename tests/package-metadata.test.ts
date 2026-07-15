@@ -470,10 +470,11 @@ describe("package metadata", () => {
     expect(workflow).toContain('node-version: "24.15.x"');
     expect(workflow).toContain('node-version: "26.x"');
     expect(workflow).toContain("node-version: ${{ matrix.node-version }}");
+    expect(workflow).toContain('test-args: "--maxWorkers=1"');
     expect(workflow).toContain("npm ci");
     expect(workflow).toContain("npm run typecheck");
     expect(workflow).toContain("npm run verify:package");
-    expect(workflow).toContain("npm test");
+    expect(workflow).toContain("npm test -- ${{ matrix.test-args }}");
     expect(workflow).toContain('CI: "0"');
     expect(workflow).toContain("git diff --check");
   });
