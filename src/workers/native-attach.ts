@@ -85,10 +85,24 @@ function nativeAttachArgs(input: { args: string[]; engine: EngineName; additiona
   if ((input.engine !== "codex" && input.engine !== "claude") || input.additionalDirs.length === 0) {
     return input.args;
   }
+  const args = input.engine === "codex"
+    ? withCodexWritableSandbox(input.args)
+    : input.args;
   return [
-    ...input.args,
+    ...args,
     ...[...new Set(input.additionalDirs)].flatMap((directory) => ["--add-dir", directory])
   ];
+}
+
+function withCodexWritableSandbox(args: string[]): string[] {
+  const hasExplicitSandbox = args.some((arg) => (
+    arg === "--sandbox"
+    || arg === "-s"
+    || arg.startsWith("--sandbox=")
+    || arg.startsWith("-s=")
+    || arg === "--dangerously-bypass-approvals-and-sandbox"
+  ));
+  return hasExplicitSandbox ? args : [...args, "--sandbox", "workspace-write"];
 }
 
 function isWithin(path: string, root: string): boolean {

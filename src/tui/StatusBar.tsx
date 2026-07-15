@@ -17,7 +17,7 @@ interface Segment {
   hideLabel?: boolean;
 }
 
-export type StatusTone = "idle" | "run" | "done" | "fail" | "wait";
+export type StatusTone = "idle" | "run" | "done" | "fail" | "wait" | "stop";
 type StatusSegmentTheme = Pick<TextProps, "backgroundColor" | "bold" | "color">;
 
 interface ResolvedStatusBar {
@@ -127,6 +127,7 @@ function omitTinyCurrentSegment(segments: Segment[], terminalWidth: number): Seg
       || current.tone === "run"
       || current.tone === "wait"
       || current.tone === "fail"
+      || current.tone === "stop"
     )
   ) {
     return segments;
@@ -493,25 +494,28 @@ function statusSegmentKeepPriority(segment: Segment): number {
   if (segment.tone === "fail" || label === "fail") {
     return 0;
   }
-  if (segment.tone === "run" || label === "run") {
+  if (segment.tone === "stop" || label === "stop") {
     return 1;
   }
-  if (segment.tone === "wait" || label === "wait") {
+  if (segment.tone === "run" || label === "run") {
     return 2;
   }
-  if (label === "workers") {
+  if (segment.tone === "wait" || label === "wait") {
     return 3;
   }
-  if (segment.tone === "done" || label === "done") {
+  if (label === "workers") {
     return 4;
   }
-  if (label === "current") {
+  if (segment.tone === "done" || label === "done") {
     return 5;
   }
-  if (label === "route") {
-    return 7;
+  if (label === "current") {
+    return 6;
   }
-  return 6;
+  if (label === "route") {
+    return 8;
+  }
+  return 7;
 }
 
 function compactSingleStatusSegment(segment: Segment, contentWidth: number, compact: boolean): Segment {
@@ -784,6 +788,9 @@ function compactToneLabel(tone: Exclude<StatusTone, "idle">): string {
   if (tone === "fail") {
     return "f";
   }
+  if (tone === "stop") {
+    return "s";
+  }
   return "w";
 }
 
@@ -883,7 +890,7 @@ function parseWaveProgress(part: string): Segment | null {
 }
 
 function parseStateCounts(part: string): Segment[] {
-  const matches = Array.from(part.matchAll(/\b(run|done|fail|wait|idle)\s+(\d+)\b/gi));
+  const matches = Array.from(part.matchAll(/\b(run|done|fail|wait|stop|idle)\s+(\d+)\b/gi));
   if (matches.length === 0) {
     return [];
   }
@@ -907,7 +914,7 @@ function parseCurrentStatus(part: string): Segment {
     return roleStatus;
   }
 
-  const toneMatch = part.match(/\b(run|done|fail|wait|idle)\b/i);
+  const toneMatch = part.match(/\b(run|done|fail|wait|stop|idle)\b/i);
   const tone = toneMatch ? normalizeTone(toneMatch[1] ?? "idle") : undefined;
   if (workerIdentityStatus(part)) {
     return {
@@ -950,6 +957,9 @@ function runtimeStatusTone(status: string): StatusTone | undefined {
   if (status === "wait" || status === "waiting" || status === "queued" || status === "stopping") {
     return "wait";
   }
+  if (status === "stop" || status === "cancelled" || status === "canceled") {
+    return "stop";
+  }
   if (status === "idle") {
     return "idle";
   }
@@ -957,7 +967,7 @@ function runtimeStatusTone(status: string): StatusTone | undefined {
 }
 
 function parseRoleStatus(part: string): Segment | null {
-  const match = part.match(/^(main|judge|actor|critic)\s+(run|done|fail|wait|idle)\b/i);
+  const match = part.match(/^(main|judge|actor|critic)\s+(run|done|fail|wait|stop|idle)\b/i);
   if (!match) {
     return null;
   }
@@ -971,7 +981,7 @@ function parseRoleStatus(part: string): Segment | null {
 
 function normalizeTone(value: string): StatusTone {
   const normalized = value.toLowerCase();
-  if (normalized === "run" || normalized === "done" || normalized === "fail" || normalized === "wait") {
+  if (normalized === "run" || normalized === "done" || normalized === "fail" || normalized === "wait" || normalized === "stop") {
     return normalized;
   }
   return "idle";
@@ -1005,11 +1015,14 @@ function colorForTone(tone: StatusTone | undefined): TextProps["color"] {
   if (tone === "wait") {
     return TUI_THEME.warning;
   }
+  if (tone === "stop") {
+    return TUI_THEME.warning;
+  }
   return TUI_THEME.muted;
 }
 
 function valueColorForTone(tone: StatusTone | undefined): TextProps["color"] {
-  if (tone === "run" || tone === "done" || tone === "fail" || tone === "wait") {
+  if (tone === "run" || tone === "done" || tone === "fail" || tone === "wait" || tone === "stop") {
     return colorForTone(tone);
   }
   return TUI_THEME.text;

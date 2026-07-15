@@ -32,6 +32,7 @@ describe("StatusBar", () => {
       ["main-unicode-proxy", "main | main/claude waiting output · 12s / 2m first | route simple · via 代理.local:7890 · 12s"],
       ["wave", "wave 2/3 · verification 0/1 | workers 4 | run 1 done 3"],
       ["roles", "judge done | actor run | critic wait"],
+      ["stopped", "workers 4 | stop 3 done 1 | actor/codex stop | route complex · via 127.0.0.1:7890 · 15s"],
       ["provider", "workers 1 | fail 1 | actor/super-long-third-party-provider-name fail"]
     ] as const;
     const invalid: string[] = [];
@@ -168,6 +169,10 @@ describe("StatusBar", () => {
       bold: true
     });
     expect(statusSegmentValueTheme("wait")).toEqual({
+      backgroundColor: TUI_THEME_PRESETS.codex.rail,
+      color: TUI_THEME_PRESETS.codex.warning
+    });
+    expect(statusSegmentValueTheme("stop")).toEqual({
       backgroundColor: TUI_THEME_PRESETS.codex.rail,
       color: TUI_THEME_PRESETS.codex.warning
     });
@@ -634,6 +639,23 @@ describe("StatusBar", () => {
     expect(displayWidth(frame)).toBeLessThanOrEqual(80);
   });
 
+  it("keeps stopped workers in the summary beside the selected worker", () => {
+    const { lastFrame } = render(
+      <StatusBar
+        text="070751-5bb0 | workers 4 | stop 3 done 1 | actor/codex stop | route complex · via 127.0.0.1:7890 · 15s"
+        terminalWidth={188}
+      />
+    );
+
+    const frame = lastFrame() ?? "";
+    expect(frame).toContain("workers 4");
+    expect(frame).toContain("stop 3");
+    expect(frame).toContain("done 1");
+    expect(frame).toContain("actor/codex · stop");
+    expect(frame).toContain("route complex · via 127.0.0.1:7890 · 15s");
+    expect(displayWidth(frame)).toBeLessThanOrEqual(188);
+  });
+
   it("keeps the same readable grammar when the selected worker has a long feature title", () => {
     const state = {
       taskId: "task-20260714-070751-5bb0",
@@ -656,6 +678,9 @@ describe("StatusBar", () => {
     const frame = view.lastFrame() ?? "";
 
     expect(frame).toContain("workers 4");
+    expect(frame).toContain("stop 1");
+    expect(frame).toContain("wait 2");
+    expect(frame).toContain("done 1");
     expect(frame).toContain("route complex");
     expect(frame).toContain("actor/codex · stop");
     expect(frame).not.toContain("wk4");
