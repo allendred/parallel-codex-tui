@@ -73,7 +73,7 @@ jobs:
         run: npm run typecheck
 
       - name: Test
-        run: npm test
+        run: npm test -- --maxWorkers=1
         env:
           CI: "0"
 

@@ -534,6 +534,7 @@ describe("package metadata", () => {
     expect(workflow).toContain("npm install -g npm@^11.5.1");
     expect(workflow).toContain("npm --version");
     expect(workflow).toContain("npm run typecheck");
+    expect(workflow).toContain("npm test -- --maxWorkers=1");
     expect(workflow).toContain('CI: "0"');
     expect(workflow).toContain("npm pack --json");
     expect(workflow).toContain("id: pack");
