@@ -111,6 +111,120 @@ describe("ProcessWorkerAdapter", () => {
     expect(output).not.toContain("dangerously-skip-permissions");
   });
 
+  it("uses a declared generic CLI contract without injecting Codex permission flags", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pct-process-generic-capabilities-"));
+    const filesDir = join(root, "actor-vendor");
+    const promptPath = join(filesDir, "prompt.md");
+    const outputLogPath = join(filesDir, "output.log");
+    const statusPath = join(filesDir, "status.json");
+    const coordinationDir = join(root, "task files");
+    const script = "console.log(process.argv.slice(1).join('|'))";
+    await writeText(promptPath, "generic prompt");
+
+    const adapter = new ProcessWorkerAdapter(process.execPath, [
+      "-e",
+      script,
+      "fresh",
+      "danger-full-access"
+    ], "codex", {
+      capabilities: {
+        profile: "generic",
+        writableDirArgs: ["--allow-root", "{dir}"],
+        freshSessionArgs: []
+      }
+    });
+    const result = await adapter.run({
+      workerId: "actor-vendor",
+      role: "actor",
+      engine: "codex",
+      cwd: root,
+      writableDirs: [coordinationDir],
+      enforceWorkspaceIsolation: true,
+      filesDir,
+      promptPath,
+      outputLogPath,
+      statusPath,
+      prompt: "generic prompt"
+    });
+
+    const output = await readTextIfExists(outputLogPath);
+    expect(result.exitCode).toBe(0);
+    expect(output).toContain(`fresh|danger-full-access|--allow-root|${coordinationDir}`);
+    expect(output).not.toContain("--sandbox");
+    expect(output).not.toContain("--permission-mode");
+  });
+
+  it("reuses a client-assigned session id through a generic CLI contract", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pct-process-generic-session-"));
+    const filesDir = join(root, "actor-vendor");
+    const promptPath = join(filesDir, "prompt.md");
+    const outputLogPath = join(filesDir, "output.log");
+    const statusPath = join(filesDir, "status.json");
+    const script = "console.log(process.argv.slice(1).join('|'))";
+    const detected: string[] = [];
+    await writeText(promptPath, "generic session prompt");
+
+    const adapter = new ProcessWorkerAdapter(process.execPath, ["-e", script, "fresh"], "codex", {
+      capabilities: {
+        profile: "generic",
+        writableDirArgs: [],
+        freshSessionArgs: ["--new-session", "{sessionId}"]
+      }
+    });
+    const nativeSessionConfig = {
+      enabled: true,
+      resumeArgs: ["-e", script, "resume", "{sessionId}"],
+      detectSessionId: true,
+      fallback: "fail" as const
+    };
+    const first = await adapter.run({
+      workerId: "actor-vendor",
+      role: "actor",
+      engine: "codex",
+      cwd: root,
+      filesDir,
+      promptPath,
+      outputLogPath,
+      statusPath,
+      prompt: "generic session prompt",
+      nativeSessionConfig,
+      onNativeSession: (sessionId) => {
+        detected.push(sessionId);
+      }
+    });
+
+    expect(first.exitCode).toBe(0);
+    expect(detected).toHaveLength(1);
+    expect(await readTextIfExists(outputLogPath)).toContain(`fresh|--new-session|${detected[0]}`);
+
+    const second = await adapter.run({
+      workerId: "actor-vendor",
+      role: "actor",
+      engine: "codex",
+      cwd: root,
+      filesDir,
+      promptPath,
+      outputLogPath,
+      statusPath,
+      prompt: "generic follow-up",
+      nativeSessionConfig,
+      nativeSession: {
+        engine: "codex",
+        role: "actor",
+        worker_id: "actor-vendor",
+        session_id: detected[0] ?? "",
+        scope: "task",
+        cwd: root,
+        created_at: "2026-07-15T00:00:00.000Z",
+        last_used_at: "2026-07-15T00:00:00.000Z",
+        source: "output-detected"
+      }
+    });
+
+    expect(second.exitCode).toBe(0);
+    expect(await readTextIfExists(outputLogPath)).toContain(`resume|${detected[0]}`);
+  });
+
   it("passes isolated worker coordination directories to resumed Claude workers", async () => {
     const root = await mkdtemp(join(tmpdir(), "pct-process-claude-add-dir-"));
     const filesDir = join(root, "critic-claude");

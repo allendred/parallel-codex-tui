@@ -73,6 +73,16 @@ describe("config", () => {
     ]);
     expect(config.workers.claude.interactive.args).toEqual(["--resume", "{sessionId}"]);
     expect(config.workers.codex.nativeSession.fallback).toBe("new");
+    expect(config.workers.codex.capabilities).toEqual({
+      profile: "codex",
+      writableDirArgs: ["--add-dir", "{dir}"],
+      freshSessionArgs: []
+    });
+    expect(config.workers.claude.capabilities).toEqual({
+      profile: "claude",
+      writableDirArgs: ["--add-dir", "{dir}"],
+      freshSessionArgs: ["--session-id", "{sessionId}"]
+    });
   });
 
   it("loads TOML overrides", async () => {
@@ -291,6 +301,45 @@ describe("config", () => {
       OPENAI_API_KEY: "{env:OPENAI_API_KEY}"
     });
     expect(config.workers.claude.model.args).toEqual([]);
+  });
+
+  it("loads an explicit third-party CLI capability contract", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pct-config-worker-capabilities-"));
+
+    await writeText(
+      join(root, ".parallel-codex", "config.toml"),
+      [
+        "[workers.codex.capabilities]",
+        'profile = "generic"',
+        'writableDirArgs = ["--allow-root", "{dir}"]',
+        'freshSessionArgs = ["--new-session", "{sessionId}"]'
+      ].join("\n")
+    );
+
+    const config = await loadConfig(root);
+
+    expect(config.workers.codex.capabilities).toEqual({
+      profile: "generic",
+      writableDirArgs: ["--allow-root", "{dir}"],
+      freshSessionArgs: ["--new-session", "{sessionId}"]
+    });
+  });
+
+  it("rejects capability argument lists without their required templates", async () => {
+    const cases = [
+      'writableDirArgs = ["--allow-root", "/tmp/static"]',
+      'freshSessionArgs = ["--new-session", "static-id"]'
+    ];
+
+    for (const entry of cases) {
+      const root = await mkdtemp(join(tmpdir(), "pct-config-worker-capability-template-"));
+      await writeText(
+        join(root, ".parallel-codex", "config.toml"),
+        ["[workers.codex.capabilities]", 'profile = "generic"', entry].join("\n")
+      );
+
+      await expect(loadConfig(root)).rejects.toThrow(/must include/);
+    }
   });
 
   it("loads Codex router command overrides", async () => {

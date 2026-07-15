@@ -54,6 +54,12 @@ firstOutputTimeoutMs = 120000
 # ALL_PROXY = "socks5h://127.0.0.1:7890"
 # NO_PROXY = "localhost,127.0.0.1"
 
+[workers.codex.capabilities]
+# Keep "codex" for Codex-compatible CLIs. Use "generic" for wrappers with their own flags.
+profile = "codex"
+writableDirArgs = ["--add-dir", "{dir}"]
+freshSessionArgs = []
+
 [workers.codex.interactive]
 command = "codex"
 args = ["resume", "{sessionId}"]
@@ -78,6 +84,12 @@ firstOutputTimeoutMs = 120000
 # [workers.claude.model.env]
 # ANTHROPIC_API_KEY = "{env:ANTHROPIC_API_KEY}"
 
+[workers.claude.capabilities]
+# A client-generated id makes the first Claude run reliably resumable.
+profile = "claude"
+writableDirArgs = ["--add-dir", "{dir}"]
+freshSessionArgs = ["--session-id", "{sessionId}"]
+
 [workers.claude.interactive]
 command = "claude"
 args = ["--resume", "{sessionId}"]
@@ -88,6 +100,11 @@ fallback = "new"
 [workers.mock]
 command = "mock"
 args = []
+
+[workers.mock.capabilities]
+profile = "generic"
+writableDirArgs = []
+freshSessionArgs = []
 
 [pairing]
 main = "claude"

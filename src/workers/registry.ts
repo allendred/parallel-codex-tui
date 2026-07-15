@@ -15,7 +15,8 @@ export function createWorkerRegistry(config: AppConfig): WorkerRegistry {
         timeoutMs: config.workers.codex.timeoutMs,
         idleTimeoutMs: config.workers.codex.idleTimeoutMs,
         firstOutputTimeoutMs: config.workers.codex.firstOutputTimeoutMs,
-        model: config.workers.codex.model
+        model: config.workers.codex.model,
+        capabilities: config.workers.codex.capabilities
       })
     ],
     [
@@ -24,7 +25,8 @@ export function createWorkerRegistry(config: AppConfig): WorkerRegistry {
         timeoutMs: config.workers.claude.timeoutMs,
         idleTimeoutMs: config.workers.claude.idleTimeoutMs,
         firstOutputTimeoutMs: config.workers.claude.firstOutputTimeoutMs,
-        model: config.workers.claude.model
+        model: config.workers.claude.model,
+        capabilities: config.workers.claude.capabilities
       })
     ]
   ]);

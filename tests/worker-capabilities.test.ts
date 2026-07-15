@@ -106,6 +106,48 @@ describe("diagnoseAgentCapabilities", () => {
     );
   });
 
+  it("trusts an explicit generic CLI contract without probing vendor-specific help", async () => {
+    const config = defaultConfig("/tmp/project");
+    config.workers.codex.command = "vendor-coder";
+    config.workers.codex.interactive.command = "vendor-coder";
+    config.workers.codex.capabilities = {
+      profile: "generic",
+      writableDirArgs: ["--allow-root", "{dir}"],
+      freshSessionArgs: ["--new-session", "{sessionId}"]
+    };
+    const runner = vi.fn<CapabilityCommandRunner>();
+
+    const result = await diagnoseAgentCapabilities(config, {}, {
+      includeRouter: false,
+      workerEngines: ["codex"],
+      availableCommands: new Set(["vendor-coder"]),
+      runner
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.lines).toContain(
+      "codex capabilities (vendor-coder): declared (generic CLI, writable dirs via template, client-assigned fresh session, native resume configured)"
+    );
+    expect(runner).not.toHaveBeenCalled();
+  });
+
+  it("rejects a generic native resume contract that drops the session id", async () => {
+    const config = defaultConfig("/tmp/project");
+    config.workers.codex.capabilities.profile = "generic";
+    config.workers.codex.nativeSession.resumeArgs = ["resume"];
+
+    const result = await diagnoseAgentCapabilities(config, {}, {
+      includeRouter: false,
+      workerEngines: ["codex"],
+      availableCommands: new Set(["codex"])
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.lines).toContain(
+      "codex capabilities: incompatible (nativeSession.resumeArgs missing {sessionId})"
+    );
+  });
+
   it("rejects an explicit read-only Codex native sandbox before attach", async () => {
     const config = defaultConfig("/tmp/project");
     config.workers.codex.interactive.args = ["resume", "{sessionId}", "--sandbox", "read-only"];

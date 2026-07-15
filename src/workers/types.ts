@@ -14,6 +14,14 @@ export interface WorkerModelRunConfig {
   env?: Record<string, string>;
 }
 
+export type WorkerCliProfile = "codex" | "claude" | "generic";
+
+export interface WorkerCapabilityRunConfig {
+  profile: WorkerCliProfile;
+  writableDirArgs: string[];
+  freshSessionArgs: string[];
+}
+
 export interface WorkerRunSpec {
   workerId: string;
   featureId?: string;

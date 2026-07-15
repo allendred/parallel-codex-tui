@@ -25,6 +25,27 @@ const WorkerModelConfigSchema = z.object({
   env: z.record(z.string()).default({})
 });
 
+const WorkerCapabilitiesConfigSchema = z.object({
+  profile: z.enum(["codex", "claude", "generic"]),
+  writableDirArgs: z.array(z.string()).default([]),
+  freshSessionArgs: z.array(z.string()).default([])
+}).strict().superRefine((value, context) => {
+  if (value.writableDirArgs.length > 0 && !value.writableDirArgs.some((arg) => arg.includes("{dir}"))) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["writableDirArgs"],
+      message: "writableDirArgs must include a {dir} template"
+    });
+  }
+  if (value.freshSessionArgs.length > 0 && !value.freshSessionArgs.some((arg) => arg.includes("{sessionId}"))) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["freshSessionArgs"],
+      message: "freshSessionArgs must include a {sessionId} template"
+    });
+  }
+});
+
 const InteractiveCommandSchema = z.object({
   command: z.string().min(1),
   args: z.array(z.string()).default([])
@@ -95,6 +116,7 @@ const WorkerCommandSchema = z.object({
   idleTimeoutMs: z.number().int().positive().optional(),
   firstOutputTimeoutMs: z.number().int().positive().optional(),
   model: WorkerModelConfigSchema.default({}),
+  capabilities: WorkerCapabilitiesConfigSchema,
   nativeSession: NativeSessionConfigSchema,
   interactive: InteractiveCommandSchema
 });
@@ -177,6 +199,11 @@ export function defaultConfig(projectRoot: string): AppConfig {
           args: [],
           env: {}
         },
+        capabilities: {
+          profile: "codex",
+          writableDirArgs: ["--add-dir", "{dir}"],
+          freshSessionArgs: []
+        },
         nativeSession: {
           enabled: true,
           resumeArgs: ["exec", "resume", "{sessionId}", "--skip-git-repo-check", "-"],
@@ -200,6 +227,11 @@ export function defaultConfig(projectRoot: string): AppConfig {
           args: [],
           env: {}
         },
+        capabilities: {
+          profile: "claude",
+          writableDirArgs: ["--add-dir", "{dir}"],
+          freshSessionArgs: ["--session-id", "{sessionId}"]
+        },
         nativeSession: {
           enabled: true,
           resumeArgs: ["--print", "--resume", "{sessionId}", "--permission-mode", "acceptEdits", "--output-format", "text"],
@@ -219,6 +251,11 @@ export function defaultConfig(projectRoot: string): AppConfig {
           provider: "",
           args: [],
           env: {}
+        },
+        capabilities: {
+          profile: "generic",
+          writableDirArgs: [],
+          freshSessionArgs: []
         },
         nativeSession: {
           enabled: true,
@@ -311,6 +348,10 @@ export async function loadConfig(projectRoot: string): Promise<AppConfig> {
             ...(parsed.workers?.codex?.model?.env ?? {})
           }
         },
+        capabilities: {
+          ...base.workers.codex.capabilities,
+          ...(parsed.workers?.codex?.capabilities ?? {})
+        },
         nativeSession: {
           ...base.workers.codex.nativeSession,
           ...(parsed.workers?.codex?.nativeSession ?? {})
@@ -331,6 +372,10 @@ export async function loadConfig(projectRoot: string): Promise<AppConfig> {
             ...(parsed.workers?.claude?.model?.env ?? {})
           }
         },
+        capabilities: {
+          ...base.workers.claude.capabilities,
+          ...(parsed.workers?.claude?.capabilities ?? {})
+        },
         nativeSession: {
           ...base.workers.claude.nativeSession,
           ...(parsed.workers?.claude?.nativeSession ?? {})
@@ -350,6 +395,10 @@ export async function loadConfig(projectRoot: string): Promise<AppConfig> {
             ...base.workers.mock.model.env,
             ...(parsed.workers?.mock?.model?.env ?? {})
           }
+        },
+        capabilities: {
+          ...base.workers.mock.capabilities,
+          ...(parsed.workers?.mock?.capabilities ?? {})
         },
         nativeSession: {
           ...base.workers.mock.nativeSession,
@@ -420,16 +469,19 @@ function assertObjectSections(parsed: Partial<AppConfig>): void {
     ["workers.codex", parsed.workers?.codex],
     ["workers.codex.model", parsed.workers?.codex?.model],
     ["workers.codex.model.env", parsed.workers?.codex?.model?.env],
+    ["workers.codex.capabilities", parsed.workers?.codex?.capabilities],
     ["workers.codex.nativeSession", parsed.workers?.codex?.nativeSession],
     ["workers.codex.interactive", parsed.workers?.codex?.interactive],
     ["workers.claude", parsed.workers?.claude],
     ["workers.claude.model", parsed.workers?.claude?.model],
     ["workers.claude.model.env", parsed.workers?.claude?.model?.env],
+    ["workers.claude.capabilities", parsed.workers?.claude?.capabilities],
     ["workers.claude.nativeSession", parsed.workers?.claude?.nativeSession],
     ["workers.claude.interactive", parsed.workers?.claude?.interactive],
     ["workers.mock", parsed.workers?.mock],
     ["workers.mock.model", parsed.workers?.mock?.model],
     ["workers.mock.model.env", parsed.workers?.mock?.model?.env],
+    ["workers.mock.capabilities", parsed.workers?.mock?.capabilities],
     ["workers.mock.nativeSession", parsed.workers?.mock?.nativeSession],
     ["workers.mock.interactive", parsed.workers?.mock?.interactive],
     ["pairing", parsed.pairing],

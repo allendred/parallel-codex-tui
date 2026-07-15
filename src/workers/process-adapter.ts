@@ -6,13 +6,20 @@ import { clearWorkerProcessRecord, writeWorkerProcessRecord } from "../core/proc
 import { terminateProcessTree } from "../core/process-tree.js";
 import type { EngineName, WorkerStatus } from "../domain/schemas.js";
 import { detectNativeSessionId } from "./native-session-detection.js";
-import type { WorkerAdapter, WorkerModelRunConfig, WorkerResult, WorkerRunSpec } from "./types.js";
+import type {
+  WorkerAdapter,
+  WorkerCapabilityRunConfig,
+  WorkerModelRunConfig,
+  WorkerResult,
+  WorkerRunSpec
+} from "./types.js";
 
 export interface ProcessWorkerDefaults {
   timeoutMs?: number;
   idleTimeoutMs?: number;
   firstOutputTimeoutMs?: number;
   model?: WorkerModelRunConfig;
+  capabilities?: WorkerCapabilityRunConfig;
 }
 
 interface ProcessLaunch {
@@ -53,12 +60,13 @@ export class ProcessWorkerAdapter implements WorkerAdapter {
 
   async run(spec: WorkerRunSpec): Promise<WorkerResult> {
     const model = spec.modelConfig ?? this.defaults.model;
+    const capabilities = resolveWorkerCapabilities(this.name, this.defaults.capabilities);
     const launch = buildLaunch(
       this.args,
-      this.name,
       spec.nativeSession,
       spec.nativeSessionConfig,
       model,
+      capabilities,
       spec.writableDirs,
       spec.enforceWorkspaceIsolation
     );
@@ -89,8 +97,8 @@ export class ProcessWorkerAdapter implements WorkerAdapter {
 
     const freshLaunch = buildFreshLaunch(
       this.args,
-      this.name,
       model,
+      capabilities,
       runSpec.writableDirs,
       runSpec.enforceWorkspaceIsolation,
       runSpec.nativeSessionConfig
@@ -612,10 +620,10 @@ export class ProcessWorkerAdapter implements WorkerAdapter {
 
 function buildLaunch(
   defaultArgs: string[],
-  engine: EngineName,
   nativeSession: WorkerRunSpec["nativeSession"],
   nativeSessionConfig: WorkerRunSpec["nativeSessionConfig"],
-  modelConfig?: WorkerModelRunConfig,
+  modelConfig: WorkerModelRunConfig | undefined,
+  capabilities: WorkerCapabilityRunConfig,
   writableDirs?: string[],
   enforceWorkspaceIsolation = false
 ): ProcessLaunch {
@@ -623,8 +631,8 @@ function buildLaunch(
   if (!nativeSession || !nativeSessionConfig?.enabled || nativeSessionConfig.resumeArgs.length === 0) {
     return buildFreshLaunch(
       defaultArgs,
-      engine,
       modelConfig,
+      capabilities,
       writableDirs,
       enforceWorkspaceIsolation,
       nativeSessionConfig
@@ -636,8 +644,8 @@ function buildLaunch(
       enforceWorkerIsolationArgs([
         ...nativeSessionConfig.resumeArgs.map((arg) => renderTemplate(arg, nativeSession.session_id, modelConfig)),
         ...modelArgs
-      ], engine, enforceWorkspaceIsolation),
-      engine,
+      ], capabilities.profile, enforceWorkspaceIsolation),
+      capabilities,
       true,
       writableDirs
     ),
@@ -648,41 +656,42 @@ function buildLaunch(
 
 function buildFreshLaunch(
   defaultArgs: string[],
-  engine: EngineName,
-  modelConfig?: WorkerModelRunConfig,
+  modelConfig: WorkerModelRunConfig | undefined,
+  capabilities: WorkerCapabilityRunConfig,
   writableDirs?: string[],
   enforceWorkspaceIsolation = false,
   nativeSessionConfig?: WorkerRunSpec["nativeSessionConfig"]
 ): ProcessLaunch {
   const isolatedArgs = enforceWorkerIsolationArgs(
     [...defaultArgs, ...buildModelArgs(modelConfig)],
-    engine,
+    capabilities.profile,
     enforceWorkspaceIsolation
   );
-  const claudeSession = engine === "claude"
-    ? withFreshClaudeSessionId(isolatedArgs, nativeSessionConfig)
-    : { args: isolatedArgs, sessionId: undefined };
+  const freshSession = withFreshSessionId(isolatedArgs, capabilities, nativeSessionConfig, modelConfig);
   return {
     args: withWritableDirectoryArgs(
-      claudeSession.args,
-      engine,
+      freshSession.args,
+      capabilities,
       false,
       writableDirs
     ),
     isResume: false,
     nativeSession: null,
-    ...(claudeSession.sessionId ? { initialNativeSessionId: claudeSession.sessionId } : {})
+    ...(freshSession.sessionId ? { initialNativeSessionId: freshSession.sessionId } : {})
   };
 }
 
-function withFreshClaudeSessionId(
+function withFreshSessionId(
   args: string[],
-  nativeSessionConfig: WorkerRunSpec["nativeSessionConfig"]
+  capabilities: WorkerCapabilityRunConfig,
+  nativeSessionConfig: WorkerRunSpec["nativeSessionConfig"],
+  modelConfig?: WorkerModelRunConfig
 ): { args: string[]; sessionId?: string } {
   if (
     !nativeSessionConfig?.enabled
     || nativeSessionConfig.detectSessionId === false
     || nativeSessionConfig.resumeArgs.length === 0
+    || capabilities.freshSessionArgs.length === 0
   ) {
     return { args };
   }
@@ -699,19 +708,26 @@ function withFreshClaudeSessionId(
   }
   const sessionId = randomUUID();
   return {
-    args: [...args, "--session-id", sessionId],
+    args: [
+      ...args,
+      ...capabilities.freshSessionArgs.map((arg) => renderTemplate(arg, sessionId, modelConfig))
+    ],
     sessionId
   };
 }
 
-function enforceWorkerIsolationArgs(args: string[], engine: EngineName, enforce: boolean): string[] {
+function enforceWorkerIsolationArgs(
+  args: string[],
+  profile: WorkerCapabilityRunConfig["profile"],
+  enforce: boolean
+): string[] {
   if (!enforce) {
     return args;
   }
-  if (engine === "codex") {
+  if (profile === "codex") {
     return enforceCodexWorkspaceSandbox(args);
   }
-  if (engine === "claude") {
+  if (profile === "claude") {
     return enforceClaudeEditPermissions(args);
   }
   return args;
@@ -777,17 +793,19 @@ function enforceClaudeEditPermissions(args: string[]): string[] {
 
 function withWritableDirectoryArgs(
   args: string[],
-  engine: EngineName,
+  capabilities: WorkerCapabilityRunConfig,
   isResume: boolean,
   writableDirs: string[] | undefined
 ): string[] {
   const directories = [...new Set((writableDirs ?? []).filter(Boolean))];
-  if (directories.length === 0 || engine === "mock") {
+  if (directories.length === 0 || capabilities.writableDirArgs.length === 0) {
     return args;
   }
 
-  const directoryArgs = directories.flatMap((directory) => ["--add-dir", directory]);
-  if (engine === "claude") {
+  const directoryArgs = directories.flatMap((directory) => (
+    capabilities.writableDirArgs.map((arg) => arg.replaceAll("{dir}", directory))
+  ));
+  if (capabilities.profile !== "codex") {
     return [...args, ...directoryArgs];
   }
 
@@ -813,6 +831,34 @@ function withWritableDirectoryArgs(
     ...directoryArgs,
     ...args.slice(promptIndex)
   ];
+}
+
+function resolveWorkerCapabilities(
+  engine: EngineName,
+  configured: WorkerCapabilityRunConfig | undefined
+): WorkerCapabilityRunConfig {
+  if (configured) {
+    return configured;
+  }
+  if (engine === "codex") {
+    return {
+      profile: "codex",
+      writableDirArgs: ["--add-dir", "{dir}"],
+      freshSessionArgs: []
+    };
+  }
+  if (engine === "claude") {
+    return {
+      profile: "claude",
+      writableDirArgs: ["--add-dir", "{dir}"],
+      freshSessionArgs: ["--session-id", "{sessionId}"]
+    };
+  }
+  return {
+    profile: "generic",
+    writableDirArgs: [],
+    freshSessionArgs: []
+  };
 }
 
 function buildModelArgs(modelConfig: WorkerModelRunConfig | undefined): string[] {

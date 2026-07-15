@@ -110,6 +110,45 @@ describe("CLI doctor", () => {
     expect(result.stdout).toContain("native resume sandbox/add-dir missing --add-dir");
   });
 
+  it("accepts an explicit generic third-party worker contract without guessing its help format", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pct-cli-doctor-generic-worker-"));
+    const binDir = join(root, "bin");
+    const appRoot = join(root, "app");
+    const configDir = join(appRoot, ".parallel-codex");
+
+    await mkdir(binDir, { recursive: true });
+    await mkdir(configDir, { recursive: true });
+    await writeExecutable(join(binDir, "vendor-coder"), "#!/bin/sh\nprintf 'vendor coder 1.0\\n'\n");
+    await writeFile(join(configDir, "config.toml"), [
+      "[router]",
+      'defaultMode = "complex"',
+      "",
+      "[workers.codex]",
+      'command = "vendor-coder"',
+      "",
+      "[workers.codex.capabilities]",
+      'profile = "generic"',
+      'writableDirArgs = ["--allow-root", "{dir}"]',
+      'freshSessionArgs = ["--new-session", "{sessionId}"]',
+      "",
+      "[workers.codex.interactive]",
+      'command = "vendor-coder"',
+      'args = ["resume", "{sessionId}"]'
+    ].join("\n"));
+
+    const result = await runCli(["--app-root", appRoot, "--doctor"], {
+      env: { PATH: `${binDir}${delimiter}${process.env.PATH ?? ""}` }
+    });
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stderr).toBe("");
+    expect(result.stdout).toContain("vendor-coder: ok");
+    expect(result.stdout).toContain(
+      "codex capabilities (vendor-coder): declared (generic CLI, writable dirs via template, client-assigned fresh session, native resume configured)"
+    );
+    expect(result.stdout).not.toContain("compatibility unverified");
+  });
+
   it("runs explicit fresh and resume probes through configured Codex and Claude commands", async () => {
     const root = await mkdtemp(join(tmpdir(), "pct-cli-doctor-agent-probes-"));
     const binDir = join(root, "bin");

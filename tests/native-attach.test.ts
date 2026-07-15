@@ -189,6 +189,56 @@ describe("buildNativeAttachLaunch", () => {
     ]);
   });
 
+  it("uses generic writable-directory templates without adding a Codex sandbox", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pct-native-attach-generic-"));
+    const taskDir = join(root, ".parallel-codex", "sessions", "task-a");
+    const workerDir = join(taskDir, "actor-codex-0001-ui");
+    const featureWorkspace = join(taskDir, "workspaces", "turn-0001", "wave-0001", "features", "0001-ui");
+    await writeText(join(featureWorkspace, "src", "ui.ts"), "export {};\n");
+    await writeJson(join(workerDir, "native-session.json"), {
+      engine: "codex",
+      role: "actor",
+      worker_id: "actor-codex-0001-ui",
+      session_id: "native-vendor",
+      scope: "task",
+      cwd: featureWorkspace,
+      writable_dirs: [workerDir],
+      created_at: "2026-07-15T00:00:00.000Z",
+      last_used_at: "2026-07-15T00:00:00.000Z",
+      source: "manual"
+    });
+    const config = defaultConfig(root);
+    config.workers.codex.interactive.command = "vendor-coder";
+    config.workers.codex.interactive.args = ["continue", "{sessionId}"];
+    config.workers.codex.capabilities = {
+      profile: "generic",
+      writableDirArgs: ["--allow-root", "{dir}"],
+      freshSessionArgs: []
+    };
+
+    const launch = await buildNativeAttachLaunch({
+      config,
+      worker: {
+        id: "actor-codex-0001-ui",
+        featureId: "0001-ui",
+        role: "actor",
+        engine: "codex",
+        label: "Actor (vendor)",
+        logPath: join(workerDir, "output.log"),
+        statusPath: join(workerDir, "status.json")
+      }
+    });
+
+    expect(launch.command).toBe("vendor-coder");
+    expect(launch.args).toEqual([
+      "continue",
+      "native-vendor",
+      "--allow-root",
+      workerDir
+    ]);
+    expect(launch.args).not.toContain("--sandbox");
+  });
+
   it("preserves an explicitly configured Codex sandbox when adding task directories", async () => {
     const root = await mkdtemp(join(tmpdir(), "pct-native-attach-explicit-sandbox-"));
     const taskDir = join(root, ".parallel-codex", "sessions", "task-a");

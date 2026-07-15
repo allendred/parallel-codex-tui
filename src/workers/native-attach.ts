@@ -9,7 +9,7 @@ import { pathExists, pathIsDirectory, readJson, readTextIfExists, removeIfExists
 import { NativeSessionSchema, TaskMetaSchema, type EngineName, type NativeSession } from "../domain/schemas.js";
 import type { WorkerLogRef } from "../orchestrator/orchestrator.js";
 import { detectResumeSessionId } from "./native-session-detection.js";
-import type { WorkerModelRunConfig } from "./types.js";
+import type { WorkerCapabilityRunConfig, WorkerModelRunConfig } from "./types.js";
 
 const require = createRequire(import.meta.url);
 
@@ -71,7 +71,7 @@ export async function buildNativeAttachLaunch(input: NativeAttachLaunchInput): P
         ...workerConfig.interactive.args,
         ...modelConfig.args
       ].map((arg) => renderTemplate(arg, nativeSession.session_id, modelConfig)),
-      engine: input.worker.engine,
+      capabilities: workerConfig.capabilities,
       additionalDirs
     }),
     ...(Object.keys(env).length > 0 ? { env } : {}),
@@ -81,16 +81,22 @@ export async function buildNativeAttachLaunch(input: NativeAttachLaunchInput): P
   };
 }
 
-function nativeAttachArgs(input: { args: string[]; engine: EngineName; additionalDirs: string[] }): string[] {
-  if ((input.engine !== "codex" && input.engine !== "claude") || input.additionalDirs.length === 0) {
+function nativeAttachArgs(input: {
+  args: string[];
+  capabilities: WorkerCapabilityRunConfig;
+  additionalDirs: string[];
+}): string[] {
+  if (input.additionalDirs.length === 0 || input.capabilities.writableDirArgs.length === 0) {
     return input.args;
   }
-  const args = input.engine === "codex"
+  const args = input.capabilities.profile === "codex"
     ? withCodexWritableSandbox(input.args)
     : input.args;
   return [
     ...args,
-    ...[...new Set(input.additionalDirs)].flatMap((directory) => ["--add-dir", directory])
+    ...[...new Set(input.additionalDirs)].flatMap((directory) => (
+      input.capabilities.writableDirArgs.map((arg) => arg.replaceAll("{dir}", directory))
+    ))
   ];
 }
 

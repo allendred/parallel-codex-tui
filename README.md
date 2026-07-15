@@ -293,6 +293,11 @@ args = ["--model", "{model}"]
 [workers.codex.model.env]
 OPENAI_API_KEY = "{env:OPENAI_API_KEY}"
 
+[workers.codex.capabilities]
+profile = "codex"
+writableDirArgs = ["--add-dir", "{dir}"]
+freshSessionArgs = []
+
 [workers.codex.interactive]
 command = "codex"
 args = ["resume", "{sessionId}"]
@@ -301,12 +306,39 @@ args = ["resume", "{sessionId}"]
 command = "claude"
 args = ["--print", "--permission-mode", "acceptEdits", "--output-format", "text"]
 
+[workers.claude.capabilities]
+profile = "claude"
+writableDirArgs = ["--add-dir", "{dir}"]
+freshSessionArgs = ["--session-id", "{sessionId}"]
+
 [workers.claude.interactive]
 command = "claude"
 args = ["--resume", "{sessionId}"]
 ```
 
 `model.args` and `model.env` apply to both automated worker runs and embedded native attach sessions. Native attach appends the rendered model arguments after `interactive.args`, so third-party `{model}` and `{provider}` selections remain active when you press `Ctrl+O`.
+
+`model.provider` names the remote model service; `capabilities.profile` describes the local CLI protocol. Keep the built-in `codex` or `claude` profile when a wrapper accepts that CLI's normal flags. For a third-party command with its own syntax, declare `generic` so parallel-codex-tui does not inject `--sandbox`, `--permission-mode`, or other built-in-only flags:
+
+```toml
+[workers.codex]
+command = "vendor-coder"
+args = ["run", "--stdin"]
+
+[workers.codex.capabilities]
+profile = "generic"
+writableDirArgs = ["--allow-root", "{dir}"]
+freshSessionArgs = ["--new-session", "{sessionId}"]
+
+[workers.codex.nativeSession]
+resumeArgs = ["run", "--resume", "{sessionId}", "--stdin"]
+
+[workers.codex.interactive]
+command = "vendor-coder"
+args = ["resume", "{sessionId}"]
+```
+
+Set either capability argument list to `[]` when the wrapper needs no extra argument. A non-empty `writableDirArgs` must include `{dir}`, and a non-empty `freshSessionArgs` must include `{sessionId}`. Doctor validates this declared contract without guessing the wrapper's `--help` format; `--doctor --probe-agents` remains the end-to-end fresh/resume check.
 
 Customize each role independently; the main role is applied to simple chat, while Judge, Actor, and Critic receive their configured instructions during complex work:
 
