@@ -7,6 +7,7 @@ Built with Codex-assisted development.
 ## Requirements
 
 - Node.js 24.15+.
+- macOS or Linux. Windows is not yet covered by CI; use WSL for the supported Linux path.
 - Codex CLI available as `codex` for Codex routing and Codex workers.
 - Claude CLI available as `claude` only when you configure Claude workers.
 - A project workspace you are comfortable letting configured workers edit.
@@ -67,7 +68,7 @@ parallel-codex-tui --doctor --probe-router
 parallel-codex-tui --version
 ```
 
-`--doctor` checks configured automated and interactive commands, `{env:NAME}` references, and the CLI help surfaces required for Codex exec/resume sandboxing and Claude print/resume permissions before workers start. Recognized standard CLI help that lacks a required option fails the check; an opaque third-party wrapper is reported as unverified without being rejected. Doctor also rejects an explicitly read-only Codex interactive sandbox because feature attach requires its recorded `--add-dir` roots, and reminds you that native workspace trust remains an interactive decision. It reports proxy host/port reachability as a local-endpoint check, not as proof that the proxy upstream or model API is healthy. Add `--probe-agents` to make one minimal fresh request and one same-session resume request through every configured Codex or Claude worker engine. This explicit probe uses model quota, removes successful probe artifacts, preserves failed artifacts under `.parallel-codex/probes/`, and exits non-zero when a fresh or resumed request cannot be proven. Fresh Claude runs receive a generated native `--session-id`; it is persisted only after the process emits output, so a silent failed launch cannot create a false resumable session. Add `--probe-router` to run one real classification through the configured Codex Router; the command exits non-zero when that live request falls back or fails. Doctor also reports the loaded TUI theme, core palette values, ANSI swatch previews, and color override values, including any temporary `--theme` override.
+`--doctor` checks configured automated and interactive commands, `{env:NAME}` references, and the CLI help surfaces required for Codex exec/resume sandboxing and Claude print/resume permissions before workers start. Recognized standard CLI help that lacks a required option fails the check; an opaque wrapper keeps the compatible built-in profile's unverified warning, while an explicit `generic` capability contract is validated without guessing vendor-specific help. Doctor also rejects an explicitly read-only Codex interactive sandbox because feature attach requires its recorded writable roots, and reminds you that native workspace trust remains an interactive decision. It reports proxy host/port reachability as a local-endpoint check, not as proof that the proxy upstream or model API is healthy. Add `--probe-agents` to make one minimal fresh request and one same-session resume request through every configured Codex or Claude worker engine. This explicit probe uses model quota, removes successful probe artifacts, preserves failed artifacts under `.parallel-codex/probes/`, and exits non-zero when a fresh or resumed request cannot be proven. Fresh sessions use the configured `freshSessionArgs`; Claude defaults to a generated native `--session-id`, persisted only after the process emits output, so a silent failed launch cannot create a false resumable session. Add `--probe-router` to run one real classification through the configured Codex Router; the command exits non-zero when that live request falls back or fails. Doctor also reports the loaded TUI theme, core palette values, ANSI swatch previews, and color override values, including any temporary `--theme` override.
 
 ## Quick Start
 
@@ -374,7 +375,7 @@ If a native resume fails because the underlying CLI reports that its context win
 
 ## Release
 
-GitHub Actions runs CI on Node.js 24.15 and 26 for pushes and pull requests to `main`.
+GitHub Actions runs CI on Ubuntu with Node.js 24.15 and 26, plus macOS with Node.js 26, for pushes and pull requests to `main`. Every job also packs the release artifact, installs that tarball into a clean global prefix, and executes the installed `--version` and `--help` entrypoints.
 
 Releases publish to npm through npm Trusted Publishing with GitHub OIDC. Do not configure `NPM_TOKEN` for the release workflow. In npm, configure Trusted Publishing for organization/user `allendred`, repository `parallel-codex-tui`, workflow filename `release.yml`, and allowed action `npm publish`. The package already exists on npm, so future releases can use Trusted Publishing directly. You can also configure the trust relationship from an authenticated npm CLI session:
 

@@ -93,6 +93,7 @@ describe("package metadata", () => {
     ]);
     expect(pkg.dependencies?.chalk).toBe("^5.3.0");
     expect(pkg.scripts?.prepack).toBe("npm run build");
+    expect(pkg.scripts?.["verify:package"]).toBe("node scripts/verify-package.mjs");
     expect(pkg.scripts?.prepare).toBeUndefined();
   });
 
@@ -208,12 +209,12 @@ describe("package metadata", () => {
     expect(readme).toContain("Bracketed multiline paste stays in one draft");
     expect(readme).toContain('`--doctor` checks configured automated and interactive commands, `{env:NAME}` references');
     expect(readme).toContain("CLI help surfaces required for Codex exec/resume sandboxing and Claude print/resume permissions");
-    expect(readme).toContain("an opaque third-party wrapper is reported as unverified without being rejected");
+    expect(readme).toContain("an explicit `generic` capability contract is validated without guessing vendor-specific help");
     expect(readme).toContain("parallel-codex-tui --doctor --probe-agents");
     expect(readme).toContain("one minimal fresh request and one same-session resume request");
     expect(readme).toContain("This explicit probe uses model quota");
     expect(readme).toContain("preserves failed artifacts under `.parallel-codex/probes/`");
-    expect(readme).toContain("Fresh Claude runs receive a generated native `--session-id`");
+    expect(readme).toContain("Claude defaults to a generated native `--session-id`");
     expect(readme).toContain("a silent failed launch cannot create a false resumable session");
     expect(readme).toContain("proxy host/port reachability as a local-endpoint check");
     expect(readme).toContain("parallel-codex-tui --doctor --probe-router");
@@ -425,7 +426,8 @@ describe("package metadata", () => {
     expect(readme).toContain(".parallel-codex/workspaces.json");
     expect(readme).toContain(".parallel-codex/sessions/");
     expect(readme).toContain("## Release");
-    expect(readme).toContain("GitHub Actions runs CI on Node.js 24.15 and 26 for pushes and pull requests to `main`");
+    expect(readme).toContain("GitHub Actions runs CI on Ubuntu with Node.js 24.15 and 26, plus macOS with Node.js 26");
+    expect(readme).toContain("installs that tarball into a clean global prefix");
     expect(readme).toContain("npm Trusted Publishing with GitHub OIDC");
     expect(readme).toContain("In npm, configure Trusted Publishing");
     expect(readme).toContain('workflow filename `release.yml`');
@@ -462,11 +464,15 @@ describe("package metadata", () => {
     expect(workflow).toContain("pull_request:");
     expect(workflow).toContain("actions/checkout@v6");
     expect(workflow).toContain("actions/setup-node@v6");
-    expect(workflow).toContain('node-version: ["24.15.x", "26.x"]');
+    expect(workflow).toContain("runs-on: ${{ matrix.os }}");
+    expect(workflow).toContain("os: ubuntu-latest");
+    expect(workflow).toContain("os: macos-latest");
+    expect(workflow).toContain('node-version: "24.15.x"');
+    expect(workflow).toContain('node-version: "26.x"');
     expect(workflow).toContain("node-version: ${{ matrix.node-version }}");
     expect(workflow).toContain("npm ci");
     expect(workflow).toContain("npm run typecheck");
-    expect(workflow).toContain("npm pack --dry-run --json");
+    expect(workflow).toContain("npm run verify:package");
     expect(workflow).toContain("npm test");
     expect(workflow).toContain('CI: "0"');
     expect(workflow).toContain("git diff --check");

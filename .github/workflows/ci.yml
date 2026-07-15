@@ -13,12 +13,19 @@ permissions:
 
 jobs:
   test:
-    name: Test (Node ${{ matrix.node-version }})
-    runs-on: ubuntu-latest
+    name: Test (${{ matrix.os }}, Node ${{ matrix.node-version }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
-        node-version: ["24.15.x", "26.x"]
+        include:
+          - os: ubuntu-latest
+            node-version: "24.15.x"
+          - os: ubuntu-latest
+            node-version: "26.x"
+          - os: macos-latest
+            node-version: "26.x"
 
     steps:
       - name: Checkout
@@ -37,7 +44,7 @@ jobs:
         run: npm run typecheck
 
       - name: Check package contents
-        run: npm pack --dry-run --json
+        run: npm run verify:package
 
       - name: Test
         run: npm test
