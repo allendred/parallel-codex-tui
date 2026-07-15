@@ -13,8 +13,10 @@ export interface InputBarProps {
   collaborationBack?: "workers" | "features";
   featureCanCancel?: boolean;
   featureCanPause?: boolean;
+  featureCanReassign?: boolean;
   featureCancelConfirm?: boolean;
   featurePauseConfirm?: boolean;
+  featureAssignment?: boolean;
   taskSessionAction?: TaskSessionInputAction | null;
   taskSessionsIncludeArchived?: boolean;
   canRetry?: boolean;
@@ -48,8 +50,10 @@ export function InputBar({
   collaborationBack = "workers",
   featureCanCancel = false,
   featureCanPause = false,
+  featureCanReassign = false,
   featureCancelConfirm = false,
   featurePauseConfirm = false,
+  featureAssignment = false,
   taskSessionAction = null,
   taskSessionsIncludeArchived = false,
   canRetry = false,
@@ -138,8 +142,10 @@ export function InputBar({
     const hints = featureBoardInputHints(terminalWidth, {
       canCancel: featureCanCancel,
       canPause: featureCanPause,
+      canReassign: featureCanReassign,
       confirmCancel: featureCancelConfirm,
       confirmPause: featurePauseConfirm,
+      assignment: featureAssignment,
       canRetry
     });
     return (
@@ -691,11 +697,23 @@ function featureBoardInputHints(
   options: {
     canCancel: boolean;
     canPause: boolean;
+    canReassign: boolean;
     confirmCancel: boolean;
     confirmPause: boolean;
+    assignment: boolean;
     canRetry: boolean;
   }
 ): { label: string; detail: string } {
+  if (options.assignment) {
+    return selectInputHints(width, [
+      { label: "assign model", detail: " · A Actor · C Critic · M/Esc done" },
+      { label: "assign", detail: " · A Actor · C Critic · Esc done" },
+      { label: "assign", detail: " · A actor · C critic" },
+      { label: "model", detail: " · A · C · Esc" },
+      { label: "model", detail: "" },
+      { label: "M", detail: "" }
+    ]);
+  }
   if (options.confirmPause) {
     return selectInputHints(width, [
       { label: "pause feature?", detail: " · P confirm · Esc keep" },
@@ -738,10 +756,9 @@ function featureBoardInputHints(
   }
   if (options.canRetry) {
     return selectInputHints(width, [
-      { label: "features", detail: " · Up/Dn select · Enter timeline · ^R retry task · R refresh · Esc workers" },
-      { label: "features", detail: " · Up/Dn select · ^R retry task · R refresh · Esc workers" },
-      { label: "features", detail: " · Up/Dn select · ^R retry · R refresh · Esc workers" },
-      { label: "features", detail: " · Up/Dn select · ^R retry · Esc workers" },
+      { label: "features", detail: ` · Up/Dn select · Enter timeline · ${options.canReassign ? "M model · " : ""}^R retry task · R refresh · Esc workers` },
+      { label: "features", detail: ` · Up/Dn select · ${options.canReassign ? "M model · " : ""}^R retry task · R refresh · Esc workers` },
+      { label: "features", detail: ` · Up/Dn select · ${options.canReassign ? "M model · " : ""}^R retry · Esc workers` },
       { label: "features", detail: " · ^R retry · Esc workers" },
       { label: "features", detail: " · Esc workers" },
       { label: "features", detail: "" },

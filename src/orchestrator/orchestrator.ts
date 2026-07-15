@@ -16,7 +16,7 @@ import {
   type RouterExecutionProgress
 } from "../core/router.js";
 import type { SessionManager, TaskSession, TaskTurn, WorkerFiles } from "../core/session-manager.js";
-import { FeatureStatusSchema, RouteDecisionSchema, TaskMetaSchema, WorkerStatusSchema, type EngineName, type NativeSession, type RouteDecision, type RouterFallbackResolution, type WorkerRole, type WorkerStatus } from "../domain/schemas.js";
+import { FeatureStatusSchema, RouteDecisionSchema, TaskMetaSchema, WorkerStatusSchema, type EngineName, type FeatureAssignment, type NativeSession, type RouteDecision, type RouterFallbackResolution, type WorkerRole, type WorkerStatus } from "../domain/schemas.js";
 import { getAdapter, type WorkerRegistry } from "../workers/registry.js";
 import type { WorkerResult, WorkerRunSpec } from "../workers/types.js";
 import {
@@ -24,11 +24,13 @@ import {
   createFeatureChannel,
   featureCriticCheckpointIsReusable,
   featurePromptContext,
+  readFeatureAssignment,
   recordApprovedFindingResolution,
   requireActorFindingReplies,
   requireFeatureRevisionFindings,
   type FeatureChannel,
   updateFeatureStatus,
+  writeFeatureAssignment,
   writeFeatureDecision
 } from "./collaboration-channel.js";
 import {
@@ -91,6 +93,18 @@ export interface RetryTaskInput extends Omit<HandleRequestInput, "request"> {
 
 export interface ResumeFeatureInput extends RetryTaskInput {
   featureId: string;
+}
+
+export interface ReassignFeatureInput {
+  taskId: string;
+  featureId: string;
+  role: "actor" | "critic";
+  engine: EngineName;
+}
+
+export interface ReassignFeatureResult {
+  featureId: string;
+  assignment: FeatureAssignment;
 }
 
 export interface TaskFollowUpRouteResult {
@@ -319,6 +333,68 @@ export class Orchestrator {
 
   async resumeFeature(input: ResumeFeatureInput): Promise<HandleRequestResult> {
     return this.resumeTaskRun(input, input.featureId);
+  }
+
+  async reassignFeature(input: ReassignFeatureInput): Promise<ReassignFeatureResult> {
+    if (!featureIdIsSafe(input.featureId)) {
+      throw new Error(`Unsafe feature id: ${input.featureId}`);
+    }
+    const task = this.sessions.taskFromId(input.taskId);
+    if (!(await readTaskMetaIfValid(task.metaPath))) {
+      throw new Error(`Task session not found: ${input.taskId}`);
+    }
+    if (this.activeFeatureRuns.has(featureRunKey(input.taskId, input.featureId))) {
+      throw new Error(`Feature ${input.featureId} still has an active worker.`);
+    }
+    return this.withTaskRunLease(task, async () => {
+      const meta = await readTaskMetaIfValid(task.metaPath);
+      if (!meta) {
+        throw new Error(`Task session not found: ${input.taskId}`);
+      }
+      if (!new Set(["failed", "cancelled", "paused"]).has(meta.status)) {
+        throw new Error(
+          `Task ${input.taskId} is ${meta.status}; reassign a feature only while its task is failed, cancelled, or paused.`
+        );
+      }
+      if (this.activeFeatureRuns.has(featureRunKey(input.taskId, input.featureId))) {
+        throw new Error(`Feature ${input.featureId} still has an active worker.`);
+      }
+      const featureDir = join(task.dir, "features", input.featureId);
+      const status = await readJson(join(featureDir, "status.json"), FeatureStatusSchema);
+      if (status.task_id !== task.id || status.feature_id !== input.featureId) {
+        throw new Error(`Feature ${input.featureId} does not belong to task ${task.id}.`);
+      }
+      if (status.state === "approved") {
+        throw new Error(`Feature ${input.featureId} is already approved and cannot be reassigned.`);
+      }
+      const route = await this.sessions.readLatestRoute(task);
+      const fallback = {
+        actor: route?.actor_engine ?? this.config.pairing.actor,
+        critic: route?.critic_engine ?? this.config.pairing.critic
+      };
+      const assignmentPath = join(featureDir, "assignment.json");
+      const current = await readFeatureAssignment({ assignmentPath }, fallback);
+      const assignment = await writeFeatureAssignment(
+        { assignmentPath },
+        input.role === "actor" ? input.engine : current.actor_engine,
+        input.role === "critic" ? input.engine : current.critic_engine
+      );
+      await appendJsonLine(join(task.dir, "dialogue", "actor-critic.jsonl"), {
+        time: new Date().toISOString(),
+        feature_id: input.featureId,
+        turn_id: status.turn_id,
+        type: "feature.assignment_changed",
+        role: input.role,
+        message: `${capitalize(input.role)} reassigned to ${input.engine}.`,
+        paths: { assignment: assignmentPath }
+      });
+      await this.sessions.appendEvent(
+        task,
+        "feature.assignment_changed",
+        `${input.featureId} ${input.role} reassigned to ${input.engine}`
+      );
+      return { featureId: input.featureId, assignment };
+    });
   }
 
   private async resumeTaskRun(input: RetryTaskInput, pausedFeatureId?: string): Promise<HandleRequestResult> {
@@ -624,6 +700,8 @@ export class Orchestrator {
           request: input.request,
           judgeDir: judge.dir,
           feature,
+          actorEngine: route.actor_engine,
+          criticEngine: route.critic_engine,
           resume: input.retry
         })));
         return await this.runFeaturePlan(input, task, route, turn, workers, judge, featurePlan, features);
@@ -634,6 +712,8 @@ export class Orchestrator {
         turn,
         request: input.request,
         judgeDir: judge.dir,
+        actorEngine: route.actor_engine,
+        criticEngine: route.critic_engine,
         resume: input.retry
       });
       features = [feature];
@@ -673,6 +753,8 @@ export class Orchestrator {
           request: input.request,
           judgeDir: judge.dir,
           feature,
+          actorEngine: route.actor_engine,
+          criticEngine: route.critic_engine,
           resume: input.retry
         })));
         return await this.runFeaturePlan(input, task, route, turn, workers, judge, featurePlan, features);
@@ -683,6 +765,8 @@ export class Orchestrator {
         turn,
         request: input.request,
         judgeDir: judge.dir,
+        actorEngine: route.actor_engine,
+        criticEngine: route.critic_engine,
         resume: input.retry
       });
       features = [feature];
@@ -778,6 +862,13 @@ export class Orchestrator {
     features: FeatureChannel[]
   ): Promise<HandleRequestResult> {
     const channels = new Map(plan.features.map((definition, index) => [definition.id, features[index]]));
+    const assignments = new Map(await Promise.all(features.map(async (feature) => [
+      feature.id,
+      await readFeatureAssignment(feature, {
+        actor: route.actor_engine,
+        critic: route.critic_engine
+      })
+    ] as const)));
     const summaries: FeatureSummary[] = [];
     const waveReviews: WaveSummary[] = [];
     const changedPaths = new Set<string>();
@@ -848,7 +939,7 @@ export class Orchestrator {
       if (restoredWave) {
         const restoredActors = await Promise.all(wave.map((definition) => this.loadCompletedFeatureActor(
           task,
-          route.actor_engine,
+          requiredFeatureAssignment(assignments, requiredChannel(channels, definition)).actor_engine,
           definition,
           requiredChannel(channels, definition)
         )));
@@ -878,7 +969,7 @@ export class Orchestrator {
         const actor = await this.runActor(
           input,
           task,
-          route.actor_engine,
+          requiredFeatureAssignment(assignments, channel).actor_engine,
           judge.dir,
           workers,
           turn,
@@ -908,7 +999,7 @@ export class Orchestrator {
       if (restoredWave) {
         const restoredPairs = await Promise.all(actorRuns.map((actorRun) => this.loadCompletedFeaturePair(
           task,
-          route.critic_engine,
+          requiredFeatureAssignment(assignments, actorRun.channel).critic_engine,
           actorRun
         )));
         for (const pairRun of restoredPairs) {
@@ -938,7 +1029,7 @@ export class Orchestrator {
         const critic = await this.runCritic(
           input,
           task,
-          route.critic_engine,
+          requiredFeatureAssignment(assignments, actorRun.channel).critic_engine,
           judge.dir,
           actorRun.actor.dir,
           workers,
@@ -1018,7 +1109,7 @@ export class Orchestrator {
           const actor = await this.runActor(
             input,
             task,
-            route.actor_engine,
+            requiredFeatureAssignment(assignments, pair.channel).actor_engine,
             judge.dir,
             workers,
             turn,
@@ -1053,7 +1144,7 @@ export class Orchestrator {
           const critic = await this.runCritic(
             input,
             task,
-            route.critic_engine,
+            requiredFeatureAssignment(assignments, pair.channel).critic_engine,
             judge.dir,
             pair.actor.dir,
             workers,
@@ -1260,6 +1351,10 @@ export class Orchestrator {
     judge: WorkerFiles,
     feature: FeatureChannel
   ): Promise<HandleRequestResult> {
+    const assignment = await readFeatureAssignment(feature, {
+      actor: route.actor_engine,
+      critic: route.critic_engine
+    });
     const workspaceManager = new ParallelWorkspaceManager({
       workspaceRoot: input.cwd,
       taskDir: task.dir,
@@ -1295,8 +1390,8 @@ export class Orchestrator {
         task,
         turn,
         judge,
-        this.workerFiles(task, taskWorkerId("actor", route.actor_engine, turn.turnId)),
-        this.workerFiles(task, taskWorkerId("critic", route.critic_engine, turn.turnId)),
+        this.workerFiles(task, taskWorkerId("actor", assignment.actor_engine, turn.turnId)),
+        this.workerFiles(task, taskWorkerId("critic", assignment.critic_engine, turn.turnId)),
         feature,
         input,
         workers,
@@ -1318,7 +1413,7 @@ export class Orchestrator {
     throwIfCancelled(input.signal);
     await this.sessions.updateTaskStatus(task, "actor_running");
     const restoredActor = restoredWave
-      ? await this.loadCompletedActor(task, route.actor_engine, feature, false)
+      ? await this.loadCompletedActor(task, assignment.actor_engine, feature, false)
       : null;
     if (restoredActor) {
       await this.sessions.appendEvent(
@@ -1338,7 +1433,7 @@ export class Orchestrator {
       actor = await this.runActor(
         input,
         task,
-        route.actor_engine,
+        assignment.actor_engine,
         judge.dir,
         workers,
         turn,
@@ -1354,7 +1449,7 @@ export class Orchestrator {
 
     await this.sessions.updateTaskStatus(task, "critic_running");
     const restoredCritic = restoredActor
-      ? await this.loadCompletedCritic(task, route.critic_engine, feature, false)
+      ? await this.loadCompletedCritic(task, assignment.critic_engine, feature, false)
       : null;
     if (restoredCritic) {
       await this.sessions.appendEvent(
@@ -1376,7 +1471,7 @@ export class Orchestrator {
       critic = await this.runCritic(
         input,
         task,
-        route.critic_engine,
+        assignment.critic_engine,
         judge.dir,
         actor.dir,
         workers,
@@ -1428,7 +1523,7 @@ export class Orchestrator {
       actor = await this.runActor(
         input,
         task,
-        route.actor_engine,
+        assignment.actor_engine,
         judge.dir,
         workers,
         turn,
@@ -1452,7 +1547,7 @@ export class Orchestrator {
       critic = await this.runCritic(
         input,
         task,
-        route.critic_engine,
+        assignment.critic_engine,
         judge.dir,
         actor.dir,
         workers,
@@ -3033,8 +3128,23 @@ function requiredChannel(
   return channel;
 }
 
+function requiredFeatureAssignment(
+  assignments: ReadonlyMap<string, FeatureAssignment>,
+  channel: FeatureChannel
+): FeatureAssignment {
+  const assignment = assignments.get(channel.id);
+  if (!assignment) {
+    throw new Error(`Feature engine assignment missing: ${channel.id}`);
+  }
+  return assignment;
+}
+
 function featureRunKey(taskId: string, featureId: string): string {
   return `${taskId}\u0000${featureId}`;
+}
+
+function featureIdIsSafe(featureId: string): boolean {
+  return /^[a-z0-9][a-z0-9-]{0,95}$/.test(featureId);
 }
 
 function requiredFeatureWorkspace(

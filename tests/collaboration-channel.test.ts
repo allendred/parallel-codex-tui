@@ -13,6 +13,58 @@ import {
 } from "../src/orchestrator/collaboration-channel.js";
 
 describe("feature collaboration mailbox", () => {
+  it("persists the initial role engines and preserves a reassigned engine on resume", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pct-collaboration-channel-assignment-"));
+    const taskDir = join(root, "task-test");
+    const turnDir = join(taskDir, "turns", "0001");
+    const input = {
+      task: {
+        id: "task-test",
+        dir: taskDir,
+        metaPath: join(taskDir, "meta.json"),
+        routePath: join(taskDir, "route.json"),
+        eventsPath: join(taskDir, "events.jsonl")
+      },
+      turn: {
+        turnId: "0001",
+        dir: turnDir,
+        metaPath: join(turnDir, "turn.json"),
+        userPath: join(turnDir, "user.md"),
+        routePath: join(turnDir, "route.json")
+      },
+      request: "Persist engine assignment",
+      judgeDir: join(taskDir, "judge-codex"),
+      actorEngine: "codex" as const,
+      criticEngine: "claude" as const
+    };
+
+    const channel = await createFeatureChannel(input);
+    expect(JSON.parse(await readTextIfExists(channel.assignmentPath))).toMatchObject({
+      version: 1,
+      actor_engine: "codex",
+      critic_engine: "claude"
+    });
+
+    await writeText(channel.assignmentPath, `${JSON.stringify({
+      version: 1,
+      actor_engine: "claude",
+      critic_engine: "claude",
+      updated_at: "2026-07-15T00:00:00.000Z"
+    })}\n`);
+    await createFeatureChannel({
+      ...input,
+      actorEngine: "codex",
+      criticEngine: "codex",
+      resume: true
+    });
+
+    expect(JSON.parse(await readTextIfExists(channel.assignmentPath))).toMatchObject({
+      actor_engine: "claude",
+      critic_engine: "claude",
+      updated_at: "2026-07-15T00:00:00.000Z"
+    });
+  });
+
   it("repairs a missing resumed status without clearing collaboration evidence", async () => {
     const root = await mkdtemp(join(tmpdir(), "pct-collaboration-channel-resume-"));
     const taskDir = join(root, "task-test");
@@ -182,6 +234,7 @@ async function featureChannel(suffix: string): Promise<FeatureChannel> {
     actorRepliesPath: join(dir, "actor-replies.jsonl"),
     criticFindingsPath: join(dir, "critic-findings.jsonl"),
     findingResolutionPath: join(dir, "finding-resolution.json"),
-    decisionsPath: join(dir, "decisions.md")
+    decisionsPath: join(dir, "decisions.md"),
+    assignmentPath: join(dir, "assignment.json")
   };
 }

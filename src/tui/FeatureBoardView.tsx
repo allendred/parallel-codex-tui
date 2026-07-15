@@ -218,12 +218,18 @@ function featureBoardEvidenceText(
   const dependencyText = dependencies.length > 0
     ? `deps ${dependencies.map((item) => safeFeatureBoardText(item.title)).join(", ")}`
     : "independent";
+  const assignmentText = feature.actorEngine && feature.criticEngine
+    ? `actor ${feature.actorEngine} · critic ${feature.criticEngine}`
+    : "";
   const evidence = feature.latestFinding
     ? `finding · ${safeFeatureBoardText(feature.latestFinding)}`
     : feature.latestReply
       ? `reply · ${safeFeatureBoardText(feature.latestReply)}`
       : safeFeatureBoardText(feature.description);
-  return fitFeatureBoardText(`    ${[dependencyText, evidence].filter(Boolean).join(" · ")}`, width);
+  return fitFeatureBoardText(
+    `    ${[assignmentText, dependencyText, evidence].filter(Boolean).join(" · ")}`,
+    width
+  );
 }
 
 function featureBoardDependencies(

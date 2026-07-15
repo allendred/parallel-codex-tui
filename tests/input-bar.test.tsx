@@ -879,6 +879,52 @@ describe("InputBar", () => {
     confirm.unmount();
   });
 
+  it("shows Feature model reassignment controls without wrapping", () => {
+    const retry = render(
+      <InputBar
+        mode="features"
+        value=""
+        terminalWidth={100}
+        canRetry
+        featureCanReassign
+        onChange={() => {}}
+      />
+    );
+    expect(retry.lastFrame()).toContain("M model");
+    expect(retry.lastFrame()).toContain("^R retry task");
+    retry.unmount();
+
+    const assignment = render(
+      <InputBar
+        mode="features"
+        value=""
+        terminalWidth={100}
+        featureAssignment
+        onChange={() => {}}
+      />
+    );
+    expect(assignment.lastFrame()).toContain("assign model · A Actor · C Critic · M/Esc done");
+    assignment.unmount();
+
+    const overflow: string[] = [];
+    for (const props of [
+      { canRetry: true, featureCanReassign: true },
+      { featureAssignment: true }
+    ]) {
+      for (let width = 8; width <= 100; width += 1) {
+        const view = render(
+          <InputBar mode="features" value="" terminalWidth={width} onChange={() => {}} {...props} />
+        );
+        const frame = view.lastFrame() ?? "";
+        if (frame.split("\n").length !== 1 || displayWidth(frame) > width) {
+          overflow.push(`${JSON.stringify(props)}:${width}:${displayWidth(frame)}:${frame}`);
+        }
+        view.unmount();
+      }
+    }
+    expect(overflow).toEqual([]);
+  });
+
   it("shows collaboration timeline filtering and refresh guidance", () => {
     const collaborationMode = "collaboration" as Parameters<typeof InputBar>[0]["mode"];
     const roomy = render(

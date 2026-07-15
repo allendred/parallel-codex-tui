@@ -7,7 +7,7 @@ import { appendJsonLine, appendText, pathExists, readJson, readTextIfExists, wri
 import { SessionIndex } from "../src/core/session-index.js";
 import { SessionManager, type TaskSession } from "../src/core/session-manager.js";
 import { claimTaskRunLease, taskRunOwnerPath } from "../src/core/process-ownership.js";
-import { NativeSessionSchema, RouteDecisionSchema, TaskMetaSchema, WorkerStatusSchema, type RouteDecision, type TaskState } from "../src/domain/schemas.js";
+import { NativeSessionSchema, RouteDecisionSchema, TaskMetaSchema, WorkerStatusSchema, type EngineName, type RouteDecision, type TaskState } from "../src/domain/schemas.js";
 import { Orchestrator, type FeatureRunProgress } from "../src/orchestrator/orchestrator.js";
 import { MockWorkerAdapter } from "../src/workers/mock-adapter.js";
 import { ProcessWorkerAdapter } from "../src/workers/process-adapter.js";
@@ -3052,6 +3052,117 @@ describe("Orchestrator", () => {
     expect((await readJson(join(taskDir, "meta.json"), TaskMetaSchema)).status).toBe("done");
   });
 
+  it("reassigns one failed Feature role to another engine without losing prior workers", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pct-orch-reassign-feature-"));
+    const config = mockConfig(root);
+    const manager = new SessionManager({
+      projectRoot: root,
+      dataDir: config.dataDir,
+      now: () => new Date("2026-06-30T03:31:13.000Z"),
+      randomId: () => "reassign"
+    });
+    const adapter = new ReassignedCriticAdapter();
+    const registry = new Map<EngineName, WorkerAdapter>([
+      ["mock", adapter],
+      ["claude", adapter]
+    ]);
+    const orchestrator = new Orchestrator(config, manager, registry);
+    const taskId = "task-20260630-033113-reassign";
+    const featureId = "0001-build-reassignment-feature";
+
+    await expect(orchestrator.handleRequest({
+      request: "build reassignment feature",
+      cwd: root
+    })).rejects.toThrow("critic-mock failed with exit code 2");
+
+    const reassigned = await orchestrator.reassignFeature({
+      taskId,
+      featureId,
+      role: "critic",
+      engine: "claude"
+    });
+    expect(reassigned.assignment).toMatchObject({
+      actor_engine: "mock",
+      critic_engine: "claude"
+    });
+
+    const result = await orchestrator.retryTask({ taskId, cwd: root });
+    const taskDir = join(root, ".parallel-codex", "sessions", taskId);
+    expect(result.mode).toBe("complex");
+    expect(adapter.actorRuns).toBe(1);
+    expect(adapter.criticEngines).toEqual(["mock", "claude"]);
+    expect(await readTextIfExists(join(root, "reassigned.txt"))).toBe("actor checkpoint\n");
+    expect(JSON.parse(await readTextIfExists(join(taskDir, "features", featureId, "assignment.json")))).toMatchObject({
+      actor_engine: "mock",
+      critic_engine: "claude"
+    });
+    expect((await orchestrator.listTaskWorkers(taskId)).map((worker) => worker.id)).toEqual(expect.arrayContaining([
+      "actor-mock",
+      "critic-mock",
+      "critic-claude",
+      "judge-mock-final-0001"
+    ]));
+    const events = await readTextIfExists(join(taskDir, "events.jsonl"));
+    expect(events).toContain("feature.assignment_changed");
+    await expect(orchestrator.reassignFeature({
+      taskId,
+      featureId,
+      role: "actor",
+      engine: "claude"
+    })).rejects.toThrow("only while its task is failed, cancelled, or paused");
+  });
+
+  it("rejects Feature reassignment while another TUI owns the task lease", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pct-orch-reassign-owned-"));
+    const config = mockConfig(root);
+    const manager = new SessionManager({
+      projectRoot: root,
+      dataDir: config.dataDir,
+      now: () => new Date("2026-06-30T03:31:14.000Z"),
+      randomId: () => "reassign-owned"
+    });
+    const task = await manager.createTask({
+      request: "reassign a failed feature",
+      cwd: root,
+      route: {
+        mode: "complex",
+        reason: "Project work.",
+        suggested_roles: ["judge", "actor", "critic"],
+        judge_engine: "mock",
+        actor_engine: "mock",
+        critic_engine: "mock"
+      }
+    });
+    const featureId = "0001-owned-feature";
+    const featureDir = join(task.dir, "features", featureId);
+    await mkdir(featureDir, { recursive: true });
+    await writeJson(join(featureDir, "status.json"), {
+      feature_id: featureId,
+      task_id: task.id,
+      turn_id: "0001",
+      title: "Owned feature",
+      description: "Must not change while another process owns the task",
+      depends_on: [],
+      state: "failed",
+      updated_at: "2026-06-30T03:31:14.000Z"
+    });
+    await manager.updateTaskStatus(task, "failed");
+    const lease = await claimTaskRunLease(task.dir, { ownerId: "other-reassign-tui" });
+    const orchestrator = new Orchestrator(config, manager, new Map([["mock", new MockWorkerAdapter()]]));
+
+    try {
+      await expect(orchestrator.reassignFeature({
+        taskId: task.id,
+        featureId,
+        role: "critic",
+        engine: "claude"
+      })).rejects.toThrow("Task is already running in another parallel-codex-tui process");
+      expect(await pathExists(join(featureDir, "assignment.json"))).toBe(false);
+    } finally {
+      await lease.release();
+    }
+  });
+
   it("retries a failed feature worker with the persisted plan and native session", async () => {
     const root = await mkdtemp(join(tmpdir(), "pct-orch-retry-feature-"));
     const config = mockConfig(root);
@@ -3802,6 +3913,38 @@ class RetryOnceCriticAdapter extends MockWorkerAdapter {
       last_event_at: new Date().toISOString(),
       summary: "Critic failed once",
       native_session_id: "retry-critic-session"
+    });
+    return { workerId: spec.workerId, exitCode: 2, signal: null };
+  }
+}
+
+class ReassignedCriticAdapter extends MockWorkerAdapter {
+  actorRuns = 0;
+  readonly criticEngines: EngineName[] = [];
+
+  override async run(spec: WorkerRunSpec): Promise<WorkerResult> {
+    if (spec.role === "actor") {
+      this.actorRuns += 1;
+      await writeText(join(spec.cwd, "reassigned.txt"), "actor checkpoint\n");
+      return super.run(spec);
+    }
+    if (spec.role !== "critic") {
+      return super.run(spec);
+    }
+
+    this.criticEngines.push(spec.engine);
+    if (spec.engine !== "mock") {
+      return super.run(spec);
+    }
+    await appendText(spec.outputLogPath, "ORIGINAL_CRITIC_FAILURE\n");
+    await writeJson(spec.statusPath, {
+      worker_id: spec.workerId,
+      role: spec.role,
+      engine: spec.engine,
+      state: "failed",
+      phase: "test-engine-reassignment",
+      last_event_at: new Date().toISOString(),
+      summary: "Original Critic engine failed"
     });
     return { workerId: spec.workerId, exitCode: 2, signal: null };
   }

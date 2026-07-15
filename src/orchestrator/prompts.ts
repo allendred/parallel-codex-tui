@@ -75,6 +75,7 @@ export interface PromptFeatureContext {
   actorRepliesPath: string;
   criticFindingsPath: string;
   decisionsPath: string;
+  assignmentPath: string;
 }
 
 export function buildMainPrompt(input: MainPromptInput): string {
@@ -358,7 +359,8 @@ function featureLines(feature: PromptFeatureContext | undefined): string[] {
     `Actor feature worklog: ${feature.actorWorklogPath}`,
     `Critic findings: ${feature.criticFindingsPath}`,
     `Actor replies: ${feature.actorRepliesPath}`,
-    `Feature decisions: ${feature.decisionsPath}`
+    `Feature decisions: ${feature.decisionsPath}`,
+    `Feature engine assignment: ${feature.assignmentPath}`
   ];
 }
 

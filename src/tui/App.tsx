@@ -9,7 +9,7 @@ import type { RouterAuditRecord } from "../core/router-audit.js";
 import type { RouterExecutionProgress } from "../core/router.js";
 import type { TaskIndexSummary } from "../core/session-index.js";
 import type { WorkspaceChoice } from "../core/workspace.js";
-import { WorkerStatusSchema, type RouteDecision, type WorkerStatus } from "../domain/schemas.js";
+import { WorkerStatusSchema, type EngineName, type RouteDecision, type WorkerStatus } from "../domain/schemas.js";
 import type {
   Orchestrator,
   RouteFallbackChoice,
@@ -168,6 +168,11 @@ interface FeatureCancelPrompt {
   featureId: string;
   title: string;
 }
+interface FeatureAssignmentPrompt {
+  taskId: string;
+  featureId: string;
+  title: string;
+}
 type TaskSessionAction =
   | { type: "rename"; taskId: string; title: string; value: string; cursor: number }
   | { type: "delete"; taskId: string; title: string };
@@ -266,6 +271,7 @@ export function App({
   const [collaborationTimeline, setCollaborationTimeline] = useState<CollaborationTimeline | null>(null);
   const [featureBoardSelectedIndex, setFeatureBoardSelectedIndex] = useState(0);
   const [featureCancelPrompt, setFeatureCancelPrompt] = useState<FeatureCancelPrompt | null>(null);
+  const [featureAssignmentPrompt, setFeatureAssignmentPrompt] = useState<FeatureAssignmentPrompt | null>(null);
   const [featureBoardNotice, setFeatureBoardNotice] = useState<string | null>(null);
   const [collaborationLoading, setCollaborationLoading] = useState(false);
   const [collaborationError, setCollaborationError] = useState<string | null>(null);
@@ -296,6 +302,7 @@ export function App({
   const inputCursorRef = useRef(inputCursor);
   const viewRef = useRef(view);
   const busyRef = useRef(busy);
+  const canRetryTaskRef = useRef(initialCanRetryTask);
   const routeFallbackPromptRef = useRef<RouteFallbackInfo | null>(null);
   const routeFallbackResolverRef = useRef<((choice: RouteFallbackChoice) => void) | null>(null);
   const workersRef = useRef(workers);
@@ -315,6 +322,7 @@ export function App({
   const collaborationTimelineRef = useRef<CollaborationTimeline | null>(null);
   const featureBoardSelectedIndexRef = useRef(0);
   const featureCancelPromptRef = useRef<FeatureCancelPrompt | null>(null);
+  const featureAssignmentPromptRef = useRef<FeatureAssignmentPrompt | null>(null);
   const collaborationFeatureIndexRef = useRef(-1);
   const collaborationSelectedEventIdRef = useRef<string | null>(null);
   const collaborationDetailOpenRef = useRef(false);
@@ -332,6 +340,10 @@ export function App({
   const openTaskSessionsRef = useRef<() => Promise<void>>(openTaskSessions);
   const openFeatureBoardRef = useRef<() => Promise<void>>(openFeatureBoard);
   const confirmFeatureCancellationRef = useRef<(prompt: FeatureCancelPrompt) => Promise<void>>(confirmFeatureCancellation);
+  const reassignSelectedFeatureRef = useRef<(
+    prompt: FeatureAssignmentPrompt,
+    role: "actor" | "critic"
+  ) => Promise<void>>(reassignSelectedFeature);
   const openCollaborationTimelineRef = useRef<(featureIndex?: number) => Promise<void>>(openCollaborationTimeline);
   const refreshCollaborationTimelineRef = useRef<(showLoading?: boolean) => Promise<void>>(refreshCollaborationTimeline);
   const activateSelectedTaskSessionRef = useRef<() => Promise<void>>(activateSelectedTaskSession);
@@ -381,6 +393,7 @@ export function App({
     selectedBoardFeature?.state === "actor_running"
     || selectedBoardFeature?.state === "critic_running"
   );
+  const featureCanReassign = !busy && canRetryTask && selectedBoardFeature?.state !== "approved";
   const visibleStatus = statusLineWithWorkerRefs(status, workers);
   const selectedWorkerStatus = formatSelectedWorkerStatus(visibleStatus, selectedWorkerIndex);
   const visibleWorkerStatus = view === "chat" || view === "router" || view === "sessions" || view === "features" || view === "collaboration"
@@ -438,6 +451,10 @@ export function App({
   useEffect(() => {
     busyRef.current = busy;
   }, [busy]);
+
+  useEffect(() => {
+    canRetryTaskRef.current = canRetryTask;
+  }, [canRetryTask]);
 
   useEffect(() => {
     taskResultExpandedRef.current = taskResultExpanded;
@@ -885,6 +902,7 @@ export function App({
       featureBoardSelectedIndexRef.current = nextIndex;
       setCollaborationError(null);
       updateFeatureCancelPrompt(null);
+      updateFeatureAssignmentPrompt(null);
       setFeatureBoardNotice(null);
       setFeatureBoardSelectedIndex(nextIndex);
     };
@@ -1107,6 +1125,25 @@ export function App({
           }
           return;
         }
+        const pendingAssignment = featureAssignmentPromptRef.current;
+        if (pendingAssignment) {
+          for (const featureChunk of featureChunks) {
+            if (featureChunk === "\x1b" || featureChunk === "m" || featureChunk === "M") {
+              updateFeatureAssignmentPrompt(null);
+              setFeatureBoardNotice(null);
+              return;
+            }
+            if (featureChunk === "a" || featureChunk === "A") {
+              void reassignSelectedFeatureRef.current(pendingAssignment, "actor");
+              return;
+            }
+            if (featureChunk === "c" || featureChunk === "C") {
+              void reassignSelectedFeatureRef.current(pendingAssignment, "critic");
+              return;
+            }
+          }
+          return;
+        }
         for (const featureChunk of featureChunks) {
           if (featureChunk === "\x1b" || isWorkerOverviewShortcut(featureChunk, {})) {
             setCollaborationError(null);
@@ -1146,6 +1183,26 @@ export function App({
             const prompt = { action: "pause" as const, taskId, featureId: feature.id, title: feature.title };
             updateFeatureCancelPrompt(prompt);
             setFeatureBoardNotice(`Pause ${feature.title}? Completed peer checkpoints will be kept.`);
+            return;
+          }
+          if (featureChunk === "m" || featureChunk === "M") {
+            const taskId = activeTaskIdRef.current;
+            const feature = collaborationTimelineRef.current?.features[featureBoardSelectedIndexRef.current];
+            const reassignable = !busyRef.current
+              && canRetryTaskRef.current
+              && feature?.state !== "approved";
+            if (!taskId || !feature || !reassignable) {
+              setFeatureBoardNotice("Pause or stop the task before reassigning this Feature.");
+              return;
+            }
+            updateFeatureAssignmentPrompt({
+              taskId,
+              featureId: feature.id,
+              title: feature.title
+            });
+            setFeatureBoardNotice(
+              `Reassign ${feature.title} · A Actor (${feature.actorEngine ?? config.pairing.actor}) · C Critic (${feature.criticEngine ?? config.pairing.critic})`
+            );
             return;
           }
           if (featureChunk === "r" || featureChunk === "R") {
@@ -2414,6 +2471,43 @@ export function App({
     setFeatureCancelPrompt(next);
   }
 
+  function updateFeatureAssignmentPrompt(next: FeatureAssignmentPrompt | null): void {
+    featureAssignmentPromptRef.current = next;
+    setFeatureAssignmentPrompt(next);
+  }
+
+  async function reassignSelectedFeature(
+    prompt: FeatureAssignmentPrompt,
+    role: "actor" | "critic"
+  ): Promise<void> {
+    const feature = collaborationTimelineRef.current?.features.find((item) => item.id === prompt.featureId);
+    if (!feature) {
+      setFeatureBoardNotice(`Feature no longer exists: ${prompt.featureId}`);
+      updateFeatureAssignmentPrompt(null);
+      return;
+    }
+    const current = role === "actor"
+      ? feature.actorEngine ?? config.pairing.actor
+      : feature.criticEngine ?? config.pairing.critic;
+    const engine = nextAssignableFeatureEngine(current);
+    try {
+      await orchestrator.reassignFeature({
+        taskId: prompt.taskId,
+        featureId: prompt.featureId,
+        role,
+        engine
+      });
+      setFeatureBoardNotice(
+        `${role === "actor" ? "Actor" : "Critic"} reassigned to ${featureEngineDisplay(config, engine)} · Ctrl+R resumes the task.`
+      );
+      await refreshCollaborationTimeline(false);
+    } catch (error) {
+      setFeatureBoardNotice(
+        `Reassign failed for ${prompt.title}: ${error instanceof Error ? error.message : String(error)}`
+      );
+    }
+  }
+
   async function confirmFeatureCancellation(prompt: FeatureCancelPrompt): Promise<void> {
     updateFeatureCancelPrompt(null);
     setAttachError(null);
@@ -2445,6 +2539,7 @@ export function App({
     setAttachError(null);
     setCollaborationError(null);
     updateFeatureCancelPrompt(null);
+    updateFeatureAssignmentPrompt(null);
     setFeatureBoardNotice(null);
     collaborationTimelineRef.current = null;
     setCollaborationTimeline(null);
@@ -2676,8 +2771,10 @@ export function App({
           collaborationBack={collaborationReturnViewRef.current}
           featureCanCancel={featureCanCancel}
           featureCanPause={featureCanCancel}
+          featureCanReassign={featureCanReassign}
           featureCancelConfirm={featureCancelPrompt?.action === "cancel"}
           featurePauseConfirm={featureCancelPrompt?.action === "pause"}
+          featureAssignment={Boolean(featureAssignmentPrompt)}
           taskSessionAction={taskSessionAction?.type === "rename"
             ? { type: "rename", value: taskSessionAction.value, cursor: taskSessionAction.cursor }
             : taskSessionAction?.type === "delete"
@@ -3853,6 +3950,15 @@ function compactChatTaskId(taskId: string | null): string {
     return match[1] ?? taskId;
   }
   return taskId.startsWith("task-") ? taskId.slice("task-".length) : taskId;
+}
+
+export function nextAssignableFeatureEngine(current: EngineName): EngineName {
+  return current === "codex" ? "claude" : "codex";
+}
+
+function featureEngineDisplay(config: AppConfig, engine: EngineName): string {
+  const model = config.workers[engine].model.name.trim();
+  return model ? `${engine}/${model}` : engine;
 }
 
 function compactChatText(text: string, maxLength: number): string {

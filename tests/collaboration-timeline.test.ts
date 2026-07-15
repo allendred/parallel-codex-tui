@@ -43,6 +43,12 @@ describe("collaboration timeline", () => {
       state: "approved",
       updated_at: "2026-07-11T07:05:00.000Z"
     });
+    await writeJson(join(uiDir, "assignment.json"), {
+      version: 1,
+      actor_engine: "codex",
+      critic_engine: "claude",
+      updated_at: "2026-07-11T07:04:30.000Z"
+    });
     await writeJson(join(engineDir, "status.json"), {
       feature_id: "0001-engine",
       task_id: task.id,
@@ -157,6 +163,8 @@ describe("collaboration timeline", () => {
         replies: 1,
         resolvedFindings: 1,
         unresolvedFindings: 0,
+        actorEngine: "codex",
+        criticEngine: "claude",
         latestFinding: "Align board",
         latestReply: "Board alignment fixed"
       })
@@ -193,6 +201,7 @@ describe("collaboration timeline", () => {
       featureId: "0001-ui",
       artifactRefs: expect.arrayContaining([
         { label: "status", path: join(uiDir, "status.json") },
+        { label: "assignment", path: join(uiDir, "assignment.json") },
         { label: "critic findings", path: join(uiDir, "critic-findings.jsonl") },
         { label: "actor replies", path: join(uiDir, "actor-replies.jsonl") },
         { label: "finding resolution", path: join(uiDir, "finding-resolution.json") }

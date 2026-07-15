@@ -169,6 +169,13 @@ export const FeatureStatusSchema = z.object({
   updated_at: z.string().datetime()
 });
 
+export const FeatureAssignmentSchema = z.object({
+  version: z.literal(1),
+  actor_engine: EngineNameSchema,
+  critic_engine: EngineNameSchema,
+  updated_at: z.string().datetime()
+});
+
 export const TurnMetaSchema = z.object({
   task_id: TaskIdSchema,
   turn_id: z.string().regex(/^\d{4}$/),
@@ -232,6 +239,7 @@ export type RouteDecision = z.infer<typeof RouteDecisionSchema>;
 export type TaskMeta = z.infer<typeof TaskMetaSchema>;
 export type WorkerStatus = z.infer<typeof WorkerStatusSchema>;
 export type FeatureStatus = z.infer<typeof FeatureStatusSchema>;
+export type FeatureAssignment = z.infer<typeof FeatureAssignmentSchema>;
 export type TurnMeta = z.infer<typeof TurnMetaSchema>;
 export type NativeSession = z.infer<typeof NativeSessionSchema>;
 export type RetiredNativeSession = z.infer<typeof RetiredNativeSessionSchema>;

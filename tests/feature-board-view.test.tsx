@@ -96,6 +96,26 @@ describe("FeatureBoardView", () => {
     expect(text).toContain("Game Help · critic running");
   });
 
+  it("shows each Feature's persisted Actor and Critic engines", () => {
+    const displayLines = (
+      boardModule as typeof boardModule & {
+        featureBoardDisplayLines?: (
+          timeline: CollaborationTimeline,
+          selectedIndex: number,
+          height: number,
+          terminalWidth: number
+        ) => Array<{ text: string }>;
+      }
+    ).featureBoardDisplayLines;
+    const timeline = fixture();
+    timeline.features[1]!.actorEngine = "codex";
+    timeline.features[1]!.criticEngine = "claude";
+
+    const text = (displayLines?.(timeline, 1, 10, 120) ?? []).map((line) => line.text).join("\n");
+
+    expect(text).toContain("actor codex · critic claude");
+  });
+
   it("keeps every rendered row inside narrow terminal widths", () => {
     const displayLines = (
       boardModule as typeof boardModule & {

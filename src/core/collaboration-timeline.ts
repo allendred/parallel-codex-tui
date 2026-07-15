@@ -2,7 +2,13 @@ import type { Dirent } from "node:fs";
 import { readdir } from "node:fs/promises";
 import { join } from "node:path";
 import { z } from "zod";
-import { EventRecordSchema, FeatureStatusSchema, type FeatureState } from "../domain/schemas.js";
+import {
+  EventRecordSchema,
+  FeatureAssignmentSchema,
+  FeatureStatusSchema,
+  type EngineName,
+  type FeatureState
+} from "../domain/schemas.js";
 import { readTextIfExists } from "./file-store.js";
 
 const FeatureDialogueSchema = z.object({
@@ -38,6 +44,8 @@ export interface CollaborationFeature {
   turnId: string;
   state: CollaborationFeatureState;
   updatedAt: string;
+  actorEngine?: EngineName;
+  criticEngine?: EngineName;
   findings: number;
   replies: number;
   resolvedFindings?: number;
@@ -161,8 +169,9 @@ async function readCollaborationFeatures(taskDir: string): Promise<Collaboration
     .filter((entry) => entry.isDirectory())
     .map(async (entry): Promise<CollaborationFeature | null> => {
       const dir = join(root, entry.name);
-      const [statusText, spec, findings, replies, resolutionText] = await Promise.all([
+      const [statusText, assignmentText, spec, findings, replies, resolutionText] = await Promise.all([
         readTextIfExists(join(dir, "status.json")),
+        readTextIfExists(join(dir, "assignment.json")),
         readTextIfExists(join(dir, "spec.md")),
         readTextIfExists(join(dir, "critic-findings.jsonl")),
         readTextIfExists(join(dir, "actor-replies.jsonl")),
@@ -175,6 +184,7 @@ async function readCollaborationFeatures(taskDir: string): Promise<Collaboration
       const findingEvidence = readMailboxEvidence(findings);
       const replyEvidence = readMailboxEvidence(replies);
       const resolution = parseJsonValue(resolutionText, FindingResolutionSchema);
+      const assignment = parseJsonValue(assignmentText, FeatureAssignmentSchema);
       return {
         id: status.feature_id,
         title: status.title?.trim() || featureSpecTitle(spec) || status.feature_id,
@@ -183,11 +193,16 @@ async function readCollaborationFeatures(taskDir: string): Promise<Collaboration
         turnId: status.turn_id,
         state: status.state,
         updatedAt: status.updated_at,
+        ...(assignment ? {
+          actorEngine: assignment.actor_engine,
+          criticEngine: assignment.critic_engine
+        } : {}),
         findings: findingEvidence.count,
         replies: replyEvidence.count,
         artifactRefs: [
           { label: "status", path: join(dir, "status.json") },
           { label: "spec", path: join(dir, "spec.md") },
+          ...(assignment ? [{ label: "assignment", path: join(dir, "assignment.json") }] : []),
           { label: "critic findings", path: join(dir, "critic-findings.jsonl") },
           { label: "actor replies", path: join(dir, "actor-replies.jsonl") },
           ...(resolution ? [{ label: "finding resolution", path: join(dir, "finding-resolution.json") }] : [])

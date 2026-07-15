@@ -2,7 +2,15 @@ import { join } from "node:path";
 import { z } from "zod";
 import { appendJsonLine, ensureDir, pathExists, readJson, readTextIfExists, writeJson, writeText } from "../core/file-store.js";
 import type { TaskSession, TaskTurn } from "../core/session-manager.js";
-import { FeatureStatusSchema, type FeatureState, type FeatureStatus, type WorkerRole } from "../domain/schemas.js";
+import {
+  FeatureAssignmentSchema,
+  FeatureStatusSchema,
+  type EngineName,
+  type FeatureAssignment,
+  type FeatureState,
+  type FeatureStatus,
+  type WorkerRole
+} from "../domain/schemas.js";
 import type { FeatureDefinition } from "./feature-plan.js";
 
 export interface FeatureChannel {
@@ -21,6 +29,7 @@ export interface FeatureChannel {
   criticFindingsPath: string;
   findingResolutionPath: string;
   decisionsPath: string;
+  assignmentPath: string;
 }
 
 export interface FeaturePromptContext {
@@ -35,6 +44,7 @@ export interface FeaturePromptContext {
   actorRepliesPath: string;
   criticFindingsPath: string;
   decisionsPath: string;
+  assignmentPath: string;
 }
 
 export interface CreateFeatureChannelInput {
@@ -44,6 +54,8 @@ export interface CreateFeatureChannelInput {
   judgeDir: string;
   feature?: FeatureDefinition;
   resume?: boolean;
+  actorEngine?: EngineName;
+  criticEngine?: EngineName;
 }
 
 export interface CriticFindingRecord {
@@ -111,7 +123,8 @@ export async function createFeatureChannel(input: CreateFeatureChannelInput): Pr
     actorRepliesPath: join(dir, "actor-replies.jsonl"),
     criticFindingsPath: join(dir, "critic-findings.jsonl"),
     findingResolutionPath: join(dir, "finding-resolution.json"),
-    decisionsPath: join(dir, "decisions.md")
+    decisionsPath: join(dir, "decisions.md"),
+    assignmentPath: join(dir, "assignment.json")
   };
 
   await ensureDir(dir);
@@ -134,6 +147,9 @@ export async function createFeatureChannel(input: CreateFeatureChannelInput): Pr
   await writeText(channel.actorWorklogPath, "");
   await writeText(channel.actorRepliesPath, "");
   await writeText(channel.criticFindingsPath, "");
+  if (input.actorEngine && input.criticEngine) {
+    await writeFeatureAssignment(channel, input.actorEngine, input.criticEngine);
+  }
   await updateFeatureStatus(channel, "created");
   await appendFeatureDialogue(channel, "feature.created", "actor", "Feature mailbox created for the current turn.");
 
@@ -152,6 +168,40 @@ async function ensureFeatureChannelFiles(input: CreateFeatureChannelInput, chann
       await writeText(path, initialContent);
     }
   }
+  if (!(await pathExists(channel.assignmentPath)) && input.actorEngine && input.criticEngine) {
+    await writeFeatureAssignment(channel, input.actorEngine, input.criticEngine);
+  }
+}
+
+export async function readFeatureAssignment(
+  channel: Pick<FeatureChannel, "assignmentPath">,
+  fallback: { actor: EngineName; critic: EngineName }
+): Promise<FeatureAssignment> {
+  try {
+    return await readJson(channel.assignmentPath, FeatureAssignmentSchema);
+  } catch {
+    return FeatureAssignmentSchema.parse({
+      version: 1,
+      actor_engine: fallback.actor,
+      critic_engine: fallback.critic,
+      updated_at: new Date(0).toISOString()
+    });
+  }
+}
+
+export async function writeFeatureAssignment(
+  channel: Pick<FeatureChannel, "assignmentPath">,
+  actorEngine: EngineName,
+  criticEngine: EngineName
+): Promise<FeatureAssignment> {
+  const assignment = FeatureAssignmentSchema.parse({
+    version: 1,
+    actor_engine: actorEngine,
+    critic_engine: criticEngine,
+    updated_at: new Date().toISOString()
+  });
+  await writeJson(channel.assignmentPath, assignment);
+  return assignment;
 }
 
 export function featurePromptContext(channel: FeatureChannel): FeaturePromptContext {
@@ -166,7 +216,8 @@ export function featurePromptContext(channel: FeatureChannel): FeaturePromptCont
     actorWorklogPath: channel.actorWorklogPath,
     actorRepliesPath: channel.actorRepliesPath,
     criticFindingsPath: channel.criticFindingsPath,
-    decisionsPath: channel.decisionsPath
+    decisionsPath: channel.decisionsPath,
+    assignmentPath: channel.assignmentPath
   };
 }
 
@@ -459,6 +510,7 @@ function buildFeatureSpec(input: CreateFeatureChannelInput, channel: FeatureChan
     '- Critic writes one JSON object per blocking issue to critic-findings.jsonl: {"id":"C-001","severity":"blocker","summary":"what must change"}.',
     '- Actor replies to each fixed finding in actor-replies.jsonl: {"finding_id":"C-001","status":"fixed","notes":"what changed"}.',
     "- Supervisor writes the final decision summary to decisions.md.",
+    "- assignment.json records the Actor and Critic engines selected for retries.",
     ""
   ].join("\n");
 }

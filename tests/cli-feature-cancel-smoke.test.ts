@@ -40,6 +40,16 @@ describe("CLI Feature control smoke", () => {
         "[workers.codex.nativeSession]",
         "enabled = false",
         "",
+        "[workers.claude]",
+        `command = "${escapeToml(process.execPath)}"`,
+        `args = ["${escapeToml(agentScript)}"]`,
+        "timeoutMs = 30000",
+        "idleTimeoutMs = 15000",
+        "firstOutputTimeoutMs = 3000",
+        "",
+        "[workers.claude.nativeSession]",
+        "enabled = false",
+        "",
         "[pairing]",
         'main = "codex"',
         'judge = "codex"',
@@ -175,16 +185,25 @@ describe("CLI Feature control smoke", () => {
       expect(await pathExists(join(workspace, "alpha.txt"))).toBe(false);
       expect(await pathExists(join(workspace, "beta.txt"))).toBe(false);
 
+      child.write("m");
+      await waitForScreenText(() => screenWrites, screen, "assign model · A Actor · C Critic");
+      child.write("c");
+      await waitForScreenText(() => screenWrites, screen, "Critic reassigned to claude");
+      await waitForFileText(join(taskDir, "features", "0001-alpha", "assignment.json"), '"critic_engine": "claude"');
+      child.write("m");
       child.write("\x12");
-      await waitForTaskState(join(taskDir, "meta.json"), "done");
+      await waitForTaskState(join(taskDir, "meta.json"), "done", 20_000);
       await waitForScreenText(() => screenWrites, screen, "2 features · 2 approved");
       const resumedEvents = await readTextIfExists(join(taskDir, "events.jsonl"));
       expect(await readTextIfExists(join(taskDir, "actor-codex-0001-alpha", "run-count.txt"))).toBe("3");
       expect(await readTextIfExists(join(taskDir, "actor-codex-0001-beta", "run-count.txt"))).toBe("1");
       expect(await readTextIfExists(join(workspace, "alpha.txt"))).toBe("alpha\n");
       expect(await readTextIfExists(join(workspace, "beta.txt"))).toBe("beta\n");
+      expect(await pathExists(join(taskDir, "critic-claude-0001-alpha"))).toBe(true);
+      expect(await pathExists(join(taskDir, "critic-codex-0001-beta"))).toBe(true);
       expect(resumedEvents).toContain("feature.wave_checkpoint_loaded");
       expect(resumedEvents).toContain("feature.wave_actor_checkpoints_reused");
+      expect(resumedEvents).toContain("feature.assignment_changed");
 
       child.write("\x03");
       await waitForExit(exits);
@@ -194,7 +213,7 @@ describe("CLI Feature control smoke", () => {
         child.kill("SIGTERM");
       }
     }
-  }, 35000);
+  }, 45000);
 });
 
 function featureCancelAgentSource(): string {
@@ -285,8 +304,9 @@ async function waitForWorkerPhase(statusPath: string, phase: string): Promise<vo
   throw new Error(`Timed out waiting for worker phase ${phase}`);
 }
 
-async function waitForTaskState(metaPath: string, state: string): Promise<void> {
-  for (let attempt = 0; attempt < 200; attempt += 1) {
+async function waitForTaskState(metaPath: string, state: string, timeoutMs = 10_000): Promise<void> {
+  const attempts = Math.max(1, Math.ceil(timeoutMs / 50));
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
     try {
       if ((await readJson(metaPath, TaskMetaSchema)).status === state) {
         return;
