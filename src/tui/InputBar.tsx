@@ -12,7 +12,9 @@ export interface InputBarProps {
   collaborationUnresolved?: boolean;
   collaborationBack?: "workers" | "features";
   featureCanCancel?: boolean;
+  featureCanPause?: boolean;
   featureCancelConfirm?: boolean;
+  featurePauseConfirm?: boolean;
   taskSessionAction?: TaskSessionInputAction | null;
   taskSessionsIncludeArchived?: boolean;
   canRetry?: boolean;
@@ -45,7 +47,9 @@ export function InputBar({
   collaborationUnresolved = false,
   collaborationBack = "workers",
   featureCanCancel = false,
+  featureCanPause = false,
   featureCancelConfirm = false,
+  featurePauseConfirm = false,
   taskSessionAction = null,
   taskSessionsIncludeArchived = false,
   canRetry = false,
@@ -133,7 +137,9 @@ export function InputBar({
   if (mode === "features") {
     const hints = featureBoardInputHints(terminalWidth, {
       canCancel: featureCanCancel,
+      canPause: featureCanPause,
       confirmCancel: featureCancelConfirm,
+      confirmPause: featurePauseConfirm,
       canRetry
     });
     return (
@@ -682,8 +688,24 @@ function workerOverviewInputHints(width: number): { label: string; detail: strin
 
 function featureBoardInputHints(
   width: number,
-  options: { canCancel: boolean; confirmCancel: boolean; canRetry: boolean }
+  options: {
+    canCancel: boolean;
+    canPause: boolean;
+    confirmCancel: boolean;
+    confirmPause: boolean;
+    canRetry: boolean;
+  }
 ): { label: string; detail: string } {
+  if (options.confirmPause) {
+    return selectInputHints(width, [
+      { label: "pause feature?", detail: " · P confirm · Esc keep" },
+      { label: "pause?", detail: " · P confirm · Esc keep" },
+      { label: "pause?", detail: " · Esc keep" },
+      { label: "Esc keep", detail: "" },
+      { label: "hold?", detail: "" },
+      { label: "?", detail: "" }
+    ]);
+  }
   if (options.confirmCancel) {
     return selectInputHints(width, [
       { label: "cancel feature?", detail: " · X confirm · Esc keep" },
@@ -694,13 +716,21 @@ function featureBoardInputHints(
       { label: "?", detail: "" }
     ]);
   }
-  if (options.canCancel) {
+  if (options.canCancel || options.canPause) {
+    const controls = [
+      ...(options.canPause ? ["P pause"] : []),
+      ...(options.canCancel ? ["X cancel"] : [])
+    ].join(" · ");
     return selectInputHints(width, [
-      { label: "features", detail: " · Up/Dn select · Enter timeline · X cancel · R refresh · Esc workers" },
-      { label: "features", detail: " · Up/Dn select · X cancel · R refresh · Esc workers" },
-      { label: "features", detail: " · Up/Dn select · X cancel · Esc workers" },
-      { label: "features", detail: " · X cancel · Esc workers" },
-      { label: "features", detail: " · Esc workers" },
+      { label: "features", detail: ` · Up/Dn select · Enter timeline · ${controls} · R refresh · Esc workers` },
+      { label: "features", detail: ` · Up/Dn select · ${controls} · R refresh · Esc workers` },
+      { label: "features", detail: ` · Up/Dn select · ${controls} · Esc workers` },
+      { label: "features", detail: ` · ${controls} · Esc workers` },
+      { label: "ft", detail: ` · ${controls} · Esc workers` },
+      { label: "f", detail: ` · ${controls} · Esc workers` },
+      { label: "features", detail: ` · ${controls}` },
+      { label: "ft", detail: ` · ${controls}` },
+      { label: "f", detail: ` · ${controls}` },
       { label: "features", detail: "" },
       { label: "ft", detail: "" },
       { label: "f", detail: "" }

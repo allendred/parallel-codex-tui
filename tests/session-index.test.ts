@@ -1,10 +1,10 @@
-import { rm, symlink } from "node:fs/promises";
+import { readdir, rm, symlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { mkdtemp } from "node:fs/promises";
 import { describe, expect, it } from "vitest";
-import { writeJson, writeText } from "../src/core/file-store.js";
+import { pathExists, writeJson, writeText } from "../src/core/file-store.js";
 import { SessionIndex } from "../src/core/session-index.js";
 import { NativeSessionSchema, RouteDecisionSchema, TaskMetaSchema, TurnMetaSchema, WorkerStatusSchema } from "../src/domain/schemas.js";
 
@@ -28,6 +28,8 @@ describe("SessionIndex", () => {
     legacy.close();
 
     const index = await SessionIndex.open(root, dataDir);
+    expect(index.schemaVersion()).toBe(2);
+    expect(await pathExists(`${databasePath}.pre-migration-v0.backup`)).toBe(true);
     await index.upsertTask({
       id: "task-archived",
       title: "Archived task",
@@ -54,6 +56,53 @@ describe("SessionIndex", () => {
       expect.objectContaining({ id: "task-visible", archived_at: undefined })
     ]);
     index.close();
+
+    const migrationBackup = new DatabaseSync(`${databasePath}.pre-migration-v0.backup`);
+    expect((migrationBackup.prepare("PRAGMA user_version").get() as { user_version: number }).user_version).toBe(0);
+    expect(
+      (migrationBackup.prepare("PRAGMA table_info(tasks)").all() as Array<{ name: string }>)
+        .some((column) => column.name === "archived_at")
+    ).toBe(false);
+    migrationBackup.close();
+
+    const recoveryBackup = new DatabaseSync(`${databasePath}.backup`);
+    expect((recoveryBackup.prepare("PRAGMA user_version").get() as { user_version: number }).user_version).toBe(2);
+    recoveryBackup.close();
+  });
+
+  it("restores a corrupt catalog from the last healthy backup", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pct-index-backup-recovery-"));
+    const dataDir = ".parallel-codex";
+    const taskId = "task-backup-recovery";
+    const sessionDir = join(root, dataDir, "sessions", taskId);
+    const databasePath = join(root, dataDir, "session-index.sqlite");
+    await writeJson(join(sessionDir, "meta.json"), TaskMetaSchema.parse({
+      id: taskId,
+      title: "Recover from backup",
+      created_at: "2026-07-02T01:00:00.000Z",
+      cwd: root,
+      mode: "complex",
+      status: "done"
+    }));
+
+    const first = await SessionIndex.open(root, dataDir);
+    await first.rebuildFromFiles();
+    await expect(first.listTasks()).resolves.toEqual([
+      expect.objectContaining({ id: taskId, title: "Recover from backup" })
+    ]);
+    first.close();
+    await writeText(databasePath, "not a sqlite database\n");
+
+    const recovered = await SessionIndex.open(root, dataDir);
+    expect(recovered.recovery).toMatchObject({ source: "backup" });
+    expect(recovered.recovery?.quarantinedPath).toContain("session-index.sqlite.corrupt-");
+    expect(await pathExists(recovered.recovery?.quarantinedPath ?? "")).toBe(true);
+    await expect(recovered.listTasks()).resolves.toEqual([
+      expect.objectContaining({ id: taskId, title: "Recover from backup" })
+    ]);
+    const files = await readdir(join(root, dataDir));
+    expect(files.some((name) => name.startsWith("session-index.sqlite.corrupt-"))).toBe(true);
+    recovered.close();
   });
 
   it("lists newest task summaries with counts and persists the active task", async () => {

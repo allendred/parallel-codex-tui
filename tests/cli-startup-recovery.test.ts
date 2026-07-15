@@ -64,6 +64,18 @@ describe("startupRecoveryMessages", () => {
 
     expect(startupRecoveryMessages([recovery], recovery.taskId, pending)).toHaveLength(1);
   });
+
+  it("explains SQLite backup recovery without implying task logs were deleted", () => {
+    const messages = startupRecoveryMessages([], null, undefined, {
+      source: "backup",
+      quarantinedPath: "/tmp/project/.parallel-codex/session-index.sqlite.corrupt-1"
+    });
+
+    expect(messages).toEqual([{
+      from: "system",
+      text: "Recovered session catalog from the last healthy SQLite backup · task files reindexed · corrupt copy kept at /tmp/project/.parallel-codex/session-index.sqlite.corrupt-1"
+    }]);
+  });
 });
 
 function recoveredTask(

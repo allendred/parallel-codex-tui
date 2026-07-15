@@ -163,6 +163,7 @@ interface WorkerSearchState {
   matchIndex: number;
 }
 interface FeatureCancelPrompt {
+  action: "cancel" | "pause";
   taskId: string;
   featureId: string;
   title: string;
@@ -1096,7 +1097,10 @@ export function App({
               setFeatureBoardNotice(null);
               return;
             }
-            if (featureChunk === "x" || featureChunk === "X") {
+            if (
+              (pendingCancel.action === "cancel" && (featureChunk === "x" || featureChunk === "X"))
+              || (pendingCancel.action === "pause" && (featureChunk === "p" || featureChunk === "P"))
+            ) {
               void confirmFeatureCancellationRef.current(pendingCancel);
               return;
             }
@@ -1125,9 +1129,23 @@ export function App({
               setFeatureBoardNotice("Selected feature has no active Actor/Critic to cancel.");
               return;
             }
-            const prompt = { taskId, featureId: feature.id, title: feature.title };
+            const prompt = { action: "cancel" as const, taskId, featureId: feature.id, title: feature.title };
             updateFeatureCancelPrompt(prompt);
             setFeatureBoardNotice(`Cancel ${feature.title}? Active peers will finish; integration stays blocked.`);
+            return;
+          }
+          if (featureChunk === "p" || featureChunk === "P") {
+            const taskId = activeTaskIdRef.current;
+            const feature = collaborationTimelineRef.current?.features[featureBoardSelectedIndexRef.current];
+            const pausable = busyRef.current
+              && (feature?.state === "actor_running" || feature?.state === "critic_running");
+            if (!taskId || !feature || !pausable) {
+              setFeatureBoardNotice("Selected feature has no active Actor/Critic to pause.");
+              return;
+            }
+            const prompt = { action: "pause" as const, taskId, featureId: feature.id, title: feature.title };
+            updateFeatureCancelPrompt(prompt);
+            setFeatureBoardNotice(`Pause ${feature.title}? Completed peer checkpoints will be kept.`);
             return;
           }
           if (featureChunk === "r" || featureChunk === "R") {
@@ -2065,11 +2083,20 @@ export function App({
     setLastRoute(null);
 
     try {
-      const result = await orchestrator.retryTask({
+      const selectedPausedFeature = viewRef.current === "features"
+        ? collaborationTimelineRef.current?.features[featureBoardSelectedIndexRef.current]
+        : null;
+      const retryInput = {
         taskId,
         cwd,
         ...createRunCallbacks(controller, { announceRoute: false })
-      });
+      };
+      const result = selectedPausedFeature?.state === "paused"
+        ? await orchestrator.resumeFeature({
+            ...retryInput,
+            featureId: selectedPausedFeature.id
+          })
+        : await orchestrator.retryTask(retryInput);
       activeTaskIdRef.current = taskId;
       setActiveTaskId(taskId);
       setActiveMode("complex");
@@ -2386,12 +2413,17 @@ export function App({
     updateFeatureCancelPrompt(null);
     setAttachError(null);
     try {
-      const result = await orchestrator.cancelFeature(prompt.taskId, prompt.featureId);
+      const result = prompt.action === "pause"
+        ? await orchestrator.pauseFeature(prompt.taskId, prompt.featureId)
+        : await orchestrator.cancelFeature(prompt.taskId, prompt.featureId);
       setFeatureBoardNotice(result.requested
-        ? `Cancellation requested for ${prompt.title} · ${result.role ?? "worker"} stopping; active peers will finish.`
+        ? prompt.action === "pause"
+          ? `Pause requested for ${prompt.title} · ${result.role ?? "worker"} stopping; checkpoints stay resumable.`
+          : `Cancellation requested for ${prompt.title} · ${result.role ?? "worker"} stopping; active peers will finish.`
         : `No active Actor/Critic for ${prompt.title}; refresh and try again.`);
     } catch (error) {
-      setFeatureBoardNotice(`Cancel failed for ${prompt.title}: ${error instanceof Error ? error.message : String(error)}`);
+      const action = prompt.action === "pause" ? "Pause" : "Cancel";
+      setFeatureBoardNotice(`${action} failed for ${prompt.title}: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
 
@@ -2638,7 +2670,9 @@ export function App({
           collaborationUnresolved={collaborationUnresolvedOnly}
           collaborationBack={collaborationReturnViewRef.current}
           featureCanCancel={featureCanCancel}
-          featureCancelConfirm={Boolean(featureCancelPrompt)}
+          featureCanPause={featureCanCancel}
+          featureCancelConfirm={featureCancelPrompt?.action === "cancel"}
+          featurePauseConfirm={featureCancelPrompt?.action === "pause"}
           taskSessionAction={taskSessionAction?.type === "rename"
             ? { type: "rename", value: taskSessionAction.value, cursor: taskSessionAction.cursor }
             : taskSessionAction?.type === "delete"

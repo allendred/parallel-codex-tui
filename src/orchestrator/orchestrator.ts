@@ -16,7 +16,7 @@ import {
   type RouterExecutionProgress
 } from "../core/router.js";
 import type { SessionManager, TaskSession, TaskTurn, WorkerFiles } from "../core/session-manager.js";
-import { RouteDecisionSchema, TaskMetaSchema, WorkerStatusSchema, type EngineName, type NativeSession, type RouteDecision, type RouterFallbackResolution, type WorkerRole, type WorkerStatus } from "../domain/schemas.js";
+import { FeatureStatusSchema, RouteDecisionSchema, TaskMetaSchema, WorkerStatusSchema, type EngineName, type NativeSession, type RouteDecision, type RouterFallbackResolution, type WorkerRole, type WorkerStatus } from "../domain/schemas.js";
 import { getAdapter, type WorkerRegistry } from "../workers/registry.js";
 import type { WorkerResult, WorkerRunSpec } from "../workers/types.js";
 import {
@@ -84,6 +84,10 @@ export interface RetryTaskInput extends Omit<HandleRequestInput, "request"> {
   taskId: string;
 }
 
+export interface ResumeFeatureInput extends RetryTaskInput {
+  featureId: string;
+}
+
 export interface TaskFollowUpRouteResult {
   mode: "simple" | "complex";
   taskId: string | null;
@@ -146,6 +150,12 @@ export interface FeatureCancellationResult {
   role?: "actor" | "critic";
 }
 
+export interface FeaturePauseResult {
+  requested: boolean;
+  featureId: string;
+  role?: "actor" | "critic";
+}
+
 export interface WorkerLogRef {
   id: string;
   featureId?: string;
@@ -187,6 +197,7 @@ interface WaveSummary {
 interface ActiveFeatureRun {
   controller: AbortController;
   cancelRequested: boolean;
+  pauseRequested: boolean;
   role: "actor" | "critic";
 }
 
@@ -194,6 +205,13 @@ class FeatureRunCancelledError extends Error {
   constructor(readonly featureId: string) {
     super(`Feature ${featureId} was cancelled before integration. Other active workers were allowed to finish.`);
     this.name = "FeatureRunCancelledError";
+  }
+}
+
+class FeatureRunPausedError extends Error {
+  constructor(readonly featureId: string) {
+    super(`Feature ${featureId} was paused before integration. Completed peer checkpoints were preserved.`);
+    this.name = "FeatureRunPausedError";
   }
 }
 
@@ -291,6 +309,14 @@ export class Orchestrator {
   }
 
   async retryTask(input: RetryTaskInput): Promise<HandleRequestResult> {
+    return this.resumeTaskRun(input);
+  }
+
+  async resumeFeature(input: ResumeFeatureInput): Promise<HandleRequestResult> {
+    return this.resumeTaskRun(input, input.featureId);
+  }
+
+  private async resumeTaskRun(input: RetryTaskInput, pausedFeatureId?: string): Promise<HandleRequestResult> {
     throwIfCancelled(input.signal);
     const task = this.sessions.taskFromId(input.taskId);
     if (!(await readTaskMetaIfValid(task.metaPath))) {
@@ -303,8 +329,28 @@ export class Orchestrator {
       if (!meta) {
         throw new Error(`Task session not found: ${input.taskId}`);
       }
-      if (meta.status !== "failed" && meta.status !== "cancelled") {
-        throw new Error(`Task ${input.taskId} is ${meta.status}; only failed or cancelled tasks can be retried.`);
+      const retryableStates = pausedFeatureId
+        ? new Set(["paused"])
+        : new Set(["failed", "cancelled", "paused"]);
+      if (!retryableStates.has(meta.status)) {
+        throw new Error(
+          pausedFeatureId
+            ? `Task ${input.taskId} is ${meta.status}; only a paused task can resume a feature.`
+            : `Task ${input.taskId} is ${meta.status}; only failed, cancelled, or paused tasks can be retried.`
+        );
+      }
+      if (pausedFeatureId) {
+        const featureStatus = await readJson(
+          join(task.dir, "features", pausedFeatureId, "status.json"),
+          FeatureStatusSchema
+        );
+        if (
+          featureStatus.task_id !== task.id
+          || featureStatus.feature_id !== pausedFeatureId
+          || featureStatus.state !== "paused"
+        ) {
+          throw new Error(`Feature ${pausedFeatureId} is not paused in task ${task.id}.`);
+        }
       }
       const turn = await this.sessions.latestTurn(task);
       if (!turn) {
@@ -325,7 +371,13 @@ export class Orchestrator {
       input.onRoute?.(route);
       throwIfCancelled(input.signal);
       await this.sessions.recordLatestRoute(task, route);
-      await this.sessions.appendEvent(task, "task.retrying", `Retrying turn ${turn.turnId}`);
+      await this.sessions.appendEvent(
+        task,
+        pausedFeatureId ? "feature.resume_requested" : "task.retrying",
+        pausedFeatureId
+          ? `Resuming ${pausedFeatureId} in turn ${turn.turnId}`
+          : `Retrying turn ${turn.turnId}`
+      );
       return turn.turnId === "0001"
         ? this.runInitialTask(executionInput, task, route, turn, workers)
         : this.runPairTask(executionInput, task, route, turn, workers);
@@ -334,7 +386,7 @@ export class Orchestrator {
 
   async canRetryTask(taskId: string): Promise<boolean> {
     const meta = await readTaskMetaIfValid(this.sessions.taskFromId(taskId).metaPath);
-    return meta?.status === "failed" || meta?.status === "cancelled";
+    return meta?.status === "failed" || meta?.status === "cancelled" || meta?.status === "paused";
   }
 
   async cancelFeature(taskId: string, featureId: string): Promise<FeatureCancellationResult> {
@@ -353,6 +405,31 @@ export class Orchestrator {
         );
       } catch {
         // Cancellation must not wait on optional audit evidence.
+      }
+    }
+    return {
+      requested: true,
+      featureId,
+      role: active.role
+    };
+  }
+
+  async pauseFeature(taskId: string, featureId: string): Promise<FeaturePauseResult> {
+    const active = this.activeFeatureRuns.get(featureRunKey(taskId, featureId));
+    if (!active || active.cancelRequested) {
+      return { requested: false, featureId };
+    }
+    if (!active.pauseRequested) {
+      active.pauseRequested = true;
+      active.controller.abort();
+      try {
+        await this.sessions.appendEvent(
+          this.sessions.taskFromId(taskId),
+          "feature.pause_requested",
+          `Pause requested for ${featureId} ${active.role}`
+        );
+      } catch {
+        // Pausing must not wait on optional audit evidence.
       }
     }
     return {
@@ -1395,11 +1472,18 @@ export class Orchestrator {
     error: unknown
   ): Promise<never> {
     const featureCancellation = error instanceof FeatureRunCancelledError ? error : null;
+    const featurePause = error instanceof FeatureRunPausedError ? error : null;
     const cancelled = Boolean(featureCancellation) || isCancellation(error, input.signal);
-    const state = cancelled ? "cancelled" : "failed";
+    const state = featurePause ? "paused" : cancelled ? "cancelled" : "failed";
     const convergenceErrors: unknown[] = [];
     const featureUpdates = await Promise.allSettled(features.map(async (feature) => {
       if (!(await featureIsApproved(feature))) {
+        if (featurePause) {
+          if (feature.id === featurePause.featureId) {
+            await updateFeatureStatus(feature, "paused");
+          }
+          return;
+        }
         const featureState = featureCancellation
           ? feature.id === featureCancellation.featureId ? "cancelled" : "failed"
           : state;
@@ -1427,6 +1511,17 @@ export class Orchestrator {
         convergenceErrors.push(eventError);
       }
     }
+    if (featurePause) {
+      try {
+        await this.sessions.appendEvent(
+          task,
+          "feature.paused",
+          `Paused ${featurePause.featureId}; completed peer checkpoints preserved`
+        );
+      } catch (eventError) {
+        convergenceErrors.push(eventError);
+      }
+    }
     input.onStatus?.({ taskId: task.id });
     if (convergenceErrors.length > 0) {
       const details = convergenceErrors.map(errorMessage).join("; ");
@@ -1437,6 +1532,9 @@ export class Orchestrator {
     }
     if (featureCancellation) {
       throw featureCancellation;
+    }
+    if (featurePause) {
+      throw featurePause;
     }
     throw cancelled ? cancellationError() : error;
   }
@@ -2061,6 +2159,7 @@ export class Orchestrator {
     const active: ActiveFeatureRun = {
       controller,
       cancelRequested: false,
+      pauseRequested: false,
       role
     };
     const abortFromParent = () => controller.abort();
@@ -2077,6 +2176,9 @@ export class Orchestrator {
         ...spec,
         signal: controller.signal
       }, "task", resumeFrom);
+      if (active.pauseRequested) {
+        throw new FeatureRunPausedError(feature.id);
+      }
       if (active.cancelRequested) {
         throw new FeatureRunCancelledError(feature.id);
       }
@@ -2084,6 +2186,9 @@ export class Orchestrator {
       await updateFeatureStatus(feature, role === "actor" ? "actor_done" : "critic_done");
       return result;
     } catch (error) {
+      if (active.pauseRequested && !(error instanceof FeatureRunPausedError)) {
+        throw new FeatureRunPausedError(feature.id);
+      }
       if (active.cancelRequested && !(error instanceof FeatureRunCancelledError)) {
         throw new FeatureRunCancelledError(feature.id);
       }

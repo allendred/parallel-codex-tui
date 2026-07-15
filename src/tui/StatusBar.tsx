@@ -954,7 +954,7 @@ function runtimeStatusTone(status: string): StatusTone | undefined {
   if (status === "fail" || status === "failed" || status === "error") {
     return "fail";
   }
-  if (status === "wait" || status === "waiting" || status === "queued" || status === "stopping") {
+  if (status === "wait" || status === "waiting" || status === "queued" || status === "stopping" || status === "paused") {
     return "wait";
   }
   if (status === "stop" || status === "cancelled" || status === "canceled") {

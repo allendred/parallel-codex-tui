@@ -2,6 +2,7 @@ import type {
   InterruptedTaskRecovery,
   PendingTaskCreationRecovery
 } from "./core/session-manager.js";
+import type { SessionIndexRecovery } from "./core/session-index.js";
 
 export interface StartupRecoveryMessage {
   from: "system";
@@ -11,12 +12,28 @@ export interface StartupRecoveryMessage {
 export function startupRecoveryMessages(
   recoveredTasks: InterruptedTaskRecovery[],
   activeTaskId: string | null,
-  pendingTaskCreations?: PendingTaskCreationRecovery
+  pendingTaskCreations?: PendingTaskCreationRecovery,
+  sessionIndexRecovery?: SessionIndexRecovery | null
 ): StartupRecoveryMessage[] {
   return [
+    ...sessionIndexRecoveryMessages(sessionIndexRecovery),
     ...interruptedTaskRecoveryMessages(recoveredTasks, activeTaskId),
     ...pendingTaskCreationMessages(pendingTaskCreations)
   ];
+}
+
+function sessionIndexRecoveryMessages(
+  recovery?: SessionIndexRecovery | null
+): StartupRecoveryMessage[] {
+  if (!recovery) {
+    return [];
+  }
+  return [{
+    from: "system",
+    text: recovery.source === "backup"
+      ? `Recovered session catalog from the last healthy SQLite backup · task files reindexed · corrupt copy kept at ${recovery.quarantinedPath}`
+      : `Rebuilt session catalog from task files after SQLite integrity failure · corrupt copy kept at ${recovery.quarantinedPath}`
+  }];
 }
 
 function interruptedTaskRecoveryMessages(

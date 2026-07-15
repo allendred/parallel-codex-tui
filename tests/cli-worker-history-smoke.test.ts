@@ -10,7 +10,7 @@ import { NativeTerminalScreen } from "../src/tui/terminal-screen.js";
 import { resizeAndWaitForFreshScreenText } from "./pty-resize.js";
 
 describe("CLI worker history smoke", () => {
-  it("keeps every task-turn worker log and tab order across restart", async () => {
+  it("keeps ten task-turn worker logs, native sessions, and tab order across restart", async () => {
     const workspace = await mkdtemp(join(tmpdir(), "pct-cli-worker-history-workspace-"));
     const appRoot = await mkdtemp(join(tmpdir(), "pct-cli-worker-history-app-"));
     await mkdir(join(appRoot, ".parallel-codex"), { recursive: true });
@@ -38,7 +38,7 @@ describe("CLI worker history smoke", () => {
       expect(taskId).toBeTruthy();
       const taskDir = join(workspace, ".parallel-codex", "sessions", taskId ?? "");
       await waitForTaskTurnDone(taskDir, "0001");
-      await waitForScreenText(firstRun, "done · complex task completed");
+      await waitForIdleInput(firstRun);
 
       const firstTurnLogs = await Promise.all([
         readTextIfExists(join(taskDir, "judge-mock", "output.log")),
@@ -46,39 +46,38 @@ describe("CLI worker history smoke", () => {
         readTextIfExists(join(taskDir, "critic-mock", "output.log"))
       ]);
 
-      firstRun.child.write("继续完成第二轮功能\r");
-      await waitForTaskTurnDone(taskDir, "0002");
-      await waitForScreenText(firstRun, "done · complex task completed");
+      for (let turn = 2; turn <= 10; turn += 1) {
+        firstRun.child.write(`继续完成第${turn}轮功能\r`);
+        await waitForTaskTurnDone(taskDir, String(turn).padStart(4, "0"));
+        await waitForIdleInput(firstRun);
+      }
 
       expect(await Promise.all([
         readTextIfExists(join(taskDir, "judge-mock", "output.log")),
         readTextIfExists(join(taskDir, "actor-mock", "output.log")),
         readTextIfExists(join(taskDir, "critic-mock", "output.log"))
       ])).toEqual(firstTurnLogs);
-      expect(await workerDirectories(taskDir)).toEqual([
-        "actor-mock",
-        "actor-mock-0002",
-        "critic-mock",
-        "critic-mock-0002",
-        "judge-mock",
-        "judge-mock-0002"
-      ]);
+      expect(await workerDirectories(taskDir)).toEqual(expectedWorkerDirectories(10));
       for (const role of ["judge", "actor", "critic"] as const) {
         const firstSession = await readJson(
           join(taskDir, `${role}-mock`, "native-session.json"),
           NativeSessionSchema
         );
-        const secondSession = await readJson(
-          join(taskDir, `${role}-mock-0002`, "native-session.json"),
-          NativeSessionSchema
-        );
-        expect(secondSession.session_id).toBe(firstSession.session_id);
-        expect(secondSession.worker_id).toBe(`${role}-mock-0002`);
+        for (let turn = 2; turn <= 10; turn += 1) {
+          const workerId = `${role}-mock-${String(turn).padStart(4, "0")}`;
+          const continuedSession = await readJson(
+            join(taskDir, workerId, "native-session.json"),
+            NativeSessionSchema
+          );
+          expect(continuedSession.session_id).toBe(firstSession.session_id);
+          expect(continuedSession.worker_id).toBe(workerId);
+          expect(await readTextIfExists(join(taskDir, workerId, "output.log"))).not.toBe("");
+        }
       }
 
       firstRun.child.write("\x17");
-      await assertChronologicalWorkerTabs(firstRun);
-      await assertNarrowWorkerChrome(firstRun);
+      await assertChronologicalWorkerTabs(firstRun, 30);
+      await assertNarrowWorkerChrome(firstRun, 30);
 
       firstRun.child.write("\x03");
       await waitForExit(firstRun);
@@ -87,11 +86,11 @@ describe("CLI worker history smoke", () => {
       secondRun = startCli(appRoot, workspace, taskId);
       await waitForScreenText(secondRun, "> | message");
       secondRun.child.write("\x14");
-      await waitForScreenText(secondRun, "2 turns · 6 workers · 3 native");
+      await waitForScreenText(secondRun, "10 turns · 30 workers · 3 native");
       secondRun.child.write("\x1b");
       await waitForScreenText(secondRun, "parallel-codex-tui · chat");
       secondRun.child.write("\x17");
-      await assertChronologicalWorkerTabs(secondRun);
+      await assertChronologicalWorkerTabs(secondRun, 30);
 
       secondRun.child.write("\x03");
       await waitForExit(secondRun);
@@ -102,7 +101,7 @@ describe("CLI worker history smoke", () => {
         stopIfRunning(secondRun);
       }
     }
-  }, 20000);
+  }, 90000);
 });
 
 interface CliRun {
@@ -148,18 +147,18 @@ function startCli(appRoot: string, workspace: string, taskId?: string): CliRun {
   };
 }
 
-async function assertChronologicalWorkerTabs(run: CliRun): Promise<void> {
-  await waitForScreenText(run, "judge/mock · 1/6");
+async function assertChronologicalWorkerTabs(run: CliRun, workerCount: number): Promise<void> {
+  await waitForScreenText(run, `judge/mock · 1/${workerCount}`);
   await waitForScreenMatch(run, /judge\/mock(?: · |:)done/);
   run.child.write("\t");
-  await waitForScreenText(run, "actor/mock · 2/6");
+  await waitForScreenText(run, `actor/mock · 2/${workerCount}`);
   run.child.write("\t");
-  await waitForScreenText(run, "critic/mock · 3/6");
+  await waitForScreenText(run, `critic/mock · 3/${workerCount}`);
   run.child.write("\t");
-  await waitForScreenText(run, "judge/mock · Turn 2 · 4/6");
+  await waitForScreenText(run, `judge/mock · Turn 2 · 4/${workerCount}`);
 }
 
-async function assertNarrowWorkerChrome(run: CliRun): Promise<void> {
+async function assertNarrowWorkerChrome(run: CliRun, workerCount: number): Promise<void> {
   await resizeAndWaitForFreshScreenText({
     child: run.child,
     screen: run.screen,
@@ -167,7 +166,7 @@ async function assertNarrowWorkerChrome(run: CliRun): Promise<void> {
     revision: run.outputRevision,
     cols: 32,
     rows: 22,
-    text: "judge/mock · 4/6"
+    text: `judge/mock · 4/${workerCount}`
   });
   expect(maxScreenWidth(run.screen)).toBeLessThanOrEqual(32);
 
@@ -178,7 +177,7 @@ async function assertNarrowWorkerChrome(run: CliRun): Promise<void> {
     revision: run.outputRevision,
     cols: 24,
     rows: 22,
-    text: "judge · 4/6"
+    text: `judge/mock · 4/${workerCount}`
   });
   expect(maxScreenWidth(run.screen)).toBeLessThanOrEqual(24);
 }
@@ -194,8 +193,17 @@ async function workerDirectories(taskDir: string): Promise<string[]> {
     .sort();
 }
 
+function expectedWorkerDirectories(turnCount: number): string[] {
+  return (["actor", "critic", "judge"] as const).flatMap((role) =>
+    Array.from({ length: turnCount }, (_, index) => {
+      const turn = index + 1;
+      return turn === 1 ? `${role}-mock` : `${role}-mock-${String(turn).padStart(4, "0")}`;
+    })
+  );
+}
+
 async function waitForTaskCount(workspace: string, count: number): Promise<string[]> {
-  for (let attempt = 0; attempt < 200; attempt += 1) {
+  for (let attempt = 0; attempt < 600; attempt += 1) {
     try {
       const ids = (await readdir(join(workspace, ".parallel-codex", "sessions")))
         .filter((entry) => entry.startsWith("task-"))
@@ -214,7 +222,7 @@ async function waitForTaskCount(workspace: string, count: number): Promise<strin
 async function waitForTaskTurnDone(taskDir: string, turnId: string): Promise<void> {
   const summaryPath = join(taskDir, "turns", turnId, "supervisor-summary.md");
   const metaPath = join(taskDir, "meta.json");
-  for (let attempt = 0; attempt < 240; attempt += 1) {
+  for (let attempt = 0; attempt < 600; attempt += 1) {
     try {
       const meta = await readJson(metaPath, TaskMetaSchema);
       if (meta.status === "done" && await pathExists(summaryPath)) {
@@ -237,6 +245,18 @@ async function waitForScreenText(run: CliRun, text: string): Promise<void> {
     await new Promise((resolve) => setTimeout(resolve, 50));
   }
   throw new Error(`Timed out waiting for ${text}\nSnapshot:\n${run.screen.snapshot()}`);
+}
+
+async function waitForIdleInput(run: CliRun): Promise<void> {
+  for (let attempt = 0; attempt < 600; attempt += 1) {
+    await run.screenWrites();
+    const snapshot = run.screen.snapshot();
+    if (snapshot.includes("> | message") && !snapshot.includes("run working")) {
+      return;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+  throw new Error(`Timed out waiting for the chat input to become idle\nSnapshot:\n${run.screen.snapshot()}`);
 }
 
 async function waitForScreenMatch(run: CliRun, pattern: RegExp): Promise<void> {

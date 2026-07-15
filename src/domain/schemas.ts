@@ -51,6 +51,7 @@ export const TaskStateSchema = z.enum([
   "revision_needed",
   "integrating",
   "verifying",
+  "paused",
   "done",
   "failed",
   "cancelled"
@@ -85,6 +86,7 @@ export const FeatureStateSchema = z.enum([
   "revision_needed",
   "integrating",
   "verifying",
+  "paused",
   "approved",
   "failed",
   "cancelled"

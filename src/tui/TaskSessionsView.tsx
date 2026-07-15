@@ -174,7 +174,7 @@ function TaskSessionRow({ line, width }: { line: TaskSessionDisplayLine; width: 
 }
 
 function taskSessionSummary(tasks: TaskIndexSummary[], width: number): string {
-  const counts = new Map<"running" | "done" | "failed" | "cancelled", number>();
+  const counts = new Map<"running" | "paused" | "done" | "failed" | "cancelled", number>();
   let archived = 0;
   for (const task of tasks) {
     if (task.archived_at) {
@@ -184,8 +184,8 @@ function taskSessionSummary(tasks: TaskIndexSummary[], width: number): string {
     const group = taskSessionStatusGroup(task.status);
     counts.set(group, (counts.get(group) ?? 0) + 1);
   }
-  const parts = ["running", "done", "failed", "cancelled"].flatMap((group) => {
-    const count = counts.get(group as "running" | "done" | "failed" | "cancelled") ?? 0;
+  const parts = ["running", "paused", "done", "failed", "cancelled"].flatMap((group) => {
+    const count = counts.get(group as "running" | "paused" | "done" | "failed" | "cancelled") ?? 0;
     return count > 0 ? [`${count} ${group}`] : [];
   });
   if (archived > 0) {
@@ -231,8 +231,8 @@ function clampTaskIndex(index: number, count: number): number {
   return Math.min(Math.max(0, count - 1), Math.max(0, Math.trunc(index)));
 }
 
-function taskSessionStatusGroup(status: TaskState): "running" | "done" | "failed" | "cancelled" {
-  if (status === "done" || status === "failed" || status === "cancelled") {
+function taskSessionStatusGroup(status: TaskState): "running" | "paused" | "done" | "failed" | "cancelled" {
+  if (status === "paused" || status === "done" || status === "failed" || status === "cancelled") {
     return status;
   }
   return "running";
@@ -249,6 +249,9 @@ function taskSessionStatusTone(task: TaskIndexSummary): TaskSessionLineTone {
   const status = task.status;
   if (status === "done") {
     return "success";
+  }
+  if (status === "paused") {
+    return "warning";
   }
   if (status === "failed") {
     return "danger";

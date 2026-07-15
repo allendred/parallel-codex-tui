@@ -3251,6 +3251,95 @@ describe("Orchestrator", () => {
     });
   });
 
+  it("pauses one active feature and resumes only unfinished work from the same task", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pct-orch-pause-feature-"));
+    const config = mockConfig(root);
+    config.orchestration.maxParallelFeatures = 2;
+    const manager = new SessionManager({
+      projectRoot: root,
+      dataDir: config.dataDir,
+      now: () => new Date("2026-06-30T03:32:06.000Z"),
+      randomId: () => "feature-pause"
+    });
+    const script = [
+      "const fs = require('node:fs');",
+      "const path = require('node:path');",
+      "const role = process.env.PARALLEL_CODEX_ROLE;",
+      "const workerId = process.env.PARALLEL_CODEX_WORKER_ID;",
+      "const filesDir = process.env.PARALLEL_CODEX_FILES_DIR;",
+      "if (role === 'judge') {",
+      "  fs.writeFileSync(path.join(filesDir, 'requirements.md'), '# Requirements\\n\\n- [R-001] Implement alpha and beta.\\n');",
+      "  fs.writeFileSync(path.join(filesDir, 'plan.md'), '# Plan\\n\\n1. [P-001] Implement both features.\\n');",
+      "  fs.writeFileSync(path.join(filesDir, 'acceptance.md'), '# Acceptance\\n\\n- [A-001] [R-001] Both features are verified.\\n');",
+      "  fs.writeFileSync(path.join(filesDir, 'actor-brief.md'), '# Actor Brief\\n\\nImplement the assigned feature.\\n');",
+      "  fs.writeFileSync(path.join(filesDir, 'critic-brief.md'), '# Critic Brief\\n\\nVerify the assigned feature.\\n');",
+      "  fs.writeFileSync(path.join(filesDir, 'features.json'), JSON.stringify({version:1,features:[",
+      "    {id:'alpha',title:'Alpha',description:'Implement alpha',depends_on:[]},",
+      "    {id:'beta',title:'Beta',description:'Implement beta',depends_on:[]}",
+      "  ]}));",
+      "  process.exit(0);",
+      "}",
+      "if (role === 'actor') {",
+      "  const countPath = path.join(filesDir, 'run-count.txt');",
+      "  const count = (fs.existsSync(countPath) ? Number(fs.readFileSync(countPath, 'utf8')) : 0) + 1;",
+      "  fs.writeFileSync(countPath, String(count));",
+      "  console.log(workerId + ' run ' + count);",
+      "  if (workerId.endsWith('-alpha') && count === 1) setInterval(() => {}, 1000);",
+      "  else setTimeout(() => { fs.writeFileSync(path.join(filesDir, 'worklog.md'), workerId + ' complete\\n'); process.exit(0); }, 180);",
+      "}",
+      "if (role === 'critic') { fs.writeFileSync(path.join(filesDir, 'review.md'), 'APPROVED\\n'); process.exit(0); }"
+    ].join("");
+    const adapter = new ProcessWorkerAdapter(process.execPath, ["-e", script]);
+    const orchestrator = new Orchestrator(config, manager, new Map([["mock", adapter]]));
+    const taskId = "task-20260630-033206-feature-pause";
+    const taskDir = join(root, ".parallel-codex", "sessions", taskId);
+    let pause: Promise<{ requested: boolean; featureId: string; role?: string }> | null = null;
+
+    const run = orchestrator.handleRequest({
+      request: "并行实现 alpha 与 beta，暂停后继续",
+      cwd: root,
+      onWorker: (worker) => {
+        if (worker.id === "actor-mock-0001-alpha" && !pause) {
+          pause = (async () => {
+            const countPath = join(taskDir, "actor-mock-0001-alpha", "run-count.txt");
+            for (let attempt = 0; attempt < 100; attempt += 1) {
+              if (await pathExists(countPath)) {
+                return orchestrator.pauseFeature(taskId, "0001-alpha");
+              }
+              await new Promise((resolve) => setTimeout(resolve, 10));
+            }
+            throw new Error("Timed out waiting for the alpha Actor to start");
+          })();
+        }
+      }
+    });
+
+    await expect(run).rejects.toThrow("Feature 0001-alpha was paused before integration");
+    await expect(pause).resolves.toEqual({
+      requested: true,
+      featureId: "0001-alpha",
+      role: "actor"
+    });
+
+    await expect(readJson(join(taskDir, "meta.json"), TaskMetaSchema)).resolves.toMatchObject({ status: "paused" });
+    expect(JSON.parse(await readTextIfExists(join(taskDir, "features", "0001-alpha", "status.json")))).toMatchObject({ state: "paused" });
+    expect(JSON.parse(await readTextIfExists(join(taskDir, "features", "0001-beta", "status.json")))).toMatchObject({ state: "actor_done" });
+    expect(await readTextIfExists(join(taskDir, "actor-mock-0001-alpha", "run-count.txt"))).toBe("1");
+    expect(await readTextIfExists(join(taskDir, "actor-mock-0001-beta", "run-count.txt"))).toBe("1");
+    await expect(orchestrator.canRetryTask(taskId)).resolves.toBe(true);
+
+    const resumed = await orchestrator.resumeFeature({ taskId, featureId: "0001-alpha", cwd: root });
+    expect(resumed.mode).toBe("complex");
+    await expect(readJson(join(taskDir, "meta.json"), TaskMetaSchema)).resolves.toMatchObject({ status: "done" });
+    expect(await readTextIfExists(join(taskDir, "actor-mock-0001-alpha", "run-count.txt"))).toBe("2");
+    expect(await readTextIfExists(join(taskDir, "actor-mock-0001-beta", "run-count.txt"))).toBe("1");
+    const events = await readTextIfExists(join(taskDir, "events.jsonl"));
+    expect(events).toContain("feature.pause_requested");
+    expect(events).toContain("feature.paused");
+    expect(events).toContain("feature.resume_requested");
+    expect(events).toContain("feature.wave_actor_checkpoints_reused");
+  });
+
   it("marks an interrupted task cancelled and does not start the next worker", async () => {
     const root = await mkdtemp(join(tmpdir(), "pct-orch-cancel-"));
     const config = mockConfig(root);

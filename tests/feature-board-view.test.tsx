@@ -85,14 +85,14 @@ describe("FeatureBoardView", () => {
     ).featureBoardDisplayLines;
     const timeline = fixture();
     timeline.features[0]!.state = "queued";
-    timeline.features[1]!.state = "actor_done";
+    timeline.features[1]!.state = "paused";
     timeline.features[2]!.state = "critic_running";
 
     const text = (displayLines?.(timeline, 0, 10, 100) ?? []).map((line) => line.text).join("\n");
 
-    expect(text).toContain("3 features · 1 active");
+    expect(text).toContain("3 features · 1 active · 1 paused");
     expect(text).toContain("Game Engine · queued");
-    expect(text).toContain("Game UI · actor done");
+    expect(text).toContain("Game UI · paused");
     expect(text).toContain("Game Help · critic running");
   });
 

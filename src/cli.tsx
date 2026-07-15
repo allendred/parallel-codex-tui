@@ -249,7 +249,8 @@ async function loadInteractiveWorkspace(
     const recoveryMessages = startupRecoveryMessages(
       runtime.recoveredTasks,
       initialTaskId,
-      runtime.pendingTaskCreations
+      runtime.pendingTaskCreations,
+      runtime.index.recovery
     );
 
     return {

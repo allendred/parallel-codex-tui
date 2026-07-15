@@ -17,6 +17,8 @@ describe("task state machine", () => {
     ["verifying", "integrating"],
     ["integrating", "actor_running"],
     ["integrating", "done"],
+    ["actor_running", "paused"],
+    ["paused", "routed"],
     ["ready_for_pair", "done"],
     ["done", "routed"],
     ["failed", "judging"],
@@ -36,7 +38,8 @@ describe("task state machine", () => {
     ["verifying", "done"],
     ["done", "actor_running"],
     ["failed", "done"],
-    ["cancelled", "critic_running"]
+    ["cancelled", "critic_running"],
+    ["paused", "done"]
   ])("rejects %s -> %s", (from, to) => {
     expect(taskStateTransitionAllowed(from, to)).toBe(false);
   });

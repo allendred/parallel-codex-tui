@@ -81,7 +81,7 @@ describe("Orchestrator retry lease", () => {
     leaseGate.resumeClaim();
 
     await expect(retry).rejects.toThrow(
-      `Task ${task.id} is done; only failed or cancelled tasks can be retried.`
+      `Task ${task.id} is done; only failed, cancelled, or paused tasks can be retried.`
     );
     expect(await pathExists(join(task.dir, "judge-mock"))).toBe(false);
     expect(await readTextIfExists(task.eventsPath)).not.toContain("task.retrying");

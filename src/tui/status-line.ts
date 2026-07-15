@@ -473,6 +473,9 @@ function compactStatus(status: string): string {
   if (state === "cancelled" || state === "canceled") {
     return "stop";
   }
+  if (state === "paused") {
+    return "wait";
+  }
   if (state === "waiting" || state === "queued") {
     return "wait";
   }

@@ -9,8 +9,8 @@ import { displayWidth } from "../src/tui/display-width.js";
 import { NativeTerminalScreen } from "../src/tui/terminal-screen.js";
 import { resizeAndWaitForFreshScreenText } from "./pty-resize.js";
 
-describe("CLI Feature cancel smoke", () => {
-  it("confirms and cancels only the selected active Feature from the board", async () => {
+describe("CLI Feature control smoke", () => {
+  it("pauses, resumes, and cancels only the selected active Feature from the board", async () => {
     const workspace = await mkdtemp(join(tmpdir(), "pct-cli-feature-cancel-workspace-"));
     const appRoot = await mkdtemp(join(tmpdir(), "pct-cli-feature-cancel-app-"));
     const agentScript = join(appRoot, "feature-cancel-agent.cjs");
@@ -100,7 +100,7 @@ describe("CLI Feature cancel smoke", () => {
         revision: () => outputRevision,
         cols: 40,
         rows: 20,
-        text: "features · X cancel · Esc workers"
+        text: "ft · P pause · X cancel · Esc workers"
       });
       expect(Math.max(...screen.snapshot().split("\n").map((line) => displayWidth(line)))).toBeLessThanOrEqual(40);
 
@@ -130,6 +130,29 @@ describe("CLI Feature cancel smoke", () => {
       await waitForScreenText(() => screenWrites, screen, "X cancel");
       expect((await readJson(alphaWorkerPath, WorkerStatusSchema)).state).toBe("running");
 
+      child.write("p");
+      await waitForScreenText(() => screenWrites, screen, "pause feature? · P confirm · Esc keep");
+      await waitForScreenText(() => screenWrites, screen, "Pause Alpha? Completed peer checkpoints will be kept.");
+      child.write("p");
+      await waitForTaskState(join(taskDir, "meta.json"), "paused");
+      await waitForScreenText(() => screenWrites, screen, "Pause requested for Alpha");
+      await waitForScreenText(() => screenWrites, screen, "Alpha · paused");
+      expect((await readJson(alphaWorkerPath, WorkerStatusSchema)).state).toBe("cancelled");
+      expect((await readJson(
+        join(taskDir, "actor-codex-0001-beta", "status.json"),
+        WorkerStatusSchema
+      )).state).toBe("done");
+      let events = await readTextIfExists(join(taskDir, "events.jsonl"));
+      expect(events).toContain("feature.pause_requested");
+      expect(events).toContain("feature.paused");
+
+      child.write("\x12");
+      await waitForFileText(join(taskDir, "actor-codex-0001-alpha", "run-count.txt"), "2");
+      await waitForWorkerPhase(alphaWorkerPath, "process-output");
+      await waitForScreenText(() => screenWrites, screen, "Alpha · actor running");
+      events = await readTextIfExists(join(taskDir, "events.jsonl"));
+      expect(events).toContain("feature.resume_requested");
+
       child.write("x");
       await waitForScreenText(() => screenWrites, screen, "cancel feature? · X confirm · Esc keep");
       child.write("x");
@@ -142,7 +165,7 @@ describe("CLI Feature cancel smoke", () => {
         join(taskDir, "actor-codex-0001-beta", "status.json"),
         WorkerStatusSchema
       );
-      const events = await readTextIfExists(join(taskDir, "events.jsonl"));
+      events = await readTextIfExists(join(taskDir, "events.jsonl"));
       expect((await readJson(alphaWorkerPath, WorkerStatusSchema)).state).toBe("cancelled");
       expect(betaWorker.state).toBe("done");
       expect(events).toContain("feature.cancel_requested");
@@ -156,7 +179,7 @@ describe("CLI Feature cancel smoke", () => {
       await waitForTaskState(join(taskDir, "meta.json"), "done");
       await waitForScreenText(() => screenWrites, screen, "2 features · 2 approved");
       const resumedEvents = await readTextIfExists(join(taskDir, "events.jsonl"));
-      expect(await readTextIfExists(join(taskDir, "actor-codex-0001-alpha", "run-count.txt"))).toBe("2");
+      expect(await readTextIfExists(join(taskDir, "actor-codex-0001-alpha", "run-count.txt"))).toBe("3");
       expect(await readTextIfExists(join(taskDir, "actor-codex-0001-beta", "run-count.txt"))).toBe("1");
       expect(await readTextIfExists(join(workspace, "alpha.txt"))).toBe("alpha\n");
       expect(await readTextIfExists(join(workspace, "beta.txt"))).toBe("beta\n");
@@ -171,7 +194,7 @@ describe("CLI Feature cancel smoke", () => {
         child.kill("SIGTERM");
       }
     }
-  }, 25000);
+  }, 35000);
 });
 
 function featureCancelAgentSource(): string {
@@ -201,7 +224,7 @@ function featureCancelAgentSource(): string {
     "    const countPath = path.join(dir, 'run-count.txt');",
     "    const runCount = (fs.existsSync(countPath) ? Number(fs.readFileSync(countPath, 'utf8')) : 0) + 1;",
     "    fs.writeFileSync(countPath, String(runCount));",
-    "    if (workerId.endsWith('-alpha') && runCount === 1) setInterval(() => {}, 1000);",
+    "    if (workerId.endsWith('-alpha') && runCount <= 2) setInterval(() => {}, 1000);",
     "    else setTimeout(() => {",
     "      const name = workerId.endsWith('-alpha') ? 'alpha' : 'beta';",
     "      fs.writeFileSync(path.join(process.cwd(), name + '.txt'), name + '\\n');",
@@ -269,6 +292,16 @@ async function waitForTaskState(metaPath: string, state: string): Promise<void> 
     await new Promise((resolve) => setTimeout(resolve, 50));
   }
   throw new Error(`Timed out waiting for task state ${state}`);
+}
+
+async function waitForFileText(path: string, text: string): Promise<void> {
+  for (let attempt = 0; attempt < 200; attempt += 1) {
+    if ((await readTextIfExists(path)).includes(text)) {
+      return;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+  throw new Error(`Timed out waiting for ${text} in ${path}`);
 }
 
 async function waitForScreenText(

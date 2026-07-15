@@ -857,6 +857,28 @@ describe("InputBar", () => {
     view.unmount();
   });
 
+  it("shows separate pause and cancel actions for an active feature", () => {
+    const active = render(
+      <InputBar
+        mode="features"
+        value=""
+        terminalWidth={80}
+        featureCanPause
+        featureCanCancel
+        onChange={() => {}}
+      />
+    );
+    expect(active.lastFrame()).toContain("P pause");
+    expect(active.lastFrame()).toContain("X cancel");
+    active.unmount();
+
+    const confirm = render(
+      <InputBar mode="features" value="" terminalWidth={40} featurePauseConfirm onChange={() => {}} />
+    );
+    expect(confirm.lastFrame()).toContain("pause feature? · P confirm · Esc keep");
+    confirm.unmount();
+  });
+
   it("shows collaboration timeline filtering and refresh guidance", () => {
     const collaborationMode = "collaboration" as Parameters<typeof InputBar>[0]["mode"];
     const roomy = render(

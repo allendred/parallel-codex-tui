@@ -1,6 +1,6 @@
-import { readdir } from "node:fs/promises";
+import { copyFile, readdir, rename, rm } from "node:fs/promises";
 import { join } from "node:path";
-import { DatabaseSync } from "node:sqlite";
+import { backup, DatabaseSync } from "node:sqlite";
 import type { ZodTypeAny, output } from "zod";
 import {
   NativeSessionSchema,
@@ -33,76 +33,83 @@ export interface ListTaskOptions {
   includeArchived?: boolean;
 }
 
+export interface SessionIndexRecovery {
+  source: "backup" | "empty";
+  quarantinedPath: string;
+}
+
+const SESSION_INDEX_SCHEMA_VERSION = 2;
+const SESSION_INDEX_FILENAME = "session-index.sqlite";
+
 export class SessionIndex {
   private constructor(
     private readonly db: DatabaseSync,
     private readonly projectRoot: string,
-    private readonly dataDir: string
+    private readonly dataDir: string,
+    private readonly databasePath: string,
+    readonly recovery: SessionIndexRecovery | null
   ) {}
 
   static async open(projectRoot: string, dataDir: string): Promise<SessionIndex> {
-    await ensureDir(join(projectRoot, dataDir));
-    const index = new SessionIndex(new DatabaseSync(join(projectRoot, dataDir, "session-index.sqlite")), projectRoot, dataDir);
-    index.initialize();
-    return index;
+    const runtimeDir = join(projectRoot, dataDir);
+    const databasePath = join(runtimeDir, SESSION_INDEX_FILENAME);
+    const recoveryBackupPath = `${databasePath}.backup`;
+    await ensureDir(runtimeDir);
+    const databaseExisted = await pathExists(databasePath);
+    const opened = await openSessionDatabase(databasePath, recoveryBackupPath);
+    const index = new SessionIndex(
+      opened.db,
+      projectRoot,
+      dataDir,
+      databasePath,
+      opened.recovery
+    );
+    try {
+      const previousVersion = index.schemaVersion();
+      if (databaseExisted && previousVersion < SESSION_INDEX_SCHEMA_VERSION) {
+        await index.writeBackup(`${databasePath}.pre-migration-v${previousVersion}.backup`);
+      }
+      index.initialize();
+      await index.writeBackup(recoveryBackupPath);
+      return index;
+    } catch (error) {
+      try {
+        index.close();
+      } catch {
+        // Preserve the migration or backup failure that prevented startup.
+      }
+      throw error;
+    }
   }
 
   initialize(): void {
-    this.db.exec(`
-      PRAGMA busy_timeout = 5000;
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      const currentVersion = this.schemaVersion();
+      if (currentVersion > SESSION_INDEX_SCHEMA_VERSION) {
+        throw new Error(
+          `Session index schema v${currentVersion} is newer than supported v${SESSION_INDEX_SCHEMA_VERSION}`
+        );
+      }
+      for (let targetVersion = currentVersion + 1; targetVersion <= SESSION_INDEX_SCHEMA_VERSION; targetVersion += 1) {
+        this.applyMigration(targetVersion);
+        this.db.exec(`PRAGMA user_version = ${targetVersion}`);
+      }
+      this.db.exec("COMMIT");
+    } catch (error) {
+      try {
+        this.db.exec("ROLLBACK");
+      } catch {
+        // Preserve the migration failure if SQLite already rolled the transaction back.
+      }
+      throw error;
+    }
+    assertHealthyDatabase(this.db);
+  }
 
-      CREATE TABLE IF NOT EXISTS tasks (
-        id TEXT PRIMARY KEY,
-        title TEXT NOT NULL,
-        created_at TEXT NOT NULL,
-        cwd TEXT NOT NULL,
-        mode TEXT NOT NULL,
-        status TEXT NOT NULL,
-        archived_at TEXT
-      );
-
-      CREATE TABLE IF NOT EXISTS turns (
-        task_id TEXT NOT NULL,
-        turn_id TEXT NOT NULL,
-        created_at TEXT NOT NULL,
-        request_path TEXT NOT NULL,
-        PRIMARY KEY (task_id, turn_id)
-      );
-
-      CREATE TABLE IF NOT EXISTS workers (
-        task_id TEXT NOT NULL,
-        worker_id TEXT NOT NULL,
-        role TEXT NOT NULL,
-        engine TEXT NOT NULL,
-        state TEXT NOT NULL,
-        phase TEXT NOT NULL,
-        summary TEXT NOT NULL,
-        status_path TEXT NOT NULL,
-        output_log_path TEXT NOT NULL,
-        dir TEXT NOT NULL,
-        native_session_id TEXT,
-        PRIMARY KEY (task_id, worker_id)
-      );
-
-      CREATE TABLE IF NOT EXISTS native_sessions (
-        task_id TEXT NOT NULL,
-        worker_id TEXT NOT NULL,
-        engine TEXT NOT NULL,
-        role TEXT NOT NULL,
-        session_id TEXT NOT NULL,
-        cwd TEXT NOT NULL,
-        created_at TEXT NOT NULL,
-        last_used_at TEXT NOT NULL,
-        source TEXT NOT NULL,
-        PRIMARY KEY (task_id, worker_id)
-      );
-
-      CREATE TABLE IF NOT EXISTS workspace_state (
-        key TEXT PRIMARY KEY,
-        value TEXT NOT NULL
-      );
-    `);
-    this.ensureColumn("tasks", "archived_at", "TEXT");
+  schemaVersion(): number {
+    const row = this.db.prepare("PRAGMA user_version").get() as { user_version?: number } | undefined;
+    return Number(row?.user_version) || 0;
   }
 
   async upsertTask(task: TaskMeta): Promise<void> {
@@ -335,6 +342,7 @@ export class SessionIndex {
       }
       throw error;
     }
+    await this.writeBackup(`${this.databasePath}.backup`);
   }
 
   close(): void {
@@ -351,6 +359,79 @@ export class SessionIndex {
       if (!this.tableHasColumn(table, column)) {
         throw error;
       }
+    }
+  }
+
+  private applyMigration(targetVersion: number): void {
+    if (targetVersion === 1) {
+      this.db.exec(`
+        CREATE TABLE IF NOT EXISTS tasks (
+          id TEXT PRIMARY KEY,
+          title TEXT NOT NULL,
+          created_at TEXT NOT NULL,
+          cwd TEXT NOT NULL,
+          mode TEXT NOT NULL,
+          status TEXT NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS turns (
+          task_id TEXT NOT NULL,
+          turn_id TEXT NOT NULL,
+          created_at TEXT NOT NULL,
+          request_path TEXT NOT NULL,
+          PRIMARY KEY (task_id, turn_id)
+        );
+
+        CREATE TABLE IF NOT EXISTS workers (
+          task_id TEXT NOT NULL,
+          worker_id TEXT NOT NULL,
+          role TEXT NOT NULL,
+          engine TEXT NOT NULL,
+          state TEXT NOT NULL,
+          phase TEXT NOT NULL,
+          summary TEXT NOT NULL,
+          status_path TEXT NOT NULL,
+          output_log_path TEXT NOT NULL,
+          dir TEXT NOT NULL,
+          native_session_id TEXT,
+          PRIMARY KEY (task_id, worker_id)
+        );
+
+        CREATE TABLE IF NOT EXISTS native_sessions (
+          task_id TEXT NOT NULL,
+          worker_id TEXT NOT NULL,
+          engine TEXT NOT NULL,
+          role TEXT NOT NULL,
+          session_id TEXT NOT NULL,
+          cwd TEXT NOT NULL,
+          created_at TEXT NOT NULL,
+          last_used_at TEXT NOT NULL,
+          source TEXT NOT NULL,
+          PRIMARY KEY (task_id, worker_id)
+        );
+
+        CREATE TABLE IF NOT EXISTS workspace_state (
+          key TEXT PRIMARY KEY,
+          value TEXT NOT NULL
+        );
+      `);
+      return;
+    }
+    if (targetVersion === 2) {
+      this.ensureColumn("tasks", "archived_at", "TEXT");
+      return;
+    }
+    throw new Error(`Missing session index migration for schema v${targetVersion}`);
+  }
+
+  private async writeBackup(targetPath: string): Promise<void> {
+    const tempPath = `${targetPath}.${process.pid}.${Date.now()}.${Math.random().toString(16).slice(2)}.tmp`;
+    try {
+      await backup(this.db, tempPath);
+      await replaceFile(tempPath, targetPath);
+    } catch (error) {
+      await rm(tempPath, { force: true }).catch(() => undefined);
+      throw error;
     }
   }
 
@@ -453,6 +534,115 @@ export class SessionIndex {
     }
     const retired = await readJsonIfValid(retiredNativePath, RetiredNativeSessionSchema);
     return retired?.session_id === active.session_id ? null : active;
+  }
+}
+
+async function openSessionDatabase(
+  databasePath: string,
+  backupPath: string
+): Promise<{ db: DatabaseSync; recovery: SessionIndexRecovery | null }> {
+  let db: DatabaseSync | null = null;
+  try {
+    db = openCheckedDatabase(databasePath);
+    return { db, recovery: null };
+  } catch (primaryError) {
+    try {
+      db?.close();
+    } catch {
+      // Continue into file-backed recovery.
+    }
+
+    const backupIsHealthy = await isHealthyDatabaseFile(backupPath);
+    const quarantinedPath = await quarantineDatabase(databasePath);
+    await Promise.all([
+      rm(`${databasePath}-wal`, { force: true }),
+      rm(`${databasePath}-shm`, { force: true })
+    ]);
+    if (backupIsHealthy) {
+      await copyFile(backupPath, databasePath);
+    }
+
+    try {
+      return {
+        db: openCheckedDatabase(databasePath),
+        recovery: {
+          source: backupIsHealthy ? "backup" : "empty",
+          quarantinedPath
+        }
+      };
+    } catch (recoveryError) {
+      throw new AggregateError(
+        [primaryError, recoveryError],
+        `Unable to open or recover session index: ${databasePath}`
+      );
+    }
+  }
+}
+
+function openCheckedDatabase(path: string): DatabaseSync {
+  const db = new DatabaseSync(path);
+  try {
+    db.exec("PRAGMA busy_timeout = 5000");
+    assertHealthyDatabase(db);
+    return db;
+  } catch (error) {
+    try {
+      db.close();
+    } catch {
+      // Preserve the database validation failure.
+    }
+    throw error;
+  }
+}
+
+function assertHealthyDatabase(db: DatabaseSync): void {
+  const rows = db.prepare("PRAGMA quick_check").all() as Array<Record<string, unknown>>;
+  if (
+    rows.length !== 1
+    || Object.values(rows[0] ?? {}).length !== 1
+    || Object.values(rows[0] ?? {})[0] !== "ok"
+  ) {
+    throw new Error(`Session index integrity check failed: ${JSON.stringify(rows)}`);
+  }
+}
+
+async function isHealthyDatabaseFile(path: string): Promise<boolean> {
+  if (!(await pathExists(path))) {
+    return false;
+  }
+  let db: DatabaseSync | null = null;
+  try {
+    db = new DatabaseSync(path);
+    assertHealthyDatabase(db);
+    return true;
+  } catch {
+    return false;
+  } finally {
+    try {
+      db?.close();
+    } catch {
+      // A failed validation can leave no open handle to close.
+    }
+  }
+}
+
+async function quarantineDatabase(path: string): Promise<string> {
+  const quarantinedPath = `${path}.corrupt-${Date.now()}-${process.pid}`;
+  if (await pathExists(path)) {
+    await rename(path, quarantinedPath);
+  }
+  return quarantinedPath;
+}
+
+async function replaceFile(source: string, target: string): Promise<void> {
+  try {
+    await rename(source, target);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "EEXIST" && (error as NodeJS.ErrnoException).code !== "EPERM") {
+      throw error;
+    }
+    await rm(target, { force: true });
+    await rename(source, target);
   }
 }
 

@@ -307,7 +307,9 @@ describe("package metadata", () => {
     expect(readme).toContain("blocked dependencies and open Critic findings");
     expect(readme).toContain("Enter opens the selected feature's collaboration timeline");
     expect(readme).toContain("`Esc` returns to the Feature board");
-    expect(readme).toContain("press `X` twice to cancel only its active Actor or Critic process");
+    expect(readme).toContain("press `P` twice to pause only its active Actor or Critic process");
+    expect(readme).toContain("press `X` twice to cancel it");
+    expect(readme).toContain("press `Ctrl+R` to resume the same task, turn, and native Worker session");
     expect(readme).toContain("already-running peers finish, queued workers stop, and integration remains blocked");
     expect(readme).toContain("Queued Feature workers remain `queued` until they acquire a concurrency slot");
     expect(readme).toContain("`actor_done` or `critic_done`");
@@ -396,7 +398,8 @@ describe("package metadata", () => {
     expect(readme).toContain("`H` to show or hide archived sessions");
     expect(readme).toContain("Archived sessions are hidden by default");
     expect(readme).toContain("Exports are complete file-backed snapshots under `.parallel-codex/exports/<task>-<timestamp>/`");
-    expect(readme).toContain("Existing SQLite catalogs gain the nullable archive column automatically");
+    expect(readme).toContain("SQLite schema changes run as ordered, transactional migrations");
+    expect(readme).toContain("an integrity failure restores that backup or rebuilds the catalog from authoritative task files");
     expect(readme).toContain("`Ctrl+N` persists an intentionally empty active-task context");
     expect(readme).toContain("`Ctrl+F` searches the final rendered Worker log");
     expect(readme).toContain("Enter moves to the next match and Up/Down moves backward or forward");

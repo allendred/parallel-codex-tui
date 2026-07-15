@@ -165,6 +165,7 @@ function featureBoardSummary(timeline: CollaborationTimeline | null, width: numb
   const approved = timeline.features.filter((feature) => feature.state === "approved").length;
   const active = timeline.features.filter((feature) => featureBoardStateIsActive(feature.state)).length;
   const revision = timeline.features.filter((feature) => feature.state === "revision_needed").length;
+  const paused = timeline.features.filter((feature) => feature.state === "paused").length;
   const failed = timeline.features.filter((feature) => feature.state === "failed" || feature.state === "cancelled").length;
   const blocked = timeline.features.filter((feature) => featureBoardBlockedDependencies(timeline, feature).length > 0).length;
   const full = [
@@ -172,6 +173,7 @@ function featureBoardSummary(timeline: CollaborationTimeline | null, width: numb
     ...(approved > 0 ? [`${approved} approved`] : []),
     ...(active > 0 ? [`${active} active`] : []),
     ...(revision > 0 ? [`${revision} ${revision === 1 ? "revision" : "revisions"}`] : []),
+    ...(paused > 0 ? [`${paused} paused`] : []),
     ...(blocked > 0 ? [`${blocked} blocked`] : []),
     ...(failed > 0 ? [`${failed} failed`] : [])
   ].join(" · ");
@@ -257,7 +259,7 @@ function featureBoardStateTone(state: CollaborationFeatureState): FeatureBoardLi
   if (state === "failed" || state === "cancelled") {
     return "danger";
   }
-  if (state === "revision_needed") {
+  if (state === "revision_needed" || state === "paused") {
     return "warning";
   }
   if (featureBoardStateIsActive(state)) {
