@@ -28,7 +28,7 @@ jobs:
             test-args: ""
           - os: macos-latest
             node-version: "26.x"
-            test-args: "--maxWorkers=1 --exclude tests/cli-worker-layout-smoke.test.ts"
+            test-args: "--maxWorkers=1"
 
     steps:
       - name: Checkout
@@ -48,10 +48,6 @@ jobs:
 
       - name: Check package contents
         run: npm run verify:package
-
-      - name: Test macOS PTY layout
-        if: runner.os == 'macOS'
-        run: npm test -- tests/cli-worker-layout-smoke.test.ts --maxWorkers=1
 
       - name: Test
         run: npm test -- ${{ matrix.test-args }}

@@ -2,6 +2,7 @@ import { execFileSync } from "node:child_process";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join, resolve } from "node:path";
+import { pathToFileURL } from "node:url";
 
 const root = resolve(import.meta.dirname, "..");
 const npmCommand = process.platform === "win32" ? "npm.cmd" : "npm";
@@ -30,6 +31,7 @@ try {
     "--global",
     "--prefix",
     installRoot,
+    "--allow-scripts=node-pty",
     tarballPath
   ], {
     cwd: root,
@@ -49,7 +51,44 @@ try {
     throw new Error("Installed CLI help is missing its usage line");
   }
 
-  process.stdout.write(`package install: ok (${basename(tarballPath)}; ${expectedVersion})\n`);
+  const globalRoot = execFileSync(npmCommand, ["root", "--global", "--prefix", installRoot], {
+    encoding: "utf8"
+  }).trim();
+  const installedPackageRoot = join(globalRoot, packageJson.name);
+  const nativeAttachUrl = pathToFileURL(
+    join(installedPackageRoot, "dist", "workers", "native-attach.js")
+  ).href;
+  const ptyOutput = execFileSync(process.execPath, [
+    "--input-type=module",
+    "-e",
+    [
+      "const { startNativeAttachProcess } = await import(process.argv[1]);",
+      "let output = '';",
+      "const timer = setTimeout(() => process.exit(2), 10000);",
+      "startNativeAttachProcess({",
+      "  command: process.execPath,",
+      "  args: ['-e', \"process.stdout.write('PTY_PACKAGE_OK')\"],",
+      "  cwd: process.cwd(), sessionId: 'package-check', label: 'Package check'",
+      "}, {",
+      "  onOutput: (chunk) => { output += chunk; },",
+      "  onClose: (exitCode) => {",
+      "    clearTimeout(timer);",
+      "    if (exitCode !== 0 || !output.includes('PTY_PACKAGE_OK')) process.exit(1);",
+      "    process.stdout.write(output);",
+      "  }",
+      "});"
+    ].join("\n"),
+    nativeAttachUrl
+  ], {
+    cwd: installedPackageRoot,
+    encoding: "utf8",
+    timeout: 15000
+  });
+  if (!ptyOutput.includes("PTY_PACKAGE_OK")) {
+    throw new Error("Installed package could not launch a child process through node-pty");
+  }
+
+  process.stdout.write(`package install: ok (${basename(tarballPath)}; ${expectedVersion}; pty ok)\n`);
 } finally {
   if (tarballPath) {
     rmSync(tarballPath, { force: true });

@@ -160,7 +160,7 @@ jobs:
 
           VERIFY_PREFIX=$(mktemp -d)
           trap 'rm -rf "$VERIFY_PREFIX"' EXIT
-          npm install --global --prefix "$VERIFY_PREFIX" "$PACKAGE_SPEC"
+          npm install --global --prefix "$VERIFY_PREFIX" --allow-scripts=node-pty "$PACKAGE_SPEC"
           "$VERIFY_PREFIX/bin/parallel-codex-tui" --version | grep -F "parallel-codex-tui $PACKAGE_VERSION"
 
       - name: Create or update GitHub release

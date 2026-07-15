@@ -8,6 +8,7 @@ import { TUI_THEME_FIELDS, TUI_THEME_PRESETS } from "../src/tui/theme.js";
 const execFileAsync = promisify(execFile);
 
 interface PackageJson {
+  allowScripts?: Record<string, boolean>;
   bin: Record<string, string>;
   bugs?: {
     url?: string;
@@ -92,6 +93,12 @@ describe("package metadata", () => {
       ".parallel-codex/config.example.toml"
     ]);
     expect(pkg.dependencies?.chalk).toBe("^5.3.0");
+    expect(pkg.allowScripts).toEqual({
+      "esbuild@0.28.1": true,
+      "fsevents@2.3.3": true,
+      "node-pty@1.1.0": true
+    });
+    expect(pkg.scripts?.pretest).toBe("node scripts/fix-node-pty-permissions.mjs");
     expect(pkg.scripts?.prepack).toBe("npm run build");
     expect(pkg.scripts?.["verify:package"]).toBe("node scripts/verify-package.mjs");
     expect(pkg.scripts?.prepare).toBeUndefined();
@@ -470,13 +477,12 @@ describe("package metadata", () => {
     expect(workflow).toContain('node-version: "24.15.x"');
     expect(workflow).toContain('node-version: "26.x"');
     expect(workflow).toContain("node-version: ${{ matrix.node-version }}");
-    expect(workflow).toContain('test-args: "--maxWorkers=1 --exclude tests/cli-worker-layout-smoke.test.ts"');
+    expect(workflow).toContain('test-args: "--maxWorkers=1"');
     expect(workflow).toContain("npm ci");
     expect(workflow).toContain("npm run typecheck");
     expect(workflow).toContain("npm run verify:package");
-    expect(workflow).toContain("if: runner.os == 'macOS'");
-    expect(workflow).toContain("npm test -- tests/cli-worker-layout-smoke.test.ts --maxWorkers=1");
     expect(workflow).toContain("npm test -- ${{ matrix.test-args }}");
+    expect(workflow).not.toContain("Test macOS PTY layout");
     expect(workflow).toContain('CI: "0"');
     expect(workflow).toContain("git diff --check");
   });
@@ -520,7 +526,7 @@ describe("package metadata", () => {
     expect(workflow).toContain("Verify published package");
     expect(workflow).toContain('PACKAGE_SPEC="parallel-codex-tui@$PACKAGE_VERSION"');
     expect(workflow).toContain('npm view "$PACKAGE_SPEC" version --json');
-    expect(workflow).toContain('npm install --global --prefix "$VERIFY_PREFIX" "$PACKAGE_SPEC"');
+    expect(workflow).toContain('npm install --global --prefix "$VERIFY_PREFIX" --allow-scripts=node-pty "$PACKAGE_SPEC"');
     expect(workflow).toContain('"$VERIFY_PREFIX/bin/parallel-codex-tui" --version');
     expect(workflow).toContain('grep -F "parallel-codex-tui $PACKAGE_VERSION"');
     expect(workflow).toContain("GH_TOKEN: ${{ github.token }}");
