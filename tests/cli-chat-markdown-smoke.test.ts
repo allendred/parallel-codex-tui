@@ -278,6 +278,9 @@ describe("CLI chat Markdown smoke", () => {
     try {
       await waitForScreenText(() => screenWrites, screen, "> | message");
       child.write("hello\r");
+      await waitForScreenText(() => screenWrites, screen, "route diagnostics");
+      child.write("\x13");
+      await waitForScreenText(() => screenWrites, screen, "parallel-codex-tui · status");
       await waitForScreenText(
         () => screenWrites,
         screen,
@@ -303,12 +306,27 @@ describe("CLI chat Markdown smoke", () => {
         screen,
         "route failed · 1 Main · 2 Parallel · R retry · Esc cancel"
       );
-      expect(screen.snapshot()).toContain(
+      expect(screen.snapshot()).toContain("route simple · fallback · timeout");
+      child.write("\x13");
+      await waitForScreenText(() => screenWrites, screen, "parallel-codex-tui · status");
+      await waitForScreenText(
+        () => screenWrites,
+        screen,
         "route simple · fallback · try 2 · idle timeout after stderr · via 127.0.0.1:7890"
       );
+      child.write("\x13");
+      await waitForScreenText(
+        () => screenWrites,
+        screen,
+        "route failed · 1 Main · 2 Parallel · R retry · Esc cancel"
+      );
+      expect(screen.snapshot()).toContain("route simple · fallback · timeout");
       expect(screen.snapshot()).not.toContain("Fallback chat response");
       child.write("1");
       await waitForScreenText(() => screenWrites, screen, "Fallback chat response");
+      await waitForScreenText(() => screenWrites, screen, "route simple · fallback · timeout");
+      child.write("\x13");
+      await waitForScreenText(() => screenWrites, screen, "parallel-codex-tui · status");
       await waitForScreenText(
         () => screenWrites,
         screen,
@@ -342,7 +360,7 @@ describe("CLI chat Markdown smoke", () => {
     } finally {
       child.kill("SIGTERM");
     }
-  }, 10000);
+  }, 20000);
 
   it("scrolls long chat history without leaving the chat view", async () => {
     const workspace = await mkdtemp(join(tmpdir(), "pct-cli-chat-scroll-"));

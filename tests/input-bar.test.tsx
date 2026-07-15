@@ -1521,4 +1521,19 @@ describe("InputBar", () => {
     expect(frame.split("\n")).toHaveLength(1);
     expect(displayWidth(frame)).toBeLessThanOrEqual(30);
   });
+
+  it("renders a compact status-details return rail", () => {
+    const roomy = render(
+      <InputBar mode="status" value="" terminalWidth={80} onChange={() => {}} />
+    );
+    const narrow = render(
+      <InputBar mode="status" value="" terminalWidth={12} onChange={() => {}} />
+    );
+
+    expect(roomy.lastFrame()).toContain("status · ^S/Esc back · ^C exit");
+    expect(narrow.lastFrame()).toContain("status");
+    expect(displayWidth(narrow.lastFrame() ?? "")).toBeLessThanOrEqual(12);
+    roomy.unmount();
+    narrow.unmount();
+  });
 });

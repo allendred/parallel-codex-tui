@@ -38,6 +38,12 @@ describe("CLI Router fallback choice", () => {
       await waitForScreenText(session, "> | message");
       session.child.write("你好\r");
       await waitForScreenText(session, "Mock simple response for: 你好");
+      await waitForScreenText(session, "main/mock · done · route simple · recovered");
+
+      const chatSnapshot = session.screen.snapshot();
+      expect(chatSnapshot).not.toContain("route failed · 1 Main");
+      session.child.write("\x13");
+      await waitForScreenText(session, "parallel-codex-tui · status");
       await waitForScreenText(session, "route simple · auto recovered idle timeout · try 2");
 
       const snapshot = session.screen.snapshot();
@@ -94,6 +100,9 @@ describe("CLI Router fallback choice", () => {
       await waitForScreenText(session, "route failed · 1 Main · 2 Parallel · R retry · Esc cancel");
       session.child.write("r");
       await waitForScreenText(session, "Mock simple response for: 你好");
+      await waitForScreenText(session, "main/mock · done · route simple · recovered");
+      session.child.write("\x13");
+      await waitForScreenText(session, "parallel-codex-tui · status");
       await waitForScreenText(session, "route simple · recovered total timeout · try 2");
 
       const records = await readRouteAudit(appRoot);

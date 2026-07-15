@@ -57,6 +57,10 @@ describe("CLI native layout smoke", () => {
     try {
       await waitForText(chunks, "ready");
       await waitForText(chunks, "attach");
+      child.write("\x17");
+      await waitForScreenText(() => screenWrites, screen, "parallel-codex-tui · logs");
+      await waitForScreenText(() => screenWrites, screen, "workers 1");
+      const logStatus = screen.snapshot().split("\n").find((line) => line.includes("workers 1"))?.trim();
       child.write("\x0f");
       await waitForText(chunks, "native line 40");
       await waitForScreenText(() => screenWrites, screen, "native line 40");
@@ -87,6 +91,17 @@ describe("CLI native layout smoke", () => {
       expect(nativeIdentityText).toContain("native actor/mock");
       expect(nativeMetadataText).toContain("native-layout");
       expect(displayWidth(nativeTitleLineText)).toBe(139);
+      const nativeStatus = snapshot.split("\n").find((line) => line.includes("workers 1"))?.trim();
+      expect(nativeStatus).toBe(logStatus);
+
+      child.write("\x13");
+      await waitForScreenText(() => screenWrites, screen, "parallel-codex-tui · status");
+      const statusSnapshot = screen.snapshot();
+      expect(statusSnapshot).toContain("selected · actor/mock · done");
+      expect(statusSnapshot).toContain("session · native-layout");
+      child.write("\x13");
+      await waitForScreenText(() => screenWrites, screen, "native actor/mock");
+      expect(screen.snapshot()).toContain("native line 40");
     } finally {
       child.write("\x1d");
       child.kill("SIGTERM");

@@ -198,6 +198,45 @@ export function formatRouteStatus(route: RouteDecision | null): string {
   return `route ${details.join(" · ")}`;
 }
 
+export function formatRouteSummaryStatus(route: RouteDecision | null): string {
+  if (!route) {
+    return "";
+  }
+  const details: string[] = [route.mode];
+  if (route.source === "forced") {
+    details.push("forced");
+  } else if (route.source === "fallback") {
+    details.push("fallback");
+    const cause = route.router_failure_kind && route.router_failure_kind !== "unknown"
+      ? route.router_failure_kind
+      : classifyRouterFailure(route.reason) ?? "unknown";
+    details.push(cause === "timeout" ? "timeout" : cause.replaceAll("-", " "));
+  } else if (route.router_recovered_from) {
+    details.push("recovered");
+  }
+  return `route ${details.join(" · ")}`;
+}
+
+export function formatRoutePendingSummaryStatus(state: RouteStartInfo | null, elapsedMs?: number): string {
+  if (!state) {
+    return "";
+  }
+  if (state.mode !== "auto") {
+    return `route ${state.mode} · forced`;
+  }
+  if (state.phase === "retrying") {
+    return `route retry ${state.attempt}/${state.maxAttempts}`;
+  }
+  const details = [routePendingPhaseLabel(state)];
+  if (state.attempt > 1) {
+    details.push(`try ${state.attempt}`);
+  }
+  if (typeof elapsedMs === "number") {
+    details.push(formatRouteElapsed(Math.max(0, elapsedMs)));
+  }
+  return `route ${details.join(" · ")}`;
+}
+
 function routeRecoveryLabel(route: RouteDecision): string | null {
   if (!route.router_recovered_from) {
     return null;

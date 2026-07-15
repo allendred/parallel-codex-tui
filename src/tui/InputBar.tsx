@@ -4,7 +4,7 @@ import { compactEndByDisplayWidth, compactTailByDisplayWidth, displayWidth } fro
 import { TUI_THEME } from "./theme.js";
 
 export interface InputBarProps {
-  mode: "chat" | "worker" | "worker-search" | "workers" | "features" | "collaboration" | "native" | "router" | "sessions";
+  mode: "chat" | "worker" | "worker-search" | "workers" | "features" | "collaboration" | "native" | "router" | "sessions" | "status";
   ready?: boolean;
   busy?: boolean;
   routeFallback?: boolean;
@@ -95,6 +95,16 @@ export function InputBar({
         <Text backgroundColor={TUI_THEME.rail} color={TUI_THEME.accent} bold>|</Text>
         <Text backgroundColor={TUI_THEME.rail} color={TUI_THEME.text}>{display.after}</Text>
         {suffix ? <Text backgroundColor={TUI_THEME.rail} color={TUI_THEME.muted}>{suffix}</Text> : null}
+      </InputRail>
+    );
+  }
+
+  if (mode === "status") {
+    const hints = statusDetailInputHints(terminalWidth);
+    return (
+      <InputRail terminalWidth={terminalWidth} textWidth={displayWidth(`${hints.label}${hints.detail}`)} fill={fillRail}>
+        <Text backgroundColor={TUI_THEME.rail} color={TUI_THEME.accent} bold>{hints.label}</Text>
+        {hints.detail ? <Text backgroundColor={TUI_THEME.rail} color={TUI_THEME.muted}>{hints.detail}</Text> : null}
       </InputRail>
     );
   }
@@ -684,6 +694,16 @@ function workerInputHints(width: number): { label: string; detail: string } {
     return { label: "logs", detail: " · scroll · ^F find · E err · D diff · Tab · ^O attach · Esc chat" };
   }
   return { label: "logs", detail: " · scroll · ^F find · E err · D diff · Tab · ^B workers · ^O attach · Esc chat" };
+}
+
+function statusDetailInputHints(width: number): { label: string; detail: string } {
+  return selectInputHints(width, [
+    { label: "status", detail: " · ^S/Esc back · ^C exit" },
+    { label: "status", detail: " · ^S back · ^C exit" },
+    { label: "status", detail: " · ^S back" },
+    { label: "status", detail: "" },
+    { label: "st", detail: "" }
+  ]);
 }
 
 function workerOverviewInputHints(width: number): { label: string; detail: string } {

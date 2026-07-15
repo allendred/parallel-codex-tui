@@ -3703,6 +3703,7 @@ function shouldDropNoisyProcessLine(trimmed: string, line: string): boolean {
     /^202\d-\d\d-\d\dT.*codex_models_manager::manager/.test(trimmed) ||
     /^reasoning summaries:/i.test(trimmed) ||
     /^session id:/i.test(trimmed) ||
+    /^collab:\s*(?:wait|waiting)$/i.test(trimmed) ||
     /^[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏]$/.test(trimmed) ||
     line === "--------"
   );

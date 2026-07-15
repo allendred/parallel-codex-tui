@@ -162,7 +162,7 @@ function startCli(appRoot: string, workspace: string, taskId?: string): CliRun {
 
 async function assertChronologicalWorkerTabs(run: CliRun, workerCount: number): Promise<void> {
   await waitForScreenText(run, `judge/mock · 1/${workerCount}`);
-  await waitForScreenMatch(run, /judge\/mock(?: · |:)done/);
+  await waitForScreenText(run, `workers ${workerCount} · done`);
   run.child.write("\t");
   await waitForScreenText(run, `actor/mock · 2/${workerCount}`);
   run.child.write("\t");

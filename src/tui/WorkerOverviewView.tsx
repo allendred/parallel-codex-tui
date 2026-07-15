@@ -240,17 +240,38 @@ function workerOverviewWorkerText(worker: WorkerLogRef, selected: boolean, width
   const marker = selected ? "> " : "  ";
   const label = safeWorkerOverviewText(worker.label);
   const state = worker.runtimeStatus?.state ?? "waiting";
+  const turn = workerOverviewTurnLabel(worker);
+  const model = workerOverviewModelLabel(worker);
   const phase = humanizeWorkerOverviewPhase(worker.runtimeStatus?.phase ?? "status pending");
   const session = worker.runtimeStatus?.native_session_id ? "session" : "";
   const summary = safeWorkerOverviewText(worker.runtimeStatus?.summary ?? "");
   const identity = `${worker.role}/${worker.engine}`;
   return fitWorkerOverviewCandidates([
-    [marker + label, state, phase, session, summary].filter(Boolean).join(" · "),
-    [marker + label, state, phase, session].filter(Boolean).join(" · "),
-    [marker + label, state, session].filter(Boolean).join(" · "),
-    [marker + identity, state].join(" · "),
+    [marker + label, turn, state, model, phase, session, summary].filter(Boolean).join(" · "),
+    [marker + label, turn, state, model, phase, session].filter(Boolean).join(" · "),
+    [marker + label, turn, state, model, session].filter(Boolean).join(" · "),
+    [marker + identity, turn, state, model].filter(Boolean).join(" · "),
+    [marker + identity, turn, state].filter(Boolean).join(" · "),
     marker.trimEnd()
   ], width);
+}
+
+export function workerOverviewTurnLabel(worker: WorkerLogRef): string {
+  if (worker.role === "main") {
+    return "";
+  }
+  const suffix = worker.id.startsWith(`${worker.role}-${worker.engine}`)
+    ? worker.id.slice(`${worker.role}-${worker.engine}`.length).replace(/^-/, "")
+    : "";
+  const turn = suffix.match(/^(?:final-|wave-)?(\d{4})(?:-|$)/)?.[1];
+  return `turn ${Number(turn ?? "0001")}`;
+}
+
+function workerOverviewModelLabel(worker: WorkerLogRef): string {
+  const provider = safeWorkerOverviewText(worker.runtimeStatus?.model_provider ?? "");
+  const model = safeWorkerOverviewText(worker.runtimeStatus?.model_name ?? "");
+  const selection = [provider, model].filter(Boolean).join("/");
+  return selection ? `model ${selection}` : "";
 }
 
 function workerOverviewWindowStart(selected: number, count: number, visibleCount: number): number {

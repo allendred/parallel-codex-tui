@@ -594,4 +594,44 @@ describe("formatStatusLine", () => {
     expect(formatFooterHelp("worker")).toBe("scroll · Tab · ^O attach · Esc chat");
     expect(formatFooterHelp("native")).toBe("scroll · ^] logs");
   });
+
+  it("keeps the footer route summary short while retaining failure semantics", () => {
+    const formatRouteSummaryStatus = (
+      statusLineModule as typeof statusLineModule & {
+        formatRouteSummaryStatus?: (route: Record<string, unknown> | null) => string;
+      }
+    ).formatRouteSummaryStatus;
+    const formatRoutePendingSummaryStatus = (
+      statusLineModule as typeof statusLineModule & {
+        formatRoutePendingSummaryStatus?: (route: Record<string, unknown> | null, elapsedMs?: number) => string;
+      }
+    ).formatRoutePendingSummaryStatus;
+
+    expect(formatRouteSummaryStatus?.({
+      mode: "complex",
+      source: "codex",
+      duration_ms: 15000,
+      proxy_configured: true,
+      proxy_endpoint: "127.0.0.1:7890"
+    })).toBe("route complex");
+    expect(formatRouteSummaryStatus?.({
+      mode: "simple",
+      source: "fallback",
+      reason: "router timed out",
+      router_failure_kind: "timeout",
+      duration_ms: 30000
+    })).toBe("route simple · fallback · timeout");
+    expect(formatRoutePendingSummaryStatus?.({
+      scope: "initial",
+      mode: "auto",
+      command: "codex",
+      timeoutMs: 30000,
+      firstOutputTimeoutMs: 15000,
+      idleTimeoutMs: 15000,
+      phase: "waiting-output",
+      attempt: 1,
+      maxAttempts: 2,
+      proxyConfigured: true
+    }, 7400)).toBe("route waiting output · 7s");
+  });
 });

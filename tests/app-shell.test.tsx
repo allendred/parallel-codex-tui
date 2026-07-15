@@ -124,6 +124,7 @@ describe("AppShell", () => {
     expect(headerRow).toContain("chat");
     expect(headerRow).toContain("project");
     expect(headerRow).toContain("^C exit");
+    expect(headerRow).toContain("^S status");
     expect(headerRow).not.toContain("task none");
     expect(headerRow).not.toContain("none");
   });
@@ -223,6 +224,25 @@ describe("AppShell", () => {
     expect(header).not.toContain(" · chat · ");
   });
 
+  it("labels status details and keeps the return shortcut in the header", () => {
+    const { lastFrame } = render(
+      <AppShell
+        view="status"
+        cwd="/tmp/project"
+        taskId="task-1"
+        statusText="workers 2 | run 1 done 1 | route complex"
+        terminalWidth={80}
+        input={<TextLine text="status · ^S/Esc back · ^C exit" />}
+      >
+        <TextLine text="Status" />
+      </AppShell>
+    );
+
+    const header = (lastFrame() ?? "").split("\n")[0] ?? "";
+    expect(header).toContain("parallel-codex-tui · status");
+    expect(header).toContain("^S back");
+  });
+
   it("renders a structured worker interface with header, full-width content, input, and status", () => {
     const { lastFrame } = render(
       <AppShell
@@ -273,6 +293,7 @@ describe("AppShell", () => {
 
     expect(frame).toContain("native");
     expect(frame).toContain("^] logs");
+    expect(frame).toContain("^S status");
     expect(frame).not.toContain("^] detach");
     expect(frame).not.toContain("Native agent");
     expect(frame).not.toContain("^C exit");

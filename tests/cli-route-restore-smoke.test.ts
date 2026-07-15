@@ -77,6 +77,13 @@ describe("CLI route restore smoke", () => {
       await waitForScreenText(
         () => screenWrites,
         screen,
+        "route simple · fallback · timeout"
+      );
+      child.write("\x13");
+      await waitForScreenText(() => screenWrites, screen, "parallel-codex-tui · status");
+      await waitForScreenText(
+        () => screenWrites,
+        screen,
         "route simple · fallback · first output timeout · via proxy · 30s"
       );
       const snapshot = screen.snapshot();

@@ -42,6 +42,10 @@ export function isTaskResultShortcut(input: string, key: KeyboardKey): boolean {
   return (key.ctrl === true && input.toLowerCase() === "d") || input === "\u0004";
 }
 
+export function isStatusDetailsShortcut(input: string, key: KeyboardKey): boolean {
+  return (key.ctrl === true && input.toLowerCase() === "s") || input === "\u0013";
+}
+
 export function isWorkerSearchShortcut(input: string, key: KeyboardKey): boolean {
   return (key.ctrl === true && input.toLowerCase() === "f") || input === "\u0006";
 }

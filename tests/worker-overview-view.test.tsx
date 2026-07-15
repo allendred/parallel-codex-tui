@@ -24,9 +24,9 @@ describe("WorkerOverviewView", () => {
 
     expect(frame).toContain("Workers");
     expect(frame).toContain("4 workers · 1 running · 1 done · 1 failed · 1 waiting · 2 sessions");
-    expect(frame).toContain("Actor (codex) · Build board");
+    expect(frame).toContain("Actor (codex) · Build board · turn 1");
     expect(frame).toContain("> Critic (claude) · Review routing");
-    expect(frame).toContain("failed · review · session · Needs revision");
+    expect(frame).toContain("failed · model anthropic/claude-sonnet");
     view.unmount();
   });
 
@@ -194,6 +194,47 @@ describe("WorkerOverviewView", () => {
     expect(frame.match(/activity ·/g)).toHaveLength(1);
     view.unmount();
   });
+
+  it("derives turns from task, Feature, wave, and final-Judge worker ids", () => {
+    const turnLabel = (
+      overviewModule as typeof overviewModule & {
+        workerOverviewTurnLabel?: (worker: WorkerLogRef) => string;
+      }
+    ).workerOverviewTurnLabel;
+
+    expect(turnLabel?.(worker({
+      id: "judge-codex",
+      label: "Judge (codex)",
+      role: "judge",
+      state: "done",
+      phase: "requirements",
+      summary: "done"
+    }))).toBe("turn 1");
+    expect(turnLabel?.(worker({
+      id: "actor-openai_compat-0003-input",
+      label: "Actor (openai_compat)",
+      engine: "openai_compat",
+      state: "running",
+      phase: "implementation",
+      summary: "working"
+    }))).toBe("turn 3");
+    expect(turnLabel?.(worker({
+      id: "critic-codex-wave-0004-0002",
+      label: "Critic (codex)",
+      role: "critic",
+      state: "done",
+      phase: "review",
+      summary: "done"
+    }))).toBe("turn 4");
+    expect(turnLabel?.(worker({
+      id: "judge-codex-final-0005",
+      label: "Judge (codex)",
+      role: "judge",
+      state: "done",
+      phase: "verification",
+      summary: "done"
+    }))).toBe("turn 5");
+  });
 });
 
 function activityOptions() {
@@ -232,7 +273,9 @@ function workers(): WorkerLogRef[] {
       state: "failed",
       phase: "review",
       summary: "Needs revision",
-      sessionId: "critic-session"
+      sessionId: "critic-session",
+      modelName: "claude-sonnet",
+      modelProvider: "anthropic"
     }),
     worker({
       id: "actor-waiting",
@@ -248,11 +291,13 @@ function worker(input: {
   id: string;
   label: string;
   role?: "judge" | "actor" | "critic" | "main";
-  engine?: "codex" | "claude" | "mock";
+  engine?: string;
   state: "idle" | "starting" | "running" | "waiting" | "done" | "failed" | "cancelled";
   phase: string;
   summary: string;
   sessionId?: string;
+  modelName?: string;
+  modelProvider?: string;
 }): WorkerLogRef {
   const role = input.role ?? (input.id === "judge" ? "judge" : "actor");
   const engine = input.engine ?? "codex";
@@ -271,6 +316,8 @@ function worker(input: {
       phase: input.phase,
       last_event_at: "2026-07-11T08:00:00.000Z",
       summary: input.summary,
+      ...(input.modelName ? { model_name: input.modelName } : {}),
+      ...(input.modelProvider ? { model_provider: input.modelProvider } : {}),
       ...(input.sessionId ? { native_session_id: input.sessionId } : {})
     }
   };

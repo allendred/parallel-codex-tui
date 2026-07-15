@@ -96,6 +96,19 @@ describe("keyboard shortcuts", () => {
     expect(isTaskResultShortcut?.("d", { ctrl: false })).toBe(false);
   });
 
+  it("recognizes ctrl-s as the status details shortcut", () => {
+    const isStatusDetailsShortcut = (
+      keyboardModule as typeof keyboardModule & {
+        isStatusDetailsShortcut?: (input: string, key: { ctrl?: boolean }) => boolean;
+      }
+    ).isStatusDetailsShortcut;
+
+    expect(isStatusDetailsShortcut).toBeTypeOf("function");
+    expect(isStatusDetailsShortcut?.("s", { ctrl: true })).toBe(true);
+    expect(isStatusDetailsShortcut?.("\u0013", { ctrl: false })).toBe(true);
+    expect(isStatusDetailsShortcut?.("s", { ctrl: false })).toBe(false);
+  });
+
   it("recognizes worker log search and semantic jump shortcuts", () => {
     const isWorkerSearchShortcut = (
       keyboardModule as typeof keyboardModule & {

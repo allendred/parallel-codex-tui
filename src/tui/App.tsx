@@ -22,8 +22,9 @@ import type {
 import {
   effectiveWorkerWatchdog,
   formatRoutePendingStatus,
-  formatSelectedWorkerStatus,
+  formatRoutePendingSummaryStatus,
   formatRouteStatus,
+  formatRouteSummaryStatus,
   formatStatusLine,
   formatWorkerRuntimeStatus,
   type StatusLineState
@@ -40,7 +41,7 @@ import { TerminalOutput } from "./TerminalOutput.js";
 import { NativeTerminalScreen } from "./terminal-screen.js";
 import { WorkerOutputView, type WorkerOutputNavigationTargets } from "./WorkerOutputView.js";
 import { compactEndByDisplayWidth, displayWidth, wrapByDisplayWidth } from "./display-width.js";
-import { isAttachShortcut, isExitShortcut, isLogsShortcut, isNewTaskShortcut, isRouterDiagnosticsShortcut, isTaskResultShortcut, isTaskSessionsShortcut, isWorkerOverviewShortcut, isWorkerSearchShortcut, isWorkspaceShortcut, mouseScrollDelta, rawHistoryDelta, rawPageScrollDelta, scrollDelta, workerLogJumpKind } from "./keyboard.js";
+import { isAttachShortcut, isExitShortcut, isLogsShortcut, isNewTaskShortcut, isRouterDiagnosticsShortcut, isStatusDetailsShortcut, isTaskResultShortcut, isTaskSessionsShortcut, isWorkerOverviewShortcut, isWorkerSearchShortcut, isWorkspaceShortcut, mouseScrollDelta, rawHistoryDelta, rawPageScrollDelta, scrollDelta, workerLogJumpKind } from "./keyboard.js";
 import { createRawInputDecoder, tokenizeRawInput } from "./raw-input-decoder.js";
 import { decodeHtmlEntities } from "./markdown-text.js";
 import { configureTuiTheme, TUI_THEME } from "./theme.js";
@@ -87,6 +88,7 @@ import {
   workerProviderLabel,
   workerProviders
 } from "../workers/provider.js";
+import { StatusDetailView } from "./StatusDetailView.js";
 
 export interface AppProps {
   config: AppConfig;
@@ -385,6 +387,7 @@ export function App({
   const workerOverviewReturnViewRef = useRef<"chat" | "worker">("chat");
   const taskSessionsReturnViewRef = useRef<"chat" | "worker" | "workers" | "router">("chat");
   const collaborationReturnViewRef = useRef<"workers" | "features">("workers");
+  const statusReturnViewRef = useRef<Exclude<AppView, "status">>("chat");
   const collaborationLoadSequenceRef = useRef(0);
   const routerLoadSequenceRef = useRef(0);
   const taskSessionsLoadSequenceRef = useRef(0);
@@ -426,13 +429,12 @@ export function App({
     && canRetryTask
     && selectedBoardFeature?.state !== "approved";
   const visibleStatus = statusLineWithWorkerRefs(status, workers);
-  const selectedWorkerStatus = formatSelectedWorkerStatus(visibleStatus, selectedWorkerIndex);
-  const visibleWorkerStatus = view === "chat" || view === "router" || view === "sessions" || view === "features" || view === "collaboration"
-    ? ""
-    : selectedWorkerStatus;
   const visibleRouteStatus = routePending
     ? formatRoutePendingStatus(routePending, routeElapsedMs)
     : formatRouteStatus(lastRoute);
+  const visibleRouteSummary = routePending
+    ? formatRoutePendingSummaryStatus(routePending, routeElapsedMs)
+    : formatRouteSummaryStatus(lastRoute);
   const visibleTaskStatus = routePending && !activeTaskId ? "" : formatStatusLine(visibleStatus);
   const workerRefreshKey = workers.map((worker) => `${worker.id}\u0000${worker.statusPath}`).join("\u0001");
   const taskResultMessageIndex = useMemo(
@@ -1000,6 +1002,13 @@ export function App({
           exitRef.current();
           return;
         }
+        if (fallbackChunks.some((fallbackChunk) => isStatusDetailsShortcut(fallbackChunk, {}))) {
+          statusReturnViewRef.current = "chat";
+          viewRef.current = "status";
+          setAttachError(null);
+          setView("status");
+          return;
+        }
         for (const fallbackChunk of fallbackChunks) {
           if (fallbackChunk === "\x1b") {
             settleRouteFallbackChoice("cancel");
@@ -1021,6 +1030,25 @@ export function App({
         return;
       }
       if (currentView === "workspace") {
+        return;
+      }
+      if (currentView === "status") {
+        if (isExitShortcut(chunk, {})) {
+          activeRunControllerRef.current?.abort();
+          exitRef.current();
+          return;
+        }
+        if (isStatusDetailsShortcut(chunk, {}) || chunk === "\x1b") {
+          viewRef.current = statusReturnViewRef.current;
+          setView(statusReturnViewRef.current);
+        }
+        return;
+      }
+      if (isStatusDetailsShortcut(chunk, {})) {
+        statusReturnViewRef.current = currentView;
+        viewRef.current = "status";
+        setAttachError(null);
+        setView("status");
         return;
       }
       if (currentView === "sessions") {
@@ -2970,7 +2998,7 @@ export function App({
       view={view}
       cwd={cwd}
       taskId={activeTaskId}
-      statusText={[visibleTaskStatus, visibleWorkerStatus, visibleRouteStatus].filter(Boolean).join(" | ")}
+      statusText={[visibleTaskStatus, visibleRouteSummary].filter(Boolean).join(" | ")}
       contentHeight={contentHeight}
       showStatusBar={config.ui.showStatusBar}
       input={
@@ -3009,7 +3037,7 @@ export function App({
           searchMatchCount={workerNavigationTargets.searchOffsets.length}
           value={workerSearch.open && view === "worker"
             ? workerSearch.query
-            : view === "native" || view === "router" || view === "workers" || view === "features" || view === "sessions" || view === "collaboration" ? "" : input}
+            : view === "native" || view === "router" || view === "workers" || view === "features" || view === "sessions" || view === "collaboration" || view === "status" ? "" : input}
           cursor={workerSearch.open && view === "worker"
             ? workerSearch.cursor
             : view === "chat" ? inputCursor : undefined}
@@ -3020,7 +3048,22 @@ export function App({
       }
       error={attachError}
     >
-        {view === "native" ? (
+        {view === "status" ? (
+          <StatusDetailView
+            cwd={cwd}
+            taskId={activeTaskId}
+            mode={activeMode}
+            busy={busy}
+            canRetry={canRetryTask}
+            taskStatus={visibleTaskStatus}
+            routeStatus={visibleRouteStatus}
+            routeReason={routePending ? undefined : lastRoute?.reason}
+            workers={workers}
+            selectedWorkerIndex={selectedWorkerIndex}
+            height={contentHeight}
+            terminalWidth={terminalWidth}
+          />
+        ) : view === "native" ? (
           <NativeAttachView attach={nativeAttach} viewportHeight={contentHeight} />
         ) : view === "sessions" ? (
           taskSessionDetails ? (

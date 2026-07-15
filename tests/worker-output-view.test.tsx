@@ -6130,6 +6130,45 @@ describe("WorkerOutputView", () => {
     }
   });
 
+  it("hides Codex collaboration wait markers without dropping adjacent output", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pct-worker-output-collab-wait-"));
+    const workerDir = join(root, "actor-mock");
+
+    await mkdir(workerDir, { recursive: true });
+    await writeFile(join(workerDir, "worklog.md"), "Waiting for critic review.\n");
+    await writeFile(
+      join(workerDir, "output.log"),
+      [
+        "Implemented gameplay persistence.",
+        "collab: Wait",
+        "Critic review received.",
+        "collab: waiting",
+        "Applied the requested fixes."
+      ].join("\n")
+    );
+
+    const { lastFrame, unmount } = render(
+      <WorkerOutputView
+        title="Actor (codex) output"
+        role="actor"
+        logPath={join(workerDir, "output.log")}
+        height={20}
+      />
+    );
+
+    try {
+      await waitForFrame(lastFrame, "Applied the requested fixes.");
+
+      const frame = lastFrame() ?? "";
+      expect(frame).toContain("Implemented gameplay persistence.");
+      expect(frame).toContain("Critic review received.");
+      expect(frame).toContain("Applied the requested fixes.");
+      expect(frame).not.toContain("collab:");
+    } finally {
+      unmount();
+    }
+  });
+
   it("uses expanded wrapped diff rows for the worker log scroll range", async () => {
     const root = await mkdtemp(join(tmpdir(), "pct-worker-output-scroll-diff-"));
     const workerDir = join(root, "actor-mock");
