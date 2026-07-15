@@ -3,7 +3,7 @@ import { render } from "ink-testing-library";
 import { describe, expect, it } from "vitest";
 import { StatusBar, statusBarDisplayText, statusRailLayout, statusSegmentLabelTheme, statusSegmentValueTheme } from "../src/tui/StatusBar.js";
 import { displayWidth } from "../src/tui/display-width.js";
-import { formatRouteStatus, formatStatusLine } from "../src/tui/status-line.js";
+import { formatRouteStatus, formatSelectedWorkerStatus, formatStatusLine } from "../src/tui/status-line.js";
 import { TUI_THEME_PRESETS } from "../src/tui/theme.js";
 
 describe("StatusBar", () => {
@@ -641,6 +641,37 @@ describe("StatusBar", () => {
     expect(frame).not.toContain("w4");
     expect(frame).not.toContain("f1");
     expect(displayWidth(frame)).toBeLessThanOrEqual(80);
+  });
+
+  it("keeps the same readable grammar when the selected worker has a long feature title", () => {
+    const state = {
+      taskId: "task-20260714-070751-5bb0",
+      workers: [
+        { label: "Judge (codex)", status: "done/process-exited" },
+        {
+          label: "Actor (codex) · Input reliability and terminal interaction",
+          status: "cancelled/process-cancelled"
+        },
+        { label: "Critic (claude) · Input reliability and terminal interaction", status: "waiting/review" },
+        { label: "Actor (codex) · Gameplay correctness", status: "waiting/queued" }
+      ]
+    };
+    const text = [
+      formatStatusLine(state),
+      "route complex",
+      formatSelectedWorkerStatus(state, 1)
+    ].filter(Boolean).join(" | ");
+    const view = render(<StatusBar text={text} terminalWidth={80} />);
+    const frame = view.lastFrame() ?? "";
+
+    expect(frame).toContain("4 workers");
+    expect(frame).toContain("route complex");
+    expect(frame).toContain("@ actor/codex stop");
+    expect(frame).not.toContain("w4");
+    expect(frame).not.toContain("r:complex");
+    expect(frame).not.toContain("Input reliability");
+    expect(displayWidth(frame)).toBeLessThanOrEqual(80);
+    view.unmount();
   });
 
   it("keeps role runtime statuses compact in ultra narrow terminals", () => {

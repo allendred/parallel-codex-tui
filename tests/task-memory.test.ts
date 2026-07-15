@@ -160,22 +160,22 @@ describe("chooseSubmitTarget", () => {
     });
   });
 
-  it("keeps existing worker refs for simple active-task questions", () => {
+  it("keeps existing worker refs for every follow-up in the active task", () => {
     expect(
       shouldClearWorkersForSubmit({
         kind: "task-question",
         taskId: "task-a"
       })
     ).toBe(false);
-  });
-
-  it("clears worker refs for task turns and new requests", () => {
     expect(
       shouldClearWorkersForSubmit({
         kind: "task-turn",
         taskId: "task-a"
       })
-    ).toBe(true);
+    ).toBe(false);
+  });
+
+  it("clears worker refs only when starting an unrelated request", () => {
     expect(
       shouldClearWorkersForSubmit({
         kind: "new-request"

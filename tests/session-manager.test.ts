@@ -980,6 +980,46 @@ describe("SessionManager", () => {
     expect((await manager.readNativeSession(worker))?.session_id).toBe("judge-session");
   });
 
+  it("never truncates an existing worker run log when the run is resumed", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pct-worker-log-resume-"));
+    const manager = new SessionManager({
+      projectRoot: root,
+      dataDir: ".parallel-codex",
+      now: () => new Date("2026-06-30T03:30:00.000Z"),
+      randomId: () => "a1b2"
+    });
+    const task = await manager.createTask({
+      request: "Build the MVP.",
+      cwd: root,
+      route: {
+        mode: "complex",
+        reason: "Requires workers.",
+        suggested_roles: ["judge", "actor", "critic"],
+        judge_engine: "mock",
+        actor_engine: "mock",
+        critic_engine: "mock"
+      }
+    });
+    const worker = await manager.initializeWorker(task, {
+      workerId: "actor-mock",
+      role: "actor",
+      engine: "mock",
+      prompt: "First run."
+    });
+    await writeText(worker.outputLogPath, "FIRST_RUN_EVIDENCE\n");
+
+    await manager.initializeWorker(task, {
+      workerId: "actor-mock",
+      role: "actor",
+      engine: "mock",
+      prompt: "Resume the same run."
+    });
+
+    const output = await readTextIfExists(worker.outputLogPath);
+    expect(output).toContain("FIRST_RUN_EVIDENCE");
+    expect(output).toContain("--- resume 2026-06-30T03:30:00.000Z ---");
+  });
+
   it("stores worker native session metadata", async () => {
     const root = await mkdtemp(join(tmpdir(), "pct-native-session-"));
     const index = await SessionIndex.open(root, ".parallel-codex");

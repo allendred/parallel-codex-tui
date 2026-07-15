@@ -10,7 +10,8 @@ import type { RouteDecision } from "../src/domain/schemas.js";
 import type {
   HandleRequestInput,
   HandleRequestResult,
-  Orchestrator
+  Orchestrator,
+  WorkerLogRef
 } from "../src/orchestrator/orchestrator.js";
 import {
   App,
@@ -472,6 +473,92 @@ describe("App Router reason", () => {
       });
       view.unmount();
       testInput.restore();
+    }
+  });
+
+  it("keeps previous worker logs available while running a complex follow-up", async () => {
+    const testInput = installTestInputStream();
+    const completion = deferred<HandleRequestResult>();
+    const root = await mkdtemp(join(tmpdir(), "pct-app-follow-up-worker-logs-"));
+    const logPath = join(root, "turn-1-output.log");
+    const followUpLogPath = join(root, "turn-2-output.log");
+    const route: RouteDecision = {
+      mode: "complex",
+      reason: "Implementation follow-up for the active task.",
+      source: "codex",
+      suggested_roles: ["judge", "actor", "critic"],
+      judge_engine: "mock",
+      actor_engine: "codex",
+      critic_engine: "mock"
+    };
+    const previousWorker: WorkerLogRef = {
+      id: "actor-codex",
+      role: "actor",
+      engine: "codex",
+      label: "Actor (codex)",
+      logPath,
+      statusPath: join(root, "turn-1-status.json")
+    };
+    const followUpWorker: WorkerLogRef = {
+      id: "actor-codex-0002",
+      role: "actor",
+      engine: "codex",
+      label: "Actor (codex) · Turn 2",
+      logPath: followUpLogPath,
+      statusPath: join(root, "turn-2-status.json")
+    };
+    const routeTaskFollowUp = vi.fn((input: HandleRequestInput & { taskId: string }) => {
+      input.onRoute?.(route);
+      return Promise.resolve({
+        mode: "complex" as const,
+        taskId: "task-worker-log-history",
+        reason: route.reason,
+        route
+      });
+    });
+    const handleTaskTurn = vi.fn((input: HandleRequestInput) => {
+      input.onWorker?.(followUpWorker);
+      return completion.promise;
+    });
+    const canRetryTask = vi.fn(async () => false);
+
+    await writeFile(logPath, "previous actor log remains visible\n");
+    await writeFile(followUpLogPath, "follow-up actor log is also visible\n");
+    const view = render(
+      <App
+        config={defaultConfig(root)}
+        orchestrator={{ routeTaskFollowUp, handleTaskTurn, canRetryTask } as unknown as Orchestrator}
+        cwd={root}
+        initialTaskId="task-worker-log-history"
+        initialWorkers={[previousWorker]}
+      />
+    );
+
+    try {
+      await waitForFrame(view.lastFrame, "ready");
+      await settleEffects();
+      testInput.send(view.stdin, "status?\r");
+      await waitForFrame(view.lastFrame, route.reason);
+
+      testInput.send(view.stdin, "\x17");
+      await waitForFrame(view.lastFrame, "previous actor log remains visible");
+      expect(view.lastFrame()).toContain("actor/codex · 1/2");
+
+      testInput.send(view.stdin, "\t");
+      await waitForFrame(view.lastFrame, "follow-up actor log is also visible");
+      expect(view.lastFrame()).toContain("Actor (codex) · Turn 2 (2/2)");
+    } finally {
+      completion.resolve({
+        mode: "complex",
+        taskId: "task-worker-log-history",
+        summary: "The follow-up completed.",
+        workers: []
+      });
+      await settleEffects();
+      view.unmount();
+      await settleEffects();
+      testInput.restore();
+      await rm(root, { recursive: true, force: true });
     }
   });
 });

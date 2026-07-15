@@ -519,6 +519,20 @@ describe("formatStatusLine", () => {
     expect(formatSelectedWorkerStatus(state, 1)).toBe("actor/codex stop");
   });
 
+  it("keeps feature titles out of the selected worker identity", () => {
+    const state = {
+      taskId: "task-feature-status",
+      workers: [
+        {
+          label: "Actor (codex) · Input reliability and terminal interaction",
+          status: "running/process-output"
+        }
+      ]
+    };
+
+    expect(formatSelectedWorkerStatus(state, 0)).toBe("actor/codex run");
+  });
+
   it("shortens dated task ids for the footer", () => {
     expect(
       formatStatusLine({

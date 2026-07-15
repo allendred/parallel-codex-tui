@@ -486,7 +486,7 @@ function compactTaskId(taskId: string): string {
 }
 
 function compactWorkerLabel(label: string): string {
-  const match = label.match(/^\s*([^(]+?)\s*\(([^)]+)\)\s*$/);
+  const match = label.match(/^\s*([^(]+?)\s*\(([^)]+)\)/);
   if (match) {
     return `${match[1].trim().toLowerCase()}/${match[2].trim().toLowerCase()}`;
   }

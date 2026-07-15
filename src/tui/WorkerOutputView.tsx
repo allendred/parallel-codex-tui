@@ -56,6 +56,7 @@ type WorkerOutputLineTheme = Pick<TextProps, "backgroundColor" | "bold" | "color
 interface RenderLine {
   kind: WorkerOutputLineKind;
   text: string;
+  diffFile?: string;
 }
 
 interface DisplayLine extends RenderLine {
@@ -1190,8 +1191,16 @@ function renderSectionContent(section: WorkerOutputSection, renderedArtifactFile
       continue;
     }
 
-    if (section.group === "process" && hiddenProcessDiffFiles.size > 0 && isDiffHunkLine(line.trimStart())) {
-      index = collectBareDiffHunkBlock(rawLines, index).nextIndex;
+    if (section.group === "process" && parseHunkStart(line.trimStart())) {
+      const bareHunk = collectBareDiffHunkBlock(rawLines, index);
+      const bareDiffFile = inferBareDiffFile(rawLines, index);
+      if (!bareDiffTargetsRenderedArtifact(bareHunk.lines, bareDiffFile, hiddenProcessDiffFiles)) {
+        if (lines.length > 0 && lines[lines.length - 1]?.kind !== "blank") {
+          lines.push({ kind: "blank", text: "" });
+        }
+        lines.push(...renderBareDiffHunkContent(bareHunk.lines, bareDiffFile));
+      }
+      index = skipBareDiffTailContext(rawLines, bareHunk.nextIndex);
       continue;
     }
 
@@ -1253,6 +1262,37 @@ function processDiffBlockTargetsArtifacts(diffLines: string[], artifactFiles: Se
     }
     return artifactFiles.has(diffTitlePath(title));
   });
+}
+
+function bareDiffTargetsRenderedArtifact(
+  diffLines: string[],
+  diffFile: string | null,
+  artifactFiles: Set<string>
+): boolean {
+  if (artifactFiles.size === 0) {
+    return false;
+  }
+  if (artifactFiles.has("patch.diff")) {
+    return true;
+  }
+  if (diffFile) {
+    return artifactFiles.has(basename(diffFile));
+  }
+
+  const additions = diffLines
+    .filter((line) => line.startsWith("+") && !line.startsWith("+++"))
+    .map((line) => line.slice(1).trim())
+    .filter(Boolean);
+  return (
+    artifactFiles.has("review.md")
+      && additions.some((line) => /^(?:#{1,6}\s+)?(?:Critic Review|APPROVED|REVISION_REQUIRED)\b/i.test(line))
+  ) || (
+    (artifactFiles.has("worklog.md") || artifactFiles.has("actor-worklog.md"))
+      && additions.some((line) => /^(?:#{1,6}\s+)?(?:Actor )?Worklog\b/i.test(line))
+  ) || (
+    artifactFiles.has("decisions.md")
+      && additions.some((line) => /^(?:#{1,6}\s+)?Decisions\b/i.test(line))
+  );
 }
 
 function compactRenderedBlankLines(lines: RenderLine[]): RenderLine[] {
@@ -1529,10 +1569,97 @@ function isSingleFilePathListItem(trimmed: string): boolean {
 
 function cleanProcessRenderLines(lines: RenderLine[]): RenderLine[] {
   return dedupeSupersededChecklistSnapshots(
-    dedupeCollapsedDiffSummaries(
-      removePatchDiffReadbackNoise(removeDiffAdjacentCodeSummaries(mergeSmokeStatusSuccessLines(lines)))
+    dedupeBareDiffHunks(
+      dedupeCollapsedDiffSummaries(
+        removePatchDiffReadbackNoise(removeDiffAdjacentCodeSummaries(mergeSmokeStatusSuccessLines(lines)))
+      )
     )
   );
+}
+
+interface BareDiffHunkBlock {
+  startIndex: number;
+  endIndex: number;
+  key: string;
+}
+
+function dedupeBareDiffHunks(lines: RenderLine[]): RenderLine[] {
+  const blocks: BareDiffHunkBlock[] = [];
+  let currentDiffFile: string | null = null;
+
+  for (let index = 0; index < lines.length;) {
+    const line = lines[index];
+    if (!line) {
+      index += 1;
+      continue;
+    }
+
+    if (line.kind === "diff-file") {
+      currentDiffFile = line.text.trim();
+      index += 1;
+      continue;
+    }
+
+    if (line.kind !== "diff-hunk") {
+      if (line.kind !== "blank" && !isAnyDiffLine(line)) {
+        currentDiffFile = null;
+      }
+      index += 1;
+      continue;
+    }
+
+    const startIndex = index;
+    index += 1;
+    while (index < lines.length && isDiffHunkBodyLine(lines[index])) {
+      index += 1;
+    }
+    const blockLines = lines.slice(startIndex, index);
+    const diffFile = line.diffFile ?? currentDiffFile;
+    blocks.push({
+      startIndex,
+      endIndex: index,
+      key: [
+        `file\0${diffFile ?? ""}`,
+        ...blockLines.map((line) => `${line.kind}\0${line.text}`)
+      ].join("\n")
+    });
+  }
+
+  const lastBlockByKey = new Map<string, BareDiffHunkBlock>();
+  for (const block of blocks) {
+    lastBlockByKey.set(block.key, block);
+  }
+
+  const hiddenIndexes = new Set<number>();
+  for (const block of blocks) {
+    if (lastBlockByKey.get(block.key) === block) {
+      continue;
+    }
+    for (let index = block.startIndex; index < block.endIndex; index += 1) {
+      hiddenIndexes.add(index);
+    }
+  }
+
+  return hiddenIndexes.size > 0
+    ? lines.filter((_line, index) => !hiddenIndexes.has(index))
+    : lines;
+}
+
+function isDiffHunkBodyLine(line: RenderLine | undefined): boolean {
+  return line?.kind === "diff-context" ||
+    line?.kind === "diff-meta" ||
+    line?.kind === "diff-add" ||
+    line?.kind === "diff-remove";
+}
+
+function isAnyDiffLine(line: RenderLine): boolean {
+  return line.kind === "diff-file" ||
+    line.kind === "diff-summary" ||
+    line.kind === "diff-hunk" ||
+    line.kind === "diff-context" ||
+    line.kind === "diff-meta" ||
+    line.kind === "diff-add" ||
+    line.kind === "diff-remove";
 }
 
 interface ChecklistSnapshot {
@@ -1871,7 +1998,8 @@ function sanitizeProcessOutput(text: string, options: ProcessOutputSanitizeOptio
   }
 
   const compactedNetworkOutput = compactRecoveredNetworkEvents(kept);
-  return collapseProcessOutputLines(
+  const shieldedDiff = shieldProcessDiffBlocks(compactedNetworkOutput);
+  const sanitized = collapseProcessOutputLines(
     compactReadSummaryRuns(
       compactNoMatchSearchCommandBlocks(
         compactAnnotatedStatusCommandPairs(
@@ -1879,7 +2007,7 @@ function sanitizeProcessOutput(text: string, options: ProcessOutputSanitizeOptio
             compactBuildOutputBlocks(
               compactDevServerFallbackBlocks(
                 compactCollapsedCommandBlocks(
-                  dropSuccessfulInternalLaunchCommands(collapseVerboseProcessOutput(compactedNetworkOutput))
+                  dropSuccessfulInternalLaunchCommands(collapseVerboseProcessOutput(shieldedDiff.lines))
                 )
               )
             )
@@ -1887,7 +2015,52 @@ function sanitizeProcessOutput(text: string, options: ProcessOutputSanitizeOptio
         )
       )
     )
-  ).join("\n").trimEnd();
+  );
+  return sanitized
+    .map((line) => shieldedDiff.originals.get(line) ?? line)
+    .join("\n")
+    .trimEnd();
+}
+
+interface ShieldedProcessDiff {
+  lines: string[];
+  originals: Map<string, string>;
+}
+
+function shieldProcessDiffBlocks(lines: string[]): ShieldedProcessDiff {
+  const shielded: string[] = [];
+  const originals = new Map<string, string>();
+  let tokenIndex = 0;
+
+  const appendBlock = (blockLines: string[]) => {
+    for (const line of blockLines) {
+      const token = `pct protected diff line ${String(tokenIndex).padStart(8, "0")}`;
+      tokenIndex += 1;
+      originals.set(token, line);
+      shielded.push(token);
+    }
+  };
+
+  for (let index = 0; index < lines.length;) {
+    const line = normalizedProcessLine(lines[index] ?? "");
+    const trimmedStart = line.trimStart();
+    if (isDiffStartLine(trimmedStart)) {
+      const block = collectEmbeddedDiffBlock(lines, index);
+      appendBlock(block.lines);
+      index = block.nextIndex;
+      continue;
+    }
+    if (parseHunkStart(trimmedStart)) {
+      const block = collectBareDiffHunkBlock(lines, index);
+      appendBlock(block.lines);
+      index = block.nextIndex;
+      continue;
+    }
+    shielded.push(lines[index] ?? "");
+    index += 1;
+  }
+
+  return { lines: shielded, originals };
 }
 
 interface RecoveredNetworkEvent {
@@ -3358,7 +3531,7 @@ function isCssLikeProcessLine(line: string): boolean {
 
 function isJavaScriptLikeProcessLine(line: string): boolean {
   return (
-    /^(?:const|let|var|import|export|await|return|if|else|for|while|switch|try|catch|finally|function|class|new)\b/.test(line) ||
+    /^(?:const|let|var|import|export|await|return|delete|throw|yield|break|continue|if|else|for|while|switch|try|catch|finally|function|class|new)\b/.test(line) ||
     /^\}\s*else\b/.test(line) ||
     /^\.[A-Za-z_$][\w$]*(?:\s*\(|\.)/.test(line) ||
     /^[A-Za-z_$][\w$.[\]'"]*\s*(?:[+\-*/%]?=|\(|\.)/.test(line) ||
@@ -3638,7 +3811,8 @@ function collectEmbeddedDiffBlock(rawLines: string[], startIndex: number): { lin
   return { lines, nextIndex: index };
 }
 
-function collectBareDiffHunkBlock(rawLines: string[], startIndex: number): { nextIndex: number } {
+function collectBareDiffHunkBlock(rawLines: string[], startIndex: number): { lines: string[]; nextIndex: number } {
+  const lines: string[] = [];
   let index = startIndex;
   let insideHunk = false;
   let hunkCounts: { oldRemaining: number; newRemaining: number } | null = null;
@@ -3650,6 +3824,7 @@ function collectBareDiffHunkBlock(rawLines: string[], startIndex: number): { nex
     if (isDiffHunkLine(trimmedStart)) {
       insideHunk = true;
       hunkCounts = parseHunkCounts(trimmedStart);
+      lines.push(trimmedStart);
       index += 1;
       continue;
     }
@@ -3658,12 +3833,14 @@ function collectBareDiffHunkBlock(rawLines: string[], startIndex: number): { nex
       if (hunkCounts && hunkCounts.oldRemaining <= 0 && hunkCounts.newRemaining <= 0) {
         break;
       }
+      lines.push(line);
       hunkCounts = consumeHunkLine(line, hunkCounts);
       index += 1;
       continue;
     }
 
     if (insideHunk && isDiffMetaLine(trimmedStart)) {
+      lines.push(trimmedStart);
       index += 1;
       continue;
     }
@@ -3671,7 +3848,57 @@ function collectBareDiffHunkBlock(rawLines: string[], startIndex: number): { nex
     break;
   }
 
-  return { nextIndex: index };
+  return { lines, nextIndex: index };
+}
+
+function inferBareDiffFile(rawLines: string[], startIndex: number): string | null {
+  let newPath: string | null = null;
+  let oldPath: string | null = null;
+  let inspected = 0;
+
+  for (let index = startIndex - 1; index >= 0 && inspected < 8; index -= 1) {
+    const trimmed = normalizedProcessLine(rawLines[index] ?? "").trim();
+    if (!trimmed) {
+      continue;
+    }
+    inspected += 1;
+
+    const nextFile = unifiedDiffHeaderPath(trimmed, "+++");
+    if (nextFile !== null) {
+      newPath = nextFile;
+      continue;
+    }
+    const previousFile = unifiedDiffHeaderPath(trimmed, "---");
+    if (previousFile !== null) {
+      oldPath = previousFile;
+      const selected = newPath && newPath !== "/dev/null" ? newPath : oldPath;
+      return selected && selected !== "/dev/null" ? formatDiffDisplayPath(selected) : null;
+    }
+    if (!newPath && looksLikeStandaloneDiffPath(trimmed)) {
+      return formatDiffDisplayPath(trimmed);
+    }
+    if (parseHunkStart(trimmed) || isDiffStartLine(trimmed) || isHardProcessBoundary(trimmed)) {
+      break;
+    }
+  }
+
+  const selected = newPath && newPath !== "/dev/null" ? newPath : oldPath;
+  return selected && selected !== "/dev/null" ? formatDiffDisplayPath(selected) : null;
+}
+
+function unifiedDiffHeaderPath(line: string, marker: "---" | "+++"): string | null {
+  if (!line.startsWith(`${marker} `) && !line.startsWith(`${marker}\t`)) {
+    return null;
+  }
+  const value = line.slice(marker.length).trimStart().split("\t", 1)[0]?.trim() ?? "";
+  return value.replace(/^[ab]\//, "");
+}
+
+function looksLikeStandaloneDiffPath(line: string): boolean {
+  return !/\s/.test(line)
+    && /(?:^|\/)[A-Za-z0-9._@+-]+\.[A-Za-z0-9._@+-]+$/.test(line)
+    && !line.startsWith("+")
+    && !line.startsWith("-");
 }
 
 function collectBareProcessDiffBodyRun(rawLines: string[], startIndex: number): { bodyLines: number; nextIndex: number } {
@@ -3729,7 +3956,7 @@ function nextSignificantProcessLineStartsDiff(rawLines: string[], startIndex: nu
     ) {
       continue;
     }
-    return isDiffStartLine(trimmed);
+    return isDiffStartLine(trimmed) || parseHunkStart(trimmed) !== null;
   }
   return false;
 }
@@ -3880,6 +4107,70 @@ function skipProcessDiffTailContext(rawLines: string[], startIndex: number): num
   return index;
 }
 
+function skipBareDiffTailContext(rawLines: string[], startIndex: number): number {
+  let index = startIndex;
+  let skippedTail = false;
+
+  while (index < rawLines.length) {
+    const line = normalizedProcessLine(rawLines[index] ?? "");
+    const trimmed = line.trim();
+
+    if (!trimmed) {
+      if (skippedTail || nextLineLooksLikeBareDiffTail(rawLines, index + 1)) {
+        index += 1;
+        continue;
+      }
+      return index;
+    }
+    if (
+      isHardProcessBoundary(trimmed)
+      || isDiffStartLine(trimmed)
+      || parseHunkStart(trimmed)
+      || isAssistantNarrativeMarker(trimmed)
+      || isRolePromptTranscriptStart(trimmed)
+    ) {
+      return index;
+    }
+    if (
+      isCollapsedOutputSummaryLine(trimmed)
+      || isProcessCodeOutputLine(trimmed)
+      || isBareProcessDiffBodyLine(line)
+      || isIndentedBareDiffTailLine(line)
+    ) {
+      skippedTail = true;
+      index += 1;
+      continue;
+    }
+    return index;
+  }
+
+  return index;
+}
+
+function nextLineLooksLikeBareDiffTail(rawLines: string[], startIndex: number): boolean {
+  for (let index = startIndex; index < rawLines.length; index += 1) {
+    const line = normalizedProcessLine(rawLines[index] ?? "");
+    const trimmed = line.trim();
+    if (!trimmed) {
+      continue;
+    }
+    return (
+      isCollapsedOutputSummaryLine(trimmed)
+      || isProcessCodeOutputLine(trimmed)
+      || isBareProcessDiffBodyLine(line)
+      || isIndentedBareDiffTailLine(line)
+    );
+  }
+  return false;
+}
+
+function isIndentedBareDiffTailLine(line: string): boolean {
+  const trimmedStart = line.trimStart();
+  return !trimmedStart.startsWith("+++")
+    && !trimmedStart.startsWith("---")
+    && /^[+-]\s{2,}\S/.test(trimmedStart);
+}
+
 function nextLineLooksLikeProcessDiffTail(rawLines: string[], startIndex: number): boolean {
   for (let index = startIndex; index < rawLines.length; index += 1) {
     const line = normalizedProcessLine(rawLines[index] ?? "");
@@ -3997,6 +4288,69 @@ function renderDiffContent(text: string): RenderLine[] {
   flushCurrentFile();
 
   return rendered;
+}
+
+function renderBareDiffHunkContent(lines: string[], diffFile: string | null = null): RenderLine[] {
+  const hunks: RenderLine[][] = [];
+  let currentHunk: RenderLine[] = [];
+  let oldLineNumber = 0;
+  let newLineNumber = 0;
+  let insideHunk = false;
+
+  const flushHunk = () => {
+    if (currentHunk.some((line) => line.kind === "diff-add" || line.kind === "diff-remove")) {
+      hunks.push(currentHunk);
+    }
+    currentHunk = [];
+  };
+
+  for (const rawLine of lines) {
+    const line = stripAnsiForDiff(rawLine);
+    const trimmedStart = line.trimStart();
+    const hunkStart = parseHunkStart(trimmedStart);
+    if (hunkStart) {
+      flushHunk();
+      currentHunk.push({
+        kind: "diff-hunk",
+        text: trimmedStart,
+        ...(diffFile ? { diffFile } : {})
+      });
+      oldLineNumber = hunkStart.oldStart;
+      newLineNumber = hunkStart.newStart;
+      insideHunk = true;
+      continue;
+    }
+    if (!insideHunk) {
+      continue;
+    }
+    if (line.startsWith("+")) {
+      currentHunk.push({
+        kind: "diff-add",
+        text: formatDiffCodeLine(newLineNumber, "+", line.slice(1))
+      });
+      newLineNumber += 1;
+      continue;
+    }
+    if (line.startsWith("-")) {
+      currentHunk.push({
+        kind: "diff-remove",
+        text: formatDiffCodeLine(oldLineNumber, "-", line.slice(1))
+      });
+      oldLineNumber += 1;
+      continue;
+    }
+    if (line.startsWith(" ")) {
+      currentHunk.push({
+        kind: "diff-context",
+        text: formatDiffCodeLine(newLineNumber, " ", line.slice(1))
+      });
+      oldLineNumber += 1;
+      newLineNumber += 1;
+    }
+  }
+
+  flushHunk();
+  return hunks.flat();
 }
 
 function renderDiffFileLine(line: string): RenderLine | null {

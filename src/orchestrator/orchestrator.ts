@@ -496,7 +496,7 @@ export class Orchestrator {
         ...(status.feature_id ? { featureId: status.feature_id } : {}),
         role: status.role,
         engine: status.engine,
-        label: workerLabel(status.role, status.engine, status.feature_title ?? status.feature_id),
+        label: workerLabelForStatus(status),
         logPath: join(dir, "output.log"),
         statusPath,
         runtimeStatus: status
@@ -526,7 +526,7 @@ export class Orchestrator {
         input.onStatus?.({ taskId: task.id, judge: "running", actor: "waiting", critic: "waiting" });
       }
       const judgeWorker = reuseJudgeSnapshot
-        ? this.workerFiles(task, `judge-${route.judge_engine}`)
+        ? this.workerFiles(task, taskWorkerId("judge", route.judge_engine, turn.turnId))
         : await this.runJudge(input, task, route.judge_engine, workers, turn);
       throwIfCancelled(input.signal);
       const judge = reuseJudgeSnapshot
@@ -575,7 +575,7 @@ export class Orchestrator {
         await this.clearTurnJudgeArtifacts(turn);
       }
       const judgeWorker = reuseJudgeSnapshot
-        ? this.workerFiles(task, `judge-${route.judge_engine}`)
+        ? this.workerFiles(task, taskWorkerId("judge", route.judge_engine, turn.turnId))
         : await this.runFollowUpJudge(input, task, route, turn, workers);
       throwIfCancelled(input.signal);
       const judge = reuseJudgeSnapshot
@@ -1179,8 +1179,8 @@ export class Orchestrator {
         task,
         turn,
         judge,
-        this.workerFiles(task, `actor-${route.actor_engine}`),
-        this.workerFiles(task, `critic-${route.critic_engine}`),
+        this.workerFiles(task, taskWorkerId("actor", route.actor_engine, turn.turnId)),
+        this.workerFiles(task, taskWorkerId("critic", route.critic_engine, turn.turnId)),
         feature,
         input,
         workers,
@@ -1704,7 +1704,7 @@ export class Orchestrator {
     workers: WorkerLogRef[],
     turn: TaskTurn
   ): Promise<WorkerFiles> {
-    const workerId = `judge-${engine}`;
+    const workerId = taskWorkerId("judge", engine, turn.turnId);
     const judgeFiles = this.workerFiles(task, workerId);
     const judge = await this.sessions.initializeWorker(task, {
       workerId,
@@ -1725,7 +1725,7 @@ export class Orchestrator {
       id: judge.workerId,
       role: "judge",
       engine,
-      label: `Judge (${engine})`,
+      label: taskWorkerLabel("judge", engine, turn.turnId),
       logPath: judge.outputLogPath,
       statusPath: judge.statusPath
     });
@@ -1742,7 +1742,7 @@ export class Orchestrator {
       statusPath: judge.statusPath,
       prompt: await readTextIfExists(judge.promptPath),
       signal: input.signal
-    });
+    }, "task", await this.previousTurnWorker(task, "judge", engine, turn.turnId));
     ensureWorkerSuccess(result);
 
     return judge;
@@ -1761,7 +1761,12 @@ export class Orchestrator {
     workspaceDir = input.cwd,
     isolatedWorkspace = featureScoped
   ): Promise<WorkerFiles> {
-    const workerId = featureScoped ? `actor-${engine}-${feature.id}` : `actor-${engine}`;
+    const workerId = taskWorkerId(
+      "actor",
+      engine,
+      turn.turnId,
+      featureScoped ? feature.id : undefined
+    );
     const actor = await this.sessions.initializeWorker(task, {
       workerId,
       ...(featureScoped ? { featureId: feature.id } : {}),
@@ -1786,7 +1791,9 @@ export class Orchestrator {
       ...(featureScoped ? { featureId: feature.id } : {}),
       role: "actor",
       engine,
-      label: featureScoped ? `Actor (${engine}) · ${feature.title}` : `Actor (${engine})`,
+      label: featureScoped
+        ? workerLabel("actor", engine, feature.title)
+        : taskWorkerLabel("actor", engine, turn.turnId),
       logPath: actor.outputLogPath,
       statusPath: actor.statusPath
     });
@@ -1806,7 +1813,9 @@ export class Orchestrator {
       statusPath: actor.statusPath,
       prompt: await readTextIfExists(actor.promptPath),
       signal: input.signal
-    }, task, feature);
+    }, task, feature, featureScoped
+      ? undefined
+      : await this.previousTurnWorker(task, "actor", engine, turn.turnId));
     ensureWorkerSuccess(result);
     await mirrorWorkerFileToFeature(join(actor.dir, "worklog.md"), feature.actorWorklogPath);
     await appendFeatureDialogue(feature, "actor.completed", "actor", "Actor completed feature work.", {
@@ -1831,7 +1840,12 @@ export class Orchestrator {
     workspaceDir = input.cwd,
     isolatedWorkspace = featureScoped
   ): Promise<WorkerFiles> {
-    const workerId = featureScoped ? `critic-${engine}-${feature.id}` : `critic-${engine}`;
+    const workerId = taskWorkerId(
+      "critic",
+      engine,
+      turn.turnId,
+      featureScoped ? feature.id : undefined
+    );
     const critic = await this.sessions.initializeWorker(task, {
       workerId,
       ...(featureScoped ? { featureId: feature.id } : {}),
@@ -1856,7 +1870,9 @@ export class Orchestrator {
       ...(featureScoped ? { featureId: feature.id } : {}),
       role: "critic",
       engine,
-      label: featureScoped ? `Critic (${engine}) · ${feature.title}` : `Critic (${engine})`,
+      label: featureScoped
+        ? workerLabel("critic", engine, feature.title)
+        : taskWorkerLabel("critic", engine, turn.turnId),
       logPath: critic.outputLogPath,
       statusPath: critic.statusPath
     });
@@ -1876,7 +1892,9 @@ export class Orchestrator {
       statusPath: critic.statusPath,
       prompt: await readTextIfExists(critic.promptPath),
       signal: input.signal
-    }, task, feature);
+    }, task, feature, featureScoped
+      ? undefined
+      : await this.previousTurnWorker(task, "critic", engine, turn.turnId));
     ensureWorkerSuccess(result);
     await appendFeatureDialogue(feature, "critic.completed", "critic", "Critic completed feature review.", {
       review: join(critic.dir, "review.md"),
@@ -2029,7 +2047,8 @@ export class Orchestrator {
     engine: EngineName,
     spec: WorkerRunSpec,
     task: TaskSession,
-    feature: FeatureChannel
+    feature: FeatureChannel,
+    resumeFrom?: WorkerFiles
   ): Promise<WorkerResult> {
     const role = spec.role === "critic" ? "critic" : "actor";
     const key = featureRunKey(task.id, feature.id);
@@ -2056,7 +2075,7 @@ export class Orchestrator {
       const result = await this.runWorkerWithNativeSession(engine, {
         ...spec,
         signal: controller.signal
-      });
+      }, "task", resumeFrom);
       if (active.cancelRequested) {
         throw new FeatureRunCancelledError(feature.id);
       }
@@ -2079,7 +2098,8 @@ export class Orchestrator {
   private async runWorkerWithNativeSession(
     engine: EngineName,
     spec: WorkerRunSpec,
-    scope: NativeSession["scope"] = "task"
+    scope: NativeSession["scope"] = "task",
+    resumeFrom?: WorkerFiles
   ): Promise<WorkerResult> {
     const adapter = getAdapter(this.workers, engine);
     const workerFiles: WorkerFiles = {
@@ -2089,10 +2109,15 @@ export class Orchestrator {
       outputLogPath: spec.outputLogPath,
       statusPath: spec.statusPath
     };
-    const storedSession = await this.sessions.readNativeSession(workerFiles);
+    const storedSession = await this.sessions.readNativeSession(workerFiles)
+      ?? (resumeFrom ? await this.sessions.readNativeSession(resumeFrom) : null);
     const writableDirs = spec.writableDirs?.length ? uniquePaths(spec.writableDirs) : undefined;
     const existing = storedSession ? {
       ...storedSession,
+      worker_id: spec.workerId,
+      role: spec.role,
+      engine,
+      scope,
       cwd: spec.cwd,
       ...(writableDirs ? { writable_dirs: writableDirs } : {})
     } : null;
@@ -2141,6 +2166,27 @@ export class Orchestrator {
     };
   }
 
+  private async previousTurnWorker(
+    task: TaskSession,
+    role: Exclude<WorkerRole, "main">,
+    engine: EngineName,
+    currentTurnId: string
+  ): Promise<WorkerFiles | undefined> {
+    const currentTurn = Number(currentTurnId);
+    if (!Number.isInteger(currentTurn) || currentTurn <= 1) {
+      return undefined;
+    }
+
+    for (let turn = currentTurn - 1; turn >= 1; turn -= 1) {
+      const turnId = String(turn).padStart(Math.max(4, currentTurnId.length), "0");
+      const worker = this.workerFiles(task, taskWorkerId(role, engine, turnId));
+      if (await pathExists(join(worker.dir, "native-session.json"))) {
+        return worker;
+      }
+    }
+    return undefined;
+  }
+
   private async loadCompletedFeatureActor(
     task: TaskSession,
     engine: EngineName,
@@ -2169,7 +2215,12 @@ export class Orchestrator {
     channel: FeatureChannel,
     featureScoped: boolean
   ): Promise<WorkerFiles | null> {
-    const actor = this.workerFiles(task, featureScoped ? `actor-${engine}-${channel.id}` : `actor-${engine}`);
+    const actor = this.workerFiles(task, taskWorkerId(
+      "actor",
+      engine,
+      channel.turnId,
+      featureScoped ? channel.id : undefined
+    ));
     const status = await readWorkerStatusIfValid(actor.statusPath);
     if (
       status?.state !== "done"
@@ -2189,7 +2240,12 @@ export class Orchestrator {
     channel: FeatureChannel,
     featureScoped: boolean
   ): Promise<WorkerFiles | null> {
-    const critic = this.workerFiles(task, featureScoped ? `critic-${engine}-${channel.id}` : `critic-${engine}`);
+    const critic = this.workerFiles(task, taskWorkerId(
+      "critic",
+      engine,
+      channel.turnId,
+      featureScoped ? channel.id : undefined
+    ));
     const status = await readWorkerStatusIfValid(critic.statusPath);
     if (
       status?.state !== "done"
@@ -2246,21 +2302,27 @@ export class Orchestrator {
     task: TaskSession,
     role: WorkerRole
   ): Promise<{ status: WorkerStatus; logTail: string } | null> {
-    for (const engine of ["codex", "claude", "mock"] as EngineName[]) {
-      const files = this.workerFiles(task, `${role}-${engine}`);
-      if (!(await pathExists(files.statusPath))) {
-        continue;
+    const entries = await readdir(task.dir, { withFileTypes: true });
+    const candidates = (await Promise.all(entries.map(async (entry) => {
+      if (!entry.isDirectory()) {
+        return null;
       }
+      const files = this.workerFiles(task, entry.name);
       const status = await readWorkerStatusIfValid(files.statusPath);
-      if (!status) {
-        continue;
+      if (!status || status.role !== role) {
+        return null;
       }
-      return {
-        status,
-        logTail: tailText(await readTextIfExists(files.outputLogPath), 8)
-      };
-    }
-    return null;
+      return { files, status };
+    }))).filter((candidate): candidate is { files: WorkerFiles; status: WorkerStatus } => candidate !== null);
+    candidates.sort((left, right) => (
+      Date.parse(right.status.last_event_at) - Date.parse(left.status.last_event_at)
+      || right.status.worker_id.localeCompare(left.status.worker_id)
+    ));
+    const latest = candidates[0];
+    return latest ? {
+      status: latest.status,
+      logTail: tailText(await readTextIfExists(latest.files.outputLogPath), 8)
+    } : null;
   }
 }
 
@@ -2498,6 +2560,42 @@ function labelWorker(status: WorkerStatus): string {
 function workerLabel(role: WorkerRole, engine: EngineName, featureId?: string): string {
   const base = `${capitalize(role)} (${engine})`;
   return featureId ? `${base} · ${featureId}` : base;
+}
+
+function taskWorkerLabel(
+  role: Exclude<WorkerRole, "main">,
+  engine: EngineName,
+  turnId: string
+): string {
+  return turnId === "0001"
+    ? workerLabel(role, engine)
+    : workerLabel(role, engine, `Turn ${Number(turnId)}`);
+}
+
+function workerLabelForStatus(status: WorkerStatus): string {
+  const feature = status.feature_title ?? status.feature_id;
+  if (feature) {
+    return workerLabel(status.role, status.engine, feature);
+  }
+  if (status.role === "main") {
+    return workerLabel(status.role, status.engine);
+  }
+  const base = `${status.role}-${status.engine}`;
+  const turnId = status.worker_id.match(new RegExp(`^${base}-(\\d{4,})$`))?.[1];
+  return taskWorkerLabel(status.role, status.engine, turnId ?? "0001");
+}
+
+function taskWorkerId(
+  role: Exclude<WorkerRole, "main">,
+  engine: EngineName,
+  turnId: string,
+  featureId?: string
+): string {
+  const base = `${role}-${engine}`;
+  if (featureId) {
+    return `${base}-${featureId}`;
+  }
+  return turnId === "0001" ? base : `${base}-${turnId}`;
 }
 
 function capitalize(value: string): string {

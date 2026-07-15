@@ -74,5 +74,5 @@ export function nextSubmitMemoryState(
 }
 
 export function shouldClearWorkersForSubmit(target: SubmitTarget): boolean {
-  return target.kind !== "task-question";
+  return target.kind === "new-request";
 }

@@ -723,8 +723,9 @@ export class SessionManager {
     await ensureDir(dir);
     await this.clearWorkerArtifacts(dir, input.role);
     await writeText(promptPath, input.prompt);
-    if (input.preserveOutput && (await pathExists(outputLogPath))) {
-      await appendText(outputLogPath, `\n--- retry ${this.now().toISOString()} ---\n`);
+    if (await pathExists(outputLogPath)) {
+      const continuation = input.preserveOutput ? "retry" : "resume";
+      await appendText(outputLogPath, `\n--- ${continuation} ${this.now().toISOString()} ---\n`);
     } else {
       await writeText(outputLogPath, "");
     }

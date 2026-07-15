@@ -2741,6 +2741,317 @@ describe("WorkerOutputView", () => {
     }
   });
 
+  it("renders bare unified diff hunks when no artifact preserves their markers", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pct-worker-output-visible-bare-hunk-"));
+    const workerDir = join(root, "actor-codex");
+
+    await mkdir(workerDir, { recursive: true });
+    await writeFile(
+      join(workerDir, "output.log"),
+      [
+        "before bare hunk",
+        "test(\"stale readback\", () => {",
+        "const game = createGame();",
+        "@@ -10,3 +20,4 @@",
+        "   const before = true;",
+        "-  const oldValue = 1;",
+        "+  const newValue = 2;",
+        "+  const extra = true;",
+        "   return value;",
+        "",
+        " return {",
+        " dataset,",
+        "Collapsed code output: 4 lines",
+        "-  this.listeners.get(type)?.({",
+        "delete this[name];",
+        "after bare hunk"
+      ].join("\n")
+    );
+
+    const { lastFrame, unmount } = render(
+      <WorkerOutputView
+        title="Actor (codex) output"
+        role="actor"
+        logPath={join(workerDir, "output.log")}
+        height={18}
+      />
+    );
+
+    try {
+      await waitForFrame(lastFrame, "after bare hunk");
+
+      const frame = lastFrame() ?? "";
+      expect(frame).toContain("@@ -10,3 +20,4 @@");
+      expect(frame).toContain(" 11 -   const oldValue = 1;");
+      expect(frame).toContain(" 21 +   const newValue = 2;");
+      expect(frame).toContain(" 22 +   const extra = true;");
+      expect(frame).not.toContain("• const oldValue = 1;");
+      expect(frame).not.toContain("Collapsed code output");
+      expect(frame).not.toContain("dataset,");
+      expect(frame).not.toContain("this.listeners.get(type)");
+      expect(frame).not.toContain("delete this[name]");
+      expect(frame).not.toContain("stale readback");
+    } finally {
+      unmount();
+    }
+  });
+
+  it("preserves long context runs inside a bare diff hunk", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pct-worker-output-long-context-hunk-"));
+    const workerDir = join(root, "actor-codex");
+
+    await mkdir(workerDir, { recursive: true });
+    await writeFile(
+      join(workerDir, "output.log"),
+      [
+        "before long context hunk",
+        "@@ -10,6 +10,6 @@",
+        " const one = 1;",
+        " const two = 2;",
+        " const three = 3;",
+        " const four = 4;",
+        "-const value = oldValue;",
+        "+const value = newValue;",
+        " return value;",
+        "after long context hunk"
+      ].join("\n")
+    );
+
+    const { lastFrame, unmount } = render(
+      <WorkerOutputView
+        title="Actor (codex) output"
+        role="actor"
+        logPath={join(workerDir, "output.log")}
+        height={24}
+      />
+    );
+
+    try {
+      await waitForFrame(lastFrame, "after long context hunk");
+
+      const frame = lastFrame() ?? "";
+      expect(frame).toContain("@@ -10,6 +10,6 @@");
+      expect(frame).toContain("10   const one = 1;");
+      expect(frame).toContain("13   const four = 4;");
+      expect(frame).toContain("14 - const value = oldValue;");
+      expect(frame).toContain("14 + const value = newValue;");
+      expect(frame).toContain("15   return value;");
+      expect(frame).not.toContain("Collapsed code output");
+    } finally {
+      unmount();
+    }
+  });
+
+  it("does not let an unrelated rendered artifact hide a source bare diff", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pct-worker-output-unrelated-artifact-hunk-"));
+    const workerDir = join(root, "actor-codex");
+
+    await mkdir(workerDir, { recursive: true });
+    await writeFile(join(workerDir, "worklog.md"), "# Worklog\n\nImplementation notes only.\n");
+    await writeFile(
+      join(workerDir, "output.log"),
+      [
+        "--- a/src/game.ts",
+        "+++ b/src/game.ts",
+        "@@ -1,1 +1,1 @@",
+        "-const speed = 1;",
+        "+const speed = 2;",
+        "after source hunk"
+      ].join("\n")
+    );
+
+    const { lastFrame, unmount } = render(
+      <WorkerOutputView
+        title="Actor (codex) output"
+        role="actor"
+        logPath={join(workerDir, "output.log")}
+        height={20}
+      />
+    );
+
+    try {
+      await waitForFrame(lastFrame, "after source hunk");
+
+      const frame = lastFrame() ?? "";
+      expect(frame).toContain("Implementation notes only.");
+      expect(frame).toContain("@@ -1,1 +1,1 @@");
+      expect(frame).toContain("1 - const speed = 1;");
+      expect(frame).toContain("1 + const speed = 2;");
+    } finally {
+      unmount();
+    }
+  });
+
+  it("drops context-only bare hunks left by cancelled diff output", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pct-worker-output-context-only-hunk-"));
+    const workerDir = join(root, "actor-codex");
+
+    await mkdir(workerDir, { recursive: true });
+    await writeFile(
+      join(workerDir, "output.log"),
+      [
+        "before context-only hunk",
+        "@@ -20,2 +40,2 @@",
+        "   const unchanged = true;",
+        "   return unchanged;",
+        "after context-only hunk"
+      ].join("\n")
+    );
+
+    const { lastFrame, unmount } = render(
+      <WorkerOutputView
+        title="Actor (codex) output"
+        role="actor"
+        logPath={join(workerDir, "output.log")}
+        height={12}
+      />
+    );
+
+    try {
+      await waitForFrame(lastFrame, "after context-only hunk");
+
+      const frame = lastFrame() ?? "";
+      expect(frame).toContain("before context-only hunk");
+      expect(frame).toContain("after context-only hunk");
+      expect(frame).not.toContain("@@ -20,2 +40,2 @@");
+      expect(frame).not.toContain("const unchanged");
+    } finally {
+      unmount();
+    }
+  });
+
+  it("keeps only the latest copy of an identical bare diff hunk", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pct-worker-output-duplicate-bare-hunk-"));
+    const workerDir = join(root, "actor-codex");
+    const hunk = [
+      "@@ -1,1 +1,1 @@",
+      "-const value = 1;",
+      "+const value = 2;"
+    ];
+
+    await mkdir(workerDir, { recursive: true });
+    await writeFile(
+      join(workerDir, "output.log"),
+      ["before duplicate hunk", ...hunk, "between duplicate hunk", ...hunk, "after duplicate hunk"].join("\n")
+    );
+
+    const { lastFrame, unmount } = render(
+      <WorkerOutputView
+        title="Actor (codex) output"
+        role="actor"
+        logPath={join(workerDir, "output.log")}
+        height={18}
+      />
+    );
+
+    try {
+      await waitForFrame(lastFrame, "after duplicate hunk");
+
+      const frame = lastFrame() ?? "";
+      expect(frame.match(/@@ -1,1 \+1,1 @@/g)).toHaveLength(1);
+      expect(frame.match(/1 - const value = 1;/g)).toHaveLength(1);
+      expect(frame.match(/1 \+ const value = 2;/g)).toHaveLength(1);
+      expect(frame).toContain("between duplicate hunk");
+      expect(frame).toContain("after duplicate hunk");
+    } finally {
+      unmount();
+    }
+  });
+
+  it("keeps identical bare hunks when they belong to different files", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pct-worker-output-same-hunk-different-files-"));
+    const workerDir = join(root, "actor-codex");
+    const hunk = [
+      "@@ -1,1 +1,1 @@",
+      "-const enabled = false;",
+      "+const enabled = true;"
+    ];
+
+    await mkdir(workerDir, { recursive: true });
+    await writeFile(
+      join(workerDir, "output.log"),
+      [
+        "--- a/src/alpha.ts",
+        "+++ b/src/alpha.ts",
+        ...hunk,
+        "between files",
+        "--- a/src/beta.ts",
+        "+++ b/src/beta.ts",
+        ...hunk,
+        "after both files"
+      ].join("\n")
+    );
+
+    const { lastFrame, unmount } = render(
+      <WorkerOutputView
+        title="Actor (codex) output"
+        role="actor"
+        logPath={join(workerDir, "output.log")}
+        height={24}
+      />
+    );
+
+    try {
+      await waitForFrame(lastFrame, "after both files");
+
+      const frame = lastFrame() ?? "";
+      expect(frame.match(/@@ -1,1 \+1,1 @@/g)).toHaveLength(2);
+      expect(frame.match(/1 - const enabled = false;/g)).toHaveLength(2);
+      expect(frame.match(/1 \+ const enabled = true;/g)).toHaveLength(2);
+    } finally {
+      unmount();
+    }
+  });
+
+  it("dedupes an identical hunk across different multi-hunk process diff batches", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pct-worker-output-duplicate-multi-hunk-"));
+    const workerDir = join(root, "actor-codex");
+
+    await mkdir(workerDir, { recursive: true });
+    await writeFile(
+      join(workerDir, "output.log"),
+      [
+        "before first diff batch",
+        "@@ -1,1 +1,1 @@",
+        "-const repeated = 1;",
+        "+const repeated = 2;",
+        "@@ -10,1 +10,1 @@",
+        "-const firstOnly = false;",
+        "+const firstOnly = true;",
+        "between diff batches",
+        "@@ -20,1 +20,1 @@",
+        "-const secondOnly = false;",
+        "+const secondOnly = true;",
+        "@@ -1,1 +1,1 @@",
+        "-const repeated = 1;",
+        "+const repeated = 2;",
+        "after second diff batch"
+      ].join("\n")
+    );
+
+    const { lastFrame, unmount } = render(
+      <WorkerOutputView
+        title="Actor (codex) output"
+        role="actor"
+        logPath={join(workerDir, "output.log")}
+        height={24}
+      />
+    );
+
+    try {
+      await waitForFrame(lastFrame, "after second diff batch");
+
+      const frame = lastFrame() ?? "";
+      expect(frame.match(/@@ -1,1 \+1,1 @@/g)).toHaveLength(1);
+      expect(frame).toContain("@@ -10,1 +10,1 @@");
+      expect(frame).toContain("@@ -20,1 +20,1 @@");
+      expect(frame).toContain("10 + const firstOnly = true;");
+      expect(frame).toContain("20 + const secondOnly = true;");
+    } finally {
+      unmount();
+    }
+  });
+
   it("does not let process markdown fences turn later duplicate diffs into code", async () => {
     const root = await mkdtemp(join(tmpdir(), "pct-worker-output-process-fence-"));
     const workerDir = join(root, "critic-codex");

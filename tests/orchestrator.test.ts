@@ -1495,8 +1495,11 @@ describe("Orchestrator", () => {
 
     const actorRun = capturing.runs.find((run) => run.role === "actor");
     expect(actorRun?.nativeSession?.session_id).toBe("native-actor-1");
-    const updated = await readJson(join(actorDir, "native-session.json"), NativeSessionSchema);
+    const original = await readJson(join(actorDir, "native-session.json"), NativeSessionSchema);
+    const updated = await readJson(join(task.dir, "actor-mock-0002", "native-session.json"), NativeSessionSchema);
+    expect(original.last_used_at).toBe("2026-06-30T03:30:00.000Z");
     expect(updated.last_used_at).not.toBe("2026-06-30T03:30:00.000Z");
+    expect(updated.worker_id).toBe("actor-mock-0002");
     expect(updated.source).toBe("manual");
   });
 
@@ -1516,6 +1519,9 @@ describe("Orchestrator", () => {
       cwd: root
     });
     const taskDir = join(root, ".parallel-codex", "sessions", first.taskId ?? "");
+    await writeText(join(taskDir, "judge-mock", "output.log"), "FIRST_TURN_JUDGE_LOG\n");
+    await writeText(join(taskDir, "actor-mock", "output.log"), "FIRST_TURN_ACTOR_LOG\n");
+    await writeText(join(taskDir, "critic-mock", "output.log"), "FIRST_TURN_CRITIC_LOG\n");
     await writeText(
       join(taskDir, "turns", "0001", "supervisor-summary.md"),
       "FIRST_TURN_MEMORY\nstatus rail completed\n"
@@ -1533,9 +1539,21 @@ describe("Orchestrator", () => {
     const judgeRun = capturing.runs.find((run) => run.role === "judge");
     const actorRun = capturing.runs.find((run) => run.role === "actor");
     const criticRun = capturing.runs.find((run) => run.role === "critic");
+    expect(followUp.workers.map((worker) => worker.id)).toEqual([
+      "judge-mock-0002",
+      "actor-mock-0002",
+      "critic-mock-0002"
+    ]);
+    expect(followUp.workers.map((worker) => worker.label)).toEqual([
+      "Judge (mock) · Turn 2",
+      "Actor (mock) · Turn 2",
+      "Critic (mock) · Turn 2"
+    ]);
     expect(judgeRun?.nativeSession?.session_id).toBe("mock-judge-mock");
+    expect(actorRun?.nativeSession?.session_id).toBe("mock-actor-mock");
+    expect(criticRun?.nativeSession?.session_id).toBe("mock-critic-mock");
     expect(judgeRun?.prompt).toContain("继续改状态栏");
-    expect(judgeRun?.cwd).toBe(join(taskDir, "judge-mock"));
+    expect(judgeRun?.cwd).toBe(join(taskDir, "judge-mock-0002"));
     expect(judgeRun?.enforceWorkspaceIsolation).toBe(true);
     expect(actorRun?.cwd).not.toBe(root);
     expect(criticRun?.cwd).not.toBe(actorRun?.cwd);
@@ -1547,8 +1565,8 @@ describe("Orchestrator", () => {
     expect(await readTextIfExists(join(taskDir, "turns", "0001", "requirements.md"))).toContain("Mock requirements");
     expect(await readTextIfExists(join(taskDir, "turns", "0002", "requirements.md"))).toContain("Mock requirements");
     expect(await readTextIfExists(join(taskDir, "turns", "0002", "user.md"))).toContain("继续改状态栏");
-    expect(await readTextIfExists(join(taskDir, "actor-mock", "prompt.md"))).toContain("Current turn: 0002");
-    expect(await readTextIfExists(join(taskDir, "actor-mock", "prompt.md"))).toContain(
+    expect(await readTextIfExists(join(taskDir, "actor-mock-0002", "prompt.md"))).toContain("Current turn: 0002");
+    expect(await readTextIfExists(join(taskDir, "actor-mock-0002", "prompt.md"))).toContain(
       `Feature directory: ${join(taskDir, "features", "0002")}`
     );
     expect(await readTextIfExists(join(taskDir, "features", "0002", "spec.md"))).toContain("继续改状态栏");
@@ -1556,10 +1574,21 @@ describe("Orchestrator", () => {
     expect(await readTextIfExists(join(taskDir, "turns", "0002", "supervisor-summary.md"))).toContain(
       "Complex task completed."
     );
-    expect(JSON.parse(await readTextIfExists(join(taskDir, "judge-mock", "native-session.json"))).cwd).toBe(
-      join(taskDir, "judge-mock")
+    expect(await readTextIfExists(join(taskDir, "judge-mock", "output.log"))).toBe("FIRST_TURN_JUDGE_LOG\n");
+    expect(await readTextIfExists(join(taskDir, "actor-mock", "output.log"))).toBe("FIRST_TURN_ACTOR_LOG\n");
+    expect(await readTextIfExists(join(taskDir, "critic-mock", "output.log"))).toBe("FIRST_TURN_CRITIC_LOG\n");
+    expect((await orchestrator.listTaskWorkers(first.taskId ?? "")).map((worker) => worker.label)).toEqual([
+      "Judge (mock)",
+      "Judge (mock) · Turn 2",
+      "Actor (mock)",
+      "Actor (mock) · Turn 2",
+      "Critic (mock)",
+      "Critic (mock) · Turn 2"
+    ]);
+    expect(JSON.parse(await readTextIfExists(join(taskDir, "judge-mock-0002", "native-session.json"))).cwd).toBe(
+      join(taskDir, "judge-mock-0002")
     );
-    expect(JSON.parse(await readTextIfExists(join(taskDir, "actor-mock", "native-session.json"))).cwd).toBe(actorRun?.cwd);
+    expect(JSON.parse(await readTextIfExists(join(taskDir, "actor-mock-0002", "native-session.json"))).cwd).toBe(actorRun?.cwd);
   });
 
   it("runs a multi-Feature plan produced by the Judge for a complex follow-up", async () => {
@@ -1803,7 +1832,7 @@ describe("Orchestrator", () => {
     expect(summary).not.toContain("Requirements:\n(empty)");
   });
 
-  it("clears stale worker artifacts before reusing actor and critic worker directories", async () => {
+  it("keeps historical worker artifacts immutable and excludes them from a fresh turn", async () => {
     const root = await mkdtemp(join(tmpdir(), "pct-orch-clear-artifacts-"));
     const config = mockConfig(root);
     const manager = new SessionManager({
@@ -1837,9 +1866,12 @@ describe("Orchestrator", () => {
     });
 
     const summary = await readTextIfExists(join(task.dir, "turns", "0002", "supervisor-summary.md"));
-    expect(await readTextIfExists(join(task.dir, "actor-mock", "worklog.md"))).toBe("");
-    expect(await readTextIfExists(join(task.dir, "actor-mock", "patch.diff"))).toBe("");
-    expect(await readTextIfExists(join(task.dir, "critic-mock", "review.md"))).toContain("APPROVED");
+    expect(await readTextIfExists(join(task.dir, "actor-mock", "worklog.md"))).toBe("STALE_ACTOR_WORKLOG");
+    expect(await readTextIfExists(join(task.dir, "actor-mock", "patch.diff"))).toBe("STALE_PATCH");
+    expect(await readTextIfExists(join(task.dir, "critic-mock", "review.md"))).toBe("STALE_CRITIC_REVIEW");
+    expect(await readTextIfExists(join(task.dir, "actor-mock-0002", "worklog.md"))).toBe("");
+    expect(await readTextIfExists(join(task.dir, "actor-mock-0002", "patch.diff"))).toBe("");
+    expect(await readTextIfExists(join(task.dir, "critic-mock-0002", "review.md"))).toContain("APPROVED");
     expect(summary).not.toContain("STALE_ACTOR_WORKLOG");
     expect(summary).not.toContain("STALE_PATCH");
     expect(summary).not.toContain("STALE_CRITIC_REVIEW");
@@ -1948,6 +1980,61 @@ describe("Orchestrator", () => {
     expect(adapter.runs[0]?.nativeSession).toBeNull();
     expect(adapter.runs[1]?.nativeSession?.session_id).toBe("mock-main-mock");
     expect(await pathExists(join(task.dir, "turns", "0002", "user.md"))).toBe(false);
+  });
+
+  it("answers task questions from the latest turn worker evidence", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pct-orch-task-question-latest-worker-"));
+    const config = mockConfig(root);
+    const manager = new SessionManager({
+      projectRoot: root,
+      dataDir: config.dataDir,
+      now: () => new Date("2026-06-30T03:30:00.000Z"),
+      randomId: () => "latest-worker"
+    });
+    const adapter = new CapturingAdapter();
+    const orchestrator = new Orchestrator(config, manager, new Map([["mock", adapter]]));
+    const task = await manager.createTask({
+      request: "优化得分",
+      cwd: root,
+      route: {
+        mode: "complex",
+        reason: "Requires workers.",
+        suggested_roles: ["judge", "actor", "critic"],
+        judge_engine: "mock",
+        actor_engine: "mock",
+        critic_engine: "mock"
+      }
+    });
+    await writeJson(join(task.dir, "actor-mock", "status.json"), {
+      worker_id: "actor-mock",
+      role: "actor",
+      engine: "mock",
+      state: "done",
+      phase: "process-exited",
+      last_event_at: "2026-06-30T03:31:00.000Z",
+      summary: "first turn actor completed"
+    });
+    await writeText(join(task.dir, "actor-mock", "output.log"), "FIRST_TURN_ONLY\n");
+    await writeJson(join(task.dir, "actor-mock-0002", "status.json"), {
+      worker_id: "actor-mock-0002",
+      role: "actor",
+      engine: "mock",
+      state: "failed",
+      phase: "process-idle-timeout",
+      last_event_at: "2026-06-30T03:35:00.000Z",
+      summary: "second turn actor timed out"
+    });
+    await writeText(join(task.dir, "actor-mock-0002", "output.log"), "SECOND_TURN_TIMEOUT\n");
+
+    await orchestrator.answerTaskQuestion({
+      taskId: task.id,
+      request: "现在为什么失败",
+      cwd: root
+    });
+
+    expect(adapter.runs[0]?.prompt).toContain("Actor (mock): failed/process-idle-timeout");
+    expect(adapter.runs[0]?.prompt).toContain("SECOND_TURN_TIMEOUT");
+    expect(adapter.runs[0]?.prompt).not.toContain("FIRST_TURN_ONLY");
   });
 
   it("skips corrupt worker status files when answering active task questions", async () => {
@@ -2919,7 +3006,7 @@ describe("Orchestrator", () => {
 
     await expect(
       orchestrator.handleTaskTurn({ taskId, request: "增加关卡速度", cwd: root })
-    ).rejects.toThrow("actor-mock failed with exit code 2");
+    ).rejects.toThrow("actor-mock-0002 failed with exit code 2");
 
     await orchestrator.retryTask({ taskId, cwd: root });
     const taskDir = join(root, ".parallel-codex", "sessions", taskId);
@@ -2929,7 +3016,7 @@ describe("Orchestrator", () => {
     expect(adapter.runs.filter((run) => run.role === "actor").at(-1)?.nativeSession?.session_id).toBe("mock-actor-mock");
     expect(await pathExists(join(taskDir, "turns", "0002"))).toBe(true);
     expect(await pathExists(join(taskDir, "turns", "0003"))).toBe(false);
-    expect(await readTextIfExists(join(taskDir, "actor-mock", "output.log"))).toContain("FOLLOWUP_ACTOR_FAILURE");
+    expect(await readTextIfExists(join(taskDir, "actor-mock-0002", "output.log"))).toContain("FOLLOWUP_ACTOR_FAILURE");
   });
 
   it("reruns a failed follow-up Judge when no turn snapshot was produced", async () => {
@@ -2948,7 +3035,7 @@ describe("Orchestrator", () => {
 
     await expect(
       orchestrator.handleTaskTurn({ taskId, request: "改成另一个方向", cwd: root })
-    ).rejects.toThrow("judge-mock failed with exit code 2");
+    ).rejects.toThrow("judge-mock-0002 failed with exit code 2");
 
     const result = await orchestrator.retryTask({ taskId, cwd: root });
     const taskDir = join(root, ".parallel-codex", "sessions", taskId);
