@@ -58,6 +58,7 @@ describe("routeRequestWithCodex", () => {
     return expect(routeRequestWithCodex("实现一个大型功能", config, runner)).resolves.toMatchObject({
       mode: "simple",
       source: "forced",
+      duration_ms: 0,
       suggested_roles: []
     });
   });
@@ -71,6 +72,8 @@ describe("routeRequestWithCodex", () => {
 
     return expect(routeRequestWithCodex("你好", config, runner)).resolves.toMatchObject({
       mode: "complex",
+      source: "forced",
+      duration_ms: 0,
       suggested_roles: ["judge", "actor", "critic"]
     });
   });

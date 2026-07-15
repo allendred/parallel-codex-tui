@@ -174,7 +174,7 @@ function annotateRoute(
     ...routerProxyRouteFields(proxyContext),
     ...(routerCommand ? { router_command: routerCommand } : {}),
     source,
-    duration_ms: Math.max(0, Date.now() - startedAt)
+    duration_ms: source === "forced" ? 0 : Math.max(0, Date.now() - startedAt)
   };
 }
 
