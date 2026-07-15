@@ -2187,6 +2187,7 @@ export class Orchestrator {
       turn.turnId,
       featureScoped ? feature.id : undefined
     );
+    const workerFiles = this.workerFiles(task, workerId);
     const actor = await this.sessions.initializeWorker(task, {
       workerId,
       ...(featureScoped ? { featureId: feature.id } : {}),
@@ -2198,6 +2199,7 @@ export class Orchestrator {
         request: input.request,
         taskDir: task.dir,
         judgeDir,
+        workerDir: workerFiles.dir,
         turn: await this.promptTurnContext(task, turn),
         feature: featurePromptContext(feature),
         ...(isolatedWorkspace ? { workspaceDir } : {}),
@@ -2266,6 +2268,7 @@ export class Orchestrator {
       turn.turnId,
       featureScoped ? feature.id : undefined
     );
+    const workerFiles = this.workerFiles(task, workerId);
     const critic = await this.sessions.initializeWorker(task, {
       workerId,
       ...(featureScoped ? { featureId: feature.id } : {}),
@@ -2277,6 +2280,7 @@ export class Orchestrator {
         request: input.request,
         taskDir: task.dir,
         judgeDir,
+        workerDir: workerFiles.dir,
         actorDir,
         turn: await this.promptTurnContext(task, turn),
         feature: featurePromptContext(feature),
@@ -2316,6 +2320,12 @@ export class Orchestrator {
       ? undefined
       : await this.previousTurnWorker(task, "critic", engine, turn.turnId));
     ensureWorkerSuccess(result);
+    if (isolatedWorkspace) {
+      await recoverWorkerFileFromWorkspace(
+        join(workspaceDir, "review.md"),
+        join(critic.dir, "review.md")
+      );
+    }
     await appendFeatureDialogue(feature, "critic.completed", "critic", "Critic completed feature review.", {
       review: join(critic.dir, "review.md"),
       findings: feature.criticFindingsPath
@@ -3016,6 +3026,13 @@ async function mirrorWorkerFileToFeature(sourcePath: string, targetPath: string)
   if (content.trim()) {
     await writeText(targetPath, content);
   }
+}
+
+async function recoverWorkerFileFromWorkspace(sourcePath: string, targetPath: string): Promise<void> {
+  if ((await readTextIfExists(targetPath)).trim()) {
+    return;
+  }
+  await mirrorWorkerFileToFeature(sourcePath, targetPath);
 }
 
 function extractMainResponse(outputLog: string): string {

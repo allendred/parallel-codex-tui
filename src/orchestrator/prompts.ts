@@ -17,6 +17,7 @@ export interface RolePromptInput {
   request: string;
   taskDir: string;
   judgeDir: string;
+  workerDir?: string;
   actorDir?: string;
   workspaceDir?: string;
   revision?: string;
@@ -152,6 +153,7 @@ export function buildActorPrompt(input: RolePromptInput): string {
     "",
     `Task directory: ${input.taskDir}`,
     `Judge directory: ${input.judgeDir}`,
+    ...(input.workerDir ? [`Worker directory: ${input.workerDir}`] : []),
     ...(input.workspaceDir ? [
       `Feature workspace: ${input.workspaceDir}`,
       "The feature workspace above is the logical project root for this run.",
@@ -168,7 +170,7 @@ export function buildActorPrompt(input: RolePromptInput): string {
     "- acceptance.md",
     "- actor-brief.md",
     "",
-    "Write in your worker directory:",
+    "Write these coordination artifacts in the exact worker directory above, not in the feature workspace:",
     "- worklog.md",
     "- patch.diff when a diff is available",
     "",
@@ -195,6 +197,7 @@ export function buildCriticPrompt(input: RolePromptInput): string {
     "",
     `Task directory: ${input.taskDir}`,
     `Judge directory: ${input.judgeDir}`,
+    ...(input.workerDir ? [`Worker directory: ${input.workerDir}`] : []),
     `Actor directory: ${input.actorDir ?? ""}`,
     ...(input.workspaceDir ? [
       `Review workspace: ${input.workspaceDir}`,
@@ -208,7 +211,7 @@ export function buildCriticPrompt(input: RolePromptInput): string {
     "Read Judge files and Actor output.",
     "Read actor-replies.jsonl when reviewing a revision.",
     "",
-    "Write review.md in your worker directory. Include APPROVED when no blocking findings remain.",
+    "Write review.md in the exact worker directory above, not in the disposable review workspace. Include APPROVED when no blocking findings remain.",
     "If revision is required, include REVISION_REQUIRED and a concise fix list.",
     'Write critic-findings.jsonl in the feature mailbox with one JSON object per blocking issue: {"id":"C-001","severity":"blocker","summary":"what must change"}.',
     "",

@@ -14,6 +14,7 @@ describe("role prompts", () => {
       request: "实现功能",
       taskDir: "/tmp/task",
       judgeDir: "/tmp/task/judge",
+      workerDir: "/tmp/task/actor",
       workspaceDir: "/tmp/task/workspaces/feature",
       role: {
         title: "Builder",
@@ -26,6 +27,8 @@ describe("role prompts", () => {
     expect(prompt).toContain("- Always update worklog.md.");
     expect(prompt).toContain("logical project root for this run");
     expect(prompt).toContain("Never write implementation files to the shared live workspace");
+    expect(prompt).toContain("Worker directory: /tmp/task/actor");
+    expect(prompt).toContain("not in the feature workspace");
   });
 
   it("describes the Critic workspace as a disposable review copy", () => {
@@ -33,13 +36,16 @@ describe("role prompts", () => {
       request: "审查功能",
       taskDir: "/tmp/task",
       judgeDir: "/tmp/task/turn",
+      workerDir: "/tmp/task/critic",
       actorDir: "/tmp/task/actor",
       workspaceDir: "/tmp/task/workspaces/reviews/ui"
     });
 
     expect(prompt).toContain("Review workspace: /tmp/task/workspaces/reviews/ui");
+    expect(prompt).toContain("Worker directory: /tmp/task/critic");
     expect(prompt).toContain("disposable review copy");
     expect(prompt).toContain("discarded");
+    expect(prompt).toContain("not in the disposable review workspace");
     expect(prompt).toContain('{"id":"C-001","severity":"blocker","summary":"what must change"}');
   });
 

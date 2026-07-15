@@ -405,6 +405,32 @@ describe("Orchestrator", () => {
     ), TaskMetaSchema)).status).toBe("failed");
   });
 
+  it("recovers a Critic decision written in the disposable review workspace", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pct-orch-review-workspace-artifact-"));
+    const config = mockConfig(root);
+    const manager = new SessionManager({
+      projectRoot: root,
+      dataDir: config.dataDir,
+      now: () => new Date("2026-06-30T03:30:01.250Z"),
+      randomId: () => "workspace-review"
+    });
+    const adapter = new ReviewWorkspaceDecisionAdapter();
+    const orchestrator = new Orchestrator(
+      config,
+      manager,
+      new Map([["mock", adapter]])
+    );
+
+    await expect(orchestrator.handleRequest({
+      request: "实现并审查一个隔离功能",
+      cwd: root
+    })).resolves.toMatchObject({ mode: "complex" });
+
+    const taskDir = join(root, ".parallel-codex", "sessions", "task-20260630-033001-workspace-review");
+    expect(adapter.reviewWorkspace).toContain(join("reviews", "0001"));
+    expect(await readTextIfExists(join(taskDir, "critic-mock", "review.md"))).toContain("APPROVED");
+  });
+
   it("accepts Critic decisions formatted as Markdown headings", async () => {
     const root = await mkdtemp(join(tmpdir(), "pct-orch-markdown-decision-"));
     const config = mockConfig(root);
@@ -3787,6 +3813,21 @@ class MissingFeatureDecisionAdapter extends MockWorkerAdapter {
     const result = await super.run(spec);
     if (spec.role === "critic") {
       await writeText(join(spec.filesDir, "review.md"), "Review completed without a decision marker.\n");
+    }
+    return result;
+  }
+}
+
+class ReviewWorkspaceDecisionAdapter extends MockWorkerAdapter {
+  reviewWorkspace = "";
+
+  async run(spec: WorkerRunSpec): Promise<WorkerResult> {
+    const result = await super.run(spec);
+    if (spec.role === "critic" && spec.cwd.split(/[\\/]/).includes("reviews")) {
+      this.reviewWorkspace = spec.cwd;
+      const review = await readTextIfExists(join(spec.filesDir, "review.md"));
+      await writeText(join(spec.cwd, "review.md"), review);
+      await writeText(join(spec.filesDir, "review.md"), "");
     }
     return result;
   }
