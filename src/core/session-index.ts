@@ -1,6 +1,6 @@
 import { copyFile, readdir, rename, rm } from "node:fs/promises";
 import { join } from "node:path";
-import { backup, DatabaseSync } from "node:sqlite";
+import { DatabaseSync } from "node:sqlite";
 import type { ZodTypeAny, output } from "zod";
 import {
   NativeSessionSchema,
@@ -427,7 +427,7 @@ export class SessionIndex {
   private async writeBackup(targetPath: string): Promise<void> {
     const tempPath = `${targetPath}.${process.pid}.${Date.now()}.${Math.random().toString(16).slice(2)}.tmp`;
     try {
-      await backup(this.db, tempPath);
+      this.db.prepare("VACUUM INTO ?").run(tempPath);
       await replaceFile(tempPath, targetPath);
     } catch (error) {
       await rm(tempPath, { force: true }).catch(() => undefined);

@@ -9,6 +9,35 @@ import { SessionIndex } from "../src/core/session-index.js";
 import { NativeSessionSchema, RouteDecisionSchema, TaskMetaSchema, TurnMetaSchema, WorkerStatusSchema } from "../src/domain/schemas.js";
 
 describe("SessionIndex", () => {
+  it("writes a healthy backup when the workspace path contains an apostrophe", async () => {
+    const parent = await mkdtemp(join(tmpdir(), "pct-index-quoted-backup-"));
+    const root = join(parent, "project's workspace");
+    const dataDir = ".parallel-codex";
+    const taskId = "task-quoted-backup";
+    const databasePath = join(root, dataDir, "session-index.sqlite");
+    await writeJson(join(root, dataDir, "sessions", taskId, "meta.json"), TaskMetaSchema.parse({
+      id: taskId,
+      title: "Quoted backup",
+      created_at: "2026-07-02T01:00:00.000Z",
+      cwd: root,
+      mode: "complex",
+      status: "done"
+    }));
+
+    const index = await SessionIndex.open(root, dataDir);
+    await index.rebuildFromFiles();
+    index.close();
+
+    const recoveryBackup = new DatabaseSync(`${databasePath}.backup`);
+    expect(
+      (recoveryBackup.prepare("PRAGMA quick_check").get() as { quick_check: string }).quick_check
+    ).toBe("ok");
+    expect(
+      (recoveryBackup.prepare("SELECT title FROM tasks WHERE id = ?").get(taskId) as { title: string }).title
+    ).toBe("Quoted backup");
+    recoveryBackup.close();
+  });
+
   it("migrates an existing task catalog and filters archived sessions by default", async () => {
     const root = await mkdtemp(join(tmpdir(), "pct-index-archive-migration-"));
     const dataDir = ".parallel-codex";
