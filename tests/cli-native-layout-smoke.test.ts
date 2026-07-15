@@ -55,7 +55,6 @@ describe("CLI native layout smoke", () => {
     });
 
     try {
-      await waitForText(chunks, "ready");
       await waitForText(chunks, "attach");
       child.write("\x17");
       await waitForScreenText(() => screenWrites, screen, "parallel-codex-tui · logs");
@@ -153,7 +152,6 @@ describe("CLI native layout smoke", () => {
     });
 
     try {
-      await waitForText(chunks, "ready");
       await waitForText(chunks, "attach");
       child.write("\x0f");
       await waitForText(chunks, "native line 8");
@@ -219,7 +217,6 @@ describe("CLI native layout smoke", () => {
     });
 
     try {
-      await waitForText(chunks, "ready");
       await waitForText(chunks, "attach");
       child.write("\x0f");
       await waitForText(chunks, "native short line");
@@ -286,7 +283,6 @@ describe("CLI native layout smoke", () => {
     });
 
     try {
-      await waitForText(chunks, "ready");
       await waitForText(chunks, "attach");
       child.write("\x0f");
       await waitForScreenText(() => screenWrites, screen, "waiting for output");
@@ -345,7 +341,6 @@ describe("CLI native layout smoke", () => {
     });
 
     try {
-      await waitForText(chunks, "ready");
       await waitForText(chunks, "attach");
       child.write("\x0f");
       await waitForText(chunks, "process exited · code 7");

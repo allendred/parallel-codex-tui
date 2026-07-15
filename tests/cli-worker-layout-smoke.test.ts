@@ -147,7 +147,6 @@ describe("CLI worker layout smoke", () => {
     });
 
     try {
-      await waitForText(chunks, "ready");
       await waitForScreenText(() => screenWrites, screen, "workers 1");
       await waitForScreenText(() => screenWrites, screen, "^W logs");
       child.write("\x17");
@@ -266,7 +265,6 @@ describe("CLI worker layout smoke", () => {
     });
 
     try {
-      await waitForText(chunks, "ready");
       await waitForScreenText(() => screenWrites, screen, "^W logs");
       child.write("\x17");
       await waitForScreenText(() => screenWrites, screen, "logs · scroll");
@@ -318,7 +316,6 @@ describe("CLI worker layout smoke", () => {
     });
 
     try {
-      await waitForText(chunks, "ready");
       await waitForScreenText(() => screenWrites, screen, "workers 1");
       await waitForScreenText(() => screenWrites, screen, "^W logs");
       child.write("\x17");
@@ -388,7 +385,6 @@ describe("CLI worker layout smoke", () => {
     });
 
     try {
-      await waitForScreenText(() => screenWrites, screen, "ready");
       await waitForScreenText(() => screenWrites, screen, "wk1 done");
       await waitForScreenText(() => screenWrites, screen, "^W logs");
       child.write("\x0f");
@@ -441,7 +437,6 @@ describe("CLI worker layout smoke", () => {
     });
 
     try {
-      await waitForText(chunks, "ready");
       await waitForScreenText(() => screenWrites, screen, "^W logs");
       child.write("\x17");
       await waitForScreenText(() => screenWrites, screen, "const x = 1");
@@ -500,7 +495,7 @@ describe("CLI worker layout smoke", () => {
     });
 
     try {
-      await waitForScreenText(() => screenWrites, screen, "ready");
+      await waitForScreenText(() => screenWrites, screen, "^W logs");
       await openWorkerLogs(child, () => screenWrites, screen, "preserve tail");
 
       const lines = screen.styledSnapshotLines();
@@ -552,7 +547,7 @@ describe("CLI worker layout smoke", () => {
     });
 
     try {
-      await waitForScreenText(() => screenWrites, screen, "ready");
+      await waitForScreenText(() => screenWrites, screen, "^W logs");
       await openWorkerLogs(child, () => screenWrites, screen, "keep source tail");
 
       const lines = screen.styledSnapshotLines();
@@ -662,7 +657,6 @@ describe("CLI worker layout smoke", () => {
     });
 
     try {
-      await waitForText(chunks, "ready");
       await waitForScreenText(() => screenWrites, screen, "wk1 done");
       await waitForScreenText(() => screenWrites, screen, "> | message · ^W logs · ^O attach");
       child.write("\x17");

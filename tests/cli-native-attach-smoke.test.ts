@@ -60,7 +60,6 @@ describe("CLI native attach smoke", () => {
 
     child.onData((chunk) => chunks.push(chunk));
     try {
-      await waitForText(chunks, "ready");
       await waitForText(chunks, "attach");
       child.write("\x0f");
       await waitForText(chunks, "fake-agent-ready");

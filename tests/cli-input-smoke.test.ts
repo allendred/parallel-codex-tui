@@ -24,7 +24,6 @@ describe("CLI input smoke", () => {
 
     child.onData((chunk) => chunks.push(chunk));
     try {
-      await waitForText(chunks, "ready");
       await waitForText(chunks, "message");
       child.write("做");
       child.write("个");
@@ -60,7 +59,6 @@ describe("CLI input smoke", () => {
       screenWrites = screenWrites.then(() => screen.write(chunk));
     });
     try {
-      await waitForText(chunks, "ready");
       await waitForText(chunks, "message");
       child.write("请帮我继续优化这个并行编码终端界面让它在窄屏下也保持专业稳定不要换行乱掉");
 

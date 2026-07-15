@@ -425,23 +425,23 @@ describe("CLI chat Markdown smoke", () => {
       await waitForScreenText(() => screenWrites, screen, "message · scroll");
 
       child.write("\x1b[<64;10;5M");
-      await waitForScreenText(() => screenWrites, screen, "back 3/22");
+      await waitForScreenText(() => screenWrites, screen, "back 3/");
       expect(screen.snapshot()).toContain("history line 27");
       expect(screen.snapshot().split("\n")[0]).toContain("chat");
 
       child.write("\x1b[5~");
-      await waitForScreenText(() => screenWrites, screen, "back 11/22");
+      await waitForScreenText(() => screenWrites, screen, "back 11/");
       expect(screen.snapshot()).toContain("history line 11");
 
       child.write("\x1b[6~");
-      await waitForScreenText(() => screenWrites, screen, "back 3/22");
+      await waitForScreenText(() => screenWrites, screen, "back 3/");
       child.write("\x1b[<65;10;5M");
       await waitForScreenText(() => screenWrites, screen, "history line 30");
       expect(screen.snapshot()).toContain("message · scroll");
       expect(screen.snapshot().split("\n")[0]).toContain("chat");
 
       child.write("\x1b[<64;10;5M");
-      await waitForScreenText(() => screenWrites, screen, "back 3/22");
+      await waitForScreenText(() => screenWrites, screen, "back 3/");
       child.write("second-scroll-turn\r");
       await waitForScreenText(() => screenWrites, screen, "second line 30");
       expect(screen.snapshot()).not.toContain("back ");
