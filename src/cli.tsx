@@ -116,7 +116,19 @@ async function main(): Promise<void> {
             policy: routerDiagnosticsPolicy(latestConfig.router)
           };
         }}
-        loadTaskSessions={() => state.runtime.index.listTasks(100)}
+        loadTaskSessions={(options) => state.runtime.index.listTasks(100, options)}
+        renameTaskSession={async (taskId, title) => {
+          await state.runtime.sessions.renameTask(taskId, title);
+        }}
+        setTaskSessionArchived={async (taskId, archived) => {
+          await state.runtime.sessions.setTaskArchived(taskId, archived);
+        }}
+        deleteTaskSession={async (taskId) => {
+          await state.runtime.sessions.deleteTask(taskId);
+        }}
+        exportTaskSession={async (taskId) => (
+          await state.runtime.sessions.exportTask(taskId)
+        ).path}
         loadCollaborationTimeline={(taskId) => state.runtime.sessions.readCollaborationTimeline(taskId)}
         activateTaskSession={async (taskId) => {
           if (!taskId) {
@@ -127,6 +139,10 @@ async function main(): Promise<void> {
             throw new Error(`Task session not found in workspace ${state.runtime.workspaceRoot}: ${taskId}`);
           }
           const task = state.runtime.sessions.taskFromId(taskId);
+          const meta = await state.runtime.sessions.readMeta(task);
+          if (meta.archived_at) {
+            throw new Error(`Task session is archived: ${taskId}`);
+          }
           const [route, workers, canRetry] = await Promise.all([
             state.runtime.sessions.readLatestRoute(task),
             state.runtime.orchestrator.listTaskWorkers(taskId),
@@ -190,19 +206,28 @@ async function loadInteractiveWorkspace(
 ): Promise<InteractiveWorkspaceState> {
   const runtime = await createRuntime(appRoot, workspaceRoot);
   try {
-    if (requestedTaskId && !(await runtime.sessions.hasTask(requestedTaskId))) {
-      throw new Error(`Task session not found in workspace ${runtime.workspaceRoot}: ${requestedTaskId}`);
+    if (requestedTaskId) {
+      if (!(await runtime.sessions.hasTask(requestedTaskId))) {
+        throw new Error(`Task session not found in workspace ${runtime.workspaceRoot}: ${requestedTaskId}`);
+      }
+      const requestedMeta = await runtime.sessions.readMeta(runtime.sessions.taskFromId(requestedTaskId));
+      if (requestedMeta.archived_at) {
+        throw new Error(`Task session is archived in workspace ${runtime.workspaceRoot}: ${requestedTaskId}`);
+      }
     }
     const [latestTask, rememberedTaskId] = await Promise.all([
       runtime.sessions.latestTask(),
       runtime.index.activeTaskId()
     ]);
+    const rememberedTaskIsRestorable = typeof rememberedTaskId === "string"
+      && await runtime.sessions.hasTask(rememberedTaskId)
+      && !(await runtime.sessions.readMeta(runtime.sessions.taskFromId(rememberedTaskId))).archived_at;
     let initialTaskId: string | null;
     if (requestedTaskId) {
       initialTaskId = requestedTaskId;
     } else if (rememberedTaskId === null) {
       initialTaskId = null;
-    } else if (rememberedTaskId && (await runtime.sessions.hasTask(rememberedTaskId))) {
+    } else if (rememberedTaskId && rememberedTaskIsRestorable) {
       initialTaskId = rememberedTaskId;
     } else {
       initialTaskId = latestTask?.id ?? null;

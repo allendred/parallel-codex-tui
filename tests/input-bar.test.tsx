@@ -996,12 +996,12 @@ describe("InputBar", () => {
     view.unmount();
   });
 
-  it("shows Task session restore and new-task guidance", () => {
+  it("shows Task session restore and management guidance", () => {
     const roomy = render(
       <InputBar mode="sessions" value="ignored" terminalWidth={80} onChange={() => {}} />
     );
     const roomyFrame = roomy.lastFrame() ?? "";
-    expect(roomyFrame).toContain("sessions · Up/Dn select · Enter restore · ^N new · Esc back");
+    expect(roomyFrame).toContain("sessions · Up/Dn select · Enter restore · R rename · A archive · Esc back");
     expect(roomyFrame).not.toContain("ignored");
     expect(roomyFrame.split("\n")).toHaveLength(1);
     expect(displayWidth(roomyFrame)).toBeLessThanOrEqual(80);
@@ -1025,7 +1025,10 @@ describe("InputBar", () => {
     const semantics = [
       ["select", /Up\/Dn select/],
       ["restore", /Enter restore/],
-      ["new", /\^N new/],
+      ["rename", /R rename/],
+      ["archive", /A archive/],
+      ["delete", /D delete/],
+      ["export", /E export/],
       ["back", /Esc back/]
     ] as const;
 
@@ -1038,7 +1041,7 @@ describe("InputBar", () => {
       if (frame.split("\n").length !== 1 || displayWidth(frame) > width) {
         overflow.push(`${width}:${displayWidth(frame)}:${frame}`);
       }
-      if (/(?:^| · )(?:Up\/Dn|Esc|Enter|\^N)(?= ·|$)/.test(guidance)) {
+      if (/(?:^| · )(?:Up\/Dn|Esc|Enter|R|A|D|E|H)(?= ·|$)/.test(guidance)) {
         bareActions.push(`${width}:${frame}`);
       }
       for (const [name, pattern] of semantics) {
@@ -1062,7 +1065,11 @@ describe("InputBar", () => {
     [21, "sessions · Esc back"],
     [36, "sessions · Up/Dn select · Esc back"],
     [52, "sessions · Up/Dn select · Enter restore · Esc back"],
-    [61, "sessions · Up/Dn select · Enter restore · ^N new · Esc back"]
+    [61, "sessions · Up/Dn select · Enter restore · Esc back"],
+    [63, "sessions · Up/Dn select · Enter restore · R rename · Esc back"],
+    [75, "sessions · Up/Dn select · Enter restore · R rename · A archive · Esc back"],
+    [86, "sessions · Up/Dn select · Enter restore · R rename · A archive · D delete · Esc back"],
+    [97, "sessions · Up/Dn select · Enter restore · R rename · A archive · D delete · E export · Esc back"]
   ])("uses semantic Task session guidance at the %i-column boundary", (width, expected) => {
     const view = render(
       <InputBar mode="sessions" value="" terminalWidth={width} onChange={() => {}} />
@@ -1070,6 +1077,32 @@ describe("InputBar", () => {
 
     expect(view.lastFrame()).toContain(expected);
     view.unmount();
+  });
+
+  it("renders Unicode rename editing and destructive delete confirmation", () => {
+    const rename = render(
+      <InputBar
+        mode="sessions"
+        value=""
+        taskSessionAction={{ type: "rename", value: "中文名称", cursor: 2 }}
+        terminalWidth={40}
+      />
+    );
+    expect(rename.lastFrame()).toContain("rename > 中文|名称");
+    expect(displayWidth(rename.lastFrame() ?? "")).toBeLessThanOrEqual(40);
+    rename.unmount();
+
+    const deletion = render(
+      <InputBar
+        mode="sessions"
+        value=""
+        taskSessionAction={{ type: "delete", title: "旧任务" }}
+        terminalWidth={50}
+      />
+    );
+    expect(deletion.lastFrame()).toContain("delete · 旧任务 · D confirm · Esc cancel");
+    expect(displayWidth(deletion.lastFrame() ?? "")).toBeLessThanOrEqual(50);
+    deletion.unmount();
   });
 
   it("renders a Unicode Worker log search cursor and match position", () => {

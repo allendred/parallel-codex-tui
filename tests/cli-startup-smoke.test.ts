@@ -169,6 +169,50 @@ describe("CLI startup", () => {
     expect(stderr).not.toContain("at ");
   });
 
+  it("rejects an explicitly requested archived task before starting the TUI", async () => {
+    const appRoot = await mkdtemp(join(tmpdir(), "pct-cli-startup-archived-task-app-"));
+    const workspace = await mkdtemp(join(tmpdir(), "pct-cli-startup-archived-task-workspace-"));
+    const taskId = "task-20990101-000000-archived";
+    await writeJson(join(workspace, ".parallel-codex", "sessions", taskId, "meta.json"), TaskMetaSchema.parse({
+      id: taskId,
+      title: "Archived task",
+      created_at: "2026-07-15T08:35:00.000Z",
+      cwd: workspace,
+      mode: "complex",
+      status: "done",
+      archived_at: "2026-07-15T08:36:00.000Z"
+    }));
+
+    let stderr = "";
+    await expect(
+      execFileAsync(
+        process.execPath,
+        [
+          "./node_modules/.bin/tsx",
+          "src/cli.tsx",
+          "--app-root",
+          appRoot,
+          "--workspace",
+          workspace,
+          "--task",
+          taskId
+        ],
+        { cwd: process.cwd(), timeout: 5000 }
+      ).catch((error) => {
+        stderr = String((error as { stderr?: string }).stderr ?? "");
+        throw error;
+      })
+    ).rejects.toMatchObject({
+      code: 1,
+      stdout: "",
+      stderr: expect.stringContaining("Startup error:")
+    });
+
+    expect(stderr).toContain("Task session is archived in workspace");
+    expect(stderr).toContain(taskId);
+    expect(stderr).not.toContain("at ");
+  });
+
   it("blocks startup without mutating a task whose orphan process identity is unverifiable", async () => {
     const appRoot = await mkdtemp(join(tmpdir(), "pct-cli-startup-recovery-blocked-app-"));
     const workspace = await mkdtemp(join(tmpdir(), "pct-cli-startup-recovery-blocked-workspace-"));

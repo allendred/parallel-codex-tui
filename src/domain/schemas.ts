@@ -127,11 +127,12 @@ export const RouteDecisionSchema = z.object({
 
 export const TaskMetaSchema = z.object({
   id: TaskIdSchema,
-  title: z.string().min(1),
+  title: z.string().min(1).max(160),
   created_at: z.string().datetime(),
   cwd: z.string().min(1),
   mode: RouteModeSchema,
   status: TaskStateSchema,
+  archived_at: z.string().datetime().optional(),
   status_transition: TaskStatusTransitionSchema.optional().catch(undefined)
 }).transform((meta) => {
   if (meta.status_transition && meta.status_transition.to !== meta.status) {

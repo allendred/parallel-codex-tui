@@ -109,6 +109,7 @@ describe("package metadata", () => {
     expect(gitignore).toContain(".parallel-codex/config.toml");
     expect(gitignore).toContain(".parallel-codex/last-workspace");
     expect(gitignore).toContain(".parallel-codex/sessions/");
+    expect(gitignore).toContain(".parallel-codex/exports/");
     expect(gitignore).toContain(".parallel-codex/workspaces.json");
     expect(gitignore).toContain(".parallel-codex/router/");
     expect(gitignore).toContain("docs/superpowers/");
@@ -380,6 +381,14 @@ describe("package metadata", () => {
     expect(readme).toContain("turn and worker counts, plus the number of distinct native sessions");
     expect(readme).toContain("The selected active task is stored in `session-index.sqlite`");
     expect(readme).toContain("Restoring a task reloads its route, workers, retry state, and recorded native session ids");
+    expect(readme).toContain("`R` to rename with Unicode-safe cursor editing");
+    expect(readme).toContain("`A` to archive or unarchive");
+    expect(readme).toContain("`D` twice to confirm deletion");
+    expect(readme).toContain("`E` to export");
+    expect(readme).toContain("`H` to show or hide archived sessions");
+    expect(readme).toContain("Archived sessions are hidden by default");
+    expect(readme).toContain("Exports are complete file-backed snapshots under `.parallel-codex/exports/<task>-<timestamp>/`");
+    expect(readme).toContain("Existing SQLite catalogs gain the nullable archive column automatically");
     expect(readme).toContain("`Ctrl+N` persists an intentionally empty active-task context");
     expect(readme).toContain("`Ctrl+F` searches the final rendered Worker log");
     expect(readme).toContain("Enter moves to the next match and Up/Down moves backward or forward");

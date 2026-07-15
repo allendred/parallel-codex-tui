@@ -13,6 +13,8 @@ export interface InputBarProps {
   collaborationBack?: "workers" | "features";
   featureCanCancel?: boolean;
   featureCancelConfirm?: boolean;
+  taskSessionAction?: TaskSessionInputAction | null;
+  taskSessionsIncludeArchived?: boolean;
   canRetry?: boolean;
   hasWorkers?: boolean;
   hasActiveTask?: boolean;
@@ -30,6 +32,10 @@ export interface InputBarProps {
   onSubmit?: (value: string) => void;
 }
 
+export type TaskSessionInputAction =
+  | { type: "rename"; value: string; cursor: number }
+  | { type: "delete"; title: string };
+
 export function InputBar({
   mode,
   ready = true,
@@ -40,6 +46,8 @@ export function InputBar({
   collaborationBack = "workers",
   featureCanCancel = false,
   featureCancelConfirm = false,
+  taskSessionAction = null,
+  taskSessionsIncludeArchived = false,
   canRetry = false,
   hasWorkers = false,
   hasActiveTask = false,
@@ -78,7 +86,30 @@ export function InputBar({
   }
 
   if (mode === "sessions") {
-    const hints = taskSessionsInputHints(terminalWidth);
+    if (taskSessionAction?.type === "rename") {
+      const prefix = terminalWidth < 12 ? "> " : "rename > ";
+      const valueWidth = Math.max(1, terminalWidth - displayWidth(prefix) - 3);
+      const display = chatInputDisplayParts(taskSessionAction.value, taskSessionAction.cursor, valueWidth);
+      const textWidth = displayWidth(`${prefix}${display.before}|${display.after}`);
+      return (
+        <InputRail terminalWidth={terminalWidth} textWidth={textWidth} fill={fillRail}>
+          <Text backgroundColor={TUI_THEME.rail} color={TUI_THEME.accent} bold>{prefix}</Text>
+          <Text backgroundColor={TUI_THEME.rail} color={TUI_THEME.text}>{display.before}</Text>
+          <Text backgroundColor={TUI_THEME.rail} color={TUI_THEME.accent} bold>|</Text>
+          <Text backgroundColor={TUI_THEME.rail} color={TUI_THEME.text}>{display.after}</Text>
+        </InputRail>
+      );
+    }
+    if (taskSessionAction?.type === "delete") {
+      const hints = taskSessionDeleteInputHints(terminalWidth, taskSessionAction.title);
+      return (
+        <InputRail terminalWidth={terminalWidth} textWidth={displayWidth(`${hints.label}${hints.detail}`)} fill={fillRail}>
+          <Text backgroundColor={TUI_THEME.rail} color={TUI_THEME.danger} bold>{hints.label}</Text>
+          {hints.detail ? <Text backgroundColor={TUI_THEME.rail} color={TUI_THEME.muted}>{hints.detail}</Text> : null}
+        </InputRail>
+      );
+    }
+    const hints = taskSessionsInputHints(terminalWidth, taskSessionsIncludeArchived);
     return (
       <InputRail terminalWidth={terminalWidth} textWidth={displayWidth(`${hints.label}${hints.detail}`)} fill={fillRail}>
         <Text backgroundColor={TUI_THEME.rail} color={TUI_THEME.accent} bold>{hints.label}</Text>
@@ -743,9 +774,14 @@ function collaborationDetailInputHints(width: number): { label: string; detail: 
   ]);
 }
 
-function taskSessionsInputHints(width: number): { label: string; detail: string } {
+function taskSessionsInputHints(width: number, includeArchived: boolean): { label: string; detail: string } {
+  const archivedAction = includeArchived ? "H hide archived" : "H archived";
   return selectInputHints(width, [
-    { label: "sessions", detail: " · Up/Dn select · Enter restore · ^N new · Esc back" },
+    { label: "sessions", detail: ` · Up/Dn select · Enter restore · R rename · A archive · D delete · E export · ${archivedAction} · Esc back` },
+    { label: "sessions", detail: " · Up/Dn select · Enter restore · R rename · A archive · D delete · E export · Esc back" },
+    { label: "sessions", detail: " · Up/Dn select · Enter restore · R rename · A archive · D delete · Esc back" },
+    { label: "sessions", detail: " · Up/Dn select · Enter restore · R rename · A archive · Esc back" },
+    { label: "sessions", detail: " · Up/Dn select · Enter restore · R rename · Esc back" },
     { label: "sessions", detail: " · Up/Dn select · Enter restore · Esc back" },
     { label: "sessions", detail: " · Up/Dn select · Esc back" },
     { label: "sessions", detail: " · Esc back" },
@@ -753,6 +789,17 @@ function taskSessionsInputHints(width: number): { label: string; detail: string 
     { label: "sessions", detail: "" },
     { label: "ses", detail: "" },
     { label: "s", detail: "" }
+  ]);
+}
+
+function taskSessionDeleteInputHints(width: number, title: string): { label: string; detail: string } {
+  const safeTitle = title.replace(/[\u0000-\u001f\u007f]/g, " ").replace(/\s+/g, " ").trim();
+  return selectInputHints(width, [
+    { label: "delete", detail: ` · ${safeTitle} · D confirm · Esc cancel` },
+    { label: "delete", detail: " · D confirm · Esc cancel" },
+    { label: "D confirm", detail: " · Esc cancel" },
+    { label: "D confirm", detail: "" },
+    { label: "D", detail: "" }
   ]);
 }
 

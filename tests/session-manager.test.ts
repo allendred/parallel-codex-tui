@@ -22,6 +22,86 @@ import {
 } from "../src/domain/schemas.js";
 
 describe("SessionManager", () => {
+  it("renames, archives, exports, unarchives, and deletes a terminal task session", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pct-session-management-"));
+    const index = await SessionIndex.open(root, ".parallel-codex");
+    const manager = new SessionManager({
+      projectRoot: root,
+      dataDir: ".parallel-codex",
+      index,
+      now: () => new Date("2026-07-15T08:30:45.000Z"),
+      randomId: () => "managed"
+    });
+    const task = await manager.createTask({
+      request: "Original title",
+      cwd: root,
+      route: testComplexRoute("Manage this task.")
+    });
+    await completeTaskWithoutFeatures(manager, task, "Managed task complete.");
+
+    const renamed = await manager.renameTask(task.id, "  中文 会话\n名称  ");
+    expect(renamed.title).toBe("中文 会话 名称");
+    await expect(index.listTasks(10)).resolves.toEqual([
+      expect.objectContaining({ id: task.id, title: "中文 会话 名称" })
+    ]);
+
+    await index.setActiveTaskId(null);
+    const archived = await manager.setTaskArchived(task.id, true);
+    expect(archived.archived_at).toBe("2026-07-15T08:30:45.000Z");
+    await expect(index.listTasks(10)).resolves.toEqual([]);
+    await expect(index.listTasks(10, { includeArchived: true })).resolves.toEqual([
+      expect.objectContaining({ id: task.id, archived_at: "2026-07-15T08:30:45.000Z" })
+    ]);
+    await expect(manager.latestTask()).resolves.toBeNull();
+
+    const exported = await manager.exportTask(task.id);
+    expect(exported.path).toContain(join(root, ".parallel-codex", "exports", task.id));
+    expect(await pathExists(join(exported.path, "manifest.json"))).toBe(true);
+    expect(await pathExists(join(exported.path, "session", "meta.json"))).toBe(true);
+    expect(await pathExists(join(exported.path, "session", "run-owner.json"))).toBe(false);
+    expect(await readTextIfExists(join(exported.path, "session", "events.jsonl"))).toContain("task.exported");
+
+    const unarchived = await manager.setTaskArchived(task.id, false);
+    expect(unarchived.archived_at).toBeUndefined();
+    await manager.deleteTask(task.id);
+    await expect(manager.hasTask(task.id)).resolves.toBe(false);
+    await expect(index.countRows("tasks")).resolves.toBe(0);
+    await expect(index.countRows("turns")).resolves.toBe(0);
+    expect(await pathExists(task.dir)).toBe(false);
+    index.close();
+  });
+
+  it("blocks unsafe management of active, nonterminal, or leased tasks", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pct-session-management-guard-"));
+    const index = await SessionIndex.open(root, ".parallel-codex");
+    const manager = new SessionManager({
+      projectRoot: root,
+      dataDir: ".parallel-codex",
+      index,
+      now: () => new Date("2026-07-15T08:31:00.000Z"),
+      randomId: () => "guarded"
+    });
+    const task = await manager.createTask({
+      request: "Guarded task",
+      cwd: root,
+      route: testComplexRoute("Guard this task.")
+    });
+
+    await expect(manager.setTaskArchived(task.id, true)).rejects.toThrow("while it is routed");
+    await expect(manager.deleteTask(task.id)).rejects.toThrow("Cannot delete active task");
+    await expect(manager.exportTask(task.id)).rejects.toThrow("while it is routed");
+
+    const lease = await claimTaskRunLease(task.dir, { ownerId: "other-tui" });
+    try {
+      await expect(manager.renameTask(task.id, "Blocked rename")).rejects.toThrow(
+        "Task is already running in another parallel-codex-tui process"
+      );
+    } finally {
+      await lease.release();
+      index.close();
+    }
+  });
+
   it("persists bounded workspace chat history and skips corrupt JSONL rows", async () => {
     const root = await mkdtemp(join(tmpdir(), "pct-chat-history-"));
     const manager = new SessionManager({

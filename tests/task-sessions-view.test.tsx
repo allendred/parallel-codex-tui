@@ -65,6 +65,40 @@ describe("TaskSessionsView", () => {
     expect(visible.some((line) => line.taskIndex === 15 && line.text.startsWith("> "))).toBe(true);
     expect(visible.some((line) => line.taskIndex === 0)).toBe(false);
   });
+
+  it("renders archived sessions and management feedback without counting them as active work", () => {
+    const archived = task({
+      id: "task-archived",
+      title: "Archived work",
+      status: "done",
+      createdAt: "2026-07-05T01:00:00.000Z"
+    });
+    archived.archived_at = "2026-07-06T01:00:00.000Z";
+    const lines = sessionsModule.taskSessionsDisplayLines(
+      [archived, task({
+        id: "task-visible",
+        title: "Visible work",
+        status: "failed",
+        createdAt: "2026-07-04T01:00:00.000Z"
+      })],
+      null,
+      0,
+      8,
+      100,
+      {
+        includeArchived: true,
+        action: { type: "delete", title: "Archived work" }
+      }
+    );
+
+    expect(lines[0]?.text).toContain("archived shown");
+    expect(lines[1]?.text).toBe("2 tasks · 1 failed · 1 archived");
+    expect(lines[2]).toMatchObject({ tone: "danger" });
+    expect(lines.find((line) => line.taskIndex === 0)).toMatchObject({
+      tone: "muted"
+    });
+    expect(lines.find((line) => line.taskIndex === 0)?.text).toContain("archived · done");
+  });
 });
 
 function tasks(): TaskIndexSummary[] {

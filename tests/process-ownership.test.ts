@@ -1,4 +1,4 @@
-import { mkdtemp, readdir } from "node:fs/promises";
+import { mkdtemp, readdir, rename } from "node:fs/promises";
 import { spawn } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -31,6 +31,18 @@ describe("process ownership", () => {
 
     await lease.release();
     await expect(inspectTaskRunLease(taskDir)).resolves.toEqual({ state: "missing", owner: null });
+  });
+
+  it("does not recreate a task directory that was atomically moved while its lease was held", async () => {
+    const taskDir = await mkdtemp(join(tmpdir(), "pct-moved-task-lease-"));
+    const movedDir = `${taskDir}.deleted`;
+    const lease = await claimTaskRunLease(taskDir, { ownerId: "delete-owner" });
+
+    await rename(taskDir, movedDir);
+    await lease.release();
+
+    expect(await pathExists(taskDir)).toBe(false);
+    expect(await pathExists(movedDir)).toBe(true);
   });
 
   it("reclaims a lease whose recorded owner process is gone", async () => {

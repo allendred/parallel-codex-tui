@@ -248,6 +248,9 @@ async function acquireTaskRunMutationTurn(taskDir: string): Promise<{ release():
 }
 
 async function releaseTaskRunLease(taskDir: string, path: string, ownerId: string): Promise<void> {
+  if (!(await pathExists(taskDir))) {
+    return;
+  }
   const mutationTurn = await acquireTaskRunMutationTurn(taskDir);
   try {
     await removeOwnedLease(path, ownerId);

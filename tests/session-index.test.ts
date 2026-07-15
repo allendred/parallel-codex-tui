@@ -1,6 +1,7 @@
 import { rm, symlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import { mkdtemp } from "node:fs/promises";
 import { describe, expect, it } from "vitest";
 import { writeJson, writeText } from "../src/core/file-store.js";
@@ -8,6 +9,53 @@ import { SessionIndex } from "../src/core/session-index.js";
 import { NativeSessionSchema, RouteDecisionSchema, TaskMetaSchema, TurnMetaSchema, WorkerStatusSchema } from "../src/domain/schemas.js";
 
 describe("SessionIndex", () => {
+  it("migrates an existing task catalog and filters archived sessions by default", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pct-index-archive-migration-"));
+    const dataDir = ".parallel-codex";
+    await writeText(join(root, dataDir, ".keep"), "");
+    const databasePath = join(root, dataDir, "session-index.sqlite");
+    const legacy = new DatabaseSync(databasePath);
+    legacy.exec(`
+      CREATE TABLE tasks (
+        id TEXT PRIMARY KEY,
+        title TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        cwd TEXT NOT NULL,
+        mode TEXT NOT NULL,
+        status TEXT NOT NULL
+      );
+    `);
+    legacy.close();
+
+    const index = await SessionIndex.open(root, dataDir);
+    await index.upsertTask({
+      id: "task-archived",
+      title: "Archived task",
+      created_at: "2026-07-02T01:00:00.000Z",
+      cwd: root,
+      mode: "complex",
+      status: "done",
+      archived_at: "2026-07-03T01:00:00.000Z"
+    });
+    await index.upsertTask({
+      id: "task-visible",
+      title: "Visible task",
+      created_at: "2026-07-01T01:00:00.000Z",
+      cwd: root,
+      mode: "complex",
+      status: "done"
+    });
+
+    await expect(index.listTasks(10)).resolves.toEqual([
+      expect.objectContaining({ id: "task-visible", archived_at: undefined })
+    ]);
+    await expect(index.listTasks(10, { includeArchived: true })).resolves.toEqual([
+      expect.objectContaining({ id: "task-archived", archived_at: "2026-07-03T01:00:00.000Z" }),
+      expect.objectContaining({ id: "task-visible", archived_at: undefined })
+    ]);
+    index.close();
+  });
+
   it("lists newest task summaries with counts and persists the active task", async () => {
     const root = await mkdtemp(join(tmpdir(), "pct-index-catalog-"));
     const index = await SessionIndex.open(root, ".parallel-codex");

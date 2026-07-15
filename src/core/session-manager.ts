@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { mkdir, readdir, rename, rm, writeFile } from "node:fs/promises";
+import { cp, mkdir, mkdtemp, readdir, rename, rm, writeFile } from "node:fs/promises";
 import { basename, dirname, join } from "node:path";
 import { z } from "zod";
 import {
@@ -137,6 +137,12 @@ export interface PendingTaskCreationRecovery {
   abandoned: number;
   active: number;
   publishedTaskIds: string[];
+}
+
+export interface TaskSessionExport {
+  taskId: string;
+  path: string;
+  createdAt: string;
 }
 
 type BlockingProcessTermination = Extract<WorkerProcessTermination, "unverifiable" | "still-running">;
@@ -407,6 +413,104 @@ export class SessionManager {
     return meta?.id === taskId;
   }
 
+  async renameTask(taskId: string, title: string): Promise<TaskMeta> {
+    const normalizedTitle = normalizeTaskTitle(title);
+    return this.withTaskManagementLease(taskId, "rename", async (task, meta) => {
+      const next = TaskMetaSchema.parse({ ...meta, title: normalizedTitle });
+      await writeJson(task.metaPath, next);
+      await this.index?.upsertTask(next);
+      await this.appendEvent(task, "task.renamed", `Task renamed to ${normalizedTitle}`);
+      return next;
+    });
+  }
+
+  async setTaskArchived(taskId: string, archived: boolean): Promise<TaskMeta> {
+    return this.withTaskManagementLease(taskId, archived ? "archive" : "unarchive", async (task, meta) => {
+      this.assertTerminalTask(meta, archived ? "archive" : "unarchive");
+      if (archived && await this.index?.activeTaskId() === taskId) {
+        throw new Error(`Cannot archive active task ${taskId}. Start a new task first.`);
+      }
+      const { archived_at: _archivedAt, ...withoutArchive } = meta;
+      const next = TaskMetaSchema.parse(archived
+        ? { ...withoutArchive, archived_at: this.now().toISOString() }
+        : withoutArchive);
+      await writeJson(task.metaPath, next);
+      await this.index?.upsertTask(next);
+      await this.appendEvent(
+        task,
+        archived ? "task.archived" : "task.unarchived",
+        archived ? "Task session archived" : "Task session restored from archive"
+      );
+      return next;
+    });
+  }
+
+  async deleteTask(taskId: string): Promise<void> {
+    if (await this.index?.activeTaskId() === taskId) {
+      throw new Error(`Cannot delete active task ${taskId}. Start a new task first.`);
+    }
+    const deletedDir = await this.withTaskManagementLease(taskId, "delete", async (task, meta) => {
+      this.assertTerminalTask(meta, "delete");
+      if (await this.index?.activeTaskId() === taskId) {
+        throw new Error(`Cannot delete active task ${taskId}. Start a new task first.`);
+      }
+      const target = join(
+        sessionsRoot(this.projectRoot, this.dataDir),
+        `.${taskId}.deleted-${randomUUID()}`
+      );
+      await rename(task.dir, target);
+      try {
+        await this.index?.deleteTask(taskId);
+      } catch (error) {
+        try {
+          await rename(target, task.dir);
+        } catch (rollbackError) {
+          throw new Error(
+            `Task index deletion failed and session rollback also failed: ${errorMessage(error)}; ${errorMessage(rollbackError)}`,
+            { cause: new AggregateError([error, rollbackError]) }
+          );
+        }
+        throw error;
+      }
+      return target;
+    });
+    await rm(deletedDir, { force: true, recursive: true });
+  }
+
+  async exportTask(taskId: string): Promise<TaskSessionExport> {
+    return this.withTaskManagementLease(taskId, "export", async (task, meta) => {
+      this.assertTerminalTask(meta, "export");
+      const createdAt = this.now().toISOString();
+      const exportsRoot = join(this.projectRoot, this.dataDir, "exports");
+      await ensureDir(exportsRoot);
+      const staging = await mkdtemp(join(exportsRoot, `.${taskId}-`));
+      const suffix = basename(staging).slice(-6);
+      const stamp = createdAt.replace(/[^0-9]/g, "").slice(0, 14);
+      const destination = join(exportsRoot, `${taskId}-${stamp}-${suffix}`);
+      try {
+        await this.appendEvent(task, "task.exported", "Task session exported");
+        await writeJson(join(staging, "manifest.json"), {
+          format: "parallel-codex-task-export-v1",
+          exported_at: createdAt,
+          source_workspace: this.projectRoot,
+          session_path: "session",
+          task: await this.readMeta(task)
+        });
+        await cp(task.dir, join(staging, "session"), {
+          recursive: true,
+          preserveTimestamps: true,
+          verbatimSymlinks: true,
+          filter: (source) => !isTransientTaskLeasePath(task.dir, source)
+        });
+        await rename(staging, destination);
+      } catch (error) {
+        await rm(staging, { force: true, recursive: true });
+        throw error;
+      }
+      return { taskId, path: destination, createdAt };
+    });
+  }
+
   async reconcilePendingTaskCreations(): Promise<PendingTaskCreationRecovery> {
     const report: PendingTaskCreationRecovery = {
       published: 0,
@@ -590,7 +694,7 @@ export class SessionManager {
         if (!meta) {
           continue;
         }
-        if (meta.id === entry.name && meta.mode === "complex") {
+        if (meta.id === entry.name && meta.mode === "complex" && !meta.archived_at) {
           tasks.push(meta);
         }
       }
@@ -873,6 +977,32 @@ export class SessionManager {
     };
 
     await appendJsonLine(join(task.dir, "events.jsonl"), event);
+  }
+
+  private async withTaskManagementLease<Result>(
+    taskId: string,
+    operation: string,
+    run: (task: TaskSession, meta: TaskMeta) => Promise<Result>
+  ): Promise<Result> {
+    const id = TaskIdSchema.parse(taskId);
+    const task = this.taskFromId(id);
+    if (!(await this.hasTask(id))) {
+      throw new Error(`Task session not found: ${id}`);
+    }
+    const lease = await this.claimTaskRunLease(task.dir);
+    return runWithLeaseFinalization(`Task ${operation}`, lease, async () => {
+      const meta = await this.readMeta(task);
+      if (meta.id !== id) {
+        throw new Error(`Task session metadata does not match ${id}.`);
+      }
+      return run(task, meta);
+    });
+  }
+
+  private assertTerminalTask(meta: TaskMeta, operation: string): void {
+    if (!TERMINAL_TASK_STATES.has(meta.status)) {
+      throw new Error(`Cannot ${operation} task ${meta.id} while it is ${meta.status}.`);
+    }
   }
 
   private async syncTaskStatusTransition(task: TaskSession, meta: TaskMeta): Promise<void> {
@@ -1499,6 +1629,33 @@ export class SessionManager {
 function titleFromRequest(request: string): string {
   const firstLine = request.trim().split("\n")[0] ?? "Untitled task";
   return firstLine.length > 80 ? `${firstLine.slice(0, 77)}...` : firstLine;
+}
+
+function normalizeTaskTitle(title: string): string {
+  const normalized = title
+    .replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, "")
+    .replace(/[\u0000-\u001f\u007f]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!normalized) {
+    throw new Error("Task title cannot be empty.");
+  }
+  if (Array.from(normalized).length > 160) {
+    throw new Error("Task title cannot exceed 160 characters.");
+  }
+  return normalized;
+}
+
+function isTransientTaskLeasePath(taskDir: string, source: string): boolean {
+  if (dirname(source) !== taskDir) {
+    return false;
+  }
+  const name = basename(source);
+  return name === "run-owner.json" || name.startsWith(".run-owner-claim-");
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }
 
 async function readTaskMetaIfValid(metaPath: string): Promise<TaskMeta | null> {

@@ -17,16 +17,26 @@ export interface TaskSessionsViewProps {
   tasks: TaskIndexSummary[];
   activeTaskId: string | null;
   selectedIndex: number;
+  includeArchived?: boolean;
+  notice?: string | null;
+  action?: TaskSessionViewAction | null;
   loading?: boolean;
   error?: string | null;
   height?: number;
   terminalWidth?: number;
 }
 
+export type TaskSessionViewAction =
+  | { type: "rename"; title: string }
+  | { type: "delete"; title: string };
+
 export function TaskSessionsView({
   tasks,
   activeTaskId,
   selectedIndex,
+  includeArchived = false,
+  notice = null,
+  action = null,
   loading = false,
   error = null,
   height = 20,
@@ -36,7 +46,10 @@ export function TaskSessionsView({
   const width = taskSessionsContentWidth(terminalWidth);
   const lines = taskSessionsDisplayLines(tasks, activeTaskId, selectedIndex, viewportHeight, terminalWidth, {
     loading,
-    error
+    error,
+    includeArchived,
+    notice,
+    action
   });
   const blankRows = Math.max(0, viewportHeight - lines.length);
 
@@ -60,16 +73,44 @@ export function taskSessionsDisplayLines(
   selectedIndex: number,
   height: number,
   terminalWidth: number,
-  state: { loading?: boolean; error?: string | null } = {}
+  state: {
+    loading?: boolean;
+    error?: string | null;
+    includeArchived?: boolean;
+    notice?: string | null;
+    action?: TaskSessionViewAction | null;
+  } = {}
 ): TaskSessionDisplayLine[] {
   const viewportHeight = Math.max(1, Math.trunc(height));
   const width = taskSessionsContentWidth(terminalWidth);
   const lines: TaskSessionDisplayLine[] = [
-    { text: fitTaskSessionCandidates(["Task sessions", "Sessions", "Tasks", "T"], width), tone: "heading" }
+    {
+      text: fitTaskSessionCandidates([
+        state.includeArchived ? "Task sessions · archived shown" : "Task sessions",
+        state.includeArchived ? "Sessions · all" : "Sessions",
+        "Tasks",
+        "T"
+      ], width),
+      tone: "heading"
+    }
   ];
 
   if (viewportHeight >= 3) {
     lines.push({ text: taskSessionSummary(tasks, width), tone: "muted" });
+  }
+
+  if (viewportHeight >= 4 && state.action) {
+    lines.push({
+      text: fitTaskSessionText(
+        state.action.type === "rename"
+          ? `rename · ${safeTaskSessionText(state.action.title)} · Enter save · Esc cancel`
+          : `delete · ${safeTaskSessionText(state.action.title)} · press D again · Esc cancel`,
+        width
+      ),
+      tone: state.action.type === "delete" ? "danger" : "active"
+    });
+  } else if (viewportHeight >= 4 && state.notice) {
+    lines.push({ text: fitTaskSessionText(state.notice, width), tone: "success" });
   }
 
   const slots = Math.max(0, viewportHeight - lines.length);
@@ -102,7 +143,7 @@ export function taskSessionsDisplayLines(
     }
     lines.push({
       text: taskSessionRowText(task, index === selected, task.id === activeTaskId, width),
-      tone: taskSessionStatusTone(task.status),
+      tone: taskSessionStatusTone(task),
       taskIndex: index
     });
   }
@@ -134,7 +175,12 @@ function TaskSessionRow({ line, width }: { line: TaskSessionDisplayLine; width: 
 
 function taskSessionSummary(tasks: TaskIndexSummary[], width: number): string {
   const counts = new Map<"running" | "done" | "failed" | "cancelled", number>();
+  let archived = 0;
   for (const task of tasks) {
+    if (task.archived_at) {
+      archived += 1;
+      continue;
+    }
     const group = taskSessionStatusGroup(task.status);
     counts.set(group, (counts.get(group) ?? 0) + 1);
   }
@@ -142,6 +188,9 @@ function taskSessionSummary(tasks: TaskIndexSummary[], width: number): string {
     const count = counts.get(group as "running" | "done" | "failed" | "cancelled") ?? 0;
     return count > 0 ? [`${count} ${group}`] : [];
   });
+  if (archived > 0) {
+    parts.push(`${archived} archived`);
+  }
   return fitTaskSessionCandidates([
     [`${tasks.length} ${tasks.length === 1 ? "task" : "tasks"}`, ...parts].join(" · "),
     `${tasks.length} tasks · ${counts.get("running") ?? 0} active · ${counts.get("failed") ?? 0} failed`,
@@ -153,7 +202,9 @@ function taskSessionSummary(tasks: TaskIndexSummary[], width: number): string {
 function taskSessionRowText(task: TaskIndexSummary, selected: boolean, active: boolean, width: number): string {
   const marker = `${selected ? ">" : " "} ${active ? "*" : " "} `;
   const title = safeTaskSessionText(task.title);
-  const status = humanizeTaskSessionStatus(task.status);
+  const status = task.archived_at
+    ? `archived · ${humanizeTaskSessionStatus(task.status)}`
+    : humanizeTaskSessionStatus(task.status);
   const date = task.created_at.slice(5, 16).replace("T", " ");
   const turns = `${task.turnCount} ${task.turnCount === 1 ? "turn" : "turns"}`;
   const workers = `${task.workerCount} ${task.workerCount === 1 ? "worker" : "workers"}`;
@@ -191,7 +242,11 @@ function humanizeTaskSessionStatus(status: TaskState): string {
   return status.replace(/_/g, " ");
 }
 
-function taskSessionStatusTone(status: TaskState): TaskSessionLineTone {
+function taskSessionStatusTone(task: TaskIndexSummary): TaskSessionLineTone {
+  if (task.archived_at) {
+    return "muted";
+  }
+  const status = task.status;
   if (status === "done") {
     return "success";
   }

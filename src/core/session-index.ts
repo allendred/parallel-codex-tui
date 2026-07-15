@@ -29,6 +29,10 @@ export interface TaskIndexSummary extends TaskMeta {
   nativeSessionCount: number;
 }
 
+export interface ListTaskOptions {
+  includeArchived?: boolean;
+}
+
 export class SessionIndex {
   private constructor(
     private readonly db: DatabaseSync,
@@ -53,7 +57,8 @@ export class SessionIndex {
         created_at TEXT NOT NULL,
         cwd TEXT NOT NULL,
         mode TEXT NOT NULL,
-        status TEXT NOT NULL
+        status TEXT NOT NULL,
+        archived_at TEXT
       );
 
       CREATE TABLE IF NOT EXISTS turns (
@@ -97,21 +102,23 @@ export class SessionIndex {
         value TEXT NOT NULL
       );
     `);
+    this.ensureColumn("tasks", "archived_at", "TEXT");
   }
 
   async upsertTask(task: TaskMeta): Promise<void> {
     this.db
       .prepare(
-        `INSERT INTO tasks (id, title, created_at, cwd, mode, status)
-         VALUES (?, ?, ?, ?, ?, ?)
+        `INSERT INTO tasks (id, title, created_at, cwd, mode, status, archived_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(id) DO UPDATE SET
            title=excluded.title,
            created_at=excluded.created_at,
            cwd=excluded.cwd,
            mode=excluded.mode,
-           status=excluded.status`
+           status=excluded.status,
+           archived_at=excluded.archived_at`
       )
-      .run(task.id, task.title, task.created_at, task.cwd, task.mode, task.status);
+      .run(task.id, task.title, task.created_at, task.cwd, task.mode, task.status, task.archived_at ?? null);
   }
 
   async upsertTurn(taskId: string, turn: TurnMeta): Promise<void> {
@@ -192,18 +199,37 @@ export class SessionIndex {
     this.db.prepare("DELETE FROM native_sessions WHERE task_id = ? AND worker_id = ?").run(taskId, workerId);
   }
 
+  async deleteTask(taskId: string): Promise<void> {
+    const id = TaskIdSchema.parse(taskId);
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      this.db.prepare("DELETE FROM native_sessions WHERE task_id = ?").run(id);
+      this.db.prepare("DELETE FROM workers WHERE task_id = ?").run(id);
+      this.db.prepare("DELETE FROM turns WHERE task_id = ?").run(id);
+      this.db.prepare("DELETE FROM tasks WHERE id = ?").run(id);
+      this.db.prepare(
+        "UPDATE workspace_state SET value = '' WHERE key = 'active_task_id' AND value = ?"
+      ).run(id);
+      this.db.exec("COMMIT");
+    } catch (error) {
+      this.db.exec("ROLLBACK");
+      throw error;
+    }
+  }
+
   async countRows(table: "tasks" | "turns" | "workers" | "native_sessions"): Promise<number> {
     const row = this.db.prepare(`SELECT COUNT(*) AS count FROM ${table}`).get() as { count: number };
     return row.count;
   }
 
-  async listTasks(limit = 50): Promise<TaskIndexSummary[]> {
+  async listTasks(limit = 50, options: ListTaskOptions = {}): Promise<TaskIndexSummary[]> {
     const boundedLimit = Number.isFinite(limit)
       ? Math.min(500, Math.max(0, Math.trunc(limit)))
       : 50;
     if (boundedLimit === 0) {
       return [];
     }
+    const archivedFilter = options.includeArchived ? "" : "WHERE tasks.archived_at IS NULL";
     const rows = this.db.prepare(
       `SELECT
          tasks.id,
@@ -212,12 +238,14 @@ export class SessionIndex {
          tasks.cwd,
          tasks.mode,
          tasks.status,
+         tasks.archived_at,
          (SELECT COUNT(*) FROM turns WHERE turns.task_id = tasks.id) AS turn_count,
          (SELECT COUNT(*) FROM workers WHERE workers.task_id = tasks.id) AS worker_count,
          (SELECT COUNT(DISTINCT engine || char(31) || session_id)
-            FROM native_sessions
+           FROM native_sessions
            WHERE native_sessions.task_id = tasks.id) AS native_session_count
        FROM tasks
+       ${archivedFilter}
        ORDER BY tasks.created_at DESC, tasks.id DESC
        LIMIT ?`
     ).all(boundedLimit) as Array<Record<string, unknown>>;
@@ -229,7 +257,8 @@ export class SessionIndex {
         created_at: row.created_at,
         cwd: row.cwd,
         mode: row.mode,
-        status: row.status
+        status: row.status,
+        archived_at: row.archived_at ?? undefined
       });
       if (!task.success) {
         return [];
@@ -310,6 +339,24 @@ export class SessionIndex {
 
   close(): void {
     this.db.close();
+  }
+
+  private ensureColumn(table: string, column: string, declaration: string): void {
+    if (this.tableHasColumn(table, column)) {
+      return;
+    }
+    try {
+      this.db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${declaration}`);
+    } catch (error) {
+      if (!this.tableHasColumn(table, column)) {
+        throw error;
+      }
+    }
+  }
+
+  private tableHasColumn(table: string, column: string): boolean {
+    const columns = this.db.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name?: string }>;
+    return columns.some((entry) => entry.name === column);
   }
 
   private async rebuildTask(taskDir: string, taskId: string): Promise<void> {

@@ -93,7 +93,11 @@ export interface AppProps {
     records: RouterAuditRecord[];
     policy: RouterDiagnosticsPolicy;
   }>;
-  loadTaskSessions?: () => Promise<TaskIndexSummary[]>;
+  loadTaskSessions?: (options?: { includeArchived?: boolean }) => Promise<TaskIndexSummary[]>;
+  renameTaskSession?: (taskId: string, title: string) => Promise<void>;
+  setTaskSessionArchived?: (taskId: string, archived: boolean) => Promise<void>;
+  deleteTaskSession?: (taskId: string) => Promise<void>;
+  exportTaskSession?: (taskId: string) => Promise<string>;
   loadCollaborationTimeline?: (taskId: string) => Promise<CollaborationTimeline>;
   activateTaskSession?: (taskId: string | null) => Promise<ActivatedTaskSession | null>;
   prepareNativeAttach?: (worker: WorkerLogRef) => Promise<NativeAttachLaunch>;
@@ -163,6 +167,9 @@ interface FeatureCancelPrompt {
   featureId: string;
   title: string;
 }
+type TaskSessionAction =
+  | { type: "rename"; taskId: string; title: string; value: string; cursor: number }
+  | { type: "delete"; taskId: string; title: string };
 type NativeAttachStartingTheme = Pick<TextProps, "backgroundColor" | "color">;
 const NO_WORKERS_ATTACH_MESSAGE = "No workers yet · start a complex task before attaching";
 const NO_WORKERS_LOGS_MESSAGE = "No workers yet · start a complex task before opening logs";
@@ -190,6 +197,10 @@ export function App({
   switchWorkspace,
   loadRouterDiagnostics,
   loadTaskSessions,
+  renameTaskSession,
+  setTaskSessionArchived,
+  deleteTaskSession,
+  exportTaskSession,
   loadCollaborationTimeline,
   activateTaskSession,
   prepareNativeAttach,
@@ -248,6 +259,9 @@ export function App({
   const [selectedTaskSessionIndex, setSelectedTaskSessionIndex] = useState(0);
   const [taskSessionsLoading, setTaskSessionsLoading] = useState(false);
   const [taskSessionsError, setTaskSessionsError] = useState<string | null>(null);
+  const [taskSessionsNotice, setTaskSessionsNotice] = useState<string | null>(null);
+  const [taskSessionsIncludeArchived, setTaskSessionsIncludeArchived] = useState(false);
+  const [taskSessionAction, setTaskSessionAction] = useState<TaskSessionAction | null>(null);
   const [collaborationTimeline, setCollaborationTimeline] = useState<CollaborationTimeline | null>(null);
   const [featureBoardSelectedIndex, setFeatureBoardSelectedIndex] = useState(0);
   const [featureCancelPrompt, setFeatureCancelPrompt] = useState<FeatureCancelPrompt | null>(null);
@@ -295,6 +309,8 @@ export function App({
   const taskSessionsRef = useRef(taskSessions);
   const selectedTaskSessionIndexRef = useRef(selectedTaskSessionIndex);
   const taskSessionsLoadingRef = useRef(taskSessionsLoading);
+  const taskSessionsIncludeArchivedRef = useRef(taskSessionsIncludeArchived);
+  const taskSessionActionRef = useRef<TaskSessionAction | null>(taskSessionAction);
   const collaborationTimelineRef = useRef<CollaborationTimeline | null>(null);
   const featureBoardSelectedIndexRef = useRef(0);
   const featureCancelPromptRef = useRef<FeatureCancelPrompt | null>(null);
@@ -318,6 +334,11 @@ export function App({
   const openCollaborationTimelineRef = useRef<(featureIndex?: number) => Promise<void>>(openCollaborationTimeline);
   const refreshCollaborationTimelineRef = useRef<(showLoading?: boolean) => Promise<void>>(refreshCollaborationTimeline);
   const activateSelectedTaskSessionRef = useRef<() => Promise<void>>(activateSelectedTaskSession);
+  const refreshTaskSessionsRef = useRef<(preferredTaskId?: string | null) => Promise<void>>(refreshTaskSessions);
+  const renameSelectedTaskSessionRef = useRef<(action: Extract<TaskSessionAction, { type: "rename" }>) => Promise<void>>(renameSelectedTaskSession);
+  const archiveSelectedTaskSessionRef = useRef<() => Promise<void>>(archiveSelectedTaskSession);
+  const deleteSelectedTaskSessionRef = useRef<(action: Extract<TaskSessionAction, { type: "delete" }>) => Promise<void>>(deleteSelectedTaskSession);
+  const exportSelectedTaskSessionRef = useRef<() => Promise<void>>(exportSelectedTaskSession);
   const workspaceReturnViewRef = useRef<"chat" | "worker" | "workers" | "sessions">("chat");
   const routerReturnViewRef = useRef<"chat" | "worker" | "workers" | "sessions">("chat");
   const workerOverviewReturnViewRef = useRef<"chat" | "worker">("chat");
@@ -458,6 +479,14 @@ export function App({
   }, [taskSessionsLoading]);
 
   useEffect(() => {
+    taskSessionsIncludeArchivedRef.current = taskSessionsIncludeArchived;
+  }, [taskSessionsIncludeArchived]);
+
+  useEffect(() => {
+    taskSessionActionRef.current = taskSessionAction;
+  }, [taskSessionAction]);
+
+  useEffect(() => {
     featureBoardSelectedIndexRef.current = featureBoardSelectedIndex;
   }, [featureBoardSelectedIndex]);
 
@@ -520,6 +549,11 @@ export function App({
     openCollaborationTimelineRef.current = openCollaborationTimeline;
     refreshCollaborationTimelineRef.current = refreshCollaborationTimeline;
     activateSelectedTaskSessionRef.current = activateSelectedTaskSession;
+    refreshTaskSessionsRef.current = refreshTaskSessions;
+    renameSelectedTaskSessionRef.current = renameSelectedTaskSession;
+    archiveSelectedTaskSessionRef.current = archiveSelectedTaskSession;
+    deleteSelectedTaskSessionRef.current = deleteSelectedTaskSession;
+    exportSelectedTaskSessionRef.current = exportSelectedTaskSession;
   });
 
   useEffect(() => {
@@ -923,8 +957,41 @@ export function App({
           exitRef.current();
           return;
         }
+        const sessionAction = taskSessionActionRef.current;
+        if (sessionAction) {
+          if (chunk === "\x1b") {
+            updateTaskSessionAction(null);
+            setTaskSessionsError(null);
+            return;
+          }
+          if (taskSessionsLoadingRef.current) {
+            return;
+          }
+          if (sessionAction.type === "rename") {
+            const update = applyChatInputChunk(sessionAction.value, chunk, sessionAction.cursor);
+            if (update.submit !== null) {
+              void renameSelectedTaskSessionRef.current({
+                ...sessionAction,
+                value: update.submit,
+                cursor: Array.from(update.submit).length
+              });
+            } else {
+              updateTaskSessionAction({
+                ...sessionAction,
+                value: update.value,
+                cursor: update.cursor
+              });
+            }
+            return;
+          }
+          if (chunk === "d" || chunk === "D") {
+            void deleteSelectedTaskSessionRef.current(sessionAction);
+          }
+          return;
+        }
         if (isTaskSessionsShortcut(chunk, {}) || chunk === "\x1b") {
           setTaskSessionsError(null);
+          setTaskSessionsNotice(null);
           viewRef.current = taskSessionsReturnViewRef.current;
           setView(taskSessionsReturnViewRef.current);
           return;
@@ -947,6 +1014,53 @@ export function App({
             viewRef.current = "chat";
             setView("chat");
           }
+          return;
+        }
+        const selectedSession = taskSessionsRef.current[selectedTaskSessionIndexRef.current];
+        if (chunk === "r" || chunk === "R") {
+          if (selectedSession) {
+            updateTaskSessionAction({
+              type: "rename",
+              taskId: selectedSession.id,
+              title: selectedSession.title,
+              value: selectedSession.title,
+              cursor: Array.from(selectedSession.title).length
+            });
+            setTaskSessionsError(null);
+            setTaskSessionsNotice(null);
+          }
+          return;
+        }
+        if (chunk === "a" || chunk === "A") {
+          void archiveSelectedTaskSessionRef.current();
+          return;
+        }
+        if (chunk === "d" || chunk === "D") {
+          if (selectedSession) {
+            if (selectedSession.id === activeTaskIdRef.current) {
+              setTaskSessionsError("Start a new task before deleting the active session");
+            } else {
+              updateTaskSessionAction({
+                type: "delete",
+                taskId: selectedSession.id,
+                title: selectedSession.title
+              });
+              setTaskSessionsError(null);
+              setTaskSessionsNotice(null);
+            }
+          }
+          return;
+        }
+        if (chunk === "e" || chunk === "E") {
+          void exportSelectedTaskSessionRef.current();
+          return;
+        }
+        if (chunk === "h" || chunk === "H") {
+          const includeArchived = !taskSessionsIncludeArchivedRef.current;
+          taskSessionsIncludeArchivedRef.current = includeArchived;
+          setTaskSessionsIncludeArchived(includeArchived);
+          setTaskSessionsNotice(includeArchived ? "Archived sessions shown" : "Archived sessions hidden");
+          void refreshTaskSessionsRef.current(selectedSession?.id ?? null);
           return;
         }
         if (chunk === "\r" || chunk === "\n") {
@@ -2082,25 +2196,34 @@ export function App({
     setView("sessions");
     setAttachError(null);
     setTaskSessionsError(null);
+    setTaskSessionsNotice(null);
+    updateTaskSessionAction(null);
+    await refreshTaskSessions(activeTaskIdRef.current);
+  }
+
+  async function refreshTaskSessions(preferredTaskId: string | null = null): Promise<void> {
     taskSessionsLoadingRef.current = true;
     setTaskSessionsLoading(true);
-
     const sequence = taskSessionsLoadSequenceRef.current + 1;
     taskSessionsLoadSequenceRef.current = sequence;
     try {
       if (!loadTaskSessions) {
         throw new Error("Task sessions are unavailable");
       }
-      const tasks = await loadTaskSessions();
+      const tasks = await loadTaskSessions({
+        includeArchived: taskSessionsIncludeArchivedRef.current
+      });
       if (taskSessionsLoadSequenceRef.current !== sequence) {
         return;
       }
       taskSessionsRef.current = tasks;
       setTaskSessions(tasks);
-      const activeIndex = activeTaskIdRef.current
-        ? tasks.findIndex((task) => task.id === activeTaskIdRef.current)
+      const preferredIndex = preferredTaskId
+        ? tasks.findIndex((task) => task.id === preferredTaskId)
         : -1;
-      const selectedIndex = activeIndex >= 0 ? activeIndex : 0;
+      const selectedIndex = preferredIndex >= 0
+        ? preferredIndex
+        : Math.min(Math.max(0, selectedTaskSessionIndexRef.current), Math.max(0, tasks.length - 1));
       selectedTaskSessionIndexRef.current = selectedIndex;
       setSelectedTaskSessionIndex(selectedIndex);
     } catch (error) {
@@ -2115,12 +2238,97 @@ export function App({
     }
   }
 
+  function updateTaskSessionAction(next: TaskSessionAction | null): void {
+    taskSessionActionRef.current = next;
+    setTaskSessionAction(next);
+  }
+
+  async function runTaskSessionOperation<Result>(
+    run: () => Promise<Result>,
+    notice: string | ((result: Result) => string),
+    preferredTaskId: string | null
+  ): Promise<void> {
+    if (taskSessionsLoadingRef.current) {
+      return;
+    }
+    taskSessionsLoadingRef.current = true;
+    setTaskSessionsLoading(true);
+    setTaskSessionsError(null);
+    setTaskSessionsNotice(null);
+    try {
+      const result = await run();
+      updateTaskSessionAction(null);
+      setTaskSessionsNotice(typeof notice === "function" ? notice(result) : notice);
+      await refreshTaskSessions(preferredTaskId);
+    } catch (error) {
+      setTaskSessionsError(error instanceof Error ? error.message : String(error));
+    } finally {
+      taskSessionsLoadingRef.current = false;
+      setTaskSessionsLoading(false);
+    }
+  }
+
+  async function renameSelectedTaskSession(
+    action: Extract<TaskSessionAction, { type: "rename" }>
+  ): Promise<void> {
+    await runTaskSessionOperation(async () => {
+      if (!renameTaskSession) {
+        throw new Error("Task session rename is unavailable");
+      }
+      const title = action.value.trim();
+      await renameTaskSession(action.taskId, title);
+      return title;
+    }, (title) => `Renamed · ${title}`, action.taskId);
+  }
+
+  async function archiveSelectedTaskSession(): Promise<void> {
+    const selected = taskSessionsRef.current[selectedTaskSessionIndexRef.current];
+    if (!selected) {
+      return;
+    }
+    const archived = !selected.archived_at;
+    await runTaskSessionOperation(async () => {
+      if (!setTaskSessionArchived) {
+        throw new Error("Task session archive is unavailable");
+      }
+      await setTaskSessionArchived(selected.id, archived);
+    }, archived ? `Archived · ${selected.title}` : `Unarchived · ${selected.title}`, selected.id);
+  }
+
+  async function deleteSelectedTaskSession(
+    action: Extract<TaskSessionAction, { type: "delete" }>
+  ): Promise<void> {
+    await runTaskSessionOperation(async () => {
+      if (!deleteTaskSession) {
+        throw new Error("Task session deletion is unavailable");
+      }
+      await deleteTaskSession(action.taskId);
+    }, `Deleted · ${action.title}`, null);
+  }
+
+  async function exportSelectedTaskSession(): Promise<void> {
+    const selected = taskSessionsRef.current[selectedTaskSessionIndexRef.current];
+    if (!selected) {
+      return;
+    }
+    await runTaskSessionOperation(async () => {
+      if (!exportTaskSession) {
+        throw new Error("Task session export is unavailable");
+      }
+      return exportTaskSession(selected.id);
+    }, (path) => `Exported · ${path}`, selected.id);
+  }
+
   async function activateSelectedTaskSession(): Promise<void> {
     if (busyRef.current || taskSessionsLoadingRef.current) {
       return;
     }
     const selected = taskSessionsRef.current[selectedTaskSessionIndexRef.current];
     if (!selected) {
+      return;
+    }
+    if (selected.archived_at) {
+      setTaskSessionsError(`Unarchive ${selected.title} before restoring it`);
       return;
     }
     taskSessionsLoadingRef.current = true;
@@ -2431,6 +2639,12 @@ export function App({
           collaborationBack={collaborationReturnViewRef.current}
           featureCanCancel={featureCanCancel}
           featureCancelConfirm={Boolean(featureCancelPrompt)}
+          taskSessionAction={taskSessionAction?.type === "rename"
+            ? { type: "rename", value: taskSessionAction.value, cursor: taskSessionAction.cursor }
+            : taskSessionAction?.type === "delete"
+              ? { type: "delete", title: taskSessionAction.title }
+              : null}
+          taskSessionsIncludeArchived={taskSessionsIncludeArchived}
           canRetry={canRetryTask}
           hasWorkers={workers.length > 0}
           hasActiveTask={Boolean(activeTaskId)}
@@ -2461,6 +2675,13 @@ export function App({
             tasks={taskSessions}
             activeTaskId={activeTaskId}
             selectedIndex={selectedTaskSessionIndex}
+            includeArchived={taskSessionsIncludeArchived}
+            notice={taskSessionsNotice}
+            action={taskSessionAction?.type === "rename"
+              ? { type: "rename", title: taskSessionAction.title }
+              : taskSessionAction?.type === "delete"
+                ? { type: "delete", title: taskSessionAction.title }
+                : null}
             loading={taskSessionsLoading}
             error={taskSessionsError}
             height={contentHeight}
