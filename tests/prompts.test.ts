@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   buildActorPrompt,
   buildCriticPrompt,
+  buildFinalJudgePrompt,
   buildJudgePrompt,
   buildWaveActorPrompt,
   buildWaveCriticPrompt
@@ -112,5 +113,25 @@ describe("role prompts", () => {
     expect(prompt).toContain("Combined integration workspace: /tmp/task/workspaces/wave/integration");
     expect(prompt).toContain("Fix combined output.");
     expect(prompt).toContain("Do not modify the live workspace");
+  });
+
+  it("requires the Final Judge to return structured criterion evidence", () => {
+    const prompt = buildFinalJudgePrompt({
+      request: "实现 alpha 与 beta",
+      taskDir: "/tmp/task",
+      judgeDir: "/tmp/task/turns/0001",
+      workerDir: "/tmp/task/judge-final",
+      workspaceDir: "/tmp/task/workspaces/turn-0001/final-verification",
+      supervisorSummaryPath: "/tmp/task/turns/0001/supervisor-summary.md",
+      expectedCriterionIds: ["A-001", "A-002"],
+      changedPaths: ["src/a.ts", "src/b.ts"]
+    });
+
+    expect(prompt).toContain("Final acceptance");
+    expect(prompt).toContain("disposable snapshot of the integrated project");
+    expect(prompt).toContain('Required acceptance criterion ids: ["A-001","A-002"]');
+    expect(prompt).toContain('Authoritative changed paths: ["src/a.ts","src/b.ts"]');
+    expect(prompt).toContain("Write final-acceptance.json");
+    expect(prompt).toContain("Do not rely on process exit alone");
   });
 });

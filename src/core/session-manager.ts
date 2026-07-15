@@ -205,6 +205,19 @@ const ACTIVE_FEATURE_STATES = new Set([
 ]);
 const PENDING_TURN_DIRECTORY = /^\.turn-(\d{4})-.+\.pending$/;
 const PENDING_TASK_CREATION_CLAIM = /^\.(task-.+)\.creating\.json$/;
+const CompletionContractSchema = z.object({
+  version: z.literal(1),
+  final_judge_required: z.literal(true)
+});
+const FinalAcceptanceEvidenceSchema = z.object({
+  decision: z.literal("approved")
+}).passthrough();
+const FinalAcceptanceValidationSchema = z.object({
+  version: z.literal(1),
+  state: z.literal("valid"),
+  decision: z.literal("approved"),
+  issues: z.array(z.string()).length(0)
+});
 const TaskCreationOwnerSchema = z.object({
   version: z.literal(1),
   task_id: TaskIdSchema,
@@ -1108,6 +1121,17 @@ export class SessionManager {
     }
     if (!(await readTextIfExists(join(latestTurn.dir, "supervisor-summary.md"))).trim()) {
       return false;
+    }
+
+    const completionContractPath = join(latestTurn.dir, "completion-contract.json");
+    if (await pathExists(completionContractPath)) {
+      try {
+        await readJson(completionContractPath, CompletionContractSchema);
+        await readJson(join(latestTurn.dir, "final-acceptance.json"), FinalAcceptanceEvidenceSchema);
+        await readJson(join(latestTurn.dir, "final-acceptance-validation.json"), FinalAcceptanceValidationSchema);
+      } catch {
+        return false;
+      }
     }
 
     const featuresRoot = join(task.dir, "features");

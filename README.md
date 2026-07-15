@@ -108,9 +108,12 @@ Limit how many feature-level Actor or Critic agents may run at once:
 ```toml
 [orchestration]
 maxParallelFeatures = 3 # 1..8
+maxRevisionRounds = 3   # 1..10
 ```
 
 Judge may plan up to eight dependency-aware features. The orchestrator keeps dependency order while running at most this many agents concurrently. When one worker fails, already-running peers are allowed to finish cleanly and queued features are not started.
+
+Actor and Critic reuse their native sessions across revision rounds. Blocking findings and Actor replies remain in the Feature JSONL mailbox; the task stops with an explicit error when `maxRevisionRounds` is exhausted.
 
 Queued Feature workers remain `queued` until they acquire a concurrency slot. Their persisted state changes to `actor_running` or `critic_running` only after the Worker is registered as cancellable, then to `actor_done` or `critic_done` before that active registration is removed. As a result, only `actor_running` and `critic_running` expose Feature cancellation; queued and role-complete Features cannot present a cancel action that has no live process behind it.
 

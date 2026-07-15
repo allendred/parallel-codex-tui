@@ -50,6 +50,32 @@ describe("ParallelWorkspaceManager", () => {
     expect(await pathExists(join(workspaceRoot, ".parallel-codex", "injected.txt"))).toBe(false);
   });
 
+  it("creates a disposable final verification snapshot without runtime data", async () => {
+    const workspaceRoot = await mkdtemp(join(tmpdir(), "pct-workspace-final-verification-"));
+    const taskDir = join(workspaceRoot, ".parallel-codex", "sessions", "task-final");
+    await writeText(join(workspaceRoot, "src", "app.ts"), "export const ready = true;\n");
+    await writeText(join(taskDir, "private.log"), "runtime data\n");
+    const manager = new ParallelWorkspaceManager({
+      workspaceRoot,
+      taskDir,
+      dataDir: ".parallel-codex"
+    });
+
+    const verificationDir = await manager.prepareFinalVerificationWorkspace("0002");
+
+    expect(verificationDir).toBe(join(taskDir, "workspaces", "turn-0002", "final-verification"));
+    expect(await readTextIfExists(join(verificationDir, "src", "app.ts"))).toBe("export const ready = true;\n");
+    expect(await pathExists(join(verificationDir, ".parallel-codex"))).toBe(false);
+    await writeText(join(verificationDir, "src", "app.ts"), "export const ready = false;\n");
+    expect(await readTextIfExists(join(workspaceRoot, "src", "app.ts"))).toBe("export const ready = true;\n");
+    expect(JSON.parse(await readTextIfExists(join(taskDir, "workspaces", "turn-0002", "final-verification.json")))).toEqual({
+      version: 1,
+      workspace_root: workspaceRoot,
+      turn_id: "0002",
+      verification: verificationDir
+    });
+  });
+
   it("refreshes disposable feature review workspaces without merging Critic writes", async () => {
     const workspaceRoot = await mkdtemp(join(tmpdir(), "pct-workspace-review-"));
     const taskDir = join(workspaceRoot, ".parallel-codex", "sessions", "task-review");

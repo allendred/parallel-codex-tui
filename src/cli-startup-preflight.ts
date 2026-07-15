@@ -8,6 +8,9 @@ export interface StartupPreflightMessage {
 export function startupPreflightMessages(
   preflight: RuntimePreflightResult
 ): StartupPreflightMessage[] {
+  if (preflight.ok) {
+    return [];
+  }
   const issues = preflight.lines.filter(isStartupPreflightIssue);
   if (issues.length === 0) {
     return [];
@@ -17,7 +20,7 @@ export function startupPreflightMessages(
   const remainder = issues.length > 4 ? ` · ${issues.length - 4} more` : "";
   return [{
     from: "system",
-    text: `${preflight.ok ? "Startup preflight warning" : "Startup preflight needs attention"} · ${summary}${remainder} · run parallel-codex-tui --doctor before starting workers`
+    text: `Startup preflight needs attention · ${summary}${remainder} · run parallel-codex-tui --doctor before starting workers`
   }];
 }
 

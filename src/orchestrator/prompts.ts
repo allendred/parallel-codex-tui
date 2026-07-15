@@ -44,6 +44,19 @@ export interface WaveRolePromptInput {
   role?: RolePromptConfig;
 }
 
+export interface FinalJudgePromptInput {
+  request: string;
+  taskDir: string;
+  judgeDir: string;
+  workerDir: string;
+  workspaceDir: string;
+  supervisorSummaryPath: string;
+  expectedCriterionIds: string[];
+  changedPaths: string[];
+  turn?: PromptTurnContext;
+  role?: RolePromptConfig;
+}
+
 export interface PromptTurnContext {
   turnId: string;
   turnDir: string;
@@ -263,6 +276,43 @@ export function buildWaveActorPrompt(input: WaveRolePromptInput): string {
     "",
     "Wave Critic review:",
     input.review?.trim() || "REVISION_REQUIRED\nNo review details were provided.",
+    "",
+    "User request:",
+    input.request,
+    ""
+  ].join("\n");
+}
+
+export function buildFinalJudgePrompt(input: FinalJudgePromptInput): string {
+  const role = roleConfig(input.role, "Final Judge", [
+    "Perform the final integration acceptance against the requirements you established before the task can be completed."
+  ]);
+  return [
+    `# Role: ${role.title} · Final acceptance`,
+    "",
+    ...instructionLines(role.instructions),
+    "",
+    `Task directory: ${input.taskDir}`,
+    `Judge artifact directory: ${input.judgeDir}`,
+    `Final Judge worker directory: ${input.workerDir}`,
+    `Final verification workspace: ${input.workspaceDir}`,
+    `Supervisor summary: ${input.supervisorSummaryPath}`,
+    ...turnLines(input.turn),
+    "",
+    "The verification workspace is a disposable snapshot of the integrated project.",
+    "Inspect and test it as the logical project root. Do not modify the live workspace.",
+    "Read requirements.md, acceptance.md, the supervisor summary, feature decisions, and Critic reviews.",
+    "Run the commands needed to validate the complete integrated result, including cross-feature behavior.",
+    "",
+    `Required acceptance criterion ids: ${JSON.stringify(input.expectedCriterionIds)}`,
+    `Authoritative changed paths: ${JSON.stringify(input.changedPaths)}`,
+    "",
+    "Write final-acceptance.json in the Final Judge worker directory.",
+    "It must be strict JSON with this shape:",
+    '{"version":1,"decision":"approved|rejected","summary":"concise verdict","acceptance":[{"criterion_id":"A-001","status":"passed|failed","evidence":"command or observable result"}],"changed_paths":["relative/path"]}',
+    "Include every required criterion exactly once and copy the authoritative changed paths exactly.",
+    "Use decision approved only when every criterion passed; otherwise use rejected and identify each failure.",
+    "Do not rely on process exit alone and do not omit evidence.",
     "",
     "User request:",
     input.request,

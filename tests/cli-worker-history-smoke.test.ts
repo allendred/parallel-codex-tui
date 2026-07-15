@@ -74,10 +74,23 @@ describe("CLI worker history smoke", () => {
           expect(await readTextIfExists(join(taskDir, workerId, "output.log"))).not.toBe("");
         }
       }
+      const firstJudgeSession = await readJson(
+        join(taskDir, "judge-mock", "native-session.json"),
+        NativeSessionSchema
+      );
+      for (let turn = 1; turn <= 10; turn += 1) {
+        const workerId = `judge-mock-final-${String(turn).padStart(4, "0")}`;
+        const finalSession = await readJson(
+          join(taskDir, workerId, "native-session.json"),
+          NativeSessionSchema
+        );
+        expect(finalSession.session_id).toBe(firstJudgeSession.session_id);
+        expect(finalSession.worker_id).toBe(workerId);
+      }
 
       firstRun.child.write("\x17");
-      await assertChronologicalWorkerTabs(firstRun, 30);
-      await assertNarrowWorkerChrome(firstRun, 30);
+      await assertChronologicalWorkerTabs(firstRun, 40);
+      await assertNarrowWorkerChrome(firstRun, 40);
 
       firstRun.child.write("\x03");
       await waitForExit(firstRun);
@@ -86,11 +99,11 @@ describe("CLI worker history smoke", () => {
       secondRun = startCli(appRoot, workspace, taskId);
       await waitForScreenText(secondRun, "> | message");
       secondRun.child.write("\x14");
-      await waitForScreenText(secondRun, "10 turns · 30 workers · 3 native");
+      await waitForScreenText(secondRun, "10 turns · 40 workers · 3 native");
       secondRun.child.write("\x1b");
       await waitForScreenText(secondRun, "parallel-codex-tui · chat");
       secondRun.child.write("\x17");
-      await assertChronologicalWorkerTabs(secondRun, 30);
+      await assertChronologicalWorkerTabs(secondRun, 40);
 
       secondRun.child.write("\x03");
       await waitForExit(secondRun);
@@ -155,7 +168,9 @@ async function assertChronologicalWorkerTabs(run: CliRun, workerCount: number): 
   run.child.write("\t");
   await waitForScreenText(run, `critic/mock · 3/${workerCount}`);
   run.child.write("\t");
-  await waitForScreenText(run, `judge/mock · Turn 2 · 4/${workerCount}`);
+  await waitForScreenText(run, `judge/mock · Final acceptance · 4/${workerCount}`);
+  run.child.write("\t");
+  await waitForScreenText(run, `judge/mock · Turn 2 · 5/${workerCount}`);
 }
 
 async function assertNarrowWorkerChrome(run: CliRun, workerCount: number): Promise<void> {
@@ -166,7 +181,7 @@ async function assertNarrowWorkerChrome(run: CliRun, workerCount: number): Promi
     revision: run.outputRevision,
     cols: 32,
     rows: 22,
-    text: `judge/mock · 4/${workerCount}`
+    text: `judge/mock · 5/${workerCount}`
   });
   expect(maxScreenWidth(run.screen)).toBeLessThanOrEqual(32);
 
@@ -177,7 +192,7 @@ async function assertNarrowWorkerChrome(run: CliRun, workerCount: number): Promi
     revision: run.outputRevision,
     cols: 24,
     rows: 22,
-    text: `judge/mock · 4/${workerCount}`
+    text: `judge/mock · 5/${workerCount}`
   });
   expect(maxScreenWidth(run.screen)).toBeLessThanOrEqual(24);
 }
@@ -194,12 +209,18 @@ async function workerDirectories(taskDir: string): Promise<string[]> {
 }
 
 function expectedWorkerDirectories(turnCount: number): string[] {
-  return (["actor", "critic", "judge"] as const).flatMap((role) =>
+  return [
+    ...(["actor", "critic", "judge"] as const).flatMap((role) =>
     Array.from({ length: turnCount }, (_, index) => {
       const turn = index + 1;
       return turn === 1 ? `${role}-mock` : `${role}-mock-${String(turn).padStart(4, "0")}`;
     })
-  );
+    ),
+    ...Array.from(
+      { length: turnCount },
+      (_, index) => `judge-mock-final-${String(index + 1).padStart(4, "0")}`
+    )
+  ].sort();
 }
 
 async function waitForTaskCount(workspace: string, count: number): Promise<string[]> {

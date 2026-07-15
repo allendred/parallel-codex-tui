@@ -31,10 +31,10 @@ describe("startupPreflightMessages", () => {
     }]);
   });
 
-  it("surfaces non-blocking compatibility warnings", () => {
+  it("keeps non-blocking compatibility warnings in doctor output", () => {
     expect(startupPreflightMessages({
       ok: true,
       lines: ["codex capabilities: warning (help not recognized; compatibility unverified)"]
-    })[0]?.text).toContain("Startup preflight warning");
+    })).toEqual([]);
   });
 });

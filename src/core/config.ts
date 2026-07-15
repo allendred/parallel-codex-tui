@@ -99,7 +99,8 @@ const CodexRouterConfigSchema = z.object({
 });
 
 const OrchestrationConfigSchema = z.object({
-  maxParallelFeatures: z.number().int().min(1).max(8)
+  maxParallelFeatures: z.number().int().min(1).max(8),
+  maxRevisionRounds: z.number().int().min(1).max(10)
 }).strict();
 
 const UiConfigSchema = z.object({
@@ -184,7 +185,8 @@ export function defaultConfig(projectRoot: string): AppConfig {
       }
     },
     orchestration: {
-      maxParallelFeatures: 3
+      maxParallelFeatures: 3,
+      maxRevisionRounds: 3
     },
     workers: {
       codex: {

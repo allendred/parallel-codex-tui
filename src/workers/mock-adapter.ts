@@ -16,11 +16,27 @@ export class MockWorkerAdapter implements WorkerAdapter {
     await appendText(spec.outputLogPath, `[mock:${spec.role}] started\n`);
 
     if (spec.role === "judge") {
-      await writeText(join(spec.filesDir, "requirements.md"), "# Requirements\n\n- [R-001] Mock requirements derived from the user request.\n");
-      await writeText(join(spec.filesDir, "plan.md"), "# Plan\n\n1. [P-001] Implement the scoped change.\n2. [P-002] Run focused verification.\n");
-      await writeText(join(spec.filesDir, "acceptance.md"), "# Acceptance\n\n- [A-001] [R-001] Focused tests pass for the requested behavior.\n");
-      await writeText(join(spec.filesDir, "actor-brief.md"), "# Actor Brief\n\nImplement the requested change and write a worklog.\n");
-      await writeText(join(spec.filesDir, "critic-brief.md"), "# Critic Brief\n\nReview the Actor output against acceptance criteria.\n");
+      if (spec.prompt.includes("# Role:") && spec.prompt.includes("· Final acceptance")) {
+        const criterionIds = promptJsonArray(spec.prompt, "Required acceptance criterion ids");
+        const changedPaths = promptJsonArray(spec.prompt, "Authoritative changed paths");
+        await writeJson(join(spec.filesDir, "final-acceptance.json"), {
+          version: 1,
+          decision: "approved",
+          summary: "Mock Final Judge verified every acceptance criterion.",
+          acceptance: criterionIds.map((criterionId) => ({
+            criterion_id: criterionId,
+            status: "passed",
+            evidence: "Mock verification completed."
+          })),
+          changed_paths: changedPaths
+        });
+      } else {
+        await writeText(join(spec.filesDir, "requirements.md"), "# Requirements\n\n- [R-001] Mock requirements derived from the user request.\n");
+        await writeText(join(spec.filesDir, "plan.md"), "# Plan\n\n1. [P-001] Implement the scoped change.\n2. [P-002] Run focused verification.\n");
+        await writeText(join(spec.filesDir, "acceptance.md"), "# Acceptance\n\n- [A-001] [R-001] Focused tests pass for the requested behavior.\n");
+        await writeText(join(spec.filesDir, "actor-brief.md"), "# Actor Brief\n\nImplement the requested change and write a worklog.\n");
+        await writeText(join(spec.filesDir, "critic-brief.md"), "# Critic Brief\n\nReview the Actor output against acceptance criteria.\n");
+      }
     }
 
     if (spec.role === "actor") {
@@ -82,6 +98,19 @@ function mainRequestFromPrompt(prompt: string): string {
 function featureDirFromPrompt(prompt: string): string | null {
   const line = prompt.split("\n").find((item) => item.startsWith("Feature directory: "));
   return line ? line.replace("Feature directory: ", "").trim() : null;
+}
+
+function promptJsonArray(prompt: string, label: string): string[] {
+  const line = prompt.split("\n").find((item) => item.startsWith(`${label}: `));
+  if (!line) {
+    return [];
+  }
+  try {
+    const value = JSON.parse(line.slice(label.length + 2));
+    return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
+  } catch {
+    return [];
+  }
 }
 
 async function setStatus(

@@ -34,11 +34,13 @@ import {
 import {
   buildActorPrompt,
   buildCriticPrompt,
+  buildFinalJudgePrompt,
   buildJudgePrompt,
   buildMainPrompt,
   buildWaveActorPrompt,
   buildWaveCriticPrompt
 } from "./prompts.js";
+import { validateFinalJudgeAcceptance } from "./final-acceptance.js";
 import { featureExecutionWaves, parseFeaturePlan, type FeatureDefinition, type FeaturePlan } from "./feature-plan.js";
 import {
   JUDGE_REQUIRED_ARTIFACTS,
@@ -56,6 +58,9 @@ const JUDGE_ARTIFACTS = [
   ...JUDGE_REQUIRED_ARTIFACTS,
   "features.json"
 ] as const;
+const FINAL_ACCEPTANCE_FILE = "final-acceptance.json";
+const FINAL_ACCEPTANCE_VALIDATION_FILE = "final-acceptance-validation.json";
+const COMPLETION_CONTRACT_FILE = "completion-contract.json";
 
 export interface HandleRequestInput {
   request: string;
@@ -582,7 +587,7 @@ export class Orchestrator {
 
     return workers.sort((left, right) => (
       workerTurnOrder(left) - workerTurnOrder(right)
-      || workerRoleOrder(left.role) - workerRoleOrder(right.role)
+      || workerStageOrder(left) - workerStageOrder(right)
       || left.id.localeCompare(right.id)
     ));
   }
@@ -958,32 +963,52 @@ export class Orchestrator {
       });
       throwIfCancelled(input.signal);
 
-      const revisionRuns: Array<FeaturePairRun & { review: string }> = [];
-      const revisionFindingIds = new Map<string, string[]>();
-      for (const pair of pairRuns) {
-        const review = await readTextIfExists(join(pair.critic.dir, "review.md"));
-        const decision = criticReviewDecision(review);
-        if (decision === "revision") {
-          revisionFindingIds.set(pair.channel.id, await requireFeatureRevisionFindings(pair.channel));
-          revisionRuns.push({ ...pair, review });
-        } else if (decision !== "approved") {
-          throw new Error(`Critic review for feature ${pair.channel.id} must include APPROVED or REVISION_REQUIRED.`);
-        } else {
-          await recordApprovedFindingResolution(pair.channel, [], {
-            allowLegacyResolvedFindings: Boolean(input.retry)
-          });
-        }
-      }
-
       let finalPairs = pairRuns;
-      if (revisionRuns.length > 0) {
+      const revisionFindingIds = new Map<string, Set<string>>();
+      let revisionRound = 0;
+      while (true) {
+        const revisionRuns: Array<FeaturePairRun & { review: string }> = [];
+        for (const pair of finalPairs) {
+          const review = await readTextIfExists(join(pair.critic.dir, "review.md"));
+          const decision = criticReviewDecision(review);
+          if (decision === "revision") {
+            if (revisionRound >= this.config.orchestration.maxRevisionRounds) {
+              throw new Error(
+                `Critic still requires revision for ${pair.channel.id} after ${revisionRound} revision rounds.`
+              );
+            }
+            const findingIds = await requireFeatureRevisionFindings(pair.channel);
+            const accumulated = revisionFindingIds.get(pair.channel.id) ?? new Set<string>();
+            findingIds.forEach((id) => accumulated.add(id));
+            revisionFindingIds.set(pair.channel.id, accumulated);
+            revisionRuns.push({ ...pair, review });
+          } else if (decision !== "approved") {
+            throw new Error(`Critic review for feature ${pair.channel.id} must include APPROVED or REVISION_REQUIRED.`);
+          } else {
+            const accumulated = revisionFindingIds.get(pair.channel.id);
+            await recordApprovedFindingResolution(pair.channel, accumulated ? [...accumulated] : [], {
+              allowLegacyResolvedFindings: Boolean(input.retry) && !accumulated
+            });
+          }
+        }
+
+        if (revisionRuns.length === 0) {
+          break;
+        }
+        revisionRound += 1;
         await this.sessions.updateTaskStatus(task, "revision_needed");
         await Promise.all(revisionRuns.map(async ({ channel, critic }) => {
           await updateFeatureStatus(channel, "revision_needed");
-          await appendFeatureDialogue(channel, "critic.revision_requested", "critic", "Critic requested Actor revision.", {
-            review: join(critic.dir, "review.md"),
-            findings: channel.criticFindingsPath
-          });
+          await appendFeatureDialogue(
+            channel,
+            "critic.revision_requested",
+            "critic",
+            `Critic requested Actor revision ${revisionRound}/${this.config.orchestration.maxRevisionRounds}.`,
+            {
+              review: join(critic.dir, "review.md"),
+              findings: channel.criticFindingsPath
+            }
+          );
         }));
         await this.sessions.updateTaskStatus(task, "actor_running");
         let revisionCompleted = 0;
@@ -998,13 +1023,18 @@ export class Orchestrator {
             workers,
             turn,
             pair.channel,
-            buildRevisionRequest(pair.review, pair.channel),
+            buildRevisionRequest(
+              pair.review,
+              pair.channel,
+              revisionRound,
+              this.config.orchestration.maxRevisionRounds
+            ),
             true,
             requiredFeatureWorkspace(workspaceWave.featureDirs, pair.channel)
           );
           await requireActorFindingReplies(
             pair.channel,
-            revisionFindingIds.get(pair.channel.id) ?? []
+            [...(revisionFindingIds.get(pair.channel.id) ?? [])]
           );
           revisionCompleted += 1;
           reportProgress("revision", revisionCompleted, revisionRuns.length, "revision", "done");
@@ -1042,17 +1072,7 @@ export class Orchestrator {
           };
         });
         const replacements = new Map(revisedPairs.map((pair) => [pair.definition.id, pair]));
-        finalPairs = pairRuns.map((pair) => replacements.get(pair.definition.id) ?? pair);
-        for (const pair of revisedPairs) {
-          const review = await readTextIfExists(join(pair.critic.dir, "review.md"));
-          if (criticReviewDecision(review) !== "approved") {
-            throw new Error(`Critic did not approve feature ${pair.channel.id} after Actor revision.`);
-          }
-          await recordApprovedFindingResolution(
-            pair.channel,
-            revisionFindingIds.get(pair.channel.id) ?? []
-          );
-        }
+        finalPairs = finalPairs.map((pair) => replacements.get(pair.definition.id) ?? pair);
         throwIfCancelled(input.signal);
       }
 
@@ -1100,13 +1120,20 @@ export class Orchestrator {
         `Wave ${waveNumber}/${featureWaves.length} Critic decision: ${waveDecision}`
       );
       let waveRevised = false;
+      let waveRevisionRound = 0;
 
-      if (waveDecision === "revision") {
+      while (waveDecision === "revision") {
+        if (waveRevisionRound >= this.config.orchestration.maxRevisionRounds) {
+          throw new Error(
+            `Wave ${waveNumber}/${featureWaves.length} Critic still requires revision after ${waveRevisionRound} revision rounds. Live workspace was not changed.`
+          );
+        }
+        waveRevisionRound += 1;
         waveRevised = true;
         await this.sessions.appendEvent(
           task,
           "feature.wave_revision_requested",
-          `Wave ${waveNumber}/${featureWaves.length} Critic requested combined revision`
+          `Wave ${waveNumber}/${featureWaves.length} Critic requested combined revision ${waveRevisionRound}/${this.config.orchestration.maxRevisionRounds}`
         );
         await this.sessions.updateTaskStatus(task, "revision_needed");
         await Promise.all(finalPairs.map(({ channel }) => updateFeatureStatus(channel, "revision_needed")));
@@ -1147,20 +1174,21 @@ export class Orchestrator {
         );
         waveReview = await readTextIfExists(join(waveCritic.dir, "review.md"));
         waveDecision = criticReviewDecision(waveReview);
-        const secondReviewPath = join(workspaceWave.rootDir, "verification-review-02.md");
-        waveReviewPaths.push(secondReviewPath);
-        await writeText(secondReviewPath, waveReview);
+        const reviewPath = join(
+          workspaceWave.rootDir,
+          `verification-review-${String(waveRevisionRound + 1).padStart(2, "0")}.md`
+        );
+        waveReviewPaths.push(reviewPath);
+        await writeText(reviewPath, waveReview);
         await this.sessions.appendEvent(
           task,
           "feature.wave_reviewed",
-          `Wave ${waveNumber}/${featureWaves.length} Critic recheck decision: ${waveDecision}`
+          `Wave ${waveNumber}/${featureWaves.length} Critic recheck ${waveRevisionRound}/${this.config.orchestration.maxRevisionRounds} decision: ${waveDecision}`
         );
       }
 
       if (waveDecision !== "approved") {
-        const detail = waveDecision === "revision"
-          ? "still requires revision after the Wave Actor pass"
-          : "did not include APPROVED or REVISION_REQUIRED";
+        const detail = "did not include APPROVED or REVISION_REQUIRED";
         throw new Error(`Wave ${waveNumber}/${featureWaves.length} Critic ${detail}. Live workspace was not changed.`);
       }
       reportProgress("verification", 1, 1, "done", "done");
@@ -1203,6 +1231,16 @@ export class Orchestrator {
       changedPaths: [...changedPaths]
     });
     await writeText(join(turn.dir, "supervisor-summary.md"), `${summary}\n`);
+    await this.runFinalJudgeAcceptance(
+      completionInput(input),
+      task,
+      turn,
+      workers,
+      route.judge_engine,
+      judge,
+      workspaceManager,
+      [...changedPaths].sort()
+    );
     await this.sessions.updateTaskStatus(task, "done");
     input.onStatus?.({ taskId: task.id, judge: "done", actor: "done", critic: "done" });
     return {
@@ -1262,7 +1300,9 @@ export class Orchestrator {
         feature,
         input,
         workers,
-        await integratedWaveChangedPaths(workspaceRootDir)
+        await integratedWaveChangedPaths(workspaceRootDir),
+        workspaceManager,
+        route.judge_engine
       );
     }
     const restoredWave = input.retry ? await workspaceManager.restoreWave(workspaceInput) : null;
@@ -1355,15 +1395,35 @@ export class Orchestrator {
       throw new Error(`Critic review for ${feature.id} must include APPROVED or REVISION_REQUIRED.`);
     }
 
-    if (decision === "revision") {
+    const revisionFindingIds = new Set<string>();
+    let revisionRound = 0;
+    while (decision === "revision") {
+      if (revisionRound >= this.config.orchestration.maxRevisionRounds) {
+        throw new Error(
+          `Critic still requires revision for ${feature.id} after ${revisionRound} revision rounds.`
+        );
+      }
+      revisionRound += 1;
       const findingIds = await requireFeatureRevisionFindings(feature);
+      findingIds.forEach((id) => revisionFindingIds.add(id));
       await this.sessions.updateTaskStatus(task, "revision_needed");
       await updateFeatureStatus(feature, "revision_needed");
-      await appendFeatureDialogue(feature, "critic.revision_requested", "critic", "Critic requested Actor revision.", {
+      await appendFeatureDialogue(
+        feature,
+        "critic.revision_requested",
+        "critic",
+        `Critic requested Actor revision ${revisionRound}/${this.config.orchestration.maxRevisionRounds}.`,
+        {
         review: join(critic.dir, "review.md"),
         findings: feature.criticFindingsPath
+        }
+      );
+      input.onStatus?.({
+        taskId: task.id,
+        judge: "done",
+        actor: `revision ${revisionRound}/${this.config.orchestration.maxRevisionRounds}`,
+        critic: "done"
       });
-      input.onStatus?.({ taskId: task.id, judge: "done", actor: "revision", critic: "done" });
       await this.sessions.updateTaskStatus(task, "actor_running");
       actor = await this.runActor(
         input,
@@ -1373,12 +1433,17 @@ export class Orchestrator {
         workers,
         turn,
         feature,
-        buildRevisionRequest(review, feature),
+        buildRevisionRequest(
+          review,
+          feature,
+          revisionRound,
+          this.config.orchestration.maxRevisionRounds
+        ),
         false,
         workspaceDir,
         true
       );
-      await requireActorFindingReplies(feature, findingIds);
+      await requireActorFindingReplies(feature, [...revisionFindingIds]);
       await updateFeatureStatus(feature, "actor_done");
       throwIfCancelled(input.signal);
       reviewWorkspace = await workspaceManager.prepareFeatureReviewWorkspace(workspaceWave, feature.id);
@@ -1401,10 +1466,13 @@ export class Orchestrator {
       throwIfCancelled(input.signal);
       review = await readTextIfExists(`${critic.dir}/review.md`);
       decision = criticReviewDecision(review);
-      if (decision !== "approved") {
-        throw new Error(`Critic did not approve ${feature.id} after Actor revision.`);
+      if (decision === "missing") {
+        throw new Error(`Critic review for ${feature.id} must include APPROVED or REVISION_REQUIRED.`);
       }
-      await recordApprovedFindingResolution(feature, findingIds);
+    }
+
+    if (revisionFindingIds.size > 0) {
+      await recordApprovedFindingResolution(feature, [...revisionFindingIds]);
     } else {
       await recordApprovedFindingResolution(feature, [], {
         allowLegacyResolvedFindings: Boolean(input.retry)
@@ -1430,7 +1498,19 @@ export class Orchestrator {
       featureProgress: { wave: 1, waves: 1, phase: "integration", completed: 1, total: 1 }
     });
 
-    return this.completeTask(task, turn, judge, actor, critic, feature, input, workers, integration.changedPaths);
+    return this.completeTask(
+      task,
+      turn,
+      judge,
+      actor,
+      critic,
+      feature,
+      input,
+      workers,
+      integration.changedPaths,
+      workspaceManager,
+      route.judge_engine
+    );
   }
 
   private async completeTask(
@@ -1442,7 +1522,9 @@ export class Orchestrator {
     feature: FeatureChannel,
     input: HandleRequestInput,
     workers: WorkerLogRef[],
-    changedPaths: string[]
+    changedPaths: string[],
+    workspaceManager: ParallelWorkspaceManager,
+    judgeEngine: EngineName
   ): Promise<HandleRequestResult> {
     const summary = await buildSupervisorSummary({
       judgeDir: judge.dir,
@@ -1453,6 +1535,16 @@ export class Orchestrator {
       changedPaths
     });
     await writeText(join(turn.dir, "supervisor-summary.md"), `${summary}\n`);
+    await this.runFinalJudgeAcceptance(
+      completionInput(input),
+      task,
+      turn,
+      workers,
+      judgeEngine,
+      judge,
+      workspaceManager,
+      [...new Set(changedPaths)].sort()
+    );
     await writeFeatureDecision(feature, summary);
     await updateFeatureStatus(feature, "approved");
     await this.sessions.updateTaskStatus(task, "done");
@@ -1845,6 +1937,135 @@ export class Orchestrator {
     ensureWorkerSuccess(result);
 
     return judge;
+  }
+
+  private async runFinalJudgeAcceptance(
+    input: HandleRequestInput,
+    task: TaskSession,
+    turn: TaskTurn,
+    workers: WorkerLogRef[],
+    engine: EngineName,
+    judge: WorkerFiles,
+    workspaceManager: ParallelWorkspaceManager,
+    changedPaths: string[]
+  ): Promise<void> {
+    const judgeReport = await this.validateJudgeSnapshot(turn);
+    if (judgeReport.state !== "valid") {
+      throw new Error(judgeValidationError(turn, judgeReport));
+    }
+    await writeJson(join(turn.dir, COMPLETION_CONTRACT_FILE), {
+      version: 1,
+      final_judge_required: true
+    });
+    const criterionIds = judgeReport.contract.acceptance.map((item) => item.id);
+    const persistedPath = join(turn.dir, FINAL_ACCEPTANCE_FILE);
+    const validationPath = join(turn.dir, FINAL_ACCEPTANCE_VALIDATION_FILE);
+    if (input.retry) {
+      const checkpoint = await readFinalJudgeAcceptance(persistedPath, criterionIds, changedPaths);
+      if (checkpoint?.report.state === "valid" && checkpoint.acceptance?.decision === "approved") {
+        await this.sessions.appendEvent(
+          task,
+          "judge.final_checkpoint_reused",
+          `Reused approved Final Judge acceptance for turn ${turn.turnId}`
+        );
+        return;
+      }
+    }
+
+    const verificationWorkspace = await workspaceManager.prepareFinalVerificationWorkspace(turn.turnId);
+    await this.sessions.updateTaskStatus(task, "verifying");
+    input.onStatus?.({ taskId: task.id, judge: "verifying", actor: "done", critic: "done" });
+    await this.sessions.appendEvent(
+      task,
+      "judge.final_started",
+      `Final Judge started integration acceptance for ${criterionIds.length} criteria`
+    );
+
+    const workerId = `judge-${engine}-final-${turn.turnId}`;
+    const featureTitle = finalJudgeTitle(turn.turnId);
+    const workerFiles = this.workerFiles(task, workerId);
+    await removeIfExists(join(workerFiles.dir, FINAL_ACCEPTANCE_FILE));
+    await removeIfExists(persistedPath);
+    await removeIfExists(validationPath);
+    const finalJudge = await this.sessions.initializeWorker(task, {
+      workerId,
+      featureTitle,
+      role: "judge",
+      engine,
+      preserveOutput: input.retry,
+      prompt: buildFinalJudgePrompt({
+        request: input.request,
+        taskDir: task.dir,
+        judgeDir: judge.dir,
+        workerDir: workerFiles.dir,
+        workspaceDir: verificationWorkspace,
+        supervisorSummaryPath: join(turn.dir, "supervisor-summary.md"),
+        expectedCriterionIds: criterionIds,
+        changedPaths,
+        turn: await this.promptTurnContext(task, turn),
+        role: this.config.roles.judge
+      })
+    });
+
+    this.recordWorker(input, workers, {
+      id: finalJudge.workerId,
+      role: "judge",
+      engine,
+      label: workerLabel("judge", engine, featureTitle),
+      logPath: finalJudge.outputLogPath,
+      statusPath: finalJudge.statusPath
+    });
+
+    const initialJudge = this.workerFiles(task, taskWorkerId("judge", engine, turn.turnId));
+    const result = await this.runWorkerWithNativeSession(engine, {
+      workerId: finalJudge.workerId,
+      featureTitle,
+      role: "judge",
+      engine,
+      cwd: verificationWorkspace,
+      enforceWorkspaceIsolation: true,
+      writableDirs: uniquePaths([finalJudge.dir, judge.dir, join(task.dir, "features"), turn.dir]),
+      filesDir: finalJudge.dir,
+      promptPath: finalJudge.promptPath,
+      outputLogPath: finalJudge.outputLogPath,
+      statusPath: finalJudge.statusPath,
+      prompt: await readTextIfExists(finalJudge.promptPath),
+      signal: input.signal
+    }, "task", initialJudge);
+    ensureWorkerSuccess(result);
+    throwIfCancelled(input.signal);
+
+    const workerAcceptancePath = join(finalJudge.dir, FINAL_ACCEPTANCE_FILE);
+    const raw = await readTextIfExists(workerAcceptancePath);
+    if (raw.trim()) {
+      await writeText(persistedPath, raw);
+    }
+    const validated = await readFinalJudgeAcceptance(workerAcceptancePath, criterionIds, changedPaths);
+    const report = validated?.report ?? {
+      version: 1 as const,
+      state: "invalid" as const,
+      decision: "unknown" as const,
+      issues: [`${FINAL_ACCEPTANCE_FILE} is missing or empty`]
+    };
+    await writeJson(validationPath, report);
+    if (report.state !== "valid") {
+      await this.sessions.appendEvent(task, "judge.final_invalid", report.issues.join("; "));
+      throw new Error(`Final Judge acceptance is invalid: ${report.issues.join("; ")}`);
+    }
+    if (validated?.acceptance?.decision !== "approved") {
+      await this.sessions.appendEvent(
+        task,
+        "judge.final_rejected",
+        validated?.acceptance?.summary ?? "Final Judge rejected integration"
+      );
+      throw new Error(`Final Judge rejected integration: ${validated?.acceptance?.summary ?? "no summary"}`);
+    }
+    await this.sessions.appendEvent(
+      task,
+      "judge.final_approved",
+      `Final Judge approved ${criterionIds.length} acceptance criteria`
+    );
+    input.onStatus?.({ taskId: task.id, judge: "done", actor: "done", critic: "done" });
   }
 
   private async runActor(
@@ -2591,6 +2812,12 @@ function cancellationError(): Error {
   return error;
 }
 
+function completionInput(input: HandleRequestInput): HandleRequestInput {
+  const detached = { ...input };
+  delete detached.signal;
+  return detached;
+}
+
 function isCancellation(error: unknown, signal?: AbortSignal): boolean {
   return Boolean(signal?.aborted) || (error instanceof Error && error.name === "AbortError");
 }
@@ -2631,8 +2858,15 @@ function summarizeRetirementReason(reason: string): string {
   return summary.length > 240 ? `${summary.slice(0, 237)}...` : summary;
 }
 
-function buildRevisionRequest(review: string, feature: FeatureChannel): string {
+function buildRevisionRequest(
+  review: string,
+  feature: FeatureChannel,
+  round = 1,
+  maxRounds = 1
+): string {
   return [
+    `Revision round: ${round}/${maxRounds}`,
+    "",
     review.trim(),
     "",
     "Feature mailbox:",
@@ -2651,6 +2885,30 @@ function criticReviewDecision(review: string): "approved" | "revision" | "missin
     return "approved";
   }
   return "missing";
+}
+
+async function readFinalJudgeAcceptance(
+  path: string,
+  criterionIds: string[],
+  changedPaths: string[]
+) {
+  const raw = await readTextIfExists(path);
+  if (!raw.trim()) {
+    return null;
+  }
+  try {
+    return validateFinalJudgeAcceptance(JSON.parse(raw), criterionIds, changedPaths);
+  } catch (error) {
+    return {
+      acceptance: null,
+      report: {
+        version: 1 as const,
+        state: "invalid" as const,
+        decision: "unknown" as const,
+        issues: [`${FINAL_ACCEPTANCE_FILE} is not valid JSON: ${errorMessage(error)}`]
+      }
+    };
+  }
 }
 
 async function mirrorWorkerFileToFeature(sourcePath: string, targetPath: string): Promise<void> {
@@ -2692,6 +2950,12 @@ function taskWorkerLabel(
     : workerLabel(role, engine, `Turn ${Number(turnId)}`);
 }
 
+function finalJudgeTitle(turnId: string): string {
+  return turnId === "0001"
+    ? "Final acceptance"
+    : `Turn ${Number(turnId)} final`;
+}
+
 function workerLabelForStatus(status: WorkerStatus): string {
   const feature = status.feature_title ?? status.feature_id;
   if (feature) {
@@ -2724,6 +2988,12 @@ function capitalize(value: string): string {
 
 function workerRoleOrder(role: WorkerRole): number {
   return ["main", "judge", "actor", "critic"].indexOf(role);
+}
+
+function workerStageOrder(worker: WorkerLogRef): number {
+  return worker.role === "judge" && /-final-\d{4,}$/.test(worker.id)
+    ? 4
+    : workerRoleOrder(worker.role);
 }
 
 function workerTurnOrder(worker: WorkerLogRef): number {

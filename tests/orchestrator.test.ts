@@ -204,8 +204,18 @@ describe("Orchestrator", () => {
     expect(result.mode).toBe("complex");
     expect(result.taskId).toBe("task-20260630-033000-a1b2");
     expect(result.summary).toContain("APPROVED");
-    expect(result.workers.map((worker) => worker.id)).toEqual(["judge-mock", "actor-mock", "critic-mock"]);
-    expect(workerLabels).toEqual(["Judge (mock)", "Actor (mock)", "Critic (mock)"]);
+    expect(result.workers.map((worker) => worker.id)).toEqual([
+      "judge-mock",
+      "actor-mock",
+      "critic-mock",
+      "judge-mock-final-0001"
+    ]);
+    expect(workerLabels).toEqual([
+      "Judge (mock)",
+      "Actor (mock)",
+      "Critic (mock)",
+      "Judge (mock) · Final acceptance"
+    ]);
     expect(statuses).toContain("running/waiting/waiting");
     expect(statuses).toContain("done/done/done");
 
@@ -228,6 +238,17 @@ describe("Orchestrator", () => {
         "acceptance.md": { state: "valid", item_count: 1 }
       }
     });
+    expect(JSON.parse(await readTextIfExists(join(taskDir, "turns", "0001", "final-acceptance.json")))).toMatchObject({
+      decision: "approved",
+      acceptance: [{ criterion_id: "A-001", status: "passed" }]
+    });
+    expect(JSON.parse(await readTextIfExists(join(taskDir, "turns", "0001", "final-acceptance-validation.json")))).toEqual({
+      version: 1,
+      state: "valid",
+      decision: "approved",
+      issues: []
+    });
+    expect(await readTextIfExists(join(taskDir, "events.jsonl"))).toContain("judge.final_approved");
     expect(await readTextIfExists(join(taskDir, "actor-mock", "prompt.md"))).toContain("Current turn: 0001");
 
     const featureDir = join(taskDir, "features", "0001-parallel-coding-worker");
@@ -258,6 +279,40 @@ describe("Orchestrator", () => {
         taskEvents.indexOf(`"type":"${lifecycle[index]}"`)
       );
     }
+  });
+
+  it("fails the task when Final Judge rejects integration without mutating the live workspace", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pct-orch-final-rejected-"));
+    const config = mockConfig(root);
+    const manager = new SessionManager({
+      projectRoot: root,
+      dataDir: config.dataDir,
+      now: () => new Date("2026-06-30T03:30:00.000Z"),
+      randomId: () => "final-rejected"
+    });
+    const adapter = new RejectingFinalJudgeAdapter();
+    const orchestrator = new Orchestrator(config, manager, new Map([["mock", adapter]]));
+
+    await expect(orchestrator.handleRequest({
+      request: "build a feature that requires final integration acceptance",
+      cwd: root
+    })).rejects.toThrow("Final Judge rejected integration: integration verification failed");
+
+    const taskDir = join(root, ".parallel-codex", "sessions", "task-20260630-033000-final-rejected");
+    const turnDir = join(taskDir, "turns", "0001");
+    expect((await readJson(join(taskDir, "meta.json"), TaskMetaSchema)).status).toBe("failed");
+    expect(adapter.finalCwd).toBe(join(taskDir, "workspaces", "turn-0001", "final-verification"));
+    expect(await pathExists(join(adapter.finalCwd, "final-judge-probe.txt"))).toBe(true);
+    expect(await pathExists(join(root, "final-judge-probe.txt"))).toBe(false);
+    expect(JSON.parse(await readTextIfExists(join(turnDir, "final-acceptance-validation.json")))).toEqual({
+      version: 1,
+      state: "valid",
+      decision: "rejected",
+      issues: []
+    });
+    const events = await readTextIfExists(join(taskDir, "events.jsonl"));
+    expect(events).toContain("judge.final_rejected");
+    expect(events).not.toContain('"type":"task.done"');
   });
 
   it("stops before Actor when Judge artifacts are not executable", async () => {
@@ -315,7 +370,8 @@ describe("Orchestrator", () => {
     expect(manager.doneEvidence).toEqual([{
       summary: true,
       decision: true,
-      featureApproved: true
+      featureApproved: true,
+      finalAcceptance: true
     }]);
   });
 
@@ -504,7 +560,7 @@ describe("Orchestrator", () => {
     });
 
     expect(adapter.maxConcurrent).toBe(2);
-    expect(result.workers).toHaveLength(12);
+    expect(result.workers).toHaveLength(13);
     expect(progress).toContainEqual({ wave: 1, waves: 1, phase: "actor", completed: 0, total: 5 });
     expect(progress).toContainEqual({ wave: 1, waves: 1, phase: "actor", completed: 5, total: 5 });
     expect(progress).toContainEqual({ wave: 1, waves: 1, phase: "critic", completed: 5, total: 5 });
@@ -810,9 +866,19 @@ describe("Orchestrator", () => {
 
     const workers = await restartedOrchestrator.listTaskWorkers(result.taskId ?? "");
 
-    expect(workers.map((worker) => worker.id)).toEqual(["judge-mock", "actor-mock", "critic-mock"]);
-    expect(workers.map((worker) => worker.label)).toEqual(["Judge (mock)", "Actor (mock)", "Critic (mock)"]);
-    expect(workers.map((worker) => worker.runtimeStatus?.state)).toEqual(["done", "done", "done"]);
+    expect(workers.map((worker) => worker.id)).toEqual([
+      "judge-mock",
+      "actor-mock",
+      "critic-mock",
+      "judge-mock-final-0001"
+    ]);
+    expect(workers.map((worker) => worker.label)).toEqual([
+      "Judge (mock)",
+      "Actor (mock)",
+      "Critic (mock)",
+      "Judge (mock) · Final acceptance"
+    ]);
+    expect(workers.map((worker) => worker.runtimeStatus?.state)).toEqual(["done", "done", "done", "done"]);
     expect(workers[1].statusPath).toBe(join(root, ".parallel-codex", "sessions", result.taskId ?? "", "actor-mock", "status.json"));
   });
 
@@ -835,7 +901,11 @@ describe("Orchestrator", () => {
 
     const workers = await orchestrator.listTaskWorkers(result.taskId ?? "");
 
-    expect(workers.map((worker) => worker.id)).toEqual(["judge-mock", "critic-mock"]);
+    expect(workers.map((worker) => worker.id)).toEqual([
+      "judge-mock",
+      "critic-mock",
+      "judge-mock-final-0001"
+    ]);
   });
 
   it("uses Codex router decisions before starting workers", async () => {
@@ -1535,19 +1605,21 @@ describe("Orchestrator", () => {
     });
 
     expect(followUp.mode).toBe("complex");
-    expect(capturing.runs.map((run) => run.role)).toEqual(["judge", "actor", "critic"]);
+    expect(capturing.runs.map((run) => run.role)).toEqual(["judge", "actor", "critic", "judge"]);
     const judgeRun = capturing.runs.find((run) => run.role === "judge");
     const actorRun = capturing.runs.find((run) => run.role === "actor");
     const criticRun = capturing.runs.find((run) => run.role === "critic");
     expect(followUp.workers.map((worker) => worker.id)).toEqual([
       "judge-mock-0002",
       "actor-mock-0002",
-      "critic-mock-0002"
+      "critic-mock-0002",
+      "judge-mock-final-0002"
     ]);
     expect(followUp.workers.map((worker) => worker.label)).toEqual([
       "Judge (mock) · Turn 2",
       "Actor (mock) · Turn 2",
-      "Critic (mock) · Turn 2"
+      "Critic (mock) · Turn 2",
+      "Judge (mock) · Turn 2 final"
     ]);
     expect(judgeRun?.nativeSession?.session_id).toBe("mock-judge-mock");
     expect(actorRun?.nativeSession?.session_id).toBe("mock-actor-mock");
@@ -1581,9 +1653,11 @@ describe("Orchestrator", () => {
       "Judge (mock)",
       "Actor (mock)",
       "Critic (mock)",
+      "Judge (mock) · Final acceptance",
       "Judge (mock) · Turn 2",
       "Actor (mock) · Turn 2",
-      "Critic (mock) · Turn 2"
+      "Critic (mock) · Turn 2",
+      "Judge (mock) · Turn 2 final"
     ]);
     expect(JSON.parse(await readTextIfExists(join(taskDir, "judge-mock-0002", "native-session.json"))).cwd).toBe(
       join(taskDir, "judge-mock-0002")
@@ -1724,7 +1798,7 @@ describe("Orchestrator", () => {
     });
 
     expect(followUp.mode).toBe("complex");
-    expect(adapter.runs.filter((run) => run.role === "judge")).toHaveLength(1);
+    expect(adapter.runs.filter((run) => run.role === "judge" && !isFinalJudgeRun(run))).toHaveLength(1);
     expect(adapter.judgeNativeSessions).toEqual([null, "mock-judge-mock"]);
     expect(adapter.runs.filter((run) => run.role === "actor").map((run) => run.workerId).sort()).toEqual([
       "actor-mock-0002-alpha",
@@ -1760,7 +1834,7 @@ describe("Orchestrator", () => {
       cwd: root
     });
 
-    expect(adapter.runs.map((run) => run.role)).toEqual(["judge", "actor", "critic", "actor", "critic"]);
+    expect(adapter.runs.map((run) => run.role)).toEqual(["judge", "actor", "critic", "actor", "critic", "judge"]);
     const taskDir = join(root, ".parallel-codex", "sessions", result.taskId ?? "");
     const featureDir = join(taskDir, "features", "0001-keyboard-feature");
     const actorPrompts = adapter.runs.filter((run) => run.role === "actor").map((run) => run.prompt);
@@ -1784,6 +1858,74 @@ describe("Orchestrator", () => {
       unresolved_ids: []
     });
     expect(parseTaskResultSummary(result.summary)?.sections.findings).toBe("");
+  });
+
+  it("keeps Actor and Critic in the same native sessions across multiple revision rounds", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pct-orch-feature-multi-revision-"));
+    const config = mockConfig(root);
+    config.orchestration.maxRevisionRounds = 3;
+    const adapter = new MultiRoundRevisionAdapter();
+    const manager = new SessionManager({
+      projectRoot: root,
+      dataDir: config.dataDir,
+      now: () => new Date("2026-06-30T03:30:00.000Z"),
+      randomId: () => "multi-revision"
+    });
+    const orchestrator = new Orchestrator(config, manager, new Map([["mock", adapter]]));
+
+    const result = await orchestrator.handleRequest({
+      request: "实现 multi revision feature",
+      cwd: root
+    });
+
+    expect(adapter.actorPrompts).toHaveLength(3);
+    expect(adapter.criticNativeSessions).toEqual([
+      null,
+      "mock-critic-mock",
+      "mock-critic-mock"
+    ]);
+    expect(adapter.actorPrompts[1]).toContain("Revision round: 1/3");
+    expect(adapter.actorPrompts[2]).toContain("Revision round: 2/3");
+    expect(await readTextIfExists(join(root, "round-2.txt"))).toBe("fixed C-002\n");
+    const taskDir = join(root, ".parallel-codex", "sessions", result.taskId ?? "");
+    const featureDir = join(taskDir, "features", "0001-multi-revision-feature");
+    expect(JSON.parse(await readTextIfExists(join(featureDir, "finding-resolution.json")))).toMatchObject({
+      decision: "approved",
+      finding_ids: ["C-001", "C-002"],
+      fixed_ids: ["C-001", "C-002"],
+      unresolved_ids: []
+    });
+    const dialogue = await readTextIfExists(join(taskDir, "dialogue", "actor-critic.jsonl"));
+    expect(dialogue).toContain("Actor revision 1/3");
+    expect(dialogue).toContain("Actor revision 2/3");
+  });
+
+  it("stops after the configured revision limit without integrating unfinished work", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pct-orch-feature-revision-limit-"));
+    const config = mockConfig(root);
+    config.orchestration.maxRevisionRounds = 2;
+    const adapter = new AlwaysRevisionAdapter();
+    const manager = new SessionManager({
+      projectRoot: root,
+      dataDir: config.dataDir,
+      now: () => new Date("2026-06-30T03:30:00.000Z"),
+      randomId: () => "revision-limit"
+    });
+    const orchestrator = new Orchestrator(config, manager, new Map([["mock", adapter]]));
+
+    await expect(orchestrator.handleRequest({
+      request: "实现 bounded revision feature",
+      cwd: root
+    })).rejects.toThrow(
+      "Critic still requires revision for 0001-bounded-revision-feature after 2 revision rounds."
+    );
+
+    expect(adapter.actorRuns).toBe(3);
+    expect(adapter.criticRuns).toBe(3);
+    expect(await pathExists(join(root, "unfinished.txt"))).toBe(false);
+    const taskDir = join(root, ".parallel-codex", "sessions", "task-20260630-033000-revision-limit");
+    expect((await readJson(join(taskDir, "meta.json"), TaskMetaSchema)).status).toBe("failed");
+    expect(await pathExists(join(taskDir, "turns", "0001", "final-acceptance.json"))).toBe(false);
   });
 
   it("rejects a revision request without structured Critic findings", async () => {
@@ -3121,7 +3263,7 @@ describe("Orchestrator", () => {
     await orchestrator.retryTask({ taskId, cwd: root });
     const taskDir = join(root, ".parallel-codex", "sessions", taskId);
 
-    expect(adapter.runs.filter((run) => run.role === "judge")).toHaveLength(2);
+    expect(adapter.runs.filter((run) => run.role === "judge" && !isFinalJudgeRun(run))).toHaveLength(2);
     expect(adapter.runs.filter((run) => run.role === "actor")).toHaveLength(3);
     expect(adapter.runs.filter((run) => run.role === "actor").at(-1)?.nativeSession?.session_id).toBe("mock-actor-mock");
     expect(await pathExists(join(taskDir, "turns", "0002"))).toBe(true);
@@ -3172,6 +3314,10 @@ describe("Orchestrator", () => {
       "const role = process.env.PARALLEL_CODEX_ROLE;",
       "const workerId = process.env.PARALLEL_CODEX_WORKER_ID;",
       "const filesDir = process.env.PARALLEL_CODEX_FILES_DIR;",
+      "if (role === 'judge' && workerId.includes('-final-')) {",
+      "  fs.writeFileSync(path.join(filesDir, 'final-acceptance.json'), JSON.stringify({version:1,decision:'approved',summary:'all passed',acceptance:[{criterion_id:'A-001',status:'passed',evidence:'verified'}],changed_paths:[]}));",
+      "  process.exit(0);",
+      "}",
       "if (role === 'judge') {",
       "  fs.writeFileSync(path.join(filesDir, 'requirements.md'), '# Requirements\\n\\n- [R-001] Implement alpha and beta.\\n');",
       "  fs.writeFileSync(path.join(filesDir, 'plan.md'), '# Plan\\n\\n1. [P-001] Implement both features.\\n');",
@@ -3267,6 +3413,10 @@ describe("Orchestrator", () => {
       "const role = process.env.PARALLEL_CODEX_ROLE;",
       "const workerId = process.env.PARALLEL_CODEX_WORKER_ID;",
       "const filesDir = process.env.PARALLEL_CODEX_FILES_DIR;",
+      "if (role === 'judge' && workerId.includes('-final-')) {",
+      "  fs.writeFileSync(path.join(filesDir, 'final-acceptance.json'), JSON.stringify({version:1,decision:'approved',summary:'all passed',acceptance:[{criterion_id:'A-001',status:'passed',evidence:'verified'}],changed_paths:[]}));",
+      "  process.exit(0);",
+      "}",
       "if (role === 'judge') {",
       "  fs.writeFileSync(path.join(filesDir, 'requirements.md'), '# Requirements\\n\\n- [R-001] Implement alpha and beta.\\n');",
       "  fs.writeFileSync(path.join(filesDir, 'plan.md'), '# Plan\\n\\n1. [P-001] Implement both features.\\n');",
@@ -3397,6 +3547,7 @@ class CompletionOrderingSessionManager extends SessionManager {
     summary: boolean;
     decision: boolean;
     featureApproved: boolean;
+    finalAcceptance: boolean;
   }> = [];
 
   override async updateTaskStatus(task: TaskSession, status: TaskState): Promise<void> {
@@ -3412,10 +3563,37 @@ class CompletionOrderingSessionManager extends SessionManager {
       this.doneEvidence.push({
         summary: Boolean((await readTextIfExists(join(task.dir, "turns", "0001", "supervisor-summary.md"))).trim()),
         decision: Boolean((await readTextIfExists(join(featureDir, "decisions.md"))).trim()),
-        featureApproved
+        featureApproved,
+        finalAcceptance: JSON.parse(
+          await readTextIfExists(join(task.dir, "turns", "0001", "final-acceptance-validation.json"))
+        ).decision === "approved"
       });
     }
     await super.updateTaskStatus(task, status);
+  }
+}
+
+class RejectingFinalJudgeAdapter extends MockWorkerAdapter {
+  finalCwd = "";
+
+  override async run(spec: WorkerRunSpec): Promise<WorkerResult> {
+    const result = await super.run(spec);
+    if (isFinalJudgeRun(spec)) {
+      this.finalCwd = spec.cwd;
+      await writeText(join(spec.cwd, "final-judge-probe.txt"), "snapshot only\n");
+      await writeJson(join(spec.filesDir, "final-acceptance.json"), {
+        version: 1,
+        decision: "rejected",
+        summary: "integration verification failed",
+        acceptance: [{
+          criterion_id: "A-001",
+          status: "failed",
+          evidence: "The integration probe failed."
+        }],
+        changed_paths: []
+      });
+    }
+    return result;
   }
 }
 
@@ -3529,7 +3707,7 @@ class SingleIsolationAdapter extends MockWorkerAdapter {
   }
 
   async run(spec: WorkerRunSpec): Promise<WorkerResult> {
-    if (spec.role === "judge") {
+    if (spec.role === "judge" && !isFinalJudgeRun(spec)) {
       this.judgeRuns += 1;
     }
     if (spec.role === "actor") {
@@ -3556,7 +3734,7 @@ class RetryOnceActorAdapter extends MockWorkerAdapter {
   readonly actorNativeSessions: Array<string | null> = [];
 
   async run(spec: WorkerRunSpec): Promise<WorkerResult> {
-    if (spec.role === "judge") {
+    if (spec.role === "judge" && !isFinalJudgeRun(spec)) {
       this.judgeRuns += 1;
     }
     if (spec.role !== "actor") {
@@ -3596,7 +3774,7 @@ class RetryOnceCriticAdapter extends MockWorkerAdapter {
   readonly criticNativeSessions: Array<string | null> = [];
 
   async run(spec: WorkerRunSpec): Promise<WorkerResult> {
-    if (spec.role === "judge") {
+    if (spec.role === "judge" && !isFinalJudgeRun(spec)) {
       this.judgeRuns += 1;
       return super.run(spec);
     }
@@ -3698,7 +3876,7 @@ class RetryMultiFeatureAdapter extends MultiFeatureAdapter {
   private judgeRuns = 0;
 
   async run(spec: WorkerRunSpec): Promise<WorkerResult> {
-    if (spec.role === "judge") {
+    if (spec.role === "judge" && !isFinalJudgeRun(spec)) {
       this.judgeRuns += 1;
       const result = await super.run(spec);
       if (this.judgeRuns > 1) {
@@ -3748,7 +3926,7 @@ class RetryCheckpointFeatureAdapter extends MockWorkerAdapter {
   integrationSawDependencies = false;
 
   async run(spec: WorkerRunSpec): Promise<WorkerResult> {
-    if (spec.role === "judge") {
+    if (spec.role === "judge" && !isFinalJudgeRun(spec)) {
       this.judgeRuns += 1;
       const result = await super.run(spec);
       await writeJson(join(spec.filesDir, "features.json"), {
@@ -3948,7 +4126,7 @@ class IntegratedCheckpointRecoveryAdapter extends CombinedVerificationAdapter {
   actorRuns = 0;
 
   async run(spec: WorkerRunSpec): Promise<WorkerResult> {
-    if (spec.role === "judge") {
+    if (spec.role === "judge" && !isFinalJudgeRun(spec)) {
       this.judgeRuns += 1;
     }
     if (spec.role === "actor" && spec.featureId) {
@@ -4105,6 +4283,9 @@ class RetryFollowUpJudgeAdapter extends MockWorkerAdapter {
   private judgeRuns = 0;
 
   async run(spec: WorkerRunSpec): Promise<WorkerResult> {
+    if (isFinalJudgeRun(spec)) {
+      return super.run(spec);
+    }
     if (spec.role !== "judge") {
       return super.run(spec);
     }
@@ -4125,7 +4306,7 @@ class FollowUpFeaturePlanAdapter extends MockWorkerAdapter {
 
   async run(spec: WorkerRunSpec): Promise<WorkerResult> {
     this.runs.push(spec);
-    if (spec.role === "judge") {
+    if (spec.role === "judge" && !isFinalJudgeRun(spec)) {
       this.judgeRuns += 1;
       this.judgeNativeSessions.push(spec.nativeSession?.session_id ?? null);
       const result = await super.run(spec);
@@ -4198,6 +4379,78 @@ class RevisionFindingAdapter extends MockWorkerAdapter {
         status: "fixed",
         notes: "Mock actor fixed the keyboard handling."
       });
+    }
+    return result;
+  }
+}
+
+class MultiRoundRevisionAdapter extends MockWorkerAdapter {
+  readonly actorPrompts: string[] = [];
+  readonly criticNativeSessions: Array<string | null> = [];
+  private criticRuns = 0;
+
+  override async run(spec: WorkerRunSpec): Promise<WorkerResult> {
+    const result = await super.run(spec);
+    if (spec.role === "actor") {
+      this.actorPrompts.push(spec.prompt);
+      const round = spec.prompt.match(/Revision round: (\d+)\/3/)?.[1];
+      if (round) {
+        const findingId = `C-${round.padStart(3, "0")}`;
+        const featureDir = featureDirFromPrompt(spec.prompt);
+        await writeText(join(spec.cwd, `round-${round}.txt`), `fixed ${findingId}\n`);
+        await appendJsonLine(join(featureDir, "actor-replies.jsonl"), {
+          finding_id: findingId,
+          status: "fixed",
+          notes: `Fixed in revision round ${round}.`
+        });
+      }
+    }
+    if (spec.role === "critic") {
+      this.criticRuns += 1;
+      this.criticNativeSessions.push(spec.nativeSession?.session_id ?? null);
+      if (this.criticRuns <= 2) {
+        const featureDir = featureDirFromPrompt(spec.prompt);
+        const findingId = `C-${String(this.criticRuns).padStart(3, "0")}`;
+        await appendJsonLine(join(featureDir, "critic-findings.jsonl"), {
+          id: findingId,
+          severity: "blocker",
+          summary: `Blocking issue from Critic round ${this.criticRuns}`
+        });
+        await writeText(join(spec.filesDir, "review.md"), "REVISION_REQUIRED\nSee critic-findings.jsonl.\n");
+      }
+    }
+    return result;
+  }
+}
+
+class AlwaysRevisionAdapter extends MockWorkerAdapter {
+  actorRuns = 0;
+  criticRuns = 0;
+
+  override async run(spec: WorkerRunSpec): Promise<WorkerResult> {
+    const result = await super.run(spec);
+    if (spec.role === "actor") {
+      this.actorRuns += 1;
+      await writeText(join(spec.cwd, "unfinished.txt"), "not approved\n");
+      if (spec.prompt.includes("Revision request:")) {
+        const featureDir = featureDirFromPrompt(spec.prompt);
+        const findingId = `C-${String(this.criticRuns).padStart(3, "0")}`;
+        await appendJsonLine(join(featureDir, "actor-replies.jsonl"), {
+          finding_id: findingId,
+          status: "fixed",
+          notes: "Attempted fix before the next review."
+        });
+      }
+    }
+    if (spec.role === "critic") {
+      this.criticRuns += 1;
+      const featureDir = featureDirFromPrompt(spec.prompt);
+      await appendJsonLine(join(featureDir, "critic-findings.jsonl"), {
+        id: `C-${String(this.criticRuns).padStart(3, "0")}`,
+        severity: "blocker",
+        summary: `Unresolved issue ${this.criticRuns}`
+      });
+      await writeText(join(spec.filesDir, "review.md"), "REVISION_REQUIRED\nSee critic-findings.jsonl.\n");
     }
     return result;
   }
@@ -4364,6 +4617,9 @@ class NoArtifactAdapter extends MockWorkerAdapter {
 
 class TurnRequirementsJudgeAdapter extends MockWorkerAdapter {
   async run(spec: WorkerRunSpec): Promise<WorkerResult> {
+    if (isFinalJudgeRun(spec)) {
+      return super.run(spec);
+    }
     if (spec.role === "judge") {
       await writeText(join(turnDirFromPrompt(spec.prompt), "requirements.md"), "# Requirements\n\n- [R-001] TURN_ONLY_REQUIREMENTS\n");
       await writeText(join(turnDirFromPrompt(spec.prompt), "plan.md"), "# Plan\n\n1. [P-001] Execute the turn-local plan.\n");
@@ -4395,4 +4651,8 @@ function turnDirFromPrompt(prompt: string): string {
     throw new Error("Current turn directory missing from prompt");
   }
   return line.replace("Current turn directory: ", "").trim();
+}
+
+function isFinalJudgeRun(spec: WorkerRunSpec): boolean {
+  return spec.role === "judge" && spec.prompt.includes("· Final acceptance");
 }

@@ -37,4 +37,35 @@ describe("MockWorkerAdapter", () => {
     const status = await readJson(statusPath, WorkerStatusSchema);
     expect(status.state).toBe("done");
   });
+
+  it("writes structured Final Judge acceptance from the prompt contract", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pct-mock-final-judge-"));
+    const filesDir = join(root, "judge-mock-final-0001");
+    const prompt = [
+      "# Role: Judge · Final acceptance",
+      'Required acceptance criterion ids: ["A-001","A-002"]',
+      'Authoritative changed paths: ["src/a.ts"]'
+    ].join("\n");
+
+    await new MockWorkerAdapter().run({
+      workerId: "judge-mock-final-0001",
+      role: "judge",
+      engine: "mock",
+      cwd: root,
+      filesDir,
+      promptPath: join(filesDir, "prompt.md"),
+      outputLogPath: join(filesDir, "output.log"),
+      statusPath: join(filesDir, "status.json"),
+      prompt
+    });
+
+    expect(JSON.parse(await readTextIfExists(join(filesDir, "final-acceptance.json")))).toMatchObject({
+      decision: "approved",
+      acceptance: [
+        { criterion_id: "A-001", status: "passed" },
+        { criterion_id: "A-002", status: "passed" }
+      ],
+      changed_paths: ["src/a.ts"]
+    });
+  });
 });

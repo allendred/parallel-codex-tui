@@ -354,6 +354,23 @@ export class ParallelWorkspaceManager {
     return reviewDir;
   }
 
+  async prepareFinalVerificationWorkspace(turnId: string): Promise<string> {
+    if (!/^\d{4,}$/.test(turnId)) {
+      throw new Error(`Unsafe workspace turn id: ${turnId}`);
+    }
+    const turnRoot = join(this.taskDir, "workspaces", `turn-${turnId}`);
+    const verificationDir = join(turnRoot, "final-verification");
+    await rm(verificationDir, { recursive: true, force: true });
+    await cloneTree(this.workspaceRoot, verificationDir, (path) => this.excludeFromSource(path));
+    await writeJson(join(turnRoot, "final-verification.json"), {
+      version: 1,
+      workspace_root: this.workspaceRoot,
+      turn_id: turnId,
+      verification: verificationDir
+    });
+    return verificationDir;
+  }
+
   async commitWave(wave: FeatureWorkspaceWave): Promise<WorkspaceIntegrationResult> {
     const pendingCommit = await this.readPendingCommit(wave);
     if (pendingCommit) {
