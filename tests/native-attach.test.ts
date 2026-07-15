@@ -6,7 +6,7 @@ import { defaultConfig } from "../src/core/config.js";
 import { pathExists, readJson, writeJson, writeText } from "../src/core/file-store.js";
 import { NativeSessionSchema } from "../src/domain/schemas.js";
 import * as nativeAttach from "../src/workers/native-attach.js";
-import { buildNativeAttachLaunch, startNativeAttachProcess } from "../src/workers/native-attach.js";
+import { buildNativeAttachLaunch, buildNativeForkLaunch, startNativeAttachProcess } from "../src/workers/native-attach.js";
 
 describe("buildNativeAttachLaunch", () => {
   const originalClaudeProjectsDir = process.env.PARALLEL_CODEX_CLAUDE_PROJECTS_DIR;
@@ -61,6 +61,69 @@ describe("buildNativeAttachLaunch", () => {
       sessionId: "native-abc",
       label: "Actor (codex)"
     });
+  });
+
+  it("forks Codex and Claude through their configured native interactive commands", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pct-native-fork-"));
+    for (const engine of ["codex", "claude"] as const) {
+      const workerId = `actor-${engine}`;
+      const workerDir = join(root, "task-a", workerId);
+      await writeJson(join(workerDir, "native-session.json"), {
+        engine,
+        role: "actor",
+        worker_id: workerId,
+        session_id: `native-${engine}-1234`,
+        scope: "task",
+        cwd: root,
+        created_at: "2026-07-15T03:30:00.000Z",
+        last_used_at: "2026-07-15T03:30:00.000Z",
+        source: "manual"
+      });
+      const launch = await buildNativeForkLaunch({
+        config: defaultConfig(root),
+        worker: {
+          id: workerId,
+          role: "actor",
+          engine,
+          label: `Actor (${engine})`,
+          logPath: join(workerDir, "output.log"),
+          statusPath: join(workerDir, "status.json")
+        }
+      });
+
+      expect(launch.args).toEqual(engine === "codex"
+        ? ["fork", `native-${engine}-1234`]
+        : ["--resume", `native-${engine}-1234`, "--fork-session"]);
+      expect(launch.label).toBe(`Actor (${engine}) · fork`);
+    }
+  });
+
+  it("explains how to configure a generic native session fork", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pct-native-fork-generic-"));
+    const workerDir = join(root, "task-a", "actor-mock");
+    await writeJson(join(workerDir, "native-session.json"), {
+      engine: "mock",
+      role: "actor",
+      worker_id: "actor-mock",
+      session_id: "native-mock-1234",
+      scope: "task",
+      cwd: root,
+      created_at: "2026-07-15T03:30:00.000Z",
+      last_used_at: "2026-07-15T03:30:00.000Z",
+      source: "manual"
+    });
+
+    await expect(buildNativeForkLaunch({
+      config: defaultConfig(root),
+      worker: {
+        id: "actor-mock",
+        role: "actor",
+        engine: "mock",
+        label: "Actor (mock)",
+        logPath: join(workerDir, "output.log"),
+        statusPath: join(workerDir, "status.json")
+      }
+    })).rejects.toThrow("workers.mock.interactive.forkArgs");
   });
 
   it("applies configured third-party model arguments to the embedded native session", async () => {

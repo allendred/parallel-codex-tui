@@ -65,6 +65,8 @@ freshSessionArgs = []
 [workers.codex.interactive]
 command = "codex"
 args = ["resume", "{sessionId}"]
+# Used by the Task session detail view when branching from a recorded native session.
+forkArgs = ["fork", "{sessionId}"]
 
 [workers.codex.nativeSession]
 fallback = "new"
@@ -95,6 +97,7 @@ freshSessionArgs = ["--session-id", "{sessionId}"]
 [workers.claude.interactive]
 command = "claude"
 args = ["--resume", "{sessionId}"]
+forkArgs = ["--resume", "{sessionId}", "--fork-session"]
 
 [workers.claude.nativeSession]
 fallback = "new"

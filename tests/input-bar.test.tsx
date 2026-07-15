@@ -1069,7 +1069,7 @@ describe("InputBar", () => {
       <InputBar mode="sessions" value="ignored" terminalWidth={80} onChange={() => {}} />
     );
     const roomyFrame = roomy.lastFrame() ?? "";
-    expect(roomyFrame).toContain("sessions · Up/Dn select · Enter restore · R rename · A archive · Esc back");
+    expect(roomyFrame).toContain("sessions · Up/Dn select · Enter restore · I inspect · R rename · Esc back");
     expect(roomyFrame).not.toContain("ignored");
     expect(roomyFrame.split("\n")).toHaveLength(1);
     expect(displayWidth(roomyFrame)).toBeLessThanOrEqual(80);
@@ -1093,6 +1093,7 @@ describe("InputBar", () => {
     const semantics = [
       ["select", /Up\/Dn select/],
       ["restore", /Enter restore/],
+      ["inspect", /I inspect/],
       ["rename", /R rename/],
       ["archive", /A archive/],
       ["delete", /D delete/],
@@ -1135,9 +1136,9 @@ describe("InputBar", () => {
     [52, "sessions · Up/Dn select · Enter restore · Esc back"],
     [61, "sessions · Up/Dn select · Enter restore · Esc back"],
     [63, "sessions · Up/Dn select · Enter restore · R rename · Esc back"],
-    [75, "sessions · Up/Dn select · Enter restore · R rename · A archive · Esc back"],
-    [86, "sessions · Up/Dn select · Enter restore · R rename · A archive · D delete · Esc back"],
-    [97, "sessions · Up/Dn select · Enter restore · R rename · A archive · D delete · E export · Esc back"]
+    [75, "sessions · Up/Dn select · Enter restore · I inspect · R rename · Esc back"],
+    [86, "sessions · Up/Dn select · Enter restore · I inspect · R rename · Esc back"],
+    [97, "sessions · Up/Dn select · Enter restore · I inspect · R rename · A archive · Esc back"]
   ])("uses semantic Task session guidance at the %i-column boundary", (width, expected) => {
     const view = render(
       <InputBar mode="sessions" value="" terminalWidth={width} onChange={() => {}} />
@@ -1145,6 +1146,52 @@ describe("InputBar", () => {
 
     expect(view.lastFrame()).toContain(expected);
     view.unmount();
+  });
+
+  it("shows native continuation and branch controls in Task session detail", () => {
+    const detail = render(
+      <InputBar
+        mode="sessions"
+        value=""
+        terminalWidth={100}
+        taskSessionDetail
+        taskSessionDetailHasNative
+        taskSessionDetailCanFork
+        onChange={() => {}}
+      />
+    );
+    expect(detail.lastFrame()).toContain(
+      "session · Up/Dn worker · Enter logs · C continue · B branch · R refresh · Esc tasks"
+    );
+    detail.unmount();
+
+    const withoutNative = render(
+      <InputBar mode="sessions" value="" terminalWidth={80} taskSessionDetail onChange={() => {}} />
+    );
+    expect(withoutNative.lastFrame()).toContain("session · Up/Dn worker · Enter logs · R refresh · Esc tasks");
+    expect(withoutNative.lastFrame()).not.toContain("continue");
+    withoutNative.unmount();
+
+    const overflow: string[] = [];
+    for (let width = 8; width <= 100; width += 1) {
+      const view = render(
+        <InputBar
+          mode="sessions"
+          value=""
+          terminalWidth={width}
+          taskSessionDetail
+          taskSessionDetailHasNative
+          taskSessionDetailCanFork
+          onChange={() => {}}
+        />
+      );
+      const frame = view.lastFrame() ?? "";
+      if (frame.split("\n").length !== 1 || displayWidth(frame) > width) {
+        overflow.push(`${width}:${displayWidth(frame)}:${frame}`);
+      }
+      view.unmount();
+    }
+    expect(overflow).toEqual([]);
   });
 
   it("renders Unicode rename editing and destructive delete confirmation", () => {

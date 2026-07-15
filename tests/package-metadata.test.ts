@@ -140,6 +140,8 @@ describe("package metadata", () => {
     expect(example).toContain('# provider = "openai"');
     expect(example).toContain("# [workers.claude.model]");
     expect(example).toContain('# provider = "anthropic"');
+    expect(example).toContain('forkArgs = ["fork", "{sessionId}"]');
+    expect(example).toContain('forkArgs = ["--resume", "{sessionId}", "--fork-session"]');
     for (const field of TUI_THEME_FIELDS) {
       expect(example).toContain(`# ${field} = `);
     }
@@ -392,6 +394,12 @@ describe("package metadata", () => {
     expect(readme).toContain("Enter or `Ctrl+W` opens its rendered log");
     expect(readme).toContain("`Ctrl+T` opens the workspace's persisted Task sessions");
     expect(readme).toContain("turn and worker counts, plus the number of distinct native sessions");
+    expect(readme).toContain("`I` to inspect the complete session hierarchy");
+    expect(readme).toContain("`Project -> Task -> Turn -> Worker -> Native session`");
+    expect(readme).toContain("Historical Workers from earlier turns remain selectable after same-task follow-ups");
+    expect(readme).toContain("`C` or `Ctrl+O` to continue the original native session");
+    expect(readme).toContain("`B` to ask the native CLI to fork it");
+    expect(readme).toContain("The child fork is owned and persisted by the native CLI");
     expect(readme).toContain("The selected active task is stored in `session-index.sqlite`");
     expect(readme).toContain("Restoring a task reloads its route, workers, retry state, and recorded native session ids");
     expect(readme).toContain("`R` to rename with Unicode-safe cursor editing");

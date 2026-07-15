@@ -42,10 +42,30 @@ export interface NativeAttachProcessRef {
 }
 
 export async function buildNativeAttachLaunch(input: NativeAttachLaunchInput): Promise<NativeAttachLaunch> {
+  return buildNativeSessionLaunch(input, "resume");
+}
+
+export async function buildNativeForkLaunch(input: NativeAttachLaunchInput): Promise<NativeAttachLaunch> {
+  return buildNativeSessionLaunch(input, "fork");
+}
+
+async function buildNativeSessionLaunch(
+  input: NativeAttachLaunchInput,
+  mode: "resume" | "fork"
+): Promise<NativeAttachLaunch> {
   const nativeSession = await readWorkerNativeSession(input.worker);
   const workerConfig = input.config.workers[input.worker.engine];
   const modelConfig = workerConfig.model;
   const env = modelEnvironment(modelConfig);
+  const interactiveArgs = mode === "fork"
+    ? workerConfig.interactive.forkArgs
+    : workerConfig.interactive.args;
+  if (mode === "fork" && interactiveArgs.length === 0) {
+    throw new Error(
+      `Native session fork is not configured for ${input.worker.engine}. `
+      + `Set workers.${input.worker.engine}.interactive.forkArgs with a {sessionId} template.`
+    );
+  }
   const workerDir = dirname(input.worker.statusPath);
   const taskDir = dirname(workerDir);
   if (!(await pathExists(nativeSession.cwd))) {
@@ -68,7 +88,7 @@ export async function buildNativeAttachLaunch(input: NativeAttachLaunchInput): P
     command: workerConfig.interactive.command,
     args: nativeAttachArgs({
       args: [
-        ...workerConfig.interactive.args,
+        ...interactiveArgs,
         ...modelConfig.args
       ].map((arg) => renderTemplate(arg, nativeSession.session_id, modelConfig)),
       capabilities: workerConfig.capabilities,
@@ -77,7 +97,7 @@ export async function buildNativeAttachLaunch(input: NativeAttachLaunchInput): P
     ...(Object.keys(env).length > 0 ? { env } : {}),
     cwd: nativeSession.cwd,
     sessionId: nativeSession.session_id,
-    label: input.worker.label
+    label: mode === "fork" ? `${input.worker.label} · fork` : input.worker.label
   };
 }
 

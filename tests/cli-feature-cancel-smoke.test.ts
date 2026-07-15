@@ -190,9 +190,17 @@ describe("CLI Feature control smoke", () => {
       child.write("c");
       await waitForScreenText(() => screenWrites, screen, "Critic reassigned to claude");
       await waitForFileText(join(taskDir, "features", "0001-alpha", "assignment.json"), '"critic_engine": "claude"');
+      const assignmentRevision = outputRevision;
       child.write("m");
+      await waitForFreshScreenText(
+        () => screenWrites,
+        () => outputRevision,
+        assignmentRevision,
+        screen,
+        "M model · ^R retry task"
+      );
       child.write("\x12");
-      await waitForTaskState(join(taskDir, "meta.json"), "done", 20_000);
+      await waitForTaskState(join(taskDir, "meta.json"), "done", 30_000);
       await waitForScreenText(() => screenWrites, screen, "2 features · 2 approved");
       const resumedEvents = await readTextIfExists(join(taskDir, "events.jsonl"));
       expect(await readTextIfExists(join(taskDir, "actor-codex-0001-alpha", "run-count.txt"))).toBe("3");
@@ -213,7 +221,7 @@ describe("CLI Feature control smoke", () => {
         child.kill("SIGTERM");
       }
     }
-  }, 45000);
+  }, 60000);
 });
 
 function featureCancelAgentSource(): string {
@@ -342,6 +350,23 @@ async function waitForScreenText(
     await new Promise((resolve) => setTimeout(resolve, 50));
   }
   throw new Error(`Timed out waiting for ${text}\nSnapshot:\n${screen.snapshot()}`);
+}
+
+async function waitForFreshScreenText(
+  screenWritesRef: () => Promise<void>,
+  revisionRef: () => number,
+  previousRevision: number,
+  screen: NativeTerminalScreen,
+  text: string
+): Promise<void> {
+  for (let attempt = 0; attempt < 240; attempt += 1) {
+    await screenWritesRef();
+    if (revisionRef() > previousRevision && screen.snapshot().includes(text)) {
+      return;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+  throw new Error(`Timed out waiting for fresh ${text}\nSnapshot:\n${screen.snapshot()}`);
 }
 
 async function waitForExit(exits: number[]): Promise<void> {

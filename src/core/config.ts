@@ -48,7 +48,16 @@ const WorkerCapabilitiesConfigSchema = z.object({
 
 const InteractiveCommandSchema = z.object({
   command: z.string().min(1),
-  args: z.array(z.string()).default([])
+  args: z.array(z.string()).default([]),
+  forkArgs: z.array(z.string()).default([])
+}).superRefine((value, context) => {
+  if (value.forkArgs.length > 0 && !value.forkArgs.some((arg) => arg.includes("{sessionId}"))) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["forkArgs"],
+      message: "forkArgs must include a {sessionId} template"
+    });
+  }
 });
 
 const RolePromptConfigSchema = z.object({
@@ -214,7 +223,8 @@ export function defaultConfig(projectRoot: string): AppConfig {
         },
         interactive: {
           command: "codex",
-          args: ["resume", "{sessionId}"]
+          args: ["resume", "{sessionId}"],
+          forkArgs: ["fork", "{sessionId}"]
         }
       },
       claude: {
@@ -242,7 +252,8 @@ export function defaultConfig(projectRoot: string): AppConfig {
         },
         interactive: {
           command: "claude",
-          args: ["--resume", "{sessionId}"]
+          args: ["--resume", "{sessionId}"],
+          forkArgs: ["--resume", "{sessionId}", "--fork-session"]
         }
       },
       mock: {
@@ -267,7 +278,8 @@ export function defaultConfig(projectRoot: string): AppConfig {
         },
         interactive: {
           command: "mock",
-          args: ["resume", "{sessionId}"]
+          args: ["resume", "{sessionId}"],
+          forkArgs: []
         }
       }
     },

@@ -306,6 +306,7 @@ freshSessionArgs = []
 [workers.codex.interactive]
 command = "codex"
 args = ["resume", "{sessionId}"]
+forkArgs = ["fork", "{sessionId}"]
 
 [workers.claude]
 command = "claude"
@@ -319,6 +320,7 @@ freshSessionArgs = ["--session-id", "{sessionId}"]
 [workers.claude.interactive]
 command = "claude"
 args = ["--resume", "{sessionId}"]
+forkArgs = ["--resume", "{sessionId}", "--fork-session"]
 ```
 
 `model.args` and `model.env` apply to both automated worker runs and embedded native attach sessions. Native attach appends the rendered model arguments after `interactive.args`, so third-party `{model}` and `{provider}` selections remain active when you press `Ctrl+O`.
@@ -341,9 +343,10 @@ resumeArgs = ["run", "--resume", "{sessionId}", "--stdin"]
 [workers.codex.interactive]
 command = "vendor-coder"
 args = ["resume", "{sessionId}"]
+forkArgs = ["branch", "{sessionId}"]
 ```
 
-Set either capability argument list to `[]` when the wrapper needs no extra argument. A non-empty `writableDirArgs` must include `{dir}`, and a non-empty `freshSessionArgs` must include `{sessionId}`. Doctor validates this declared contract without guessing the wrapper's `--help` format; `--doctor --probe-agents` remains the end-to-end fresh/resume check.
+Set either capability argument list to `[]` when the wrapper needs no extra argument. A non-empty `writableDirArgs` must include `{dir}`, while non-empty `freshSessionArgs` and `interactive.forkArgs` must include `{sessionId}`. Set `forkArgs = []` when a generic CLI cannot fork a native conversation. Doctor validates the declared capability contract without guessing the wrapper's `--help` format; `--doctor --probe-agents` remains the end-to-end fresh/resume check.
 
 Customize each role independently; the main role is applied to simple chat, while Judge, Actor, and Critic receive their configured instructions during complex work:
 
@@ -371,7 +374,9 @@ For a failed, cancelled, or paused task, select an unfinished Feature and press 
 
 From Worker overview, press `C` to open the file-backed Actor/Critic collaboration timeline. It merges `dialogue/actor-critic.jsonl`, feature status, Critic findings, Actor replies, finding resolution, and Wave events into one chronological view. The timeline follows new file evidence automatically and shows verified `fixed`/`open` counts when resolution evidence exists. Up/Down selects a collaboration event; `Enter` opens its complete event detail, including artifact paths from dialogue, status, Critic findings, Actor replies, and finding resolution; `U` filters to unresolved feature evidence; `Tab` cycles all features and each individual feature; `R` refreshes immediately; the mouse wheel or PageUp/PageDown scrolls history; and `Esc` returns to Worker overview.
 
-`Ctrl+T` opens the workspace's persisted Task sessions without exiting the outer TUI. The list shows status, creation time, turn and worker counts, plus the number of distinct native sessions after deduplicating reused `engine + session_id` bindings; `>` marks the selected row and `*` marks the active task. Use Up/Down, PageUp/PageDown, the mouse wheel, or `Tab` to select, Enter to restore, `R` to rename with Unicode-safe cursor editing, `A` to archive or unarchive, `D` twice to confirm deletion, `E` to export, `H` to show or hide archived sessions, `Ctrl+N` to start with an empty task context, and `Esc` to return without losing the chat draft. Archived sessions are hidden by default, cannot be restored until unarchived, and are excluded from automatic startup selection. Archive, delete, and export require a terminal task with no live task lease; the active task cannot be archived or deleted. Exports are complete file-backed snapshots under `.parallel-codex/exports/<task>-<timestamp>/` with a versioned manifest and without transient lease files. Restoring a task reloads its route, workers, retry state, and recorded native session ids. The selected active task is stored in `session-index.sqlite` and survives process and workspace switches; `Ctrl+N` persists an intentionally empty active-task context instead of reopening an older task on restart. SQLite schema changes run as ordered, transactional migrations. Existing catalogs receive a pre-migration snapshot, each successful startup/reindex refreshes a healthy backup, and an integrity failure restores that backup or rebuilds the catalog from authoritative task files while preserving the corrupt copy for inspection. `meta.json` and the Worker files remain the rebuild authority.
+`Ctrl+T` opens the workspace's persisted Task sessions without exiting the outer TUI. The list shows status, creation time, turn and worker counts, plus the number of distinct native sessions after deduplicating reused `engine + session_id` bindings; `>` marks the selected row and `*` marks the active task. Use Up/Down, PageUp/PageDown, the mouse wheel, or `Tab` to select, Enter to restore, `I` to inspect the complete session hierarchy, `R` to rename with Unicode-safe cursor editing, `A` to archive or unarchive, `D` twice to confirm deletion, `E` to export, `H` to show or hide archived sessions, `Ctrl+N` to start with an empty task context, and `Esc` to return without losing the chat draft. Archived sessions are hidden by default, cannot be restored until unarchived, and are excluded from automatic startup selection. Archive, delete, and export require a terminal task with no live task lease; the active task cannot be archived or deleted. Exports are complete file-backed snapshots under `.parallel-codex/exports/<task>-<timestamp>/` with a versioned manifest and without transient lease files. Restoring a task reloads its route, workers, retry state, and recorded native session ids. The selected active task is stored in `session-index.sqlite` and survives process and workspace switches; `Ctrl+N` persists an intentionally empty active-task context instead of reopening an older task on restart. SQLite schema changes run as ordered, transactional migrations. Existing catalogs receive a pre-migration snapshot, each successful startup/reindex refreshes a healthy backup, and an integrity failure restores that backup or rebuilds the catalog from authoritative task files while preserving the corrupt copy for inspection. `meta.json` and the Worker files remain the rebuild authority.
+
+The Task detail view reads authoritative task files and presents `Project -> Task -> Turn -> Worker -> Native session`, including each request, role, engine, configured model, Worker state, native session id, working directory, and last activity time. Historical Workers from earlier turns remain selectable after same-task follow-ups. Use Up/Down or `Tab` to select a Worker, Enter to open its retained log, `C` or `Ctrl+O` to continue the original native session, `B` to ask the native CLI to fork it, `R` to refresh, and `Esc` to return to the Task list. Continue and fork restore the selected Worker's recorded cwd and writable roots while the outer TUI stays open. Codex and Claude have built-in fork commands; a generic CLI exposes `B` only when `interactive.forkArgs` is configured. The child fork is owned and persisted by the native CLI; the indexed parent session remains unchanged.
 
 In a Worker log, `Ctrl+F` searches the final rendered Worker log rather than raw file offsets. Type Unicode text normally; Enter moves to the next match and Up/Down moves backward or forward. `Esc` closes search. The current match is marked with `>` without shifting Diff or source line-number columns. With search closed, press `E` to cycle rendered error lines or `D` to cycle Diff files and hunks.
 

@@ -19,6 +19,9 @@ export interface InputBarProps {
   featureAssignment?: boolean;
   taskSessionAction?: TaskSessionInputAction | null;
   taskSessionsIncludeArchived?: boolean;
+  taskSessionDetail?: boolean;
+  taskSessionDetailHasNative?: boolean;
+  taskSessionDetailCanFork?: boolean;
   canRetry?: boolean;
   hasWorkers?: boolean;
   hasActiveTask?: boolean;
@@ -56,6 +59,9 @@ export function InputBar({
   featureAssignment = false,
   taskSessionAction = null,
   taskSessionsIncludeArchived = false,
+  taskSessionDetail = false,
+  taskSessionDetailHasNative = false,
+  taskSessionDetailCanFork = false,
   canRetry = false,
   hasWorkers = false,
   hasActiveTask = false,
@@ -113,6 +119,19 @@ export function InputBar({
       return (
         <InputRail terminalWidth={terminalWidth} textWidth={displayWidth(`${hints.label}${hints.detail}`)} fill={fillRail}>
           <Text backgroundColor={TUI_THEME.rail} color={TUI_THEME.danger} bold>{hints.label}</Text>
+          {hints.detail ? <Text backgroundColor={TUI_THEME.rail} color={TUI_THEME.muted}>{hints.detail}</Text> : null}
+        </InputRail>
+      );
+    }
+    if (taskSessionDetail) {
+      const hints = taskSessionDetailInputHints(
+        terminalWidth,
+        taskSessionDetailHasNative,
+        taskSessionDetailCanFork
+      );
+      return (
+        <InputRail terminalWidth={terminalWidth} textWidth={displayWidth(`${hints.label}${hints.detail}`)} fill={fillRail}>
+          <Text backgroundColor={TUI_THEME.rail} color={TUI_THEME.accent} bold>{hints.label}</Text>
           {hints.detail ? <Text backgroundColor={TUI_THEME.rail} color={TUI_THEME.muted}>{hints.detail}</Text> : null}
         </InputRail>
       );
@@ -824,16 +843,40 @@ function collaborationDetailInputHints(width: number): { label: string; detail: 
 function taskSessionsInputHints(width: number, includeArchived: boolean): { label: string; detail: string } {
   const archivedAction = includeArchived ? "H hide archived" : "H archived";
   return selectInputHints(width, [
-    { label: "sessions", detail: ` · Up/Dn select · Enter restore · R rename · A archive · D delete · E export · ${archivedAction} · Esc back` },
-    { label: "sessions", detail: " · Up/Dn select · Enter restore · R rename · A archive · D delete · E export · Esc back" },
-    { label: "sessions", detail: " · Up/Dn select · Enter restore · R rename · A archive · D delete · Esc back" },
-    { label: "sessions", detail: " · Up/Dn select · Enter restore · R rename · A archive · Esc back" },
+    { label: "sessions", detail: ` · Up/Dn select · Enter restore · I inspect · R rename · A archive · D delete · E export · ${archivedAction} · Esc back` },
+    { label: "sessions", detail: " · Up/Dn select · Enter restore · I inspect · R rename · A archive · D delete · E export · Esc back" },
+    { label: "sessions", detail: " · Up/Dn select · Enter restore · I inspect · R rename · A archive · D delete · Esc back" },
+    { label: "sessions", detail: " · Up/Dn select · Enter restore · I inspect · R rename · A archive · Esc back" },
+    { label: "sessions", detail: " · Up/Dn select · Enter restore · I inspect · R rename · Esc back" },
     { label: "sessions", detail: " · Up/Dn select · Enter restore · R rename · Esc back" },
+    { label: "sessions", detail: " · Up/Dn select · Enter restore · I inspect · Esc back" },
     { label: "sessions", detail: " · Up/Dn select · Enter restore · Esc back" },
     { label: "sessions", detail: " · Up/Dn select · Esc back" },
     { label: "sessions", detail: " · Esc back" },
     { label: "Esc back", detail: "" },
     { label: "sessions", detail: "" },
+    { label: "ses", detail: "" },
+    { label: "s", detail: "" }
+  ]);
+}
+
+function taskSessionDetailInputHints(
+  width: number,
+  hasNative: boolean,
+  canFork: boolean
+): { label: string; detail: string } {
+  const nativeActions = hasNative
+    ? `${canFork ? "C continue · B branch" : "C continue"} · `
+    : "";
+  return selectInputHints(width, [
+    { label: "session", detail: ` · Up/Dn worker · Enter logs · ${nativeActions}R refresh · Esc tasks` },
+    { label: "session", detail: ` · Up/Dn worker · Enter logs · ${nativeActions}Esc tasks` },
+    { label: "session", detail: ` · Up/Dn · Enter logs · ${nativeActions}Esc tasks` },
+    { label: "session", detail: ` · Enter logs · ${nativeActions}Esc tasks` },
+    { label: "session", detail: ` · ${hasNative ? "C continue · " : ""}Esc tasks` },
+    { label: "session", detail: " · Esc tasks" },
+    { label: "Esc tasks", detail: "" },
+    { label: "session", detail: "" },
     { label: "ses", detail: "" },
     { label: "s", detail: "" }
   ]);

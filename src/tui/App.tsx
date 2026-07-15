@@ -8,6 +8,7 @@ import { readJson } from "../core/file-store.js";
 import type { RouterAuditRecord } from "../core/router-audit.js";
 import type { RouterExecutionProgress } from "../core/router.js";
 import type { TaskIndexSummary } from "../core/session-index.js";
+import type { TaskSessionDetails, TaskSessionWorkerDetail } from "../core/task-session-details.js";
 import type { WorkspaceChoice } from "../core/workspace.js";
 import { WorkerStatusSchema, type EngineName, type RouteDecision, type WorkerStatus } from "../domain/schemas.js";
 import type {
@@ -65,6 +66,10 @@ import {
 } from "./CollaborationTimelineView.js";
 import { moveTaskSessionSelection, TaskSessionsView } from "./TaskSessionsView.js";
 import {
+  moveTaskSessionDetailSelection,
+  TaskSessionDetailView
+} from "./TaskSessionDetailView.js";
+import {
   latestTaskResultMessageIndex,
   parseTaskResultSummary,
   type TaskResultOutcome,
@@ -72,6 +77,7 @@ import {
 } from "./task-result.js";
 import {
   buildNativeAttachLaunch,
+  buildNativeForkLaunch,
   startNativeAttachProcess,
   type NativeAttachLaunch,
   type NativeAttachProcessRef
@@ -94,6 +100,7 @@ export interface AppProps {
     policy: RouterDiagnosticsPolicy;
   }>;
   loadTaskSessions?: (options?: { includeArchived?: boolean }) => Promise<TaskIndexSummary[]>;
+  loadTaskSessionDetails?: (task: TaskIndexSummary) => Promise<TaskSessionDetails>;
   renameTaskSession?: (taskId: string, title: string) => Promise<void>;
   setTaskSessionArchived?: (taskId: string, archived: boolean) => Promise<void>;
   deleteTaskSession?: (taskId: string) => Promise<void>;
@@ -101,6 +108,7 @@ export interface AppProps {
   loadCollaborationTimeline?: (taskId: string) => Promise<CollaborationTimeline>;
   activateTaskSession?: (taskId: string | null) => Promise<ActivatedTaskSession | null>;
   prepareNativeAttach?: (worker: WorkerLogRef) => Promise<NativeAttachLaunch>;
+  prepareNativeFork?: (worker: WorkerLogRef) => Promise<NativeAttachLaunch>;
   startNativeAttach?: (
     launch: NativeAttachLaunch,
     handlers: {
@@ -203,6 +211,7 @@ export function App({
   switchWorkspace,
   loadRouterDiagnostics,
   loadTaskSessions,
+  loadTaskSessionDetails,
   renameTaskSession,
   setTaskSessionArchived,
   deleteTaskSession,
@@ -210,6 +219,7 @@ export function App({
   loadCollaborationTimeline,
   activateTaskSession,
   prepareNativeAttach,
+  prepareNativeFork,
   startNativeAttach,
   shutdownSignal
 }: AppProps) {
@@ -268,6 +278,9 @@ export function App({
   const [taskSessionsNotice, setTaskSessionsNotice] = useState<string | null>(null);
   const [taskSessionsIncludeArchived, setTaskSessionsIncludeArchived] = useState(false);
   const [taskSessionAction, setTaskSessionAction] = useState<TaskSessionAction | null>(null);
+  const [taskSessionDetails, setTaskSessionDetails] = useState<TaskSessionDetails | null>(null);
+  const [taskSessionDetailSelectedWorkerIndex, setTaskSessionDetailSelectedWorkerIndex] = useState(0);
+  const [taskSessionDetailNotice, setTaskSessionDetailNotice] = useState<string | null>(null);
   const [collaborationTimeline, setCollaborationTimeline] = useState<CollaborationTimeline | null>(null);
   const [featureBoardSelectedIndex, setFeatureBoardSelectedIndex] = useState(0);
   const [featureCancelPrompt, setFeatureCancelPrompt] = useState<FeatureCancelPrompt | null>(null);
@@ -319,6 +332,8 @@ export function App({
   const taskSessionsLoadingRef = useRef(taskSessionsLoading);
   const taskSessionsIncludeArchivedRef = useRef(taskSessionsIncludeArchived);
   const taskSessionActionRef = useRef<TaskSessionAction | null>(taskSessionAction);
+  const taskSessionDetailsRef = useRef<TaskSessionDetails | null>(null);
+  const taskSessionDetailSelectedWorkerIndexRef = useRef(0);
   const collaborationTimelineRef = useRef<CollaborationTimeline | null>(null);
   const featureBoardSelectedIndexRef = useRef(0);
   const featureCancelPromptRef = useRef<FeatureCancelPrompt | null>(null);
@@ -330,7 +345,10 @@ export function App({
   const collaborationMaxScrollOffsetRef = useRef(0);
   const autoSelectedFailedWorkerRef = useRef(false);
   const userSelectedWorkerRef = useRef(false);
-  const attachSelectedWorkerRef = useRef<(worker: WorkerLogRef) => Promise<void>>(attachSelectedWorker);
+  const attachSelectedWorkerRef = useRef<(
+    worker: WorkerLogRef,
+    mode?: "resume" | "fork"
+  ) => Promise<void>>(attachSelectedWorker);
   const submitRef = useRef<(value: string) => Promise<void>>(submit);
   const retryRef = useRef<() => Promise<void>>(retryActiveTask);
   const newTaskRef = useRef<() => Promise<void>>(startNewTask);
@@ -352,6 +370,11 @@ export function App({
   const archiveSelectedTaskSessionRef = useRef<() => Promise<void>>(archiveSelectedTaskSession);
   const deleteSelectedTaskSessionRef = useRef<(action: Extract<TaskSessionAction, { type: "delete" }>) => Promise<void>>(deleteSelectedTaskSession);
   const exportSelectedTaskSessionRef = useRef<() => Promise<void>>(exportSelectedTaskSession);
+  const openSelectedTaskSessionDetailsRef = useRef<() => Promise<void>>(openSelectedTaskSessionDetails);
+  const refreshTaskSessionDetailsRef = useRef<() => Promise<void>>(refreshTaskSessionDetails);
+  const openTaskSessionDetailWorkerRef = useRef<(mode: "logs" | "resume" | "fork") => Promise<void>>(
+    openTaskSessionDetailWorker
+  );
   const workspaceReturnViewRef = useRef<"chat" | "worker" | "workers" | "sessions">("chat");
   const routerReturnViewRef = useRef<"chat" | "worker" | "workers" | "sessions">("chat");
   const workerOverviewReturnViewRef = useRef<"chat" | "worker">("chat");
@@ -389,6 +412,15 @@ export function App({
     }
   }), [config.workers.claude, config.workers.codex, config.workers.mock]);
   const selectedBoardFeature = collaborationTimeline?.features[featureBoardSelectedIndex];
+  const selectedTaskSessionDetailWorker = taskSessionDetails?.workers[taskSessionDetailSelectedWorkerIndex];
+  const taskSessionDetailHasNative = Boolean(
+    selectedTaskSessionDetailWorker?.nativeSession && !taskSessionDetails?.task.archived_at
+  );
+  const taskSessionDetailCanFork = Boolean(
+    taskSessionDetailHasNative
+    && selectedTaskSessionDetailWorker
+    && config.workers[selectedTaskSessionDetailWorker.engine].interactive.forkArgs.length > 0
+  );
   const featureCanCancel = busy && (
     selectedBoardFeature?.state === "actor_running"
     || selectedBoardFeature?.state === "critic_running"
@@ -505,6 +537,14 @@ export function App({
   }, [taskSessionAction]);
 
   useEffect(() => {
+    taskSessionDetailsRef.current = taskSessionDetails;
+  }, [taskSessionDetails]);
+
+  useEffect(() => {
+    taskSessionDetailSelectedWorkerIndexRef.current = taskSessionDetailSelectedWorkerIndex;
+  }, [taskSessionDetailSelectedWorkerIndex]);
+
+  useEffect(() => {
     featureBoardSelectedIndexRef.current = featureBoardSelectedIndex;
   }, [featureBoardSelectedIndex]);
 
@@ -572,6 +612,9 @@ export function App({
     archiveSelectedTaskSessionRef.current = archiveSelectedTaskSession;
     deleteSelectedTaskSessionRef.current = deleteSelectedTaskSession;
     exportSelectedTaskSessionRef.current = exportSelectedTaskSession;
+    openSelectedTaskSessionDetailsRef.current = openSelectedTaskSessionDetails;
+    refreshTaskSessionDetailsRef.current = refreshTaskSessionDetails;
+    openTaskSessionDetailWorkerRef.current = openTaskSessionDetailWorker;
   });
 
   useEffect(() => {
@@ -892,6 +935,17 @@ export function App({
       setTaskSessionsError(null);
       setSelectedTaskSessionIndex(nextIndex);
     };
+    const moveSelectedTaskSessionDetailWorker = (delta: number, wrap = false) => {
+      const nextIndex = moveTaskSessionDetailSelection(
+        taskSessionDetailSelectedWorkerIndexRef.current,
+        delta,
+        taskSessionDetailsRef.current?.workers.length ?? 0,
+        wrap
+      );
+      taskSessionDetailSelectedWorkerIndexRef.current = nextIndex;
+      setTaskSessionDetailNotice(null);
+      setTaskSessionDetailSelectedWorkerIndex(nextIndex);
+    };
     const moveSelectedFeature = (delta: number, wrap = false) => {
       const nextIndex = moveFeatureBoardSelection(
         featureBoardSelectedIndexRef.current,
@@ -974,6 +1028,49 @@ export function App({
         if (isExitShortcut(chunk, {})) {
           activeRunControllerRef.current?.abort();
           exitRef.current();
+          return;
+        }
+        if (taskSessionDetailsRef.current) {
+          if (isTaskSessionsShortcut(chunk, {}) || chunk === "\x1b") {
+            taskSessionDetailsRef.current = null;
+            taskSessionDetailSelectedWorkerIndexRef.current = 0;
+            setTaskSessionDetails(null);
+            setTaskSessionDetailSelectedWorkerIndex(0);
+            setTaskSessionDetailNotice(null);
+            setTaskSessionsError(null);
+            return;
+          }
+          if (taskSessionsLoadingRef.current) {
+            return;
+          }
+          if (chunk === "r" || chunk === "R") {
+            void refreshTaskSessionDetailsRef.current();
+            return;
+          }
+          if (chunk === "c" || chunk === "C" || chunk === "\u000f") {
+            void openTaskSessionDetailWorkerRef.current("resume");
+            return;
+          }
+          if (chunk === "b" || chunk === "B") {
+            void openTaskSessionDetailWorkerRef.current("fork");
+            return;
+          }
+          if (chunk === "\r" || chunk === "\n") {
+            void openTaskSessionDetailWorkerRef.current("logs");
+            return;
+          }
+          if (chunk === "\t") {
+            moveSelectedTaskSessionDetailWorker(1, true);
+            return;
+          }
+          const detailSelectionDelta = -(
+            rawHistoryDelta(chunk)
+            + rawPageScrollDelta(chunk, Math.max(1, outputHeight - 2))
+            + mouseScrollDelta(chunk, 1)
+          );
+          if (detailSelectionDelta !== 0) {
+            moveSelectedTaskSessionDetailWorker(detailSelectionDelta);
+          }
           return;
         }
         const sessionAction = taskSessionActionRef.current;
@@ -1072,6 +1169,10 @@ export function App({
         }
         if (chunk === "e" || chunk === "E") {
           void exportSelectedTaskSessionRef.current();
+          return;
+        }
+        if (chunk === "i" || chunk === "I") {
+          void openSelectedTaskSessionDetailsRef.current();
           return;
         }
         if (chunk === "h" || chunk === "H") {
@@ -1792,7 +1893,7 @@ export function App({
     }
   }, { isActive: view === "worker" && !workerSearch.open });
 
-  async function attachSelectedWorker(worker: WorkerLogRef) {
+  async function attachSelectedWorker(worker: WorkerLogRef, mode: "resume" | "fork" = "resume") {
     const requestSequence = nativeAttachRequestSequenceRef.current + 1;
     nativeAttachRequestSequenceRef.current = requestSequence;
     const attachIsCurrent = () => (
@@ -1800,12 +1901,13 @@ export function App({
     );
     setAttachError(null);
     try {
-      const launch = await (prepareNativeAttach
-        ? prepareNativeAttach(worker)
-        : buildNativeAttachLaunch({
-            config,
-            worker
-          }));
+      const launch = await (mode === "fork"
+        ? prepareNativeFork
+          ? prepareNativeFork(worker)
+          : buildNativeForkLaunch({ config, worker })
+        : prepareNativeAttach
+          ? prepareNativeAttach(worker)
+          : buildNativeAttachLaunch({ config, worker }));
       if (!attachIsCurrent()) {
         return;
       }
@@ -2286,6 +2388,11 @@ export function App({
     setAttachError(null);
     setTaskSessionsError(null);
     setTaskSessionsNotice(null);
+    taskSessionDetailsRef.current = null;
+    taskSessionDetailSelectedWorkerIndexRef.current = 0;
+    setTaskSessionDetails(null);
+    setTaskSessionDetailSelectedWorkerIndex(0);
+    setTaskSessionDetailNotice(null);
     updateTaskSessionAction(null);
     await refreshTaskSessions(activeTaskIdRef.current);
   }
@@ -2408,7 +2515,7 @@ export function App({
     }, (path) => `Exported · ${path}`, selected.id);
   }
 
-  async function activateSelectedTaskSession(): Promise<void> {
+  async function openSelectedTaskSessionDetails(): Promise<void> {
     if (busyRef.current || taskSessionsLoadingRef.current) {
       return;
     }
@@ -2416,9 +2523,107 @@ export function App({
     if (!selected) {
       return;
     }
+    taskSessionsLoadingRef.current = true;
+    setTaskSessionsLoading(true);
+    setTaskSessionsError(null);
+    setTaskSessionDetailNotice(null);
+    const sequence = taskSessionsLoadSequenceRef.current + 1;
+    taskSessionsLoadSequenceRef.current = sequence;
+    try {
+      if (!loadTaskSessionDetails) {
+        throw new Error("Task session details are unavailable");
+      }
+      const details = await loadTaskSessionDetails(selected);
+      if (taskSessionsLoadSequenceRef.current !== sequence) {
+        return;
+      }
+      taskSessionDetailsRef.current = details;
+      taskSessionDetailSelectedWorkerIndexRef.current = 0;
+      setTaskSessionDetails(details);
+      setTaskSessionDetailSelectedWorkerIndex(0);
+    } catch (error) {
+      if (taskSessionsLoadSequenceRef.current === sequence) {
+        setTaskSessionsError(error instanceof Error ? error.message : String(error));
+      }
+    } finally {
+      if (taskSessionsLoadSequenceRef.current === sequence) {
+        taskSessionsLoadingRef.current = false;
+        setTaskSessionsLoading(false);
+      }
+    }
+  }
+
+  async function refreshTaskSessionDetails(): Promise<void> {
+    const current = taskSessionDetailsRef.current;
+    if (!current || taskSessionsLoadingRef.current || !loadTaskSessionDetails) {
+      return;
+    }
+    const selectedWorkerId = current.workers[taskSessionDetailSelectedWorkerIndexRef.current]?.id;
+    taskSessionsLoadingRef.current = true;
+    setTaskSessionsLoading(true);
+    setTaskSessionsError(null);
+    const sequence = taskSessionsLoadSequenceRef.current + 1;
+    taskSessionsLoadSequenceRef.current = sequence;
+    try {
+      const details = await loadTaskSessionDetails(current.task);
+      if (taskSessionsLoadSequenceRef.current !== sequence) {
+        return;
+      }
+      const selectedIndex = selectedWorkerId
+        ? Math.max(0, details.workers.findIndex((worker) => worker.id === selectedWorkerId))
+        : 0;
+      taskSessionDetailsRef.current = details;
+      taskSessionDetailSelectedWorkerIndexRef.current = selectedIndex;
+      setTaskSessionDetails(details);
+      setTaskSessionDetailSelectedWorkerIndex(selectedIndex);
+      setTaskSessionDetailNotice("Session hierarchy refreshed");
+    } catch (error) {
+      if (taskSessionsLoadSequenceRef.current === sequence) {
+        setTaskSessionsError(error instanceof Error ? error.message : String(error));
+      }
+    } finally {
+      if (taskSessionsLoadSequenceRef.current === sequence) {
+        taskSessionsLoadingRef.current = false;
+        setTaskSessionsLoading(false);
+      }
+    }
+  }
+
+  async function openTaskSessionDetailWorker(mode: "logs" | "resume" | "fork"): Promise<void> {
+    const details = taskSessionDetailsRef.current;
+    const detailWorker = details?.workers[taskSessionDetailSelectedWorkerIndexRef.current];
+    if (!details || !detailWorker || taskSessionsLoadingRef.current) {
+      return;
+    }
+    if (mode !== "logs" && !detailWorker.nativeSession) {
+      setTaskSessionDetailNotice(`No native session recorded for ${sessionDetailWorkerLabel(detailWorker)}`);
+      return;
+    }
+    const worker = await activateTaskSessionRecord(details.task, detailWorker.id, "worker");
+    if (worker && mode !== "logs") {
+      await attachSelectedWorkerRef.current(worker, mode === "fork" ? "fork" : "resume");
+    }
+  }
+
+  async function activateSelectedTaskSession(): Promise<void> {
+    const selected = taskSessionsRef.current[selectedTaskSessionIndexRef.current];
+    if (!selected) {
+      return;
+    }
+    await activateTaskSessionRecord(selected, null, "chat");
+  }
+
+  async function activateTaskSessionRecord(
+    selected: TaskIndexSummary,
+    preferredWorkerId: string | null,
+    targetView: "chat" | "worker"
+  ): Promise<WorkerLogRef | null> {
+    if (busyRef.current || taskSessionsLoadingRef.current) {
+      return null;
+    }
     if (selected.archived_at) {
       setTaskSessionsError(`Unarchive ${selected.title} before restoring it`);
-      return;
+      return null;
     }
     taskSessionsLoadingRef.current = true;
     setTaskSessionsLoading(true);
@@ -2431,7 +2636,7 @@ export function App({
       }
       const restored = await activateTaskSession(selected.id);
       if (taskSessionsLoadSequenceRef.current !== sequence) {
-        return;
+        return null;
       }
       if (!restored) {
         throw new Error(`Task session not found: ${selected.id}`);
@@ -2446,18 +2651,27 @@ export function App({
       setTaskResultExpanded(latestTaskResultMessageIndex(messagesRef.current, restored.taskId) >= 0);
       workersRef.current = restored.workers;
       setWorkers(restored.workers);
-      selectedWorkerIndexRef.current = 0;
-      setSelectedWorkerIndex(0);
+      const preferredWorkerIndex = preferredWorkerId
+        ? restored.workers.findIndex((worker) => worker.id === preferredWorkerId)
+        : -1;
+      if (preferredWorkerId && preferredWorkerIndex < 0) {
+        throw new Error(`Worker is no longer available: ${preferredWorkerId}`);
+      }
+      const nextWorkerIndex = preferredWorkerIndex >= 0 ? preferredWorkerIndex : 0;
+      selectedWorkerIndexRef.current = nextWorkerIndex;
+      setSelectedWorkerIndex(nextWorkerIndex);
       setWorkerScrollOffset(0);
       autoSelectedFailedWorkerRef.current = false;
       userSelectedWorkerRef.current = false;
       setAttachError(null);
-      viewRef.current = "chat";
-      setView("chat");
+      viewRef.current = targetView;
+      setView(targetView);
+      return restored.workers[nextWorkerIndex] ?? null;
     } catch (error) {
       if (taskSessionsLoadSequenceRef.current === sequence) {
         setTaskSessionsError(error instanceof Error ? error.message : String(error));
       }
+      return null;
     } finally {
       if (taskSessionsLoadSequenceRef.current === sequence) {
         taskSessionsLoadingRef.current = false;
@@ -2781,6 +2995,9 @@ export function App({
               ? { type: "delete", title: taskSessionAction.title }
               : null}
           taskSessionsIncludeArchived={taskSessionsIncludeArchived}
+          taskSessionDetail={Boolean(taskSessionDetails)}
+          taskSessionDetailHasNative={taskSessionDetailHasNative}
+          taskSessionDetailCanFork={taskSessionDetailCanFork}
           canRetry={canRetryTask}
           hasWorkers={workers.length > 0}
           hasActiveTask={Boolean(activeTaskId)}
@@ -2807,22 +3024,34 @@ export function App({
         {view === "native" ? (
           <NativeAttachView attach={nativeAttach} viewportHeight={contentHeight} />
         ) : view === "sessions" ? (
-          <TaskSessionsView
-            tasks={taskSessions}
-            activeTaskId={activeTaskId}
-            selectedIndex={selectedTaskSessionIndex}
-            includeArchived={taskSessionsIncludeArchived}
-            notice={taskSessionsNotice}
-            action={taskSessionAction?.type === "rename"
-              ? { type: "rename", title: taskSessionAction.title }
-              : taskSessionAction?.type === "delete"
-                ? { type: "delete", title: taskSessionAction.title }
-                : null}
-            loading={taskSessionsLoading}
-            error={taskSessionsError}
-            height={contentHeight}
-            terminalWidth={terminalWidth}
-          />
+          taskSessionDetails ? (
+            <TaskSessionDetailView
+              details={taskSessionDetails}
+              selectedWorkerIndex={taskSessionDetailSelectedWorkerIndex}
+              loading={taskSessionsLoading}
+              error={taskSessionsError}
+              notice={taskSessionDetailNotice}
+              height={contentHeight}
+              terminalWidth={terminalWidth}
+            />
+          ) : (
+            <TaskSessionsView
+              tasks={taskSessions}
+              activeTaskId={activeTaskId}
+              selectedIndex={selectedTaskSessionIndex}
+              includeArchived={taskSessionsIncludeArchived}
+              notice={taskSessionsNotice}
+              action={taskSessionAction?.type === "rename"
+                ? { type: "rename", title: taskSessionAction.title }
+                : taskSessionAction?.type === "delete"
+                  ? { type: "delete", title: taskSessionAction.title }
+                  : null}
+              loading={taskSessionsLoading}
+              error={taskSessionsError}
+              height={contentHeight}
+              terminalWidth={terminalWidth}
+            />
+          )
         ) : view === "features" ? (
           <FeatureBoardView
             timeline={collaborationTimeline}
@@ -3954,6 +4183,11 @@ function compactChatTaskId(taskId: string | null): string {
 
 export function nextAssignableFeatureEngine(current: EngineName): EngineName {
   return current === "codex" ? "claude" : "codex";
+}
+
+function sessionDetailWorkerLabel(worker: TaskSessionWorkerDetail): string {
+  const role = `${worker.role.slice(0, 1).toUpperCase()}${worker.role.slice(1)}`;
+  return `${role} (${worker.engine})${worker.featureTitle ? ` · ${worker.featureTitle}` : ""}`;
 }
 
 function featureEngineDisplay(config: AppConfig, engine: EngineName): string {

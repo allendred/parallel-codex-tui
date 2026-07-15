@@ -72,7 +72,13 @@ describe("config", () => {
       "resume",
       "{sessionId}"
     ]);
+    expect(config.workers.codex.interactive.forkArgs).toEqual(["fork", "{sessionId}"]);
     expect(config.workers.claude.interactive.args).toEqual(["--resume", "{sessionId}"]);
+    expect(config.workers.claude.interactive.forkArgs).toEqual([
+      "--resume",
+      "{sessionId}",
+      "--fork-session"
+    ]);
     expect(config.workers.codex.nativeSession.fallback).toBe("new");
     expect(config.workers.codex.capabilities).toEqual({
       profile: "codex",
@@ -238,6 +244,7 @@ describe("config", () => {
         "[workers.codex.interactive]",
         'command = "codex-beta"',
         'args = ["resume", "{sessionId}", "--model", "{model}"]',
+        'forkArgs = ["fork", "{sessionId}", "--model", "{model}"]',
         "",
         "[workers.claude.interactive]",
         'args = ["--resume", "{sessionId}", "--dangerously-skip-permissions"]'
@@ -248,12 +255,36 @@ describe("config", () => {
 
     expect(config.workers.codex.interactive.command).toBe("codex-beta");
     expect(config.workers.codex.interactive.args).toEqual(["resume", "{sessionId}", "--model", "{model}"]);
+    expect(config.workers.codex.interactive.forkArgs).toEqual([
+      "fork",
+      "{sessionId}",
+      "--model",
+      "{model}"
+    ]);
     expect(config.workers.claude.interactive.command).toBe("claude");
     expect(config.workers.claude.interactive.args).toEqual([
       "--resume",
       "{sessionId}",
       "--dangerously-skip-permissions"
     ]);
+    expect(config.workers.claude.interactive.forkArgs).toEqual([
+      "--resume",
+      "{sessionId}",
+      "--fork-session"
+    ]);
+  });
+
+  it("rejects interactive fork args without a session id template", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pct-config-interactive-fork-template-"));
+    await writeText(
+      join(root, ".parallel-codex", "config.toml"),
+      [
+        "[workers.codex.interactive]",
+        'forkArgs = ["fork", "static-session"]'
+      ].join("\n")
+    );
+
+    await expect(loadConfig(root)).rejects.toThrow(/forkArgs must include a \{sessionId\} template/);
   });
 
   it("merges native session TOML overrides", async () => {

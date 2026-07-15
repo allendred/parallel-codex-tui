@@ -16,6 +16,7 @@ import { formatConfigErrorMessage } from "./core/config-errors.js";
 import { configPath, loadConfig, withUiThemeOverride, writeDefaultConfig } from "./core/config.js";
 import { pathExists } from "./core/file-store.js";
 import { readRouterAudit } from "./core/router-audit.js";
+import { loadTaskSessionDetails as loadPersistedTaskSessionDetails } from "./core/task-session-details.js";
 import { listWorkspaceChoices } from "./core/workspace.js";
 import { runDoctor, runRuntimePreflight } from "./doctor.js";
 import { helpText } from "./cli-help.js";
@@ -118,6 +119,15 @@ async function main(): Promise<void> {
           };
         }}
         loadTaskSessions={(options) => state.runtime.index.listTasks(100, options)}
+        loadTaskSessionDetails={(task) => loadPersistedTaskSessionDetails({
+          task,
+          taskDir: state.runtime.sessions.taskFromId(task.id).dir,
+          modelNames: {
+            codex: state.runtime.config.workers.codex.model.name,
+            claude: state.runtime.config.workers.claude.model.name,
+            mock: state.runtime.config.workers.mock.model.name
+          }
+        })}
         renameTaskSession={async (taskId, title) => {
           await state.runtime.sessions.renameTask(taskId, title);
         }}

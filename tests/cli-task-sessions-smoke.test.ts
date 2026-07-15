@@ -14,7 +14,7 @@ describe("CLI Task sessions smoke", () => {
     const appRoot = await mkdtemp(join(tmpdir(), "pct-cli-task-sessions-app-"));
     const workspace = await mkdtemp(join(tmpdir(), "pct-cli-task-sessions-workspace-"));
     await mkdir(join(appRoot, ".parallel-codex"), { recursive: true });
-    const nativeScript = "process.stdout.write('RESTORED:' + process.argv[1])";
+    const nativeScript = "process.stdout.write(process.argv[1] === 'FORK' ? 'FORKED:' + process.argv[2] : 'RESTORED:' + process.argv[1])";
     await writeFile(
       join(appRoot, ".parallel-codex", "config.toml"),
       [
@@ -30,6 +30,7 @@ describe("CLI Task sessions smoke", () => {
         "[workers.mock.interactive]",
         `command = ${JSON.stringify(process.execPath)}`,
         `args = ["-e", ${JSON.stringify(nativeScript)}, "{sessionId}"]`,
+        `forkArgs = ["-e", ${JSON.stringify(nativeScript)}, "FORK", "{sessionId}"]`,
         ""
       ].join("\n"),
       "utf8"
@@ -88,7 +89,7 @@ describe("CLI Task sessions smoke", () => {
         revision: firstRun.outputRevision,
         cols: 110,
         rows: 18,
-        text: "sessions · Up/Dn select · Enter restore · R rename · A archive · D delete · E export · H archived · Esc back"
+        text: "sessions · Up/Dn select · Enter restore · I inspect · R rename · A archive · D delete · E export · Esc back"
       });
       await waitForScreenText(firstRun, "2 tasks · 2 done");
       let snapshot = firstRun.screen.snapshot();
@@ -103,6 +104,11 @@ describe("CLI Task sessions smoke", () => {
 
       firstRun.child.write("\x1b[B");
       await waitForScreenText(firstRun, ">   第一个会话标记");
+      await writeAndWaitForFreshScreenText(firstRun, "i", "Session hierarchy");
+      await waitForScreenText(firstRun, "project ·");
+      await waitForScreenText(firstRun, "Turn 1");
+      await waitForScreenText(firstRun, "native · first-judge-native");
+      await writeAndWaitForFreshScreenText(firstRun, "\x1b", "Task sessions");
       firstRun.child.write("\r");
       const firstMarker = compactTaskMarker(firstTaskId);
       await waitForScreenText(firstRun, `#${firstMarker}`);
@@ -111,14 +117,14 @@ describe("CLI Task sessions smoke", () => {
       firstRun.child.write("\x02");
       await waitForScreenText(firstRun, "> Judge (mock)");
       await waitForScreenText(firstRun, "session");
-      firstRun.child.write("\x14");
-      await waitForScreenText(firstRun, "parallel-codex-tui · sessions");
-      firstRun.child.write("\x1b");
-      await waitForScreenText(firstRun, "parallel-codex-tui · workers");
-      firstRun.child.write("\x0f");
-      await waitForScreenText(firstRun, "RESTORED:first-judge-native");
-      firstRun.child.write("\x1d");
-      await waitForScreenText(firstRun, "parallel-codex-tui · logs");
+      await writeAndWaitForFreshScreenText(firstRun, "\x14", "parallel-codex-tui · sessions");
+      await writeAndWaitForFreshScreenText(firstRun, "i", "Session hierarchy");
+      await writeAndWaitForFreshScreenText(firstRun, "c", "RESTORED:first-judge-native");
+      await writeAndWaitForFreshScreenText(firstRun, "\x1d", "parallel-codex-tui · logs");
+      await writeAndWaitForFreshScreenText(firstRun, "\x14", "parallel-codex-tui · sessions");
+      await writeAndWaitForFreshScreenText(firstRun, "i", "Session hierarchy");
+      await writeAndWaitForFreshScreenText(firstRun, "b", "FORKED:first-judge-native");
+      await writeAndWaitForFreshScreenText(firstRun, "\x1d", "parallel-codex-tui · logs");
       firstRun.child.write("\x03");
       await waitForExit(firstRun.exits);
       expect(firstRun.exits[0]).toBe(0);
@@ -267,6 +273,24 @@ async function waitForScreenText(run: ReturnType<typeof startCli>, text: string)
     await new Promise((resolve) => setTimeout(resolve, 50));
   }
   throw new Error(`Timed out waiting for ${text}\nSnapshot:\n${run.screen.snapshot()}`);
+}
+
+async function writeAndWaitForFreshScreenText(
+  run: ReturnType<typeof startCli>,
+  input: string,
+  text: string
+): Promise<void> {
+  const previousRevision = run.outputRevision();
+  run.child.write(input);
+
+  for (let attempt = 0; attempt < 240; attempt += 1) {
+    await run.screenWrites();
+    if (run.outputRevision() > previousRevision && run.screen.snapshot().includes(text)) {
+      return;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+  throw new Error(`Timed out waiting for fresh ${text}\nSnapshot:\n${run.screen.snapshot()}`);
 }
 
 async function waitForHeaderWithoutTaskMarker(run: ReturnType<typeof startCli>): Promise<void> {
