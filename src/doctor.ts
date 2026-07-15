@@ -5,7 +5,7 @@ import { createConnection } from "node:net";
 import { delimiter, join } from "node:path";
 import { prepareAppRoot } from "./core/app-root.js";
 import { formatConfigErrorMessage } from "./core/config-errors.js";
-import { configPath, loadConfig, withUiThemeOverride } from "./core/config.js";
+import { configPath, loadConfig, withUiThemeOverride, type AppConfig } from "./core/config.js";
 import { ensureDir, pathExists } from "./core/file-store.js";
 import { routerRuntimeDir } from "./core/paths.js";
 import { diagnoseRouterFailure } from "./core/router-audit.js";
@@ -34,6 +34,19 @@ export interface SystemProxyEndpoint {
 export interface ProxyDiagnosticResult {
   ok: boolean;
   lines: string[];
+}
+
+export interface RuntimePreflightResult {
+  ok: boolean;
+  lines: string[];
+}
+
+export interface RuntimePreflightOptions {
+  includeRouter?: boolean;
+  capabilityRunner?: CapabilityCommandRunner;
+  capabilityTimeoutMs?: number;
+  systemProxy?: SystemProxyEndpoint | null;
+  proxyConnector?: ProxyConnector;
 }
 
 type LoadedConfig = Awaited<ReturnType<typeof loadConfig>>;
@@ -111,45 +124,13 @@ export async function runDoctor(
       `router budget: total ${config.router.codex.timeoutMs}ms; follow-up ${config.router.codex.followUpTimeoutMs}ms; first output ${config.router.codex.firstOutputTimeoutMs}ms; idle ${config.router.codex.idleTimeoutMs}ms`
     );
   }
-  const availableCommands = new Set<string>();
-  for (const command of configuredCommands(config, includeRouter)) {
-    if (await commandExists(command, env)) {
-      availableCommands.add(command);
-      lines.push(`${command}: ok`);
-    } else {
-      ok = false;
-      lines.push(`${command}: missing`);
-    }
-  }
-
-  for (const check of configuredEnvironmentChecks(config, env, includeRouter)) {
-    if (check.ok) {
-      lines.push(`${check.label}: ok`);
-    } else {
-      ok = false;
-      lines.push(`${check.label}: missing env ${check.envName}`);
-    }
-  }
-
-  const capabilityDiagnostics = await diagnoseAgentCapabilities(config, env, {
+  const preflight = await runRuntimePreflight(config, preparedWorkspace, env, {
     includeRouter,
-    workerEngines: configuredWorkerEngines(config),
-    availableCommands,
-    ...(options.capabilityRunner ? { runner: options.capabilityRunner } : {}),
-    ...(options.capabilityTimeoutMs ? { timeoutMs: options.capabilityTimeoutMs } : {})
+    ...(options.capabilityRunner ? { capabilityRunner: options.capabilityRunner } : {}),
+    ...(options.capabilityTimeoutMs ? { capabilityTimeoutMs: options.capabilityTimeoutMs } : {})
   });
-  lines.push(...capabilityDiagnostics.lines);
-  ok = ok && capabilityDiagnostics.ok;
-
-  const proxyDiagnostics = await diagnoseProxyEnvironment(
-    config,
-    env,
-    await detectMacSystemProxy(),
-    canConnectProxy,
-    { includeRouter }
-  );
-  lines.push(...proxyDiagnostics.lines);
-  ok = ok && proxyDiagnostics.ok;
+  lines.push(...preflight.lines);
+  ok = ok && preflight.ok;
 
   if (options.probeAgents) {
     if (ok) {
@@ -180,6 +161,70 @@ export async function runDoctor(
     ok,
     text: `${lines.join("\n")}\n`
   };
+}
+
+export async function runRuntimePreflight(
+  config: AppConfig,
+  workspaceRoot: string,
+  env: NodeJS.ProcessEnv = process.env,
+  options: RuntimePreflightOptions = {}
+): Promise<RuntimePreflightResult> {
+  const includeRouter = options.includeRouter ?? config.router.defaultMode === "auto";
+  const lines: string[] = [];
+  let ok = true;
+
+  try {
+    await access(workspaceRoot, constants.R_OK | constants.W_OK | constants.X_OK);
+    lines.push("workspace permissions: ok (read/write/search)");
+  } catch {
+    ok = false;
+    lines.push(`workspace permissions: denied (${workspaceRoot}; need read/write/search)`);
+  }
+
+  const availableCommands = new Set<string>();
+  for (const command of configuredCommands(config, includeRouter)) {
+    if (await commandExists(command, env)) {
+      availableCommands.add(command);
+      lines.push(`${command}: ok`);
+    } else {
+      ok = false;
+      lines.push(`${command}: missing`);
+    }
+  }
+
+  for (const check of configuredEnvironmentChecks(config, env, includeRouter)) {
+    if (check.ok) {
+      lines.push(`${check.label}: ok`);
+    } else {
+      ok = false;
+      lines.push(`${check.label}: missing env ${check.envName}`);
+    }
+  }
+
+  const capabilityDiagnostics = await diagnoseAgentCapabilities(config, env, {
+    includeRouter,
+    workerEngines: configuredWorkerEngines(config),
+    availableCommands,
+    ...(options.capabilityRunner ? { runner: options.capabilityRunner } : {}),
+    ...(options.capabilityTimeoutMs ? { timeoutMs: options.capabilityTimeoutMs } : {})
+  });
+  lines.push(...capabilityDiagnostics.lines);
+  ok = ok && capabilityDiagnostics.ok;
+
+  const systemProxy = options.systemProxy !== undefined
+    ? options.systemProxy
+    : await detectMacSystemProxy();
+  const proxyDiagnostics = await diagnoseProxyEnvironment(
+    config,
+    env,
+    systemProxy,
+    options.proxyConnector ?? canConnectProxy,
+    { includeRouter }
+  );
+  lines.push(...proxyDiagnostics.lines);
+  ok = ok && proxyDiagnostics.ok;
+
+  return { ok, lines };
 }
 
 export async function diagnoseProxyEnvironment(

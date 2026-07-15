@@ -8,6 +8,7 @@ import { selectWorkspaceForCli } from "./cli-workspace.js";
 import { commitWorkspaceTransition } from "./cli-workspace-transition.js";
 import { WorkspaceSelectionCancelledError } from "./cli-workspace-picker.js";
 import { startupRecoveryMessages } from "./cli-startup-recovery.js";
+import { startupPreflightMessages } from "./cli-startup-preflight.js";
 import { createRuntime } from "./bootstrap.js";
 import type { AppRuntime } from "./bootstrap.js";
 import { prepareAppRoot } from "./core/app-root.js";
@@ -16,7 +17,7 @@ import { configPath, loadConfig, withUiThemeOverride, writeDefaultConfig } from 
 import { pathExists } from "./core/file-store.js";
 import { readRouterAudit } from "./core/router-audit.js";
 import { listWorkspaceChoices } from "./core/workspace.js";
-import { runDoctor } from "./doctor.js";
+import { runDoctor, runRuntimePreflight } from "./doctor.js";
 import { helpText } from "./cli-help.js";
 import { App } from "./tui/App.js";
 import { formatTuiThemeCatalog } from "./tui/theme-preview.js";
@@ -206,6 +207,14 @@ async function loadInteractiveWorkspace(
 ): Promise<InteractiveWorkspaceState> {
   const runtime = await createRuntime(appRoot, workspaceRoot);
   try {
+    const preflightPromise = runRuntimePreflight(
+      runtime.config,
+      runtime.workspaceRoot,
+      process.env
+    ).catch((error): Awaited<ReturnType<typeof runRuntimePreflight>> => ({
+      ok: false,
+      lines: [`preflight: failed (${error instanceof Error ? error.message : String(error)})`]
+    }));
     if (requestedTaskId) {
       if (!(await runtime.sessions.hasTask(requestedTaskId))) {
         throw new Error(`Task session not found in workspace ${runtime.workspaceRoot}: ${requestedTaskId}`);
@@ -237,14 +246,15 @@ async function loadInteractiveWorkspace(
     } else if (!initialTaskId && typeof rememberedTaskId === "string") {
       await runtime.index.setActiveTaskId(null);
     }
-    const [initialRoute, initialWorkers, initialCanRetryTask, initialHistory, workspaceChoices] = await Promise.all([
+    const [initialRoute, initialWorkers, initialCanRetryTask, initialHistory, workspaceChoices, preflight] = await Promise.all([
       initialTaskId
         ? runtime.sessions.readLatestRoute(runtime.sessions.taskFromId(initialTaskId))
         : null,
       initialTaskId ? runtime.orchestrator.listTaskWorkers(initialTaskId) : [],
       initialTaskId ? runtime.orchestrator.canRetryTask(initialTaskId) : false,
       runtime.sessions.readChatHistory(),
-      listWorkspaceChoices(appRoot)
+      listWorkspaceChoices(appRoot),
+      preflightPromise
     ]);
     const recoveryMessages = startupRecoveryMessages(
       runtime.recoveredTasks,
@@ -265,7 +275,8 @@ async function loadInteractiveWorkspace(
           text,
           ...(task_id ? { taskId: task_id } : {})
         })),
-        ...recoveryMessages
+        ...recoveryMessages,
+        ...startupPreflightMessages(preflight)
       ],
       workspaceChoices
     };

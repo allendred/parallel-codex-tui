@@ -176,6 +176,9 @@ describe("package metadata", () => {
     expect(readme).toContain("shows remembered projects from `.parallel-codex/workspaces.json`");
     expect(readme).toContain("If `--workspace <path>` points to an existing file");
     expect(readme).toContain("will not use that file path as the default folder to create");
+    expect(readme).toContain("runs a quota-free startup preflight before the TUI accepts work");
+    expect(readme).toContain("workspace read/write/search access");
+    expect(readme).toContain("Healthy checks stay quiet; warnings and failures appear in chat");
     expect(readme).toContain("press `Ctrl+P` to open the same project picker without exiting");
     expect(readme).toContain("`Esc` returns with the unsent draft intact");
     expect(readme).toContain("locks duplicate picker input, shows the project being opened, rebuilds the runtime in place");
@@ -408,6 +411,7 @@ describe("package metadata", () => {
     expect(readme).toContain("In worker-log views, scroll with the mouse wheel or PageUp/PageDown");
     expect(readme).toContain("In chat or worker-log views, press `Ctrl+O`");
     expect(readme).toContain("Native attach follows outer terminal resize");
+    expect(readme).toContain("recognizes read-only sandbox/add-dir conflicts, untrusted directories");
     expect(readme).toContain("Overlapping attach preparations keep only the latest request");
     expect(readme).toContain("this and closing the outer App terminate the active PTY");
     expect(readme).toContain("An attach preparation that finishes after App shutdown is discarded");

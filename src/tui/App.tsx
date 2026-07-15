@@ -1792,7 +1792,12 @@ export function App({
           if (!attachIsCurrent()) {
             return;
           }
-          void screen.write(`\r\n${nativeAttachExitLine(code, screen.dimensions().cols)}\r\n`).then(() => {
+          const failureHint = nativeAttachFailureHint(screen.snapshot(), code);
+          const closeOutput = [
+            nativeAttachExitLine(code, screen.dimensions().cols),
+            ...(failureHint ? [failureHint] : [])
+          ].join("\r\n");
+          void screen.write(`\r\n${closeOutput}\r\n`).then(() => {
             if (!attachIsCurrent()) {
               return;
             }
@@ -4291,6 +4296,28 @@ export function nativeAttachExitLine(code: number, nativeTerminalCols: number): 
     `exit:${code}`
   ];
   return firstNativeTitleThatFits(candidates, contentWidth);
+}
+
+export function nativeAttachFailureHint(output: string, code: number): string | null {
+  if (code === 0) {
+    return null;
+  }
+  if (/effective permissions do not allow additional writable roots|error adding directories|read-only sandbox/i.test(output)) {
+    return "fix · set workers.codex.interactive.args sandbox to workspace-write or danger-full-access, then reattach";
+  }
+  if (/not inside a trusted directory|trusted directory/i.test(output)) {
+    return "fix · open Codex once in this workspace and approve directory trust, then reattach";
+  }
+  if (/unexpected argument ['\"]?--skip-git-repo-check|--skip-git-repo-check.*not found/i.test(output)) {
+    return "fix · remove --skip-git-repo-check from workers.codex.interactive.args, then reattach";
+  }
+  if (/stdin is not a terminal/i.test(output)) {
+    return "fix · native attach requires its embedded PTY; reopen it with Ctrl+O instead of piping codex resume";
+  }
+  if (/permission denied|\bEACCES\b|\bEPERM\b/i.test(output)) {
+    return "fix · grant the terminal read/write access to the workspace and .parallel-codex directories, then reattach";
+  }
+  return null;
 }
 
 function withNativeTitleSuffix(candidates: string[], suffix: string | null): string[] {

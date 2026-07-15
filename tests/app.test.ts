@@ -2,7 +2,7 @@ import React from "react";
 import { render } from "ink-testing-library";
 import { afterEach, describe, expect, it } from "vitest";
 import * as AppModule from "../src/tui/App.js";
-import { appContentHeight, chatEmptyStateTheme, chatEmptyStateTrailingFillWidth, chatLineTheme, chatLineTrailingFillWidth, chatMessageDisplayLines, chatViewportBlankLineTheme, ChatView, nativeAttachExitLine, nativeAttachStartingText, nativeAttachStartingTheme, nativeAttachTerminalColumns, nativeAttachTitleDisplay, nativeTerminalScrollDisplay } from "../src/tui/App.js";
+import { appContentHeight, chatEmptyStateTheme, chatEmptyStateTrailingFillWidth, chatLineTheme, chatLineTrailingFillWidth, chatMessageDisplayLines, chatViewportBlankLineTheme, ChatView, nativeAttachExitLine, nativeAttachFailureHint, nativeAttachStartingText, nativeAttachStartingTheme, nativeAttachTerminalColumns, nativeAttachTitleDisplay, nativeTerminalScrollDisplay } from "../src/tui/App.js";
 import { displayWidth } from "../src/tui/display-width.js";
 import { configureTuiTheme, resetTuiTheme, TUI_THEME_PRESETS } from "../src/tui/theme.js";
 
@@ -61,6 +61,28 @@ describe("nativeAttachTitleDisplay", () => {
     expect(nativeAttachExitLine(7, 40)).toBe("process exited · code 7");
     expect(nativeAttachExitLine(7, 18)).toBe("exit code 7");
     expect(nativeAttachExitLine(7, 6)).toBe("exit:7");
+  });
+
+  it("turns native permission and trust failures into executable guidance", () => {
+    expect(nativeAttachFailureHint(
+      "Error adding directories because effective permissions do not allow additional writable roots",
+      1
+    )).toContain("workspace-write or danger-full-access");
+    expect(nativeAttachFailureHint("Not inside a trusted directory", 1)).toContain(
+      "approve directory trust"
+    );
+    expect(nativeAttachFailureHint(
+      "error: unexpected argument '--skip-git-repo-check' found",
+      2
+    )).toContain("remove --skip-git-repo-check");
+    expect(nativeAttachFailureHint("Error: stdin is not a terminal", 1)).toContain(
+      "reopen it with Ctrl+O"
+    );
+    expect(nativeAttachFailureHint("permission denied: EPERM", 1)).toContain(
+      "grant the terminal read/write access"
+    );
+    expect(nativeAttachFailureHint("permission denied", 0)).toBeNull();
+    expect(nativeAttachFailureHint("unknown failure", 1)).toBeNull();
   });
 
   it("keeps native attach titles readable in roomy terminals", () => {
