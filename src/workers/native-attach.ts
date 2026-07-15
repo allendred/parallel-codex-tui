@@ -10,6 +10,7 @@ import { NativeSessionSchema, TaskMetaSchema, type EngineName, type NativeSessio
 import type { WorkerLogRef } from "../orchestrator/orchestrator.js";
 import { detectResumeSessionId } from "./native-session-detection.js";
 import type { WorkerCapabilityRunConfig, WorkerModelRunConfig } from "./types.js";
+import { workerProvider } from "./provider.js";
 
 const require = createRequire(import.meta.url);
 
@@ -53,8 +54,8 @@ async function buildNativeSessionLaunch(
   input: NativeAttachLaunchInput,
   mode: "resume" | "fork"
 ): Promise<NativeAttachLaunch> {
-  const nativeSession = await readWorkerNativeSession(input.worker);
-  const workerConfig = input.config.workers[input.worker.engine];
+  const workerConfig = workerProvider(input.config, input.worker.engine).config;
+  const nativeSession = await readWorkerNativeSession(input.worker, workerConfig.capabilities.profile);
   const modelConfig = workerConfig.model;
   const env = modelEnvironment(modelConfig);
   const interactiveArgs = mode === "fork"
@@ -91,6 +92,7 @@ async function buildNativeSessionLaunch(
         ...interactiveArgs,
         ...modelConfig.args
       ].map((arg) => renderTemplate(arg, nativeSession.session_id, modelConfig)),
+      providerId: input.worker.engine,
       capabilities: workerConfig.capabilities,
       additionalDirs
     }),
@@ -103,6 +105,7 @@ async function buildNativeSessionLaunch(
 
 function nativeAttachArgs(input: {
   args: string[];
+  providerId: EngineName;
   capabilities: WorkerCapabilityRunConfig;
   additionalDirs: string[];
 }): string[] {
@@ -110,7 +113,7 @@ function nativeAttachArgs(input: {
     return input.args;
   }
   const args = input.capabilities.profile === "codex"
-    ? withCodexWritableSandbox(input.args)
+    ? withCodexWritableSandbox(input.args, input.providerId)
     : input.args;
   return [
     ...args,
@@ -120,12 +123,12 @@ function nativeAttachArgs(input: {
   ];
 }
 
-function withCodexWritableSandbox(args: string[]): string[] {
+function withCodexWritableSandbox(args: string[], providerId: EngineName): string[] {
   const sandbox = codexSandboxSelection(args);
   if (sandbox === "read-only") {
     throw new Error(
       "Codex native attach cannot use recorded worker directories with a read-only sandbox. "
-      + "Set workers.codex.interactive.args to workspace-write or danger-full-access."
+      + `Set workers.${providerId}.interactive.args to workspace-write or danger-full-access.`
     );
   }
   return sandbox ? args : [...args, "--sandbox", "workspace-write"];
@@ -225,17 +228,20 @@ function ensureNodePtySpawnHelperExecutable(): void {
   }
 }
 
-async function readWorkerNativeSession(worker: WorkerLogRef): Promise<NativeSession> {
+async function readWorkerNativeSession(
+  worker: WorkerLogRef,
+  profile: WorkerCapabilityRunConfig["profile"]
+): Promise<NativeSession> {
   const workerDir = dirname(worker.statusPath);
   const nativePath = join(workerDir, "native-session.json");
   const record = await readAttachNativeSessionIfValid(nativePath);
   if (!record) {
-    const recoveredCodex = await recoverCodexNativeSession(worker, workerDir);
+    const recoveredCodex = await recoverCodexNativeSession(worker, workerDir, profile);
     if (recoveredCodex) {
       await writeJson(nativePath, NativeSessionSchema.parse(recoveredCodex));
       return recoveredCodex;
     }
-    const recovered = await recoverClaudeNativeSession(worker, workerDir);
+    const recovered = await recoverClaudeNativeSession(worker, workerDir, profile);
     if (recovered) {
       await writeJson(nativePath, NativeSessionSchema.parse(recovered));
       return recovered;
@@ -266,8 +272,12 @@ async function readAttachNativeSessionIfValid(nativePath: string): Promise<Nativ
   }
 }
 
-async function recoverCodexNativeSession(worker: WorkerLogRef, workerDir: string): Promise<NativeSession | null> {
-  if (worker.engine !== "codex") {
+async function recoverCodexNativeSession(
+  worker: WorkerLogRef,
+  workerDir: string,
+  profile: WorkerCapabilityRunConfig["profile"]
+): Promise<NativeSession | null> {
+  if (profile !== "codex") {
     return null;
   }
 
@@ -285,7 +295,7 @@ async function recoverCodexNativeSession(worker: WorkerLogRef, workerDir: string
 
   const now = new Date().toISOString();
   return {
-    engine: "codex",
+    engine: worker.engine,
     role: worker.role,
     worker_id: worker.id,
     session_id: sessionId,
@@ -297,8 +307,12 @@ async function recoverCodexNativeSession(worker: WorkerLogRef, workerDir: string
   };
 }
 
-async function recoverClaudeNativeSession(worker: WorkerLogRef, workerDir: string): Promise<NativeSession | null> {
-  if (worker.engine !== "claude") {
+async function recoverClaudeNativeSession(
+  worker: WorkerLogRef,
+  workerDir: string,
+  profile: WorkerCapabilityRunConfig["profile"]
+): Promise<NativeSession | null> {
+  if (profile !== "claude") {
     return null;
   }
 
@@ -322,7 +336,7 @@ async function recoverClaudeNativeSession(worker: WorkerLogRef, workerDir: strin
   }
 
   return {
-    engine: "claude",
+    engine: worker.engine,
     role: worker.role,
     worker_id: worker.id,
     session_id: match.sessionId,
@@ -431,5 +445,5 @@ function renderTemplate(value: string, sessionId: string, modelConfig: WorkerMod
 }
 
 export function supportsNativeAttach(engine: EngineName): boolean {
-  return engine === "codex" || engine === "claude" || engine === "mock";
+  return Boolean(engine);
 }

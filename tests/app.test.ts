@@ -26,6 +26,15 @@ describe("App layout sizing", () => {
   });
 });
 
+describe("Feature provider cycling", () => {
+  it("cycles every assignable provider in configured order", () => {
+    expect(AppModule.nextAssignableFeatureEngine("codex", ["codex", "vendor", "claude"])).toBe("vendor");
+    expect(AppModule.nextAssignableFeatureEngine("vendor", ["codex", "vendor", "claude"])).toBe("claude");
+    expect(AppModule.nextAssignableFeatureEngine("removed", ["codex", "vendor"])).toBe("codex");
+    expect(AppModule.nextAssignableFeatureEngine("vendor", [])).toBe("vendor");
+  });
+});
+
 describe("nativeAttachTitleDisplay", () => {
   it("themes the native attach starting placeholder with the active palette", () => {
     configureTuiTheme({ theme: "paper" });
@@ -73,8 +82,9 @@ describe("nativeAttachTitleDisplay", () => {
     );
     expect(nativeAttachFailureHint(
       "error: unexpected argument '--skip-git-repo-check' found",
-      2
-    )).toContain("remove --skip-git-repo-check");
+      2,
+      "openai_compat"
+    )).toContain("workers.openai_compat.interactive.args");
     expect(nativeAttachFailureHint("Error: stdin is not a terminal", 1)).toContain(
       "reopen it with Ctrl+O"
     );

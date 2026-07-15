@@ -6,6 +6,7 @@ import { ensureDir, readTextIfExists, writeText } from "../core/file-store.js";
 import type { NativeSession } from "../domain/schemas.js";
 import { createWorkerRegistry, getAdapter, type WorkerRegistry } from "./registry.js";
 import type { DiagnosedWorkerEngine } from "./capabilities.js";
+import { workerProvider } from "./provider.js";
 import type { WorkerResult, WorkerRunSpec } from "./types.js";
 
 export interface LiveAgentProbeResult {
@@ -34,7 +35,7 @@ export async function runLiveAgentProbes(
   if (activeEngines.length === 0) {
     return {
       ok: true,
-      lines: ["agent live probe: skipped (no Codex or Claude workers active)"]
+      lines: ["agent live probe: skipped (no process Worker providers active)"]
     };
   }
 
@@ -75,7 +76,7 @@ async function probeEngine(
   timeoutOverride?: number
 ): Promise<EngineProbeResult> {
   const startedAt = Date.now();
-  const worker = config.workers[engine];
+  const worker = workerProvider(config, engine).config;
   const adapter = getAdapter(registry, engine);
   const cwd = join(runRoot, `${engine}-workspace`);
   await mkdir(cwd, { recursive: true });
@@ -158,7 +159,7 @@ interface ProbeSpecInput {
 }
 
 async function probeSpec(input: ProbeSpecInput): Promise<WorkerRunSpec> {
-  const worker = input.config.workers[input.engine];
+  const worker = workerProvider(input.config, input.engine).config;
   await mkdir(input.dir, { recursive: true });
   const promptPath = join(input.dir, "prompt.md");
   await writeText(promptPath, `${input.challenge.prompt}\n`);

@@ -194,7 +194,7 @@ function taskSessionDetailBodyLines(
 function detailWorkerText(worker: TaskSessionWorkerDetail, selected: boolean, width: number): string {
   const marker = selected ? "> " : "  ";
   const role = `${worker.role.slice(0, 1).toUpperCase()}${worker.role.slice(1)}`;
-  const engine = worker.model ? `${worker.engine}/${worker.model}` : worker.engine;
+  const engine = [worker.engine, worker.model, worker.modelProvider].filter(Boolean).join("/");
   const feature = worker.featureTitle ?? worker.featureId ?? "";
   return fitDetailCandidates([
     `${marker}${role} · ${engine} · ${feature ? `${safeDetailText(feature)} · ` : ""}${worker.state} · ${formatDetailTime(worker.lastActivityAt)}`,

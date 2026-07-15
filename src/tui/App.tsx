@@ -82,6 +82,11 @@ import {
   type NativeAttachLaunch,
   type NativeAttachProcessRef
 } from "../workers/native-attach.js";
+import {
+  assignableWorkerProviderIds,
+  workerProviderLabel,
+  workerProviders
+} from "../workers/provider.js";
 
 export interface AppProps {
   config: AppConfig;
@@ -394,23 +399,14 @@ export function App({
   const contentHeight = appContentHeight(terminalSize.rows, Boolean(attachError), config.ui.showStatusBar);
   const outputHeight = Math.max(1, contentHeight);
   const terminalWidth = terminalSize.columns;
-  const workerActivityPolicies = useMemo<WorkerActivityPolicies>(() => ({
-    codex: {
-      timeoutMs: config.workers.codex.timeoutMs,
-      idleTimeoutMs: config.workers.codex.idleTimeoutMs,
-      firstOutputTimeoutMs: config.workers.codex.firstOutputTimeoutMs
-    },
-    claude: {
-      timeoutMs: config.workers.claude.timeoutMs,
-      idleTimeoutMs: config.workers.claude.idleTimeoutMs,
-      firstOutputTimeoutMs: config.workers.claude.firstOutputTimeoutMs
-    },
-    mock: {
-      timeoutMs: config.workers.mock.timeoutMs,
-      idleTimeoutMs: config.workers.mock.idleTimeoutMs,
-      firstOutputTimeoutMs: config.workers.mock.firstOutputTimeoutMs
-    }
-  }), [config.workers.claude, config.workers.codex, config.workers.mock]);
+  const workerActivityPolicies = useMemo<WorkerActivityPolicies>(() => Object.fromEntries(
+    workerProviders(config).map(({ id, config: provider }) => [id, {
+      timeoutMs: provider.timeoutMs,
+      idleTimeoutMs: provider.idleTimeoutMs,
+      firstOutputTimeoutMs: provider.firstOutputTimeoutMs
+    }])
+  ), [config.workers]);
+  const assignableProviderIds = useMemo(() => assignableWorkerProviderIds(config), [config.workers]);
   const selectedBoardFeature = collaborationTimeline?.features[featureBoardSelectedIndex];
   const selectedTaskSessionDetailWorker = taskSessionDetails?.workers[taskSessionDetailSelectedWorkerIndex];
   const taskSessionDetailHasNative = Boolean(
@@ -419,13 +415,16 @@ export function App({
   const taskSessionDetailCanFork = Boolean(
     taskSessionDetailHasNative
     && selectedTaskSessionDetailWorker
-    && config.workers[selectedTaskSessionDetailWorker.engine].interactive.forkArgs.length > 0
+    && (config.workers[selectedTaskSessionDetailWorker.engine]?.interactive.forkArgs.length ?? 0) > 0
   );
   const featureCanCancel = busy && (
     selectedBoardFeature?.state === "actor_running"
     || selectedBoardFeature?.state === "critic_running"
   );
-  const featureCanReassign = !busy && canRetryTask && selectedBoardFeature?.state !== "approved";
+  const featureCanReassign = assignableProviderIds.length > 1
+    && !busy
+    && canRetryTask
+    && selectedBoardFeature?.state !== "approved";
   const visibleStatus = statusLineWithWorkerRefs(status, workers);
   const selectedWorkerStatus = formatSelectedWorkerStatus(visibleStatus, selectedWorkerIndex);
   const visibleWorkerStatus = view === "chat" || view === "router" || view === "sessions" || view === "features" || view === "collaboration"
@@ -1951,7 +1950,7 @@ export function App({
           if (!attachIsCurrent()) {
             return;
           }
-          const failureHint = nativeAttachFailureHint(screen.snapshot(), code);
+          const failureHint = nativeAttachFailureHint(screen.snapshot(), code, worker.engine);
           const closeOutput = [
             nativeAttachExitLine(code, screen.dimensions().cols),
             ...(failureHint ? [failureHint] : [])
@@ -2703,7 +2702,7 @@ export function App({
     const current = role === "actor"
       ? feature.actorEngine ?? config.pairing.actor
       : feature.criticEngine ?? config.pairing.critic;
-    const engine = nextAssignableFeatureEngine(current);
+    const engine = nextAssignableFeatureEngine(current, assignableProviderIds);
     try {
       await orchestrator.reassignFeature({
         taskId: prompt.taskId,
@@ -4181,8 +4180,16 @@ function compactChatTaskId(taskId: string | null): string {
   return taskId.startsWith("task-") ? taskId.slice("task-".length) : taskId;
 }
 
-export function nextAssignableFeatureEngine(current: EngineName): EngineName {
-  return current === "codex" ? "claude" : "codex";
+export function nextAssignableFeatureEngine(
+  current: EngineName,
+  providers: readonly EngineName[] = ["codex", "claude"]
+): EngineName {
+  const available = [...new Set(providers)];
+  if (available.length === 0) {
+    return current;
+  }
+  const currentIndex = available.indexOf(current);
+  return available[(currentIndex + 1 + available.length) % available.length] ?? current;
 }
 
 function sessionDetailWorkerLabel(worker: TaskSessionWorkerDetail): string {
@@ -4191,8 +4198,7 @@ function sessionDetailWorkerLabel(worker: TaskSessionWorkerDetail): string {
 }
 
 function featureEngineDisplay(config: AppConfig, engine: EngineName): string {
-  const model = config.workers[engine].model.name.trim();
-  return model ? `${engine}/${model}` : engine;
+  return workerProviderLabel(config, engine);
 }
 
 function compactChatText(text: string, maxLength: number): string {
@@ -4638,18 +4644,22 @@ export function nativeAttachExitLine(code: number, nativeTerminalCols: number): 
   return firstNativeTitleThatFits(candidates, contentWidth);
 }
 
-export function nativeAttachFailureHint(output: string, code: number): string | null {
+export function nativeAttachFailureHint(
+  output: string,
+  code: number,
+  providerId: EngineName = "codex"
+): string | null {
   if (code === 0) {
     return null;
   }
   if (/effective permissions do not allow additional writable roots|error adding directories|read-only sandbox/i.test(output)) {
-    return "fix · set workers.codex.interactive.args sandbox to workspace-write or danger-full-access, then reattach";
+    return `fix · set workers.${providerId}.interactive.args sandbox to workspace-write or danger-full-access, then reattach`;
   }
   if (/not inside a trusted directory|trusted directory/i.test(output)) {
     return "fix · open Codex once in this workspace and approve directory trust, then reattach";
   }
   if (/unexpected argument ['\"]?--skip-git-repo-check|--skip-git-repo-check.*not found/i.test(output)) {
-    return "fix · remove --skip-git-repo-check from workers.codex.interactive.args, then reattach";
+    return `fix · remove --skip-git-repo-check from workers.${providerId}.interactive.args, then reattach`;
   }
   if (/stdin is not a terminal/i.test(output)) {
     return "fix · native attach requires its embedded PTY; reopen it with Ctrl+O instead of piping codex resume";

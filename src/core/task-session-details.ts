@@ -30,6 +30,7 @@ export interface TaskSessionWorkerDetail {
   role: WorkerRole;
   engine: EngineName;
   model: string;
+  modelProvider?: string;
   state: WorkerState;
   phase: string;
   summary: string;
@@ -152,7 +153,8 @@ async function readTaskWorkers(
           ...(status.feature_title ? { featureTitle: status.feature_title } : {}),
           role: status.role,
           engine: status.engine,
-          model: modelNames[status.engine]?.trim() ?? "",
+          model: status.model_name?.trim() || modelNames[status.engine]?.trim() || "",
+          ...(status.model_provider?.trim() ? { modelProvider: status.model_provider.trim() } : {}),
           state: status.state,
           phase: status.phase,
           summary: status.summary,

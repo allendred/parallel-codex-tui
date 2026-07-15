@@ -890,7 +890,7 @@ describe("InputBar", () => {
         onChange={() => {}}
       />
     );
-    expect(retry.lastFrame()).toContain("M model");
+    expect(retry.lastFrame()).toContain("M provider");
     expect(retry.lastFrame()).toContain("^R retry task");
     retry.unmount();
 
@@ -903,7 +903,7 @@ describe("InputBar", () => {
         onChange={() => {}}
       />
     );
-    expect(assignment.lastFrame()).toContain("assign model · A Actor · C Critic · M/Esc done");
+    expect(assignment.lastFrame()).toContain("assign provider · A Actor · C Critic · M/Esc done");
     assignment.unmount();
 
     const overflow: string[] = [];

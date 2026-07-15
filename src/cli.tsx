@@ -122,11 +122,9 @@ async function main(): Promise<void> {
         loadTaskSessionDetails={(task) => loadPersistedTaskSessionDetails({
           task,
           taskDir: state.runtime.sessions.taskFromId(task.id).dir,
-          modelNames: {
-            codex: state.runtime.config.workers.codex.model.name,
-            claude: state.runtime.config.workers.claude.model.name,
-            mock: state.runtime.config.workers.mock.model.name
-          }
+          modelNames: Object.fromEntries(Object.entries(state.runtime.config.workers).map(
+            ([id, worker]) => [id, worker.model.name]
+          ))
         })}
         renameTaskSession={async (taskId, title) => {
           await state.runtime.sessions.renameTask(taskId, title);

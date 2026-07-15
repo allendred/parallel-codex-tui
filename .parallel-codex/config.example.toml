@@ -111,6 +111,47 @@ profile = "generic"
 writableDirArgs = []
 freshSessionArgs = []
 
+# Add any number of named Worker providers. IDs use lowercase letters, digits, or _.
+# A profile can inherit the Codex/Claude command protocol and override only role-specific values.
+# [workers.openai_compat]
+# extends = "codex"
+# command = "openai-compatible-coder"
+# assignable = true
+#
+# [workers.openai_compat.model]
+# name = "third-party-model"
+# provider = "openai-compatible"
+# args = ["--model", "{model}", "--provider", "{provider}"]
+#
+# [workers.openai_compat.model.env]
+# OPENAI_API_KEY = "{env:OPENAI_COMPAT_API_KEY}"
+# OPENAI_BASE_URL = "{env:OPENAI_COMPAT_BASE_URL}"
+#
+# [workers.openai_compat.interactive]
+# command = "openai-compatible-coder"
+#
+# [workers.anthropic_compat]
+# extends = "claude"
+# command = "anthropic-compatible-coder"
+#
+# [workers.anthropic_compat.model]
+# name = "third-party-claude-model"
+# provider = "anthropic-compatible"
+#
+# [workers.anthropic_compat.model.env]
+# ANTHROPIC_API_KEY = "{env:ANTHROPIC_COMPAT_API_KEY}"
+# ANTHROPIC_BASE_URL = "{env:ANTHROPIC_COMPAT_BASE_URL}"
+#
+# [workers.anthropic_compat.interactive]
+# command = "anthropic-compatible-coder"
+
+# A custom CLI starts from conservative generic defaults: isolated cwd, no injected
+# vendor flags, and native resume disabled until explicitly configured.
+# [workers.vendor]
+# extends = "generic"
+# command = "vendor-coder"
+# args = ["run", "--stdin"]
+
 [pairing]
 main = "claude"
 judge = "codex"

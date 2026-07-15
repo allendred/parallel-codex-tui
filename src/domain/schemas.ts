@@ -1,7 +1,11 @@
 import { z } from "zod";
 
 export const RouteModeSchema = z.enum(["simple", "complex"]);
-export const EngineNameSchema = z.enum(["codex", "claude", "mock"]);
+export const EngineNameSchema = z
+  .string()
+  .min(1)
+  .max(48)
+  .regex(/^[a-z][a-z0-9_]*$/, "Worker id must start with a lowercase letter and contain only lowercase letters, digits or _");
 export const WorkerRoleSchema = z.enum(["main", "judge", "actor", "critic"]);
 export const RouterFailureStageSchema = z.enum([
   "spawn",
@@ -151,6 +155,8 @@ export const WorkerStatusSchema = z.object({
   feature_title: z.string().min(1).optional(),
   role: WorkerRoleSchema,
   engine: EngineNameSchema,
+  model_name: z.string().optional(),
+  model_provider: z.string().optional(),
   state: WorkerStateSchema,
   phase: z.string().min(1),
   last_event_at: z.string().datetime(),

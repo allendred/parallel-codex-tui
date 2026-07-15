@@ -1812,6 +1812,10 @@ describe("ProcessWorkerAdapter", () => {
     expect(result.exitCode).toBe(0);
     const output = await readTextIfExists(outputLogPath);
     expect(output).toContain("resume|abc123|--model|claude-sonnet-4-6|--provider|anthropic-gateway");
+    expect(await readJson(statusPath, WorkerStatusSchema)).toMatchObject({
+      model_name: "claude-sonnet-4-6",
+      model_provider: "anthropic-gateway"
+    });
   });
 });
 

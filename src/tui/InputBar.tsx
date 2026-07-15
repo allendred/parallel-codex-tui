@@ -725,11 +725,11 @@ function featureBoardInputHints(
 ): { label: string; detail: string } {
   if (options.assignment) {
     return selectInputHints(width, [
-      { label: "assign model", detail: " · A Actor · C Critic · M/Esc done" },
+      { label: "assign provider", detail: " · A Actor · C Critic · M/Esc done" },
       { label: "assign", detail: " · A Actor · C Critic · Esc done" },
       { label: "assign", detail: " · A actor · C critic" },
-      { label: "model", detail: " · A · C · Esc" },
-      { label: "model", detail: "" },
+      { label: "provider", detail: " · A · C · Esc" },
+      { label: "provider", detail: "" },
       { label: "M", detail: "" }
     ]);
   }
@@ -775,9 +775,9 @@ function featureBoardInputHints(
   }
   if (options.canRetry) {
     return selectInputHints(width, [
-      { label: "features", detail: ` · Up/Dn select · Enter timeline · ${options.canReassign ? "M model · " : ""}^R retry task · R refresh · Esc workers` },
-      { label: "features", detail: ` · Up/Dn select · ${options.canReassign ? "M model · " : ""}^R retry task · R refresh · Esc workers` },
-      { label: "features", detail: ` · Up/Dn select · ${options.canReassign ? "M model · " : ""}^R retry · Esc workers` },
+      { label: "features", detail: ` · Up/Dn select · Enter timeline · ${options.canReassign ? "M provider · " : ""}^R retry task · R refresh · Esc workers` },
+      { label: "features", detail: ` · Up/Dn select · ${options.canReassign ? "M provider · " : ""}^R retry task · R refresh · Esc workers` },
+      { label: "features", detail: ` · Up/Dn select · ${options.canReassign ? "M provider · " : ""}^R retry · Esc workers` },
       { label: "features", detail: " · ^R retry · Esc workers" },
       { label: "features", detail: " · Esc workers" },
       { label: "features", detail: "" },

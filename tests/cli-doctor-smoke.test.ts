@@ -123,17 +123,27 @@ describe("CLI doctor", () => {
       "[router]",
       'defaultMode = "complex"',
       "",
-      "[workers.codex]",
+      "[workers.vendor]",
+      'extends = "generic"',
       'command = "vendor-coder"',
       "",
-      "[workers.codex.capabilities]",
+      "[workers.vendor.capabilities]",
       'profile = "generic"',
       'writableDirArgs = ["--allow-root", "{dir}"]',
       'freshSessionArgs = ["--new-session", "{sessionId}"]',
       "",
-      "[workers.codex.interactive]",
+      "[workers.vendor.nativeSession]",
+      "enabled = true",
+      'resumeArgs = ["resume", "{sessionId}"]',
+      "",
+      "[workers.vendor.interactive]",
       'command = "vendor-coder"',
-      'args = ["resume", "{sessionId}"]'
+      'args = ["resume", "{sessionId}"]',
+      "",
+      "[pairing]",
+      'judge = "vendor"',
+      'actor = "vendor"',
+      'critic = "vendor"'
     ].join("\n"));
 
     const result = await runCli(["--app-root", appRoot, "--doctor"], {
@@ -144,7 +154,7 @@ describe("CLI doctor", () => {
     expect(result.stderr).toBe("");
     expect(result.stdout).toContain("vendor-coder: ok");
     expect(result.stdout).toContain(
-      "codex capabilities (vendor-coder): declared (generic CLI, writable dirs via template, client-assigned fresh session, native resume configured)"
+      "vendor capabilities (vendor-coder): declared (generic CLI, writable dirs via template, client-assigned fresh session, native resume configured)"
     );
     expect(result.stdout).not.toContain("compatibility unverified");
   });

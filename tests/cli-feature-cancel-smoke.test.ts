@@ -186,7 +186,7 @@ describe("CLI Feature control smoke", () => {
       expect(await pathExists(join(workspace, "beta.txt"))).toBe(false);
 
       child.write("m");
-      await waitForScreenText(() => screenWrites, screen, "assign model · A Actor · C Critic");
+      await waitForScreenText(() => screenWrites, screen, "assign provider · A Actor · C Critic");
       child.write("c");
       await waitForScreenText(() => screenWrites, screen, "Critic reassigned to claude");
       await waitForFileText(join(taskDir, "features", "0001-alpha", "assignment.json"), '"critic_engine": "claude"');
@@ -197,7 +197,7 @@ describe("CLI Feature control smoke", () => {
         () => outputRevision,
         assignmentRevision,
         screen,
-        "M model · ^R retry task"
+        "M provider · ^R retry task"
       );
       child.write("\x12");
       await waitForTaskState(join(taskDir, "meta.json"), "done", 30_000);

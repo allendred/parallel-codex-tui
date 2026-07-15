@@ -24,6 +24,8 @@ describe("task session details", () => {
       feature_title: "Input reliability",
       role: "actor",
       engine: "codex",
+      model_name: "persisted-model",
+      model_provider: "openai-compatible",
       state: "done",
       phase: "completed",
       last_event_at: "2026-07-15T01:02:00.000Z",
@@ -63,7 +65,8 @@ describe("task session details", () => {
         turnId: "0001",
         role: "actor",
         engine: "codex",
-        model: "gpt-5.4",
+        model: "persisted-model",
+        modelProvider: "openai-compatible",
         lastActivityAt: "2026-07-15T01:03:00.000Z",
         nativeSession: expect.objectContaining({
           sessionId: "019f-session",

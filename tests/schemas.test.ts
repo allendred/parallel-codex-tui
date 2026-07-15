@@ -44,6 +44,20 @@ describe("domain schemas", () => {
     expect(result.suggested_roles).toEqual(["judge", "actor", "critic"]);
   });
 
+  it("accepts safe named Worker providers and rejects path-like ids", () => {
+    expect(RouteDecisionSchema.parse({
+      mode: "complex",
+      reason: "Use configured providers",
+      actor_engine: "openai_compat",
+      critic_engine: "anthropic_gateway"
+    }).actor_engine).toBe("openai_compat");
+    expect(RouteDecisionSchema.safeParse({
+      mode: "complex",
+      reason: "unsafe",
+      actor_engine: "../../outside"
+    }).success).toBe(false);
+  });
+
   it("validates task metadata", () => {
     const result = TaskMetaSchema.parse({
       id: "task-20260630-033000-a1b2",

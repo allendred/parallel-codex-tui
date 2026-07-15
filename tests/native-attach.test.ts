@@ -459,6 +459,58 @@ describe("buildNativeAttachLaunch", () => {
     });
   });
 
+  it("recovers a Codex-compatible provider session under the configured provider id", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pct-native-attach-provider-log-"));
+    const workspace = join(root, "workspace");
+    const taskDir = join(workspace, ".parallel-codex", "sessions", "task-a");
+    const workerDir = join(taskDir, "actor-openai_compat");
+    const sessionId = "019f1b9b-768b-7753-9c3b-33b17f25bc6c";
+    const config = defaultConfig(root);
+    config.workers.openai_compat = {
+      ...structuredClone(config.workers.codex),
+      command: "vendor-codex",
+      interactive: {
+        ...config.workers.codex.interactive,
+        command: "vendor-codex"
+      }
+    };
+
+    await writeJson(join(taskDir, "meta.json"), {
+      id: "task-a",
+      title: "Task A",
+      created_at: "2026-06-30T03:30:00.000Z",
+      cwd: workspace,
+      mode: "complex",
+      status: "done"
+    });
+    await writeText(join(workerDir, "output.log"), `Done. To continue, run: codex resume ${sessionId}\n`);
+
+    const launch = await buildNativeAttachLaunch({
+      config,
+      worker: {
+        id: "actor-openai_compat",
+        role: "actor",
+        engine: "openai_compat",
+        label: "Actor (openai_compat)",
+        logPath: join(workerDir, "output.log"),
+        statusPath: join(workerDir, "status.json")
+      }
+    });
+
+    expect(launch).toMatchObject({
+      command: "vendor-codex",
+      args: ["resume", sessionId],
+      sessionId
+    });
+    const record = await readJson(join(workerDir, "native-session.json"), NativeSessionSchema);
+    expect(record).toMatchObject({
+      engine: "openai_compat",
+      worker_id: "actor-openai_compat",
+      session_id: sessionId,
+      source: "output-detected"
+    });
+  });
+
   it("treats corrupt native session files as missing when attaching", async () => {
     const root = await mkdtemp(join(tmpdir(), "pct-native-attach-corrupt-"));
     const workerDir = join(root, "task-a", "actor-codex");

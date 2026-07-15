@@ -39,7 +39,7 @@ Startup resolves the worker project before routing:
 - Without `--workspace`, an interactive terminal shows remembered projects from `.parallel-codex/workspaces.json`; use Up/Down and Enter, a displayed number, or `N` to enter a new folder path. The picker clears before the main chat opens.
 - In non-interactive startup, the CLI reuses the last remembered workspace, falls back to the current directory if none was saved, and creates an explicit `--workspace` path if needed.
 - The selected workspace is prepared before any router or worker process starts.
-- Every interactive open and in-place workspace switch runs a quota-free startup preflight before the TUI accepts work. It checks workspace read/write/search access, every CLI required by the active route and role configuration, referenced model environment variables, Codex/Claude or declared generic CLI capabilities, configured proxy endpoint reachability, and native workspace trust policy. Healthy checks stay quiet; warnings and failures appear in chat with the `parallel-codex-tui --doctor` action. Live model requests remain opt-in through `--probe-agents` and `--probe-router`.
+- Every interactive open and in-place workspace switch runs a quota-free startup preflight before the TUI accepts work. It checks workspace read/write/search access, every CLI required by the active route and role configuration, referenced model environment variables, each named Worker's Codex, Claude, or declared generic CLI capabilities, configured proxy endpoint reachability, and native workspace trust policy. Healthy checks stay quiet; warnings and failures appear in chat with the `parallel-codex-tui --doctor` action. Live model requests remain opt-in through `--probe-agents` and `--probe-router`.
 - While the TUI is idle, press `Ctrl+P` to open the same project picker without exiting. `Esc` returns with the unsent draft intact; selecting or creating a folder locks duplicate picker input, shows the project being opened, rebuilds the runtime in place, and restores that workspace's latest task, route, workers, and chat. A failed open returns to the original view without replacing its runtime or draft.
 - Workspace chat, task files, and `session-index.sqlite` stay isolated under each project. Router configuration and `router/routes.jsonl` remain shared under the app root, so classifications across projects use one global Router audit.
 
@@ -69,7 +69,7 @@ parallel-codex-tui --doctor --probe-router
 parallel-codex-tui --version
 ```
 
-`--doctor` checks configured automated and interactive commands, `{env:NAME}` references, and the CLI help surfaces required for Codex exec/resume sandboxing and Claude print/resume permissions before workers start. Recognized standard CLI help that lacks a required option fails the check; an opaque wrapper keeps the compatible built-in profile's unverified warning, while an explicit `generic` capability contract is validated without guessing vendor-specific help. Doctor also rejects an explicitly read-only Codex interactive sandbox because feature attach requires its recorded writable roots, and reminds you that native workspace trust remains an interactive decision. It reports proxy host/port reachability as a local-endpoint check, not as proof that the proxy upstream or model API is healthy. Add `--probe-agents` to make one minimal fresh request and one same-session resume request through every configured Codex or Claude worker engine. This explicit probe uses model quota, removes successful probe artifacts, preserves failed artifacts under `.parallel-codex/probes/`, and exits non-zero when a fresh or resumed request cannot be proven. Fresh sessions use the configured `freshSessionArgs`; Claude defaults to a generated native `--session-id`, persisted only after the process emits output, so a silent failed launch cannot create a false resumable session. Add `--probe-router` to run one real classification through the configured Codex Router; the command exits non-zero when that live request falls back or fails. Doctor also reports the loaded TUI theme, core palette values, ANSI swatch previews, and color override values, including any temporary `--theme` override.
+`--doctor` checks configured automated and interactive commands, `{env:NAME}` references, and the CLI help surfaces required for Codex exec/resume sandboxing and Claude print/resume permissions before workers start. Recognized standard CLI help that lacks a required option fails the check; an opaque wrapper keeps the compatible built-in profile's unverified warning, while an explicit `generic` capability contract is validated without guessing vendor-specific help. Doctor performs these checks for every named Worker Provider used by the active route, rejects an explicitly read-only Codex-compatible interactive sandbox when feature attach needs writable roots, and reminds you that native workspace trust remains an interactive decision. It reports proxy host/port reachability as a local-endpoint check, not as proof that the proxy upstream or model API is healthy. Add `--probe-agents` to make one minimal fresh request and, when configured, one same-session resume request through every active process Worker Provider. This explicit probe uses model quota, removes successful probe artifacts, preserves failed artifacts under `.parallel-codex/probes/`, and exits non-zero when a fresh or resumed request cannot be proven. Fresh sessions use the configured `freshSessionArgs`; Claude-compatible profiles default to a generated native `--session-id`, persisted only after the process emits output, so a silent failed launch cannot create a false resumable session. Add `--probe-router` to run one real classification through the configured Codex Router; the command exits non-zero when that live request falls back or fails. Doctor also reports the loaded TUI theme, core palette values, ANSI swatch previews, and color override values, including any temporary `--theme` override.
 
 ## Quick Start
 
@@ -266,7 +266,7 @@ ALL_PROXY = "socks5h://127.0.0.1:7890"
 NO_PROXY = "localhost,127.0.0.1"
 ```
 
-`router.codex.env` applies only to semantic classification. `workers.codex.model.env` applies to fresh/resumed Codex workers and embedded native attach sessions. Keep these values in local `config.toml`, which is ignored by Git.
+`router.codex.env` applies only to semantic classification. `workers.<id>.model.env` applies to fresh/resumed runs and embedded native attach for that named Worker Provider. Keep these values in local `config.toml`, which is ignored by Git.
 
 Run `parallel-codex-tui --doctor` after changing proxy settings. Doctor checks referenced environment variables, reports when a macOS system proxy is not inherited by Codex subprocesses, and labels configured proxy host/port checks as local-endpoint reachability without printing credentials. Then run `parallel-codex-tui --doctor --probe-router` when you also need to verify the real Codex Router path through that proxy; this explicit probe can take up to `router.codex.timeoutMs`. A timed-out request is identified as `first output timeout`, `idle timeout after stdout/stderr`, or `total timeout`; `via <proxy-host:port>` remains context, not a claim that the proxy caused the failure. The audit never exposes the proxy URL or credentials.
 
@@ -325,28 +325,76 @@ forkArgs = ["--resume", "{sessionId}", "--fork-session"]
 
 `model.args` and `model.env` apply to both automated worker runs and embedded native attach sessions. Native attach appends the rendered model arguments after `interactive.args`, so third-party `{model}` and `{provider}` selections remain active when you press `Ctrl+O`.
 
-`model.provider` names the remote model service; `capabilities.profile` describes the local CLI protocol. Keep the built-in `codex` or `claude` profile when a wrapper accepts that CLI's normal flags. For a third-party command with its own syntax, declare `generic` so parallel-codex-tui does not inject `--sandbox`, `--permission-mode`, or other built-in-only flags:
+`model.provider` names the remote model service; `capabilities.profile` describes the local CLI protocol. Worker Provider IDs are lowercase names using letters, digits, or `_`; excluding `-` keeps generated Worker directory names unambiguous. Existing `codex`, `claude`, and `mock` IDs remain compatible, while additional profiles can inherit `codex`, `claude`, another named profile, or conservative `generic` defaults.
+
+Each role can select an independent command, model, environment, and permission contract through `[pairing]`. This example uses an OpenAI-compatible coding CLI for Judge/Actor and an Anthropic-compatible coding CLI for Main/Critic:
 
 ```toml
-[workers.codex]
+[workers.openai_compat]
+extends = "codex"
+command = "openai-compatible-coder"
+args = ["exec", "--sandbox", "workspace-write", "-"]
+
+[workers.openai_compat.model]
+name = "third-party-code-model"
+provider = "openai-compatible"
+args = ["--model", "{model}", "--provider", "{provider}"]
+
+[workers.openai_compat.model.env]
+OPENAI_API_KEY = "{env:OPENAI_COMPAT_API_KEY}"
+OPENAI_BASE_URL = "{env:OPENAI_COMPAT_BASE_URL}"
+
+[workers.openai_compat.interactive]
+command = "openai-compatible-coder"
+
+[workers.anthropic_compat]
+extends = "claude"
+command = "anthropic-compatible-coder"
+
+[workers.anthropic_compat.model]
+name = "third-party-claude-model"
+provider = "anthropic-compatible"
+
+[workers.anthropic_compat.model.env]
+ANTHROPIC_API_KEY = "{env:ANTHROPIC_COMPAT_API_KEY}"
+ANTHROPIC_BASE_URL = "{env:ANTHROPIC_COMPAT_BASE_URL}"
+
+[workers.anthropic_compat.interactive]
+command = "anthropic-compatible-coder"
+
+[pairing]
+main = "anthropic_compat"
+judge = "openai_compat"
+actor = "openai_compat"
+critic = "anthropic_compat"
+```
+
+`extends` inherits the complete command protocol, including capabilities, native-session behavior, watchdogs, and interactive arguments. Override both `command` and `interactive.command` when a wrapper replaces both executables. `assignable = true` exposes a profile to Feature-level Provider cycling; custom profiles default to true, while the reserved deterministic `mock` profile defaults to false. Pairing an unknown profile, unsafe profile IDs, and inheritance cycles fail config validation before startup.
+
+For a third-party command with its own syntax, inherit `generic` so parallel-codex-tui does not inject `--sandbox`, `--permission-mode`, or other built-in-only flags:
+
+```toml
+[workers.vendor]
+extends = "generic"
 command = "vendor-coder"
 args = ["run", "--stdin"]
 
-[workers.codex.capabilities]
+[workers.vendor.capabilities]
 profile = "generic"
 writableDirArgs = ["--allow-root", "{dir}"]
 freshSessionArgs = ["--new-session", "{sessionId}"]
 
-[workers.codex.nativeSession]
+[workers.vendor.nativeSession]
+enabled = true
 resumeArgs = ["run", "--resume", "{sessionId}", "--stdin"]
 
-[workers.codex.interactive]
+[workers.vendor.interactive]
 command = "vendor-coder"
 args = ["resume", "{sessionId}"]
 forkArgs = ["branch", "{sessionId}"]
 ```
 
-Set either capability argument list to `[]` when the wrapper needs no extra argument. A non-empty `writableDirArgs` must include `{dir}`, while non-empty `freshSessionArgs` and `interactive.forkArgs` must include `{sessionId}`. Set `forkArgs = []` when a generic CLI cannot fork a native conversation. Doctor validates the declared capability contract without guessing the wrapper's `--help` format; `--doctor --probe-agents` remains the end-to-end fresh/resume check.
+Generic profiles start with native resume disabled, no vendor flags, and the isolated Worker cwd. Set either capability argument list to `[]` when the wrapper needs no extra argument. A non-empty `writableDirArgs` must include `{dir}`, while non-empty `freshSessionArgs` and `interactive.forkArgs` must include `{sessionId}`. Set `forkArgs = []` when a generic CLI cannot fork a native conversation. Doctor validates the declared capability contract without guessing the wrapper's `--help` format; `--doctor --probe-agents` remains the end-to-end fresh/resume check. Every new Worker status records the actual profile ID plus its rendered model/provider snapshot, so later config changes do not relabel historical runs.
 
 Customize each role independently; the main role is applied to simple chat, while Judge, Actor, and Critic receive their configured instructions during complex work:
 
@@ -370,7 +418,7 @@ In chat, scroll long conversation history with the mouse wheel or PageUp/PageDow
 
 From Worker overview, press `F` to open the file-backed Feature board. It summarizes every planned feature by turn, state, blocked dependencies and open Critic findings while preserving descriptions and Actor replies from the same collaboration files. Use Up/Down, PageUp/PageDown, the mouse wheel, or `Tab` to select a feature; Enter opens the selected feature's collaboration timeline; `R` refreshes immediately; and `Esc` returns to Worker overview. When a timeline was opened from this board, `Esc` returns to the Feature board instead of skipping back to Workers. While the selected feature is running, press `P` twice to pause only its active Actor or Critic process, or press `X` twice to cancel it; the first press opens a confirmation and `Esc` keeps it running. A paused feature preserves completed peers and same-wave checkpoints; select it and press `Ctrl+R` to resume the same task, turn, and native Worker session. After cancellation, already-running peers finish, queued workers stop, and integration remains blocked, so a partial wave never reaches the live workspace. Once the task settles as cancelled, `Ctrl+R` retries the cancelled task with persisted worker sessions; completed peers are loaded from their same-wave checkpoints instead of running again. Checkpoint load, reuse, and recovery events appear in the collaboration timeline.
 
-For a failed, cancelled, or paused task, select an unfinished Feature and press `M` to edit its role assignment. `A` switches that Feature's Actor between the configured Codex and Claude engines, `C` switches its Critic, and `M` or `Esc` closes the assignment prompt. The choice is persisted in `features/<turn>-<feature>/assignment.json`, appears on the Feature board and collaboration artifacts, and takes effect on the next `Ctrl+R` retry. A changed role starts a new engine-specific Worker while every previous Worker log and native-session record remains available. Assignment writes hold the same task lease as execution, so another live TUI cannot change a Feature while it is resuming.
+For a failed, cancelled, or paused task, select an unfinished Feature and press `M` to edit its Provider assignment. `A` cycles that Feature's Actor through every `assignable` Worker Provider, `C` cycles its Critic, and `M` or `Esc` closes the assignment prompt. The choice is persisted in `features/<turn>-<feature>/assignment.json`, appears on the Feature board and collaboration artifacts, and takes effect on the next `Ctrl+R` retry. A changed role starts a new Provider-specific Worker while every previous Worker log and native-session record remains available. Assignment writes hold the same task lease as execution, so another live TUI cannot change a Feature while it is resuming.
 
 From Worker overview, press `C` to open the file-backed Actor/Critic collaboration timeline. It merges `dialogue/actor-critic.jsonl`, feature status, Critic findings, Actor replies, finding resolution, and Wave events into one chronological view. The timeline follows new file evidence automatically and shows verified `fixed`/`open` counts when resolution evidence exists. Up/Down selects a collaboration event; `Enter` opens its complete event detail, including artifact paths from dialogue, status, Critic findings, Actor replies, and finding resolution; `U` filters to unresolved feature evidence; `Tab` cycles all features and each individual feature; `R` refreshes immediately; the mouse wheel or PageUp/PageDown scrolls history; and `Esc` returns to Worker overview.
 

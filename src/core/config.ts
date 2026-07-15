@@ -2,6 +2,7 @@ import { parse } from "@iarna/toml";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { z, type ZodOptional } from "zod";
+import { EngineNameSchema } from "../domain/schemas.js";
 import { pathExists, readTextIfExists, writeText } from "./file-store.js";
 import {
   normalizeTuiThemeColorValue,
@@ -122,6 +123,7 @@ const UiConfigSchema = z.object({
 const WorkerCommandSchema = z.object({
   command: z.string().min(1),
   args: z.array(z.string()).default([]),
+  assignable: z.boolean().default(true),
   timeoutMs: z.number().int().positive().optional(),
   idleTimeoutMs: z.number().int().positive().optional(),
   firstOutputTimeoutMs: z.number().int().positive().optional(),
@@ -143,12 +145,12 @@ const AppConfigSchema = z.object({
     codex: WorkerCommandSchema,
     claude: WorkerCommandSchema,
     mock: WorkerCommandSchema
-  }),
+  }).catchall(WorkerCommandSchema),
   pairing: z.object({
-    main: z.enum(["codex", "claude", "mock"]),
-    judge: z.enum(["codex", "claude", "mock"]),
-    actor: z.enum(["codex", "claude", "mock"]),
-    critic: z.enum(["codex", "claude", "mock"])
+    main: EngineNameSchema,
+    judge: EngineNameSchema,
+    actor: EngineNameSchema,
+    critic: EngineNameSchema
   }),
   roles: z.object({
     main: RolePromptConfigSchema,
@@ -157,9 +159,49 @@ const AppConfigSchema = z.object({
     critic: RolePromptConfigSchema
   }),
   ui: UiConfigSchema
+}).superRefine((config, context) => {
+  for (const [role, workerId] of Object.entries(config.pairing)) {
+    if (!config.workers[workerId]) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["pairing", role],
+        message: `Unknown Worker profile: ${workerId}`
+      });
+    }
+  }
 });
 
 export type AppConfig = z.infer<typeof AppConfigSchema>;
+type WorkerCommandConfig = z.infer<typeof WorkerCommandSchema>;
+
+type ParsedWorkerConfig = Partial<Omit<
+  WorkerCommandConfig,
+  "model" | "capabilities" | "nativeSession" | "interactive"
+>> & {
+  extends?: string;
+  model?: Partial<WorkerCommandConfig["model"]> & { env?: Record<string, string> };
+  capabilities?: Partial<WorkerCommandConfig["capabilities"]>;
+  nativeSession?: Partial<WorkerCommandConfig["nativeSession"]>;
+  interactive?: Partial<WorkerCommandConfig["interactive"]>;
+};
+
+type ParsedAppConfig = {
+  projectRoot?: string;
+  dataDir?: string;
+  router?: Partial<AppConfig["router"]> & {
+    codex?: Partial<AppConfig["router"]["codex"]> & { env?: Record<string, string> };
+  };
+  orchestration?: Partial<AppConfig["orchestration"]>;
+  workers?: Record<string, ParsedWorkerConfig>;
+  pairing?: Partial<AppConfig["pairing"]>;
+  roles?: {
+    main?: Partial<AppConfig["roles"]["main"]>;
+    judge?: Partial<AppConfig["roles"]["judge"]>;
+    actor?: Partial<AppConfig["roles"]["actor"]>;
+    critic?: Partial<AppConfig["roles"]["critic"]>;
+  };
+  ui?: Partial<AppConfig["ui"]> & { colors?: Partial<AppConfig["ui"]["colors"]> };
+};
 
 export function defaultConfig(projectRoot: string): AppConfig {
   return {
@@ -201,6 +243,7 @@ export function defaultConfig(projectRoot: string): AppConfig {
       codex: {
         command: "codex",
         args: ["exec", "--skip-git-repo-check", "--sandbox", "workspace-write", "--color", "never", "-"],
+        assignable: true,
         timeoutMs: 45 * 60 * 1000,
         idleTimeoutMs: 5 * 60 * 1000,
         firstOutputTimeoutMs: 2 * 60 * 1000,
@@ -230,6 +273,7 @@ export function defaultConfig(projectRoot: string): AppConfig {
       claude: {
         command: "claude",
         args: ["--print", "--permission-mode", "acceptEdits", "--output-format", "text"],
+        assignable: true,
         timeoutMs: 45 * 60 * 1000,
         idleTimeoutMs: 5 * 60 * 1000,
         firstOutputTimeoutMs: 2 * 60 * 1000,
@@ -259,6 +303,7 @@ export function defaultConfig(projectRoot: string): AppConfig {
       mock: {
         command: "mock",
         args: [],
+        assignable: false,
         model: {
           name: "",
           provider: "",
@@ -328,7 +373,7 @@ export async function loadConfig(projectRoot: string): Promise<AppConfig> {
     return base;
   }
 
-  const parsed = parse(await readTextIfExists(file)) as Partial<AppConfig>;
+  const parsed = parse(await readTextIfExists(file)) as ParsedAppConfig;
   assertObjectSections(parsed);
   const merged = {
     ...base,
@@ -350,80 +395,7 @@ export async function loadConfig(projectRoot: string): Promise<AppConfig> {
       ...base.orchestration,
       ...(parsed.orchestration ?? {})
     },
-    workers: {
-      codex: {
-        ...base.workers.codex,
-        ...(parsed.workers?.codex ?? {}),
-        model: {
-          ...base.workers.codex.model,
-          ...(parsed.workers?.codex?.model ?? {}),
-          env: {
-            ...base.workers.codex.model.env,
-            ...(parsed.workers?.codex?.model?.env ?? {})
-          }
-        },
-        capabilities: {
-          ...base.workers.codex.capabilities,
-          ...(parsed.workers?.codex?.capabilities ?? {})
-        },
-        nativeSession: {
-          ...base.workers.codex.nativeSession,
-          ...(parsed.workers?.codex?.nativeSession ?? {})
-        },
-        interactive: {
-          ...base.workers.codex.interactive,
-          ...(parsed.workers?.codex?.interactive ?? {})
-        }
-      },
-      claude: {
-        ...base.workers.claude,
-        ...(parsed.workers?.claude ?? {}),
-        model: {
-          ...base.workers.claude.model,
-          ...(parsed.workers?.claude?.model ?? {}),
-          env: {
-            ...base.workers.claude.model.env,
-            ...(parsed.workers?.claude?.model?.env ?? {})
-          }
-        },
-        capabilities: {
-          ...base.workers.claude.capabilities,
-          ...(parsed.workers?.claude?.capabilities ?? {})
-        },
-        nativeSession: {
-          ...base.workers.claude.nativeSession,
-          ...(parsed.workers?.claude?.nativeSession ?? {})
-        },
-        interactive: {
-          ...base.workers.claude.interactive,
-          ...(parsed.workers?.claude?.interactive ?? {})
-        }
-      },
-      mock: {
-        ...base.workers.mock,
-        ...(parsed.workers?.mock ?? {}),
-        model: {
-          ...base.workers.mock.model,
-          ...(parsed.workers?.mock?.model ?? {}),
-          env: {
-            ...base.workers.mock.model.env,
-            ...(parsed.workers?.mock?.model?.env ?? {})
-          }
-        },
-        capabilities: {
-          ...base.workers.mock.capabilities,
-          ...(parsed.workers?.mock?.capabilities ?? {})
-        },
-        nativeSession: {
-          ...base.workers.mock.nativeSession,
-          ...(parsed.workers?.mock?.nativeSession ?? {})
-        },
-        interactive: {
-          ...base.workers.mock.interactive,
-          ...(parsed.workers?.mock?.interactive ?? {})
-        }
-      }
-    },
+    workers: resolveWorkerConfigs(base.workers, parsed.workers ?? {}),
     pairing: {
       ...base.pairing,
       ...(parsed.pairing ?? {})
@@ -459,6 +431,122 @@ export async function loadConfig(projectRoot: string): Promise<AppConfig> {
   return AppConfigSchema.parse(merged);
 }
 
+function resolveWorkerConfigs(
+  builtins: AppConfig["workers"],
+  configured: Record<string, ParsedWorkerConfig>
+): AppConfig["workers"] {
+  const resolved = new Map<string, WorkerCommandConfig>();
+  const resolving = new Set<string>();
+  const ids = [...new Set([...Object.keys(builtins), ...Object.keys(configured)])];
+
+  const resolve = (id: string): WorkerCommandConfig => {
+    const cached = resolved.get(id);
+    if (cached) {
+      return cached;
+    }
+    if (!EngineNameSchema.safeParse(id).success) {
+      throw new Error(`Invalid Worker profile id: ${id}`);
+    }
+    if (resolving.has(id)) {
+      throw new Error(`Circular Worker profile inheritance: ${[...resolving, id].join(" -> ")}`);
+    }
+    resolving.add(id);
+    try {
+      const override = configured[id] ?? {};
+      const builtin = builtins[id];
+      if (builtin && override.extends) {
+        throw new Error(`Built-in Worker profile ${id} cannot declare extends`);
+      }
+      let parent = builtin;
+      if (!parent) {
+        const parentId = override.extends?.trim();
+        if (!parentId || parentId === "generic") {
+          parent = genericWorkerConfig(id, override.command);
+        } else {
+          if (!builtins[parentId] && !configured[parentId]) {
+            throw new Error(`Unknown Worker profile inherited by ${id}: ${parentId}`);
+          }
+          parent = resolve(parentId);
+        }
+      }
+      const worker = mergeWorkerConfig(parent, override);
+      resolved.set(id, worker);
+      return worker;
+    } finally {
+      resolving.delete(id);
+    }
+  };
+
+  for (const id of ids) {
+    resolve(id);
+  }
+  return Object.fromEntries(resolved) as AppConfig["workers"];
+}
+
+function genericWorkerConfig(id: string, command = id): WorkerCommandConfig {
+  return {
+    command,
+    args: [],
+    assignable: true,
+    timeoutMs: 45 * 60 * 1000,
+    idleTimeoutMs: 5 * 60 * 1000,
+    firstOutputTimeoutMs: 2 * 60 * 1000,
+    model: {
+      name: "",
+      provider: "",
+      args: [],
+      env: {}
+    },
+    capabilities: {
+      profile: "generic",
+      writableDirArgs: [],
+      freshSessionArgs: []
+    },
+    nativeSession: {
+      enabled: false,
+      resumeArgs: [],
+      detectSessionId: false,
+      fallback: "fail"
+    },
+    interactive: {
+      command,
+      args: [],
+      forkArgs: []
+    }
+  };
+}
+
+function mergeWorkerConfig(
+  base: WorkerCommandConfig,
+  override: ParsedWorkerConfig
+): WorkerCommandConfig {
+  const { extends: _extends, ...values } = override;
+  return {
+    ...base,
+    ...values,
+    model: {
+      ...base.model,
+      ...(override.model ?? {}),
+      env: {
+        ...base.model.env,
+        ...(override.model?.env ?? {})
+      }
+    },
+    capabilities: {
+      ...base.capabilities,
+      ...(override.capabilities ?? {})
+    },
+    nativeSession: {
+      ...base.nativeSession,
+      ...(override.nativeSession ?? {})
+    },
+    interactive: {
+      ...base.interactive,
+      ...(override.interactive ?? {})
+    }
+  };
+}
+
 export function withUiThemeOverride(config: AppConfig, theme: AppConfig["ui"]["theme"] | null): AppConfig {
   if (!theme) {
     return config;
@@ -473,31 +561,13 @@ export function withUiThemeOverride(config: AppConfig, theme: AppConfig["ui"]["t
   };
 }
 
-function assertObjectSections(parsed: Partial<AppConfig>): void {
+function assertObjectSections(parsed: ParsedAppConfig): void {
   const sections: Array<[string, unknown]> = [
     ["router", parsed.router],
     ["router.codex", parsed.router?.codex],
     ["router.codex.env", parsed.router?.codex?.env],
     ["orchestration", parsed.orchestration],
     ["workers", parsed.workers],
-    ["workers.codex", parsed.workers?.codex],
-    ["workers.codex.model", parsed.workers?.codex?.model],
-    ["workers.codex.model.env", parsed.workers?.codex?.model?.env],
-    ["workers.codex.capabilities", parsed.workers?.codex?.capabilities],
-    ["workers.codex.nativeSession", parsed.workers?.codex?.nativeSession],
-    ["workers.codex.interactive", parsed.workers?.codex?.interactive],
-    ["workers.claude", parsed.workers?.claude],
-    ["workers.claude.model", parsed.workers?.claude?.model],
-    ["workers.claude.model.env", parsed.workers?.claude?.model?.env],
-    ["workers.claude.capabilities", parsed.workers?.claude?.capabilities],
-    ["workers.claude.nativeSession", parsed.workers?.claude?.nativeSession],
-    ["workers.claude.interactive", parsed.workers?.claude?.interactive],
-    ["workers.mock", parsed.workers?.mock],
-    ["workers.mock.model", parsed.workers?.mock?.model],
-    ["workers.mock.model.env", parsed.workers?.mock?.model?.env],
-    ["workers.mock.capabilities", parsed.workers?.mock?.capabilities],
-    ["workers.mock.nativeSession", parsed.workers?.mock?.nativeSession],
-    ["workers.mock.interactive", parsed.workers?.mock?.interactive],
     ["pairing", parsed.pairing],
     ["roles", parsed.roles],
     ["roles.main", parsed.roles?.main],
@@ -507,6 +577,25 @@ function assertObjectSections(parsed: Partial<AppConfig>): void {
     ["ui", parsed.ui],
     ["ui.colors", parsed.ui?.colors]
   ];
+
+  if (isPlainObject(parsed.workers)) {
+    for (const [id, value] of Object.entries(parsed.workers)) {
+      sections.push([`workers.${id}`, value]);
+      if (!isPlainObject(value)) {
+        continue;
+      }
+      const worker = value as Record<string, unknown>;
+      sections.push(
+        [`workers.${id}.model`, worker.model],
+        [`workers.${id}.capabilities`, worker.capabilities],
+        [`workers.${id}.nativeSession`, worker.nativeSession],
+        [`workers.${id}.interactive`, worker.interactive]
+      );
+      if (isPlainObject(worker.model)) {
+        sections.push([`workers.${id}.model.env`, worker.model.env]);
+      }
+    }
+  }
 
   for (const [path, value] of sections) {
     if (value !== undefined && !isPlainObject(value)) {

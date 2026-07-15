@@ -11,7 +11,7 @@ import { routerRuntimeDir } from "./core/paths.js";
 import { diagnoseRouterFailure } from "./core/router-audit.js";
 import { routeRequestWithCodex, routerProxyConfigured, type CodexRouteRunner } from "./core/router.js";
 import { prepareWorkspace } from "./core/workspace.js";
-import type { RouteDecision } from "./domain/schemas.js";
+import type { EngineName, RouteDecision } from "./domain/schemas.js";
 import { auditTuiThemeContrast, TUI_THEME_MIN_CONTRAST_RATIO, type TuiThemeContrastAudit } from "./tui/theme-contrast.js";
 import { formatTuiThemePreview } from "./tui/theme-preview.js";
 import { resolveTuiTheme } from "./tui/theme.js";
@@ -20,6 +20,7 @@ import {
   type CapabilityCommandRunner
 } from "./workers/capabilities.js";
 import { runLiveAgentProbes, type LiveAgentProbeOptions } from "./workers/live-probe.js";
+import { workerProvider } from "./workers/provider.js";
 
 export interface DoctorResult {
   ok: boolean;
@@ -61,9 +62,6 @@ export interface DoctorOptions {
   capabilityTimeoutMs?: number;
   liveAgentProbeOptions?: LiveAgentProbeOptions;
 }
-
-type ConfiguredEngine = "router-codex" | "codex" | "claude" | "mock";
-type WorkerEngine = "codex" | "claude";
 
 export async function runDoctor(
   appRoot: string,
@@ -238,11 +236,11 @@ export async function diagnoseProxyEnvironment(
   if (options.includeRouter ?? config.router.defaultMode === "auto") {
     contexts.push({ label: "router proxy", env: config.router.codex.env, table: "router.codex.env" });
   }
-  if (configuredWorkerEngines(config).includes("codex")) {
+  for (const engine of configuredWorkerEngines(config)) {
     contexts.push({
-      label: "workers.codex proxy",
-      env: config.workers.codex.model.env,
-      table: "workers.codex.model.env"
+      label: `workers.${engine} proxy`,
+      env: workerProvider(config, engine).config.model.env,
+      table: `workers.${engine}.model.env`
     });
   }
 
@@ -442,16 +440,8 @@ function themeSummary(
   return effectiveTheme;
 }
 
-function configuredEngines(
-  config: Awaited<ReturnType<typeof loadConfig>>,
-  options: { includeRouter: boolean }
-): ConfiguredEngine[] {
-  const engines = new Set<ConfiguredEngine>();
-
-  if (options.includeRouter) {
-    engines.add("router-codex");
-  }
-
+function configuredWorkerEngines(config: Awaited<ReturnType<typeof loadConfig>>): EngineName[] {
+  const engines = new Set<EngineName>();
   if (config.router.defaultMode === "auto") {
     engines.add(config.pairing.main);
     engines.add(config.pairing.judge);
@@ -464,14 +454,7 @@ function configuredEngines(
     engines.add(config.pairing.actor);
     engines.add(config.pairing.critic);
   }
-
-  return Array.from(engines);
-}
-
-function configuredWorkerEngines(config: Awaited<ReturnType<typeof loadConfig>>): WorkerEngine[] {
-  return configuredEngines(config, { includeRouter: false }).filter(
-    (engine): engine is WorkerEngine => engine === "codex" || engine === "claude"
-  );
+  return [...engines].filter((engine) => engine !== "mock");
 }
 
 function configuredEnvironmentChecks(
@@ -494,7 +477,7 @@ function configuredEnvironmentChecks(
   }
 
   for (const engine of configuredWorkerEngines(config)) {
-    const worker = engine === "codex" ? config.workers.codex : config.workers.claude;
+    const worker = workerProvider(config, engine).config;
     for (const [key, value] of Object.entries(worker.model.env)) {
       for (const envName of referencedEnvNames(value)) {
         checks.push({

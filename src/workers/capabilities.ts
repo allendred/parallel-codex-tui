@@ -1,9 +1,11 @@
 import { execFile } from "node:child_process";
 import { basename } from "node:path";
 import type { AppConfig } from "../core/config.js";
+import type { EngineName } from "../domain/schemas.js";
+import { workerProvider } from "./provider.js";
 import type { WorkerCapabilityRunConfig } from "./types.js";
 
-export type DiagnosedWorkerEngine = "codex" | "claude";
+export type DiagnosedWorkerEngine = EngineName;
 
 export interface CapabilityCommandResult {
   exitCode: number | null;
@@ -94,7 +96,7 @@ function capabilityTargets(config: AppConfig, options: AgentCapabilityOptions): 
     }, "automated");
   }
   for (const engine of [...new Set(options.workerEngines)]) {
-    const worker = config.workers[engine];
+    const worker = workerProvider(config, engine).config;
     addTarget(engine, worker.command, worker.capabilities, "automated");
     if (worker.nativeSession.enabled) {
       addTarget(engine, worker.command, worker.capabilities, "resume");
@@ -151,7 +153,7 @@ async function diagnoseCapabilityTarget(
   }
 
   if (target.capabilities.profile === "codex" && target.surfaces.has("native")) {
-    const sandbox = configuredCodexSandbox(config.workers.codex.interactive.args);
+    const sandbox = configuredCodexSandbox(workerProvider(config, target.engine).config.interactive.args);
     if (sandbox === "read-only") {
       incompatible.push("native resume uses read-only but feature attach requires writable --add-dir roots");
     }
@@ -215,7 +217,7 @@ function capabilityProbeSpecs(target: CapabilityTarget): CapabilityProbeSpec[] {
 }
 
 function configuredCapabilityIssues(target: CapabilityTarget, config: AppConfig): string[] {
-  const worker = config.workers[target.engine];
+  const worker = workerProvider(config, target.engine).config;
   const issues: string[] = [];
   if (
     target.surfaces.has("resume")

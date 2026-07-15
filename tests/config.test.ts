@@ -336,6 +336,117 @@ describe("config", () => {
     expect(config.workers.claude.model.args).toEqual([]);
   });
 
+  it("loads named Worker providers and lets every role select one independently", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pct-config-named-providers-"));
+    await writeText(
+      join(root, ".parallel-codex", "config.toml"),
+      [
+        "[workers.openai_compat]",
+        'extends = "codex"',
+        'command = "openai-coder"',
+        "",
+        "[workers.openai_compat.model]",
+        'name = "deepseek-v3"',
+        'provider = "openai-compatible"',
+        'args = ["--model", "{model}", "--provider", "{provider}"]',
+        "",
+        "[workers.openai_compat.model.env]",
+        'OPENAI_API_KEY = "{env:OPENAI_COMPAT_KEY}"',
+        "",
+        "[workers.anthropic_compat]",
+        'extends = "claude"',
+        'command = "anthropic-coder"',
+        "",
+        "[workers.anthropic_compat.interactive]",
+        'command = "anthropic-coder"',
+        "",
+        "[pairing]",
+        'main = "anthropic_compat"',
+        'judge = "openai_compat"',
+        'actor = "openai_compat"',
+        'critic = "anthropic_compat"'
+      ].join("\n")
+    );
+
+    const config = await loadConfig(root);
+
+    expect(config.pairing).toEqual({
+      main: "anthropic_compat",
+      judge: "openai_compat",
+      actor: "openai_compat",
+      critic: "anthropic_compat"
+    });
+    expect(config.workers.openai_compat).toMatchObject({
+      command: "openai-coder",
+      assignable: true,
+      capabilities: { profile: "codex" },
+      model: {
+        name: "deepseek-v3",
+        provider: "openai-compatible",
+        env: { OPENAI_API_KEY: "{env:OPENAI_COMPAT_KEY}" }
+      }
+    });
+    expect(config.workers.openai_compat.nativeSession.resumeArgs).toEqual(
+      config.workers.codex.nativeSession.resumeArgs
+    );
+    expect(config.workers.anthropic_compat.interactive.command).toBe("anthropic-coder");
+    expect(config.workers.anthropic_compat.capabilities.profile).toBe("claude");
+  });
+
+  it("provides conservative defaults for a generic custom Worker provider", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pct-config-generic-provider-"));
+    await writeText(
+      join(root, ".parallel-codex", "config.toml"),
+      [
+        "[workers.vendor]",
+        'extends = "generic"',
+        'command = "vendor-coder"',
+        'args = ["run", "--stdin"]',
+        "",
+        "[pairing]",
+        'actor = "vendor"'
+      ].join("\n")
+    );
+
+    const config = await loadConfig(root);
+
+    expect(config.workers.vendor).toMatchObject({
+      command: "vendor-coder",
+      args: ["run", "--stdin"],
+      assignable: true,
+      capabilities: {
+        profile: "generic",
+        writableDirArgs: [],
+        freshSessionArgs: []
+      },
+      nativeSession: {
+        enabled: false,
+        detectSessionId: false,
+        fallback: "fail"
+      },
+      interactive: {
+        command: "vendor-coder",
+        args: [],
+        forkArgs: []
+      }
+    });
+    expect(config.pairing.actor).toBe("vendor");
+  });
+
+  it("rejects unknown, unsafe, and circular Worker provider references", async () => {
+    const cases = [
+      ['[pairing]', 'actor = "missing"'],
+      ['[workers.Bad.Provider]', 'command = "bad"'],
+      ['[workers.first]', 'extends = "second"', '[workers.second]', 'extends = "first"']
+    ];
+
+    for (const lines of cases) {
+      const root = await mkdtemp(join(tmpdir(), "pct-config-invalid-provider-"));
+      await writeText(join(root, ".parallel-codex", "config.toml"), lines.join("\n"));
+      await expect(loadConfig(root)).rejects.toThrow(/Worker profile|Worker provider|inheritance/i);
+    }
+  });
+
   it("loads an explicit third-party CLI capability contract", async () => {
     const root = await mkdtemp(join(tmpdir(), "pct-config-worker-capabilities-"));
 

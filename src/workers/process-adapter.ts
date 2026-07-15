@@ -984,6 +984,8 @@ async function setStatus(
     ...(spec.featureTitle ? { feature_title: spec.featureTitle } : {}),
     role: spec.role,
     engine: spec.engine,
+    ...(spec.modelConfig?.name.trim() ? { model_name: spec.modelConfig.name.trim() } : {}),
+    ...(spec.modelConfig?.provider.trim() ? { model_provider: spec.modelConfig.provider.trim() } : {}),
     state,
     phase,
     last_event_at: new Date().toISOString(),

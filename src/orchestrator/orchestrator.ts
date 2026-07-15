@@ -18,6 +18,7 @@ import {
 import type { SessionManager, TaskSession, TaskTurn, WorkerFiles } from "../core/session-manager.js";
 import { FeatureStatusSchema, RouteDecisionSchema, TaskMetaSchema, WorkerStatusSchema, type EngineName, type FeatureAssignment, type NativeSession, type RouteDecision, type RouterFallbackResolution, type WorkerRole, type WorkerStatus } from "../domain/schemas.js";
 import { getAdapter, type WorkerRegistry } from "../workers/registry.js";
+import { workerProvider } from "../workers/provider.js";
 import type { WorkerResult, WorkerRunSpec } from "../workers/types.js";
 import {
   appendFeatureDialogue,
@@ -338,6 +339,10 @@ export class Orchestrator {
   async reassignFeature(input: ReassignFeatureInput): Promise<ReassignFeatureResult> {
     if (!featureIdIsSafe(input.featureId)) {
       throw new Error(`Unsafe feature id: ${input.featureId}`);
+    }
+    const nextProvider = workerProvider(this.config, input.engine).config;
+    if (!nextProvider.assignable) {
+      throw new Error(`Worker provider cannot be assigned to a Feature: ${input.engine}`);
     }
     const task = this.sessions.taskFromId(input.taskId);
     if (!(await readTaskMetaIfValid(task.metaPath))) {
@@ -2561,7 +2566,7 @@ export class Orchestrator {
     return adapter.run({
       ...spec,
       nativeSession: existing,
-      nativeSessionConfig: this.config.workers[engine].nativeSession,
+      nativeSessionConfig: workerProvider(this.config, engine).config.nativeSession,
       onNativeSession: async (sessionId) => {
         const now = new Date().toISOString();
         const previous = await this.sessions.readNativeSession(workerFiles);

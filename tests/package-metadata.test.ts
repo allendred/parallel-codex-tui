@@ -140,6 +140,12 @@ describe("package metadata", () => {
     expect(example).toContain('# provider = "openai"');
     expect(example).toContain("# [workers.claude.model]");
     expect(example).toContain('# provider = "anthropic"');
+    expect(example).toContain("# [workers.openai_compat]");
+    expect(example).toContain('# extends = "codex"');
+    expect(example).toContain("# [workers.anthropic_compat]");
+    expect(example).toContain('# extends = "claude"');
+    expect(example).toContain("# [workers.vendor]");
+    expect(example).toContain('# extends = "generic"');
     expect(example).toContain('forkArgs = ["fork", "{sessionId}"]');
     expect(example).toContain('forkArgs = ["--resume", "{sessionId}", "--fork-session"]');
     for (const field of TUI_THEME_FIELDS) {
@@ -222,11 +228,16 @@ describe("package metadata", () => {
     expect(readme).toContain('`--doctor` checks configured automated and interactive commands, `{env:NAME}` references');
     expect(readme).toContain("CLI help surfaces required for Codex exec/resume sandboxing and Claude print/resume permissions");
     expect(readme).toContain("an explicit `generic` capability contract is validated without guessing vendor-specific help");
+    expect(readme).toContain("every named Worker Provider used by the active route");
+    expect(readme).toContain("[workers.openai_compat]");
+    expect(readme).toContain("[workers.anthropic_compat]");
+    expect(readme).toContain('extends = "generic"');
+    expect(readme).toContain("Every new Worker status records the actual profile ID plus its rendered model/provider snapshot");
     expect(readme).toContain("parallel-codex-tui --doctor --probe-agents");
-    expect(readme).toContain("one minimal fresh request and one same-session resume request");
+    expect(readme).toContain("one minimal fresh request and, when configured, one same-session resume request");
     expect(readme).toContain("This explicit probe uses model quota");
     expect(readme).toContain("preserves failed artifacts under `.parallel-codex/probes/`");
-    expect(readme).toContain("Claude defaults to a generated native `--session-id`");
+    expect(readme).toContain("Claude-compatible profiles default to a generated native `--session-id`");
     expect(readme).toContain("a silent failed launch cannot create a false resumable session");
     expect(readme).toContain("proxy host/port reachability as a local-endpoint check");
     expect(readme).toContain("parallel-codex-tui --doctor --probe-router");
