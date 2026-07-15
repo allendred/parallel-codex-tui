@@ -25,7 +25,6 @@ import {
   formatRouteStatus,
   formatStatusLine,
   formatWorkerRuntimeStatus,
-  selectedWorkerStatusIsRedundant,
   type StatusLineState
 } from "./status-line.js";
 import { applyChatInputChunk, insertChatPaste } from "./chat-input.js";
@@ -360,14 +359,15 @@ export function App({
     selectedBoardFeature?.state === "actor_running"
     || selectedBoardFeature?.state === "critic_running"
   );
-  const selectedWorkerStatus = formatSelectedWorkerStatus(status, selectedWorkerIndex);
-  const visibleWorkerStatus = view === "chat" || view === "router" || view === "sessions" || view === "features" || view === "collaboration" || selectedWorkerStatusIsRedundant(status)
+  const visibleStatus = statusLineWithWorkerRefs(status, workers);
+  const selectedWorkerStatus = formatSelectedWorkerStatus(visibleStatus, selectedWorkerIndex);
+  const visibleWorkerStatus = view === "chat" || view === "router" || view === "sessions" || view === "features" || view === "collaboration"
     ? ""
     : selectedWorkerStatus;
   const visibleRouteStatus = routePending
     ? formatRoutePendingStatus(routePending, routeElapsedMs)
     : formatRouteStatus(lastRoute);
-  const visibleTaskStatus = routePending && !activeTaskId ? "" : formatStatusLine(status);
+  const visibleTaskStatus = routePending && !activeTaskId ? "" : formatStatusLine(visibleStatus);
   const workerRefreshKey = workers.map((worker) => `${worker.id}\u0000${worker.statusPath}`).join("\u0001");
   const taskResultMessageIndex = useMemo(
     () => activeTaskId ? latestTaskResultMessageIndex(messages, activeTaskId) : -1,
@@ -2417,7 +2417,7 @@ export function App({
       view={view}
       cwd={cwd}
       taskId={activeTaskId}
-      statusText={[visibleTaskStatus, visibleRouteStatus, visibleWorkerStatus].filter(Boolean).join(" | ")}
+      statusText={[visibleTaskStatus, visibleWorkerStatus, visibleRouteStatus].filter(Boolean).join(" | ")}
       contentHeight={contentHeight}
       showStatusBar={config.ui.showStatusBar}
       input={
@@ -2546,6 +2546,7 @@ export function App({
           <WorkerOutputView
             title={workerTitle(workers, selectedWorkerIndex)}
             role={workers[selectedWorkerIndex]?.role}
+            featureId={workers[selectedWorkerIndex]?.featureId}
             logPath={workers[selectedWorkerIndex]?.logPath ?? null}
             scrollOffset={workerScrollOffset}
             searchQuery={workerSearch.open ? workerSearch.query : ""}
@@ -3639,16 +3640,13 @@ function restoredWorkerStatusLine(
   }
 
   const state: StatusLineState = { taskId };
-  const restored = (workers ?? []).flatMap((worker) => {
-    if (!worker.runtimeStatus) {
-      return [];
-    }
-    return [{
+  const restored = (workers ?? []).map((worker) => {
+    return {
       role: worker.role,
       engine: worker.engine,
       label: worker.label,
-      status: formatWorkerRuntimeStatus(worker.runtimeStatus)
-    }];
+      status: worker.runtimeStatus ? formatWorkerRuntimeStatus(worker.runtimeStatus) : "waiting"
+    };
   });
   if (restored.length === 0) {
     return state;
@@ -3662,6 +3660,34 @@ function restoredWorkerStatusLine(
     }
   }
   return state;
+}
+
+export function statusLineWithWorkerRefs(
+  status: StatusLineState | null,
+  workers: WorkerLogRef[]
+): StatusLineState | null {
+  if (!status || workers.length === 0) {
+    return status;
+  }
+  const restored = restoredWorkerStatusLine(status.taskId, workers);
+  if (!restored?.workers?.length) {
+    return status;
+  }
+
+  const next: StatusLineState = {
+    ...status,
+    workers: restored.workers
+  };
+  for (const role of ["judge", "actor", "critic"] as const) {
+    if (restored[role]) {
+      next[role] = restored[role];
+    }
+  }
+  if (restored.main && (!terminalMainStatus(status.main) || terminalMainStatus(restored.main))) {
+    next.main = restored.main;
+    next.mainEngine = restored.mainEngine;
+  }
+  return next;
 }
 
 function workerTitle(workers: WorkerLogRef[], selectedWorkerIndex: number): string {

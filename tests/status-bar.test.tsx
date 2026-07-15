@@ -85,7 +85,7 @@ describe("StatusBar", () => {
     );
     const frame = view.lastFrame() ?? "";
 
-    expect(frame.trim()).toBe("3 workers · done · simple · 13s");
+    expect(frame.trim()).toBe("wk3 done simple · 13s");
     expect(displayWidth(frame)).toBeLessThanOrEqual(40);
     view.unmount();
   });
@@ -104,8 +104,8 @@ describe("StatusBar", () => {
       />
     );
 
-    expect((completed.lastFrame() ?? "").trim()).toBe("3 workers · done · route simple · 13s");
-    expect(partial.lastFrame()).toContain("3 workers · 2 done");
+    expect((completed.lastFrame() ?? "").trim()).toBe("workers 3 · done · route simple · 13s");
+    expect(partial.lastFrame()).toContain("workers 3 · done 2");
     completed.unmount();
     partial.unmount();
   });
@@ -184,22 +184,20 @@ describe("StatusBar", () => {
     const frame = lastFrame() ?? "";
 
     expect(frame).not.toContain("20260702-000000-wheel");
-    expect(frame).toContain("3 workers");
-    expect(frame).toContain("1 running");
-    expect(frame).toContain("1 done");
-    expect(frame).toContain("1 failed");
-    expect(frame).toContain("@ critic/claude");
-    expect(frame).not.toContain("workers 3");
-    expect(frame).not.toContain("run 1");
-    expect(frame).not.toContain("fail 1");
+    expect(frame).toContain("workers 3");
+    expect(frame).toContain("run 1");
+    expect(frame).toContain("done 1");
+    expect(frame).toContain("fail 1");
+    expect(frame).toContain("critic/claude · done");
+    expect(frame).not.toContain("3 workers");
     expect(frame).not.toContain("selected critic/claude");
     expect(frame).not.toContain("current critic/claude");
     expect(frame).not.toContain("w3");
     expect(frame).not.toContain("r1");
     expect(frame).not.toContain("d1");
     expect(frame).not.toContain("f1");
-    expect(frame.indexOf("1 failed")).toBeLessThan(frame.indexOf("1 running"));
-    expect(frame.indexOf("1 failed")).toBeLessThan(frame.indexOf("1 done"));
+    expect(frame.indexOf("fail 1")).toBeLessThan(frame.indexOf("run 1"));
+    expect(frame.indexOf("fail 1")).toBeLessThan(frame.indexOf("done 1"));
   });
 
   it("renders feature wave progress as named chrome instead of a selected worker", () => {
@@ -222,7 +220,7 @@ describe("StatusBar", () => {
     );
     const narrowFrame = narrow.lastFrame() ?? "";
     expect(narrowFrame).toContain("wave 1/3 a2/4");
-    expect(narrowFrame).toContain("w4");
+    expect(narrowFrame).toContain("wk4");
     expect(displayWidth(narrowFrame)).toBeLessThanOrEqual(34);
     narrow.unmount();
 
@@ -257,10 +255,10 @@ describe("StatusBar", () => {
     );
 
     const frame = lastFrame() ?? "";
-    const layout = statusRailLayout(40, displayWidth("1 worker · done"));
-    expect(frame).toContain("1 worker · done");
-    expect(layout).toEqual({ leadingWidth: 1, trailingWidth: 23 });
-    expect(layout.leadingWidth + displayWidth("1 worker · done") + layout.trailingWidth).toBe(39);
+    const layout = statusRailLayout(40, displayWidth("wk1 done"));
+    expect(frame).toContain("wk1 done");
+    expect(layout).toEqual({ leadingWidth: 1, trailingWidth: 30 });
+    expect(layout.leadingWidth + displayWidth("wk1 done") + layout.trailingWidth).toBe(39);
   });
 
   it("keeps status segments compact in narrow terminals", () => {
@@ -273,14 +271,14 @@ describe("StatusBar", () => {
 
     const frame = lastFrame() ?? "";
 
-    expect(frame).toContain("w3");
+    expect(frame).toContain("wk3");
     expect(frame).toContain("r1");
     expect(frame).toContain("d1");
     expect(frame).toContain("f1");
-    expect(frame).toContain("@ critic");
+    expect(frame).toContain("critic/claude:done");
     expect(frame).not.toContain("workers 3");
     expect(frame).not.toContain("selected critic/claude");
-    expect(frame).not.toContain("critic/claude");
+    expect(frame).not.toContain("@ critic");
   });
 
   it("truncates long selected worker labels in narrow terminals", () => {
@@ -292,10 +290,7 @@ describe("StatusBar", () => {
     );
 
     const frame = lastFrame() ?? "";
-    expect(frame).toContain("w1");
-    expect(frame).toContain("d1");
-    expect(frame).toContain("@ actor");
-    expect(frame).not.toContain("@ actor/");
+    expect(frame).toContain("wk1 done actor:done");
     expect(frame).not.toContain("...");
     expect(frame).not.toContain("third-party-provider-name");
     expect(Math.max(...frame.split("\n").map((line) => displayWidth(line)))).toBeLessThanOrEqual(32);
@@ -310,10 +305,7 @@ describe("StatusBar", () => {
     );
 
     const frame = lastFrame() ?? "";
-    expect(frame).toContain("w1");
-    expect(frame).toContain("d1");
-    expect(frame).toContain("@ actor");
-    expect(frame).not.toContain("@ actor/");
+    expect(frame).toContain("wk1 done actor:done");
     expect(frame).not.toContain("...");
     expect(frame).not.toContain("第三方模型提供商超级长名称");
     expect(Math.max(...frame.split("\n").map((line) => displayWidth(line)))).toBeLessThanOrEqual(32);
@@ -328,7 +320,7 @@ describe("StatusBar", () => {
     );
 
     const frame = lastFrame() ?? "";
-    expect(frame).toContain("w4 f1 d3 @ judge");
+    expect(frame).toContain("wk4 f1 d3 judge:done");
     expect(frame).not.toContain("judge/codex");
     expect(frame.split("\n")).toHaveLength(1);
     expect(displayWidth(frame)).toBeLessThanOrEqual(24);
@@ -343,14 +335,14 @@ describe("StatusBar", () => {
     );
 
     const frame = lastFrame() ?? "";
-    expect(frame).toContain("w4 f1 d3");
+    expect(frame).toContain("wk4 f1 d3");
     expect(frame).not.toContain("@");
     expect(frame).not.toContain("judge");
     expect(frame.split("\n")).toHaveLength(1);
     expect(displayWidth(frame)).toBeLessThanOrEqual(20);
   });
 
-  it("drops clipped selected worker fragments below the full-label threshold", () => {
+  it("keeps an active selected worker before lower-priority completed counts", () => {
     const { lastFrame } = render(
       <StatusBar
         text="workers 4 | fail 1 done 3 | actor/codex fail"
@@ -359,7 +351,7 @@ describe("StatusBar", () => {
     );
 
     const frame = lastFrame() ?? "";
-    expect(frame).toContain("w4 f1 d3");
+    expect(frame).toContain("actor:fail");
     expect(frame).not.toContain("@");
     expect(frame).not.toContain("actor/");
     expect(frame).not.toContain("...");
@@ -410,7 +402,7 @@ describe("StatusBar", () => {
     compact.unmount();
   });
 
-  it("renders simple chat runtime status without selected-worker chrome", () => {
+  it("renders the Main role with the same identity grammar as workers", () => {
     const { lastFrame } = render(
       <StatusBar
         text="main | main run"
@@ -419,8 +411,8 @@ describe("StatusBar", () => {
     );
 
     const frame = lastFrame() ?? "";
-    expect(frame).toContain("chat run");
-    expect(frame).not.toContain("@ main");
+    expect(frame).toContain("main · run");
+    expect(frame).not.toContain("chat run");
     expect(frame).not.toContain("selected main");
   });
 
@@ -433,9 +425,9 @@ describe("StatusBar", () => {
     );
 
     const frame = lastFrame() ?? "";
-    expect(frame).toContain("@ main/claude starting");
+    expect(frame).toContain("main/claude · starting");
     expect(frame).toContain("route simple · 42ms");
-    expect(frame).not.toContain("chat starting");
+    expect(frame).not.toContain("@ main/claude");
   });
 
   it("keeps Main first-output progress distinct from completed Router evidence", () => {
@@ -447,7 +439,7 @@ describe("StatusBar", () => {
     );
 
     const frame = lastFrame() ?? "";
-    expect(frame).toContain("@ main/claude waiting output · 12s / 2m first");
+    expect(frame).toContain("main/claude · waiting output · 12s / 2m first");
     expect(frame).toContain("route simple · via 127.0.0.1:7890 · 12s");
     expect(displayWidth(frame)).toBeLessThanOrEqual(136);
   });
@@ -461,13 +453,13 @@ describe("StatusBar", () => {
       return value;
     };
 
-    expect(frame(80)).toContain("@ main/claude waiting output · 12s / 2m first");
+    expect(frame(80)).toContain("main/claude:waiting output · 12s / 2m first");
     expect(frame(80)).toContain("r:simple · 12s");
-    expect(frame(56)).toContain("@ main/claude waiting output · 12s / 2m first");
-    expect(frame(40)).toContain("@ main/claude wait 12s/2m");
-    expect(frame(24)).toContain("@ claude wait 12s/2m");
-    expect(frame(16)).toContain("@ claude wait");
-    expect(frame(8)).toContain("@ chat");
+    expect(frame(56)).toContain("main/claude:waiting output · 12s / 2m first");
+    expect(frame(40)).toContain("main/claude:wait 12s/2m");
+    expect(frame(24)).toContain("main:wait 12s/2m");
+    expect(frame(16)).toContain("main:wait");
+    expect(frame(8)).toContain("main");
 
     for (const width of [80, 56, 40, 24, 16, 8]) {
       expect(frame(width)).not.toContain("...");
@@ -481,7 +473,7 @@ describe("StatusBar", () => {
     const frame = view.lastFrame() ?? "";
     view.unmount();
 
-    expect(frame).toContain("@ main/claude reply 4s/5m");
+    expect(frame).toContain("main/claude:reply 4s/5m");
     expect(frame).not.toContain("...");
     expect(displayWidth(frame)).toBeLessThanOrEqual(40);
   });
@@ -492,7 +484,7 @@ describe("StatusBar", () => {
     const frame = view.lastFrame() ?? "";
     view.unmount();
 
-    expect(frame).toContain("@ claude fail");
+    expect(frame).toContain("main:fail");
     expect(frame).not.toContain("...");
     expect(displayWidth(frame)).toBeLessThanOrEqual(16);
   });
@@ -507,12 +499,11 @@ describe("StatusBar", () => {
       return value;
     };
 
-    expect(frame(24)).toContain("@ main/claude run");
-    expect(frame(18)).toContain("@ main/claude");
-    expect(frame(18)).not.toContain(" run");
-    expect(frame(10)).toContain("@ claude");
+    expect(frame(24)).toContain("main/claude:run");
+    expect(frame(18)).toContain("main/claude:run");
+    expect(frame(10)).toContain("main:run");
     expect(frame(10)).not.toContain("main/");
-    expect(frame(8)).toContain("@ chat");
+    expect(frame(8)).toContain("main");
   });
 
   it("keeps complete fallback evidence beside Main identity at 120 columns", () => {
@@ -525,8 +516,8 @@ describe("StatusBar", () => {
     );
 
     const frame = lastFrame() ?? "";
-    expect(frame).toContain("@ main/codex");
-    expect(frame).not.toContain("@ main/codex done");
+    expect(frame).toContain("main · done");
+    expect(frame).not.toContain("@");
     expect(frame).toContain(route);
     expect(displayWidth(frame)).toBeLessThanOrEqual(120);
   });
@@ -540,7 +531,7 @@ describe("StatusBar", () => {
     );
 
     const frame = lastFrame() ?? "";
-    expect(frame).toContain("chat done");
+    expect(frame).toContain("main · done");
     expect(frame).toContain("route simple · 42ms");
     expect(frame).not.toContain("@ route");
   });
@@ -570,7 +561,7 @@ describe("StatusBar", () => {
     );
 
     const frame = lastFrame() ?? "";
-    expect(frame).toContain("chat done");
+    expect(frame).toContain("main · done");
     expect(frame).toContain("route simple · 13s");
     expect(frame).not.toContain("workers");
     expect(frame).not.toContain("done 3");
@@ -615,9 +606,9 @@ describe("StatusBar", () => {
     );
 
     const frame = lastFrame() ?? "";
-    expect(frame).toContain("judge done");
-    expect(frame).toContain("actor run");
-    expect(frame).toContain("critic wait");
+    expect(frame).toContain("judge · done");
+    expect(frame).toContain("actor · run");
+    expect(frame).toContain("critic · wait");
     expect(frame).not.toContain("j:done");
     expect(frame).not.toContain("a:run");
     expect(frame).not.toContain("c:wait");
@@ -634,11 +625,11 @@ describe("StatusBar", () => {
     );
 
     const frame = lastFrame() ?? "";
-    expect(frame).toContain("4 workers");
-    expect(frame).toContain("1 failed");
-    expect(frame).toContain("done");
-    expect(frame).toContain("@ actor/codex");
-    expect(frame).not.toContain("w4");
+    expect(frame).toContain("workers 4");
+    expect(frame).toContain("fail 1");
+    expect(frame).toContain("done 3");
+    expect(frame).toContain("actor/codex · fail");
+    expect(frame).not.toContain("wk4");
     expect(frame).not.toContain("f1");
     expect(displayWidth(frame)).toBeLessThanOrEqual(80);
   });
@@ -664,10 +655,10 @@ describe("StatusBar", () => {
     const view = render(<StatusBar text={text} terminalWidth={80} />);
     const frame = view.lastFrame() ?? "";
 
-    expect(frame).toContain("4 workers");
+    expect(frame).toContain("workers 4");
     expect(frame).toContain("route complex");
-    expect(frame).toContain("@ actor/codex stop");
-    expect(frame).not.toContain("w4");
+    expect(frame).toContain("actor/codex · stop");
+    expect(frame).not.toContain("wk4");
     expect(frame).not.toContain("r:complex");
     expect(frame).not.toContain("Input reliability");
     expect(displayWidth(frame)).toBeLessThanOrEqual(80);
@@ -699,9 +690,9 @@ describe("StatusBar", () => {
     const frame = lastFrame() ?? "";
 
     expect(frame).toContain("20260702-000000-wheel");
-    expect(frame).toContain("3 workers");
+    expect(frame).toContain("workers 3");
     expect(frame).toContain("done");
-    expect(frame).not.toContain("w3");
+    expect(frame).not.toContain("wk3");
     expect(frame).not.toContain("d3");
   });
 
@@ -725,11 +716,11 @@ describe("StatusBar", () => {
 
     const frame = lastFrame() ?? "";
 
-    expect(frame).toContain("w3");
+    expect(frame).toContain("wk3");
     expect(frame).toContain("d1");
     expect(frame).toContain("f1");
-    expect(frame).toContain("@ critic");
-    expect(frame).not.toContain("critic/claude");
+    expect(frame).toContain("critic/claude:done");
+    expect(frame).not.toContain("@ critic");
     expect(frame).not.toContain("20260702-000000-wheel");
   });
 

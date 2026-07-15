@@ -504,7 +504,8 @@ export class Orchestrator {
     }
 
     return workers.sort((left, right) => (
-      workerRoleOrder(left.role) - workerRoleOrder(right.role)
+      workerTurnOrder(left) - workerTurnOrder(right)
+      || workerRoleOrder(left.role) - workerRoleOrder(right.role)
       || left.id.localeCompare(right.id)
     ));
   }
@@ -2109,8 +2110,16 @@ export class Orchestrator {
       outputLogPath: spec.outputLogPath,
       statusPath: spec.statusPath
     };
-    const storedSession = await this.sessions.readNativeSession(workerFiles)
-      ?? (resumeFrom ? await this.sessions.readNativeSession(resumeFrom) : null);
+    const currentSession = await this.sessions.readNativeSession(workerFiles);
+    const inheritedSession = !currentSession
+      && resumeFrom
+      && !(await this.sessions.hasRetiredNativeSession(workerFiles))
+      ? await this.sessions.readNativeSession(resumeFrom)
+      : null;
+    const candidateSession = currentSession ?? inheritedSession;
+    const storedSession = candidateSession && nativeSessionMatchesWorker(candidateSession, engine, spec.role, scope)
+      ? candidateSession
+      : null;
     const writableDirs = spec.writableDirs?.length ? uniquePaths(spec.writableDirs) : undefined;
     const existing = storedSession ? {
       ...storedSession,
@@ -2135,6 +2144,9 @@ export class Orchestrator {
       onNativeSession: async (sessionId) => {
         const now = new Date().toISOString();
         const previous = await this.sessions.readNativeSession(workerFiles);
+        const compatiblePrevious = previous && nativeSessionMatchesWorker(previous, engine, spec.role, scope)
+          ? previous
+          : null;
         const record: NativeSession = {
           engine,
           role: spec.role,
@@ -2143,9 +2155,9 @@ export class Orchestrator {
           scope,
           cwd: spec.cwd,
           ...(writableDirs ? { writable_dirs: writableDirs } : {}),
-          created_at: previous?.created_at ?? now,
+          created_at: compatiblePrevious?.created_at ?? now,
           last_used_at: now,
-          source: previous?.source ?? "output-detected"
+          source: compatiblePrevious?.source ?? "output-detected"
         };
         await this.sessions.writeNativeSession(workerFiles, record);
       },
@@ -2182,6 +2194,9 @@ export class Orchestrator {
       const worker = this.workerFiles(task, taskWorkerId(role, engine, turnId));
       if (await pathExists(join(worker.dir, "native-session.json"))) {
         return worker;
+      }
+      if (await this.sessions.hasRetiredNativeSession(worker)) {
+        return undefined;
       }
     }
     return undefined;
@@ -2604,6 +2619,23 @@ function capitalize(value: string): string {
 
 function workerRoleOrder(role: WorkerRole): number {
   return ["main", "judge", "actor", "critic"].indexOf(role);
+}
+
+function workerTurnOrder(worker: WorkerLogRef): number {
+  const featureTurn = worker.featureId?.match(/^(\d{4,})(?:-|$)/)?.[1];
+  const waveTurn = worker.id.match(/-wave-(\d{4,})-/)?.[1];
+  const taskTurn = worker.id.match(/-(\d{4,})$/)?.[1];
+  const parsed = Number(featureTurn ?? waveTurn ?? taskTurn ?? "1");
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : 1;
+}
+
+function nativeSessionMatchesWorker(
+  session: NativeSession,
+  engine: EngineName,
+  role: WorkerRole,
+  scope: NativeSession["scope"]
+): boolean {
+  return session.engine === engine && session.role === role && session.scope === scope;
 }
 
 function tailText(text: string, lines: number): string {

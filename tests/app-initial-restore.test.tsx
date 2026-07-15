@@ -43,7 +43,7 @@ describe("App initial task restore", () => {
     );
 
     try {
-      expect(view.lastFrame()).toContain("1 worker · done");
+      expect(view.lastFrame()).toContain("workers 1 · done");
       await settleEffects();
       testInput.send(view.stdin, "\x17");
       await waitForFrame(view.lastFrame, "· logs ·");

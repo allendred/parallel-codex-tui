@@ -1579,16 +1579,126 @@ describe("Orchestrator", () => {
     expect(await readTextIfExists(join(taskDir, "critic-mock", "output.log"))).toBe("FIRST_TURN_CRITIC_LOG\n");
     expect((await orchestrator.listTaskWorkers(first.taskId ?? "")).map((worker) => worker.label)).toEqual([
       "Judge (mock)",
-      "Judge (mock) · Turn 2",
       "Actor (mock)",
-      "Actor (mock) · Turn 2",
       "Critic (mock)",
+      "Judge (mock) · Turn 2",
+      "Actor (mock) · Turn 2",
       "Critic (mock) · Turn 2"
     ]);
     expect(JSON.parse(await readTextIfExists(join(taskDir, "judge-mock-0002", "native-session.json"))).cwd).toBe(
       join(taskDir, "judge-mock-0002")
     );
     expect(JSON.parse(await readTextIfExists(join(taskDir, "actor-mock-0002", "native-session.json"))).cwd).toBe(actorRun?.cwd);
+  });
+
+  it("does not resurrect a previous-turn native session after the current worker retired it", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pct-orch-follow-up-retired-session-"));
+    const config = mockConfig(root);
+    const manager = new SessionManager({
+      projectRoot: root,
+      dataDir: config.dataDir,
+      now: () => new Date("2026-06-30T03:30:00.000Z"),
+      randomId: () => "retired-follow-up"
+    });
+    const capturing = new CapturingAdapter();
+    const orchestrator = new Orchestrator(config, manager, new Map([["mock", capturing]]));
+    const first = await orchestrator.handleRequest({ request: "实现基础功能", cwd: root });
+    const taskDir = join(root, ".parallel-codex", "sessions", first.taskId ?? "");
+    const previous = await readJson(join(taskDir, "actor-mock", "native-session.json"), NativeSessionSchema);
+    const nextActorDir = join(taskDir, "actor-mock-0002");
+    await mkdir(nextActorDir, { recursive: true });
+    await writeJson(join(nextActorDir, "native-session.retired.json"), {
+      ...previous,
+      worker_id: "actor-mock-0002",
+      retired_at: "2026-06-30T03:31:00.000Z",
+      retired_reason: "context window full"
+    });
+
+    capturing.runs.length = 0;
+    await orchestrator.handleTaskTurn({
+      taskId: first.taskId ?? "",
+      request: "继续实现但不要复活已退役会话",
+      cwd: root
+    });
+
+    const judgeRun = capturing.runs.find((run) => run.role === "judge");
+    const actorRun = capturing.runs.find((run) => run.role === "actor");
+    const criticRun = capturing.runs.find((run) => run.role === "critic");
+    expect(judgeRun?.nativeSession?.session_id).toBe("mock-judge-mock");
+    expect(actorRun?.nativeSession).toBeNull();
+    expect(criticRun?.nativeSession?.session_id).toBe("mock-critic-mock");
+    expect((await manager.readNativeSession({ dir: nextActorDir }))?.session_id).toBe("mock-actor-mock-0002");
+  });
+
+  it("does not search past an intervening turn that retired its inherited native session", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pct-orch-retired-session-barrier-"));
+    const config = mockConfig(root);
+    const manager = new SessionManager({
+      projectRoot: root,
+      dataDir: config.dataDir,
+      now: () => new Date("2026-06-30T03:30:00.000Z"),
+      randomId: () => "retired-barrier"
+    });
+    const capturing = new CapturingAdapter();
+    const orchestrator = new Orchestrator(config, manager, new Map([["mock", capturing]]));
+    const first = await orchestrator.handleRequest({ request: "实现第一轮", cwd: root });
+    await orchestrator.handleTaskTurn({
+      taskId: first.taskId ?? "",
+      request: "实现第二轮",
+      cwd: root
+    });
+    const taskDir = join(root, ".parallel-codex", "sessions", first.taskId ?? "");
+    const secondActorDir = join(taskDir, "actor-mock-0002");
+    await manager.retireNativeSession({ dir: secondActorDir }, "context window full");
+
+    capturing.runs.length = 0;
+    await orchestrator.handleTaskTurn({
+      taskId: first.taskId ?? "",
+      request: "实现第三轮且从新会话开始",
+      cwd: root
+    });
+
+    const actorRun = capturing.runs.find((run) => run.role === "actor");
+    expect(actorRun?.workerId).toBe("actor-mock-0003");
+    expect(actorRun?.nativeSession).toBeNull();
+    expect((await manager.readNativeSession({ dir: join(taskDir, "actor-mock-0003") }))?.session_id).toBe(
+      "mock-actor-mock-0003"
+    );
+  });
+
+  it("starts fresh when previous-turn native metadata belongs to another engine", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pct-orch-incompatible-native-session-"));
+    const config = mockConfig(root);
+    const manager = new SessionManager({
+      projectRoot: root,
+      dataDir: config.dataDir,
+      now: () => new Date("2026-06-30T03:30:00.000Z"),
+      randomId: () => "incompatible-session"
+    });
+    const capturing = new CapturingAdapter();
+    const orchestrator = new Orchestrator(config, manager, new Map([["mock", capturing]]));
+    const first = await orchestrator.handleRequest({ request: "实现基础功能", cwd: root });
+    const actorSessionPath = join(
+      root,
+      ".parallel-codex",
+      "sessions",
+      first.taskId ?? "",
+      "actor-mock",
+      "native-session.json"
+    );
+    const actorSession = await readJson(actorSessionPath, NativeSessionSchema);
+    await writeJson(actorSessionPath, { ...actorSession, engine: "codex" });
+
+    capturing.runs.length = 0;
+    await orchestrator.handleTaskTurn({
+      taskId: first.taskId ?? "",
+      request: "继续实现且忽略不兼容会话",
+      cwd: root
+    });
+
+    const actorRun = capturing.runs.find((run) => run.role === "actor");
+    expect(actorRun?.workerId).toBe("actor-mock-0002");
+    expect(actorRun?.nativeSession).toBeNull();
   });
 
   it("runs a multi-Feature plan produced by the Judge for a complex follow-up", async () => {

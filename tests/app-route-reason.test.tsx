@@ -186,7 +186,7 @@ describe("App Router reason", () => {
       await waitForFrame(view.lastFrame, "Short conversation without project work.");
       const routingFrame = view.lastFrame() ?? "";
       expect(routingFrame).toContain("route · simple · codex");
-      expect(routingFrame).toContain("@ main/claude run");
+      expect(routingFrame).toContain("main/claude · run");
       expect(routingFrame).not.toContain("Final Main answer.");
 
       completion.resolve({
@@ -262,7 +262,7 @@ describe("App Router reason", () => {
 
       await waitForFrame(view.lastFrame, "waiting output");
       const frame = view.lastFrame() ?? "";
-      expect(frame).toContain("main/claude waiting output");
+      expect(frame).toContain("main/claude · waiting output");
       expect(frame).toContain("/ 2m first");
       expect(frame).toContain("route simple");
     } finally {
@@ -328,11 +328,11 @@ describe("App Router reason", () => {
       await waitForFrame(view.lastFrame, "ready");
       await settleEffects();
       testInput.send(view.stdin, "hello\r");
-      await waitForFrame(view.lastFrame, "main/claude done");
+      await waitForFrame(view.lastFrame, "main/claude · done");
       await new Promise((resolve) => setTimeout(resolve, 1_200));
 
       const frame = view.lastFrame() ?? "";
-      expect(frame).toContain("main/claude done");
+      expect(frame).toContain("main/claude · done");
       expect(frame).not.toContain("responding");
     } finally {
       completion.resolve({
@@ -398,7 +398,7 @@ describe("App Router reason", () => {
       await waitForFrame(view.lastFrame, "waiting output");
 
       const frame = view.lastFrame() ?? "";
-      expect(frame).toContain("main/claude waiting output");
+      expect(frame).toContain("main/claude · waiting output");
       expect(frame).not.toContain("main/claude fail");
     } finally {
       completion.resolve({
@@ -546,7 +546,7 @@ describe("App Router reason", () => {
 
       testInput.send(view.stdin, "\t");
       await waitForFrame(view.lastFrame, "follow-up actor log is also visible");
-      expect(view.lastFrame()).toContain("Actor (codex) · Turn 2 (2/2)");
+      expect(view.lastFrame()).toContain("actor/codex · Turn 2 · 2/2");
     } finally {
       completion.resolve({
         mode: "complex",

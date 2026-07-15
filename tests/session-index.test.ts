@@ -72,6 +72,17 @@ describe("SessionIndex", () => {
       last_used_at: "2026-07-02T01:03:00.000Z",
       source: "manual"
     });
+    await index.upsertNativeSession("task-new", {
+      engine: "codex",
+      role: "critic",
+      worker_id: "critic-codex-0002",
+      session_id: "native-new",
+      scope: "task",
+      cwd: root,
+      created_at: "2026-07-02T01:00:00.000Z",
+      last_used_at: "2026-07-02T01:04:00.000Z",
+      source: "manual"
+    });
 
     expect(catalog.listTasks).toBeTypeOf("function");
     await expect(catalog.listTasks?.(10)).resolves.toEqual([
@@ -90,6 +101,7 @@ describe("SessionIndex", () => {
         nativeSessionCount: 0
       })
     ]);
+    await expect(index.countRows("native_sessions")).resolves.toBe(2);
 
     expect(catalog.setActiveTaskId).toBeTypeOf("function");
     expect(catalog.activeTaskId).toBeTypeOf("function");

@@ -250,10 +250,9 @@ describe("AppShell", () => {
     expect(frame).not.toContain("> Critic/mock");
     expect(frame).toContain("Role artifacts");
     expect(frame).toContain("Input area");
-    expect(frame).toContain("2 workers");
-    expect(frame).toContain("@ critic/mock");
-    expect(frame).toContain("critic/mock");
-    expect(frame).not.toContain("w2");
+    expect(frame).toContain("workers 2");
+    expect(frame).toContain("critic/mock · done");
+    expect(frame).not.toContain("wk2");
     expect(frame).not.toContain("workers 2 | critic/mock done");
   });
 

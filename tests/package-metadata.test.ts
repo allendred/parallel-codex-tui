@@ -127,6 +127,10 @@ describe("package metadata", () => {
 
     expect(example).toContain("[router]");
     expect(example).toContain("[workers.mock]");
+    expect(example).toContain("# [workers.codex.model]");
+    expect(example).toContain('# provider = "openai"');
+    expect(example).toContain("# [workers.claude.model]");
+    expect(example).toContain('# provider = "anthropic"');
     for (const field of TUI_THEME_FIELDS) {
       expect(example).toContain(`# ${field} = `);
     }
@@ -336,6 +340,10 @@ describe("package metadata", () => {
     expect(readme).toContain("Recovery commits cancellation only after every recorded process group is confirmed stopped");
     expect(readme).toContain("An unverifiable or still-running process blocks startup");
     expect(readme).toContain("A matching `native-session.retired.json` tombstone always wins over a leftover active session file");
+    expect(readme).toContain("Every numbered turn keeps its own immutable Judge, Actor, and Critic worker directories");
+    expect(readme).toContain("cycles them in turn order, and restores the same order after restart");
+    expect(readme).toContain("number of distinct native sessions after deduplicating reused `engine + session_id` bindings");
+    expect(readme).toContain("A valid retirement tombstone is also a cross-turn inheritance barrier");
     expect(readme).toContain("startup reconciles the active file, Worker status, and both SQLite projections before the first TUI frame");
     expect(readme).toContain("Session index rebuilding publishes either the previous complete snapshot or the new complete snapshot");
     expect(readme).toContain("Terminal completion is evidence-guarded");
@@ -361,7 +369,7 @@ describe("package metadata", () => {
     expect(readme).toContain("Up/Down, PageUp/PageDown, the mouse wheel, or `Tab` changes the selected worker");
     expect(readme).toContain("Enter or `Ctrl+W` opens its rendered log");
     expect(readme).toContain("`Ctrl+T` opens the workspace's persisted Task sessions");
-    expect(readme).toContain("turn, worker, and native-session counts");
+    expect(readme).toContain("turn and worker counts, plus the number of distinct native sessions");
     expect(readme).toContain("The selected active task is stored in `session-index.sqlite`");
     expect(readme).toContain("Restoring a task reloads its route, workers, retry state, and recorded native session ids");
     expect(readme).toContain("`Ctrl+N` persists an intentionally empty active-task context");

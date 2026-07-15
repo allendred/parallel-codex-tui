@@ -148,11 +148,11 @@ describe("CLI worker layout smoke", () => {
 
     try {
       await waitForText(chunks, "ready");
-      await waitForText(chunks, "1 worker");
+      await waitForScreenText(() => screenWrites, screen, "workers 1");
       await waitForScreenText(() => screenWrites, screen, "^W logs");
       child.write("\x17");
       await waitForText(chunks, "line 80");
-      await waitForScreenText(() => screenWrites, screen, "1 worker");
+      await waitForScreenText(() => screenWrites, screen, "workers 1");
       await screenWrites;
 
       const snapshot = screen.snapshot();
@@ -167,7 +167,7 @@ describe("CLI worker layout smoke", () => {
       const workerTitleContentChunks = workerTitleLine?.chunks.filter((chunk) => chunk.text.trim().length > 0) ?? [];
       const statusLine = screen
         .styledSnapshotLines()
-        .find((line) => line.chunks.map((chunk) => chunk.text).join("").includes("1 worker"));
+        .find((line) => line.chunks.map((chunk) => chunk.text).join("").includes("workers 1"));
       const statusLineText = statusLine?.chunks.map((chunk) => chunk.text).join("") ?? "";
       const inputLine = screen
         .styledSnapshotLines()
@@ -200,9 +200,9 @@ describe("CLI worker layout smoke", () => {
       expect(snapshot).toContain("^O attach");
       expect(inputLine?.chunks.some((chunk) => chunk.style.backgroundColor === TUI_THEME_PRESETS.codex.rail)).toBe(true);
       expect(displayWidth(inputLineText)).toBe(139);
-      expect(snapshot).toContain("1 worker");
+      expect(snapshot).toContain("workers 1");
       expect(snapshot).toContain("done");
-      expect(snapshot).not.toContain("@ critic/mock");
+      expect(snapshot).toContain("critic/mock · done");
       expect(statusLine?.chunks.some((chunk) => chunk.style.backgroundColor === TUI_THEME_PRESETS.codex.rail)).toBe(true);
       const successStatusText = statusLine?.chunks
         .filter((chunk) => chunk.style.color === TUI_THEME_PRESETS.codex.success)
@@ -217,9 +217,9 @@ describe("CLI worker layout smoke", () => {
       await waitForScreenText(() => screenWrites, screen, "^W logs");
       const chatSnapshot = screen.snapshot();
       expect(chatSnapshot).toContain("> | message · ^N new · ^W logs · ^B workers · ^T tasks · Tab · ^O attach · ^G routes");
-      expect(chatSnapshot).toContain("1 worker");
+      expect(chatSnapshot).toContain("workers 1");
       expect(chatSnapshot).toContain("done");
-      expect(chatSnapshot).not.toContain("@ critic/mock");
+      expect(chatSnapshot).not.toContain("critic/mock · done");
     } finally {
       child.kill("SIGTERM");
     }
@@ -320,17 +320,17 @@ describe("CLI worker layout smoke", () => {
 
     try {
       await waitForText(chunks, "ready");
-      await waitForScreenText(() => screenWrites, screen, "1 worker");
+      await waitForScreenText(() => screenWrites, screen, "workers 1");
       await waitForScreenText(() => screenWrites, screen, "^W logs");
       child.write("\x17");
       await waitForScreenText(() => screenWrites, screen, "line 80");
-      await waitForScreenText(() => screenWrites, screen, "1 worker");
+      await waitForScreenText(() => screenWrites, screen, "workers 1");
 
       const lines = screen.styledSnapshotLines();
       const headerLine = lines.find((line) => line.chunks.map((chunk) => chunk.text).join("").includes("parallel-codex-tui"));
       const workerTitleLine = lines.find((line) => line.chunks.map((chunk) => chunk.text).join("").includes("critic/mock · 1/1"));
       const inputLine = lines.find((line) => line.chunks.map((chunk) => chunk.text).join("").includes("logs · scroll"));
-      const statusLine = lines.find((line) => line.chunks.map((chunk) => chunk.text).join("").includes("1 worker"));
+      const statusLine = lines.find((line) => line.chunks.map((chunk) => chunk.text).join("").includes("workers 1"));
       const statusMutedChunks = statusLine?.chunks.filter((chunk) => chunk.style.color === TUI_THEME_PRESETS.paper.muted) ?? [];
 
       expect(headerLine?.chunks.some((chunk) => chunk.style.backgroundColor === TUI_THEME_PRESETS.paper.chrome)).toBe(true);
@@ -349,7 +349,7 @@ describe("CLI worker layout smoke", () => {
       )).toBe(true);
       expect(statusMutedChunks.length).toBeGreaterThan(0);
       expect(statusMutedChunks.every((chunk) => chunk.style.dimColor !== true)).toBe(true);
-      expect(statusLine?.chunks.some((chunk) => chunk.text.includes("1 worker") && chunk.style.color === TUI_THEME_PRESETS.paper.text)).toBe(true);
+      expect(statusLine?.chunks.some((chunk) => chunk.text === "1" && chunk.style.color === TUI_THEME_PRESETS.paper.text)).toBe(true);
       expect(headerLine?.chunks.some((chunk) => chunk.style.backgroundColor === TUI_THEME_PRESETS.codex.chrome)).toBe(false);
     } finally {
       child.kill("SIGTERM");
@@ -390,8 +390,7 @@ describe("CLI worker layout smoke", () => {
 
     try {
       await waitForScreenText(() => screenWrites, screen, "ready");
-      await waitForScreenText(() => screenWrites, screen, "w1");
-      await waitForScreenText(() => screenWrites, screen, "d1");
+      await waitForScreenText(() => screenWrites, screen, "wk1 done");
       await waitForScreenText(() => screenWrites, screen, "^W logs");
       child.write("\x0f");
       await waitForScreenText(() => screenWrites, screen, "no session · critic");
@@ -606,7 +605,7 @@ describe("CLI worker layout smoke", () => {
     });
 
     try {
-      await waitForScreenText(() => screenWrites, screen, "w1 d1");
+      await waitForScreenText(() => screenWrites, screen, "wk1 done");
       await waitForScreenText(() => screenWrites, screen, "> | msg");
       child.write("\x17");
       await waitForScreenText(() => screenWrites, screen, "ok");
@@ -665,7 +664,7 @@ describe("CLI worker layout smoke", () => {
 
     try {
       await waitForText(chunks, "ready");
-      await waitForScreenText(() => screenWrites, screen, "1 worker · done");
+      await waitForScreenText(() => screenWrites, screen, "wk1 done");
       await waitForScreenText(() => screenWrites, screen, "> | message · ^W logs · ^O attach");
       child.write("\x17");
       await waitForScreenText(() => screenWrites, screen, "logs · scroll · Tab · Esc chat");
@@ -674,9 +673,8 @@ describe("CLI worker layout smoke", () => {
       expect(snapshot).toContain("logs · scroll · Tab · Esc chat");
       expect(snapshot).not.toContain("^O");
       expect(snapshot).not.toContain("logs · wheel/Pg");
-      expect(snapshot).toContain("1 worker · done");
-      expect(snapshot).not.toContain("w1");
-      expect(snapshot).not.toContain("d1");
+      expect(snapshot).toContain("wk1 done");
+      expect(snapshot).toContain("critic/mock:done");
       expect(snapshot).not.toContain("@ critic");
       expect(snapshot).not.toContain("@ critic/mock");
       expect(snapshot).not.toContain("s readscroll");
@@ -853,27 +851,27 @@ describe("CLI worker layout smoke", () => {
 
     try {
       await waitForText(chunks, "actor failure details");
-      await waitForScreenText(() => screenWrites, screen, "2 workers");
+      await waitForScreenText(() => screenWrites, screen, "workers 2");
       await screenWrites;
 
       const snapshot = screen.snapshot();
       expect(snapshot).toContain("logs");
       expect(snapshot).toContain("actor/mock · 2/2");
       expect(snapshot).toContain("actor failure details");
-      expect(snapshot).toContain("2 workers");
-      expect(snapshot).toContain("1 failed");
-      expect(snapshot).toContain("1 done");
-      expect(snapshot).toContain("@ actor/mock");
-      expect(snapshot).not.toContain("@ judge/mock");
+      expect(snapshot).toContain("workers 2");
+      expect(snapshot).toContain("fail 1");
+      expect(snapshot).toContain("done 1");
+      expect(snapshot).toContain("actor/mock · fail");
+      expect(snapshot).not.toContain("judge/mock · done");
 
       child.write("\t");
       await waitForScreenText(() => screenWrites, screen, "judge/mock · 1/2");
       await waitForScreenText(() => screenWrites, screen, "judge healthy details");
-      await waitForScreenText(() => screenWrites, screen, "@ judge/mock");
+      await waitForScreenText(() => screenWrites, screen, "judge/mock · done");
       const switchedSnapshot = screen.snapshot();
       expect(switchedSnapshot).toContain("judge healthy details");
-      expect(switchedSnapshot).toContain("@ judge/mock");
-      expect(switchedSnapshot).not.toContain("@ actor/mock");
+      expect(switchedSnapshot).toContain("judge/mock · done");
+      expect(switchedSnapshot).not.toContain("actor/mock · fail");
     } finally {
       child.kill("SIGTERM");
     }
@@ -946,9 +944,9 @@ describe("CLI worker layout smoke", () => {
       const snapshot = screen.snapshot();
       expect(snapshot).toContain("chat");
       expect(snapshot).toContain("^R retry");
-      expect(snapshot).toContain("2 workers");
-      expect(snapshot).toContain("1 failed");
-      expect(snapshot).not.toContain("@ actor/mock");
+      expect(snapshot).toContain("workers 2");
+      expect(snapshot).toContain("fail 1");
+      expect(snapshot).not.toContain("actor/mock · fail");
       expect(snapshot).not.toContain("actor failure details");
     } finally {
       child.kill("SIGTERM");

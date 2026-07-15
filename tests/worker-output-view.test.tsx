@@ -137,6 +137,9 @@ describe("WorkerOutputView", () => {
       );
       await waitForFrame(lastFrame, "second generation only");
       expect(lastFrame() ?? "").not.toContain("first generation line");
+
+      await writeFile(join(workerDir, "worklog.md"), "Artifact updated without process output.\n", "utf8");
+      await waitForFrame(lastFrame, "Artifact updated without process output.");
     } finally {
       unmount();
     }
@@ -1214,12 +1217,15 @@ describe("WorkerOutputView", () => {
 
   it("renders feature mailbox artifacts for the selected role", async () => {
     const root = await mkdtemp(join(tmpdir(), "pct-worker-output-"));
-    const workerDir = join(root, "actor-mock");
+    const workerDir = join(root, "actor-mock-0002");
     const featureDir = join(root, "features", "0002");
+    const siblingFeatureDir = join(root, "features", "0002-sibling");
 
     await mkdir(workerDir, { recursive: true });
     await mkdir(featureDir, { recursive: true });
+    await mkdir(siblingFeatureDir, { recursive: true });
     await writeFile(join(featureDir, "actor-worklog.md"), "Feature 0002 implementation notes.\n");
+    await writeFile(join(siblingFeatureDir, "actor-worklog.md"), "Sibling feature must stay hidden.\n");
     await writeFile(join(featureDir, "critic-findings.jsonl"), "{\"message\":\"critic only\"}\n");
     await writeFile(join(workerDir, "output.log"), "actor cli transcript\n");
 
@@ -1227,6 +1233,7 @@ describe("WorkerOutputView", () => {
       <WorkerOutputView
         title="Actor (mock) output"
         role="actor"
+        featureId="0002"
         logPath={join(workerDir, "output.log")}
         height={20}
       />
@@ -1241,6 +1248,7 @@ describe("WorkerOutputView", () => {
       expect(frame).not.toContain("file · features/0002/actor-worklog.md");
       expect(frame).not.toContain("actor-worklog.md");
       expect(frame).not.toContain("critic only");
+      expect(frame).not.toContain("Sibling feature must stay hidden.");
       expect(frame).toContain("process");
       expect(frame).not.toContain("Feature mailbox");
       expect(frame).not.toContain("Process output");
@@ -1252,7 +1260,7 @@ describe("WorkerOutputView", () => {
 
   it("compacts short worker metadata headings into one-line fields", async () => {
     const root = await mkdtemp(join(tmpdir(), "pct-worker-output-metadata-fields-"));
-    const workerDir = join(root, "actor-mock");
+    const workerDir = join(root, "actor-mock-0010");
     const featureDir = join(root, "features", "0010");
 
     await mkdir(workerDir, { recursive: true });
@@ -1278,6 +1286,7 @@ describe("WorkerOutputView", () => {
       <WorkerOutputView
         title="Actor (mock) output"
         role="actor"
+        featureId="0010"
         logPath={join(workerDir, "output.log")}
         height={24}
       />
@@ -1299,9 +1308,9 @@ describe("WorkerOutputView", () => {
     }
   });
 
-  it("renders feature mailbox artifacts from oldest to newest before process output", async () => {
+  it("keeps other task turns out of a worker's feature artifacts", async () => {
     const root = await mkdtemp(join(tmpdir(), "pct-worker-output-mailbox-order-"));
-    const workerDir = join(root, "critic-mock");
+    const workerDir = join(root, "critic-mock-0010");
     const oldFeatureDir = join(root, "features", "0005");
     const newFeatureDir = join(root, "features", "0010");
 
@@ -1325,20 +1334,19 @@ describe("WorkerOutputView", () => {
       await waitForFrame(lastFrame, "Latest decision turn 0010.");
 
       const frame = lastFrame() ?? "";
-      const oldIndex = frame.indexOf("Old decision turn 0005.");
       const latestIndex = frame.indexOf("Latest decision turn 0010.");
       const processIndex = frame.indexOf("process tail");
-      expect(oldIndex).toBeGreaterThanOrEqual(0);
-      expect(latestIndex).toBeGreaterThan(oldIndex);
+      expect(frame).not.toContain("Old decision turn 0005.");
+      expect(latestIndex).toBeGreaterThanOrEqual(0);
       expect(processIndex).toBeGreaterThan(latestIndex);
     } finally {
       unmount();
     }
   });
 
-  it("opens tall multi-turn tails at the latest complete feature section without top padding", async () => {
+  it("opens scoped tall tails at the complete feature section without top padding", async () => {
     const root = await mkdtemp(join(tmpdir(), "pct-worker-output-latest-tail-"));
-    const workerDir = join(root, "critic-mock");
+    const workerDir = join(root, "critic-mock-0010");
     const oldFeatureDir = join(root, "features", "0007");
     const newFeatureDir = join(root, "features", "0010");
 
@@ -1389,6 +1397,7 @@ describe("WorkerOutputView", () => {
       <WorkerOutputView
         title="Critic (mock) output"
         role="critic"
+        featureId="0010"
         logPath={join(workerDir, "output.log")}
         height={18}
       />
@@ -1399,7 +1408,8 @@ describe("WorkerOutputView", () => {
 
       const frame = lastFrame() ?? "";
       const lines = frame.split("\n");
-      expect(lines[1]?.trim()).toBe("decision · 0010");
+      expect(lines[1]?.trim()).toBe("mailbox");
+      expect(lines[2]?.trim()).toBe("decision · 0010");
       expect(frame).toContain("Feature 0010");
       expect(frame).not.toContain("decision · 0007");
       expect(frame).not.toContain("Feature 0007");
@@ -1410,7 +1420,7 @@ describe("WorkerOutputView", () => {
 
   it("compacts feature decisions to final review signal instead of repeated truncated source summaries", async () => {
     const root = await mkdtemp(join(tmpdir(), "pct-worker-output-decisions-compact-"));
-    const workerDir = join(root, "critic-mock");
+    const workerDir = join(root, "critic-mock-0010");
     const featureDir = join(root, "features", "0010");
 
     await mkdir(workerDir, { recursive: true });
@@ -1470,6 +1480,7 @@ describe("WorkerOutputView", () => {
       <WorkerOutputView
         title="Critic (mock) output"
         role="critic"
+        featureId="0010"
         logPath={join(workerDir, "output.log")}
         height={32}
       />
@@ -1512,7 +1523,7 @@ describe("WorkerOutputView", () => {
 
   it("keeps historical decision reviews short when they include long critic context sections", async () => {
     const root = await mkdtemp(join(tmpdir(), "pct-worker-output-decisions-review-short-"));
-    const workerDir = join(root, "critic-mock");
+    const workerDir = join(root, "critic-mock-0005");
     const featureDir = join(root, "features", "0005");
 
     await mkdir(workerDir, { recursive: true });
@@ -1558,6 +1569,7 @@ describe("WorkerOutputView", () => {
       <WorkerOutputView
         title="Critic (mock) output"
         role="critic"
+        featureId="0005"
         logPath={join(workerDir, "output.log")}
         height={28}
       />
@@ -2837,6 +2849,44 @@ describe("WorkerOutputView", () => {
       expect(frame).toContain("14 + const value = newValue;");
       expect(frame).toContain("15   return value;");
       expect(frame).not.toContain("Collapsed code output");
+    } finally {
+      unmount();
+    }
+  });
+
+  it("keeps genuine output that matches the internal diff shield vocabulary", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pct-worker-output-diff-shield-collision-"));
+    const workerDir = join(root, "actor-codex");
+
+    await mkdir(workerDir, { recursive: true });
+    await writeFile(
+      join(workerDir, "output.log"),
+      [
+        "pct protected diff line 00000000",
+        "@@ -1,1 +1,1 @@",
+        "-const mode = 'old';",
+        "+const mode = 'new';",
+        "after collision-safe hunk"
+      ].join("\n")
+    );
+
+    const { lastFrame, unmount } = render(
+      <WorkerOutputView
+        title="Actor (codex) output"
+        role="actor"
+        logPath={join(workerDir, "output.log")}
+        height={14}
+      />
+    );
+
+    try {
+      await waitForFrame(lastFrame, "after collision-safe hunk");
+
+      const frame = lastFrame() ?? "";
+      expect(frame).toContain("pct protected diff line 00000000");
+      expect(frame.match(/@@ -1,1 \+1,1 @@/g)).toHaveLength(1);
+      expect(frame).toContain("1 - const mode = 'old';");
+      expect(frame).toContain("1 + const mode = 'new';");
     } finally {
       unmount();
     }
@@ -4536,7 +4586,18 @@ describe("WorkerOutputView", () => {
     expect(workerOutputTitleDisplay("Actor (codex) output (2/4)", 6)).toBe("a 2/4");
     expect(workerOutputTitleDisplay("Actor (codex) output (2/4)", 3)).toBe("2/4");
     expect(workerOutputTitleDisplay("Critic (claude) output (3/4)", 80)).toBe("critic/claude · 3/4");
+    expect(workerOutputTitleDisplay("Actor (codex) · Turn 2 output (4/6)", 40)).toBe("actor/codex · Turn 2 · 4/6");
+    expect(workerOutputTitleDisplay("Actor (codex) · Turn 2 output (4/6)", 20)).toBe("actor/codex · 4/6");
+    expect(workerOutputTitleDisplay("Critic (claude) · Gameplay output (5/8)", 45)).toBe("critic/claude · Gameplay · 5/8");
+    const detailedTitle = workerOutputTitleDisplay(
+      "Actor (codex) · Input reliability and terminal interaction output (4/6)",
+      40
+    );
+    expect(detailedTitle).toMatch(/^actor\/codex · Input/);
+    expect(detailedTitle).toMatch(/ · 4\/6$/);
+    expect(displayWidth(detailedTitle)).toBeLessThanOrEqual(40);
     expect(workerOutputHeaderDisplay("Judge (codex) output (1/4)", "tail", 40)).toBe("judge/codex · 1/4 · tail");
+    expect(workerOutputHeaderDisplay("Actor (codex) · Turn 2 output (4/6)", "tail", 40)).toBe("actor/codex · Turn 2 · 4/6 · tail");
     expect(workerOutputHeaderDisplay("Critic (claude) output (3/4)", "back 3/474", 45)).toBe("critic/claude · 3/4 · back 3/474");
     expect(workerOutputHeaderDisplay("Judge (codex) output (1/4)", "tail", 18)).toBe("judge · 1/4 · tail");
     expect(workerOutputHeaderDisplay("Actor (codex) output (2/4)", "tail", 16)).toBe("actor · 2/4");

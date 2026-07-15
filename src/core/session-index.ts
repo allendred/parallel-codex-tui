@@ -214,7 +214,9 @@ export class SessionIndex {
          tasks.status,
          (SELECT COUNT(*) FROM turns WHERE turns.task_id = tasks.id) AS turn_count,
          (SELECT COUNT(*) FROM workers WHERE workers.task_id = tasks.id) AS worker_count,
-         (SELECT COUNT(*) FROM native_sessions WHERE native_sessions.task_id = tasks.id) AS native_session_count
+         (SELECT COUNT(DISTINCT engine || char(31) || session_id)
+            FROM native_sessions
+           WHERE native_sessions.task_id = tasks.id) AS native_session_count
        FROM tasks
        ORDER BY tasks.created_at DESC, tasks.id DESC
        LIMIT ?`

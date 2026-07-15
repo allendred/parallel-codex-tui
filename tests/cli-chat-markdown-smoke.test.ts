@@ -196,11 +196,12 @@ describe("CLI chat Markdown smoke", () => {
           .filter((line) => line.includes("main/codex") || line.includes("route")))
       ));
       const observedStatusText = observedStatusLines.join("\n");
-      expect(observedStatusText).toMatch(
-        /@ main\/codex waiting output · \d+s \/ 5s first · route simple · forced(?:\n|$)/
+      const waitingStatusLine = observedStatusLines.find((line) => line.includes("waiting output")) ?? "";
+      expect(waitingStatusLine).toMatch(
+        /main\/codex · waiting output · \d+s \/ 5s first · route simple · forced(?:\n|$)/
       );
-      expect(observedStatusText).toContain("@ main/codex responding");
-      expect(observedStatusText).not.toContain("@ main/codex run ·");
+      expect(observedStatusText).toContain("main/codex · responding");
+      expect(observedStatusText).not.toContain("main/codex · run ·");
     } finally {
       child.kill("SIGTERM");
     }

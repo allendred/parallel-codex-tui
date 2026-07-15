@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { basename, dirname, join } from "node:path";
-import { readdir } from "node:fs/promises";
+import { readdir, stat } from "node:fs/promises";
 import { Box, Text, type TextProps } from "ink";
 import { pathExists, readTextIfExists } from "../core/file-store.js";
 import type { WorkerRole } from "../domain/schemas.js";
@@ -102,6 +102,7 @@ export interface WorkerOutputSourceColumns {
 export interface WorkerOutputViewProps {
   title: string;
   role?: WorkerRole;
+  featureId?: string;
   logPath: string | null;
   scrollOffset?: number;
   height?: number;
@@ -149,6 +150,7 @@ export function workerOutputNavigationTargets(
 export function WorkerOutputView({
   title,
   role,
+  featureId,
   logPath,
   scrollOffset = 0,
   height = 24,
@@ -159,26 +161,41 @@ export function WorkerOutputView({
   onNavigationChange
 }: WorkerOutputViewProps) {
   const nanoOutput = isNanoWorkerOutputWidth(terminalWidth);
-  const contentKey = workerOutputContentKey(role, logPath, nanoOutput);
+  const contentKey = workerOutputContentKey(role, featureId, logPath, nanoOutput);
   const [contentState, setContentState] = useState<WorkerOutputContentState>({ key: "", lines: [] });
 
   useEffect(() => {
     let active = true;
     let refreshing = false;
     let refreshQueued = false;
+    let rendered = false;
+    let artifactSignature: string | null = null;
     const loadKey = contentKey;
     const outputReader = logPath ? createIncrementalTextFileReader(logPath) : null;
 
     async function load() {
       try {
         if (!logPath || !outputReader) {
+          if (rendered) {
+            return;
+          }
+          rendered = true;
           setContentState({
             key: loadKey,
             lines: [{ kind: "placeholder", text: NO_WORKER_OUTPUT_TEXT }]
           });
           return;
         }
-        const output = (await outputReader.read()).text;
+        const snapshot = await outputReader.read();
+        const nextArtifactSignature = nanoOutput
+          ? ""
+          : await workerArtifactSignature(role, dirname(logPath), featureId);
+        if (rendered && !snapshot.changed && nextArtifactSignature === artifactSignature) {
+          return;
+        }
+        rendered = true;
+        artifactSignature = nextArtifactSignature;
+        const output = snapshot.text;
         if (nanoOutput) {
           const lines = await loadNanoWorkerOutputLines(logPath, height, output);
           if (active) {
@@ -189,7 +206,7 @@ export function WorkerOutputView({
           }
           return;
         }
-        const sections = await loadWorkerOutputSections(role, logPath, output);
+        const sections = await loadWorkerOutputSections(role, logPath, output, featureId);
         if (active) {
           setContentState({
             key: loadKey,
@@ -235,7 +252,7 @@ export function WorkerOutputView({
       active = false;
       clearInterval(interval);
     };
-  }, [contentKey, height, logPath, nanoOutput, role]);
+  }, [contentKey, featureId, height, logPath, nanoOutput, role]);
 
   const contentReady = contentState.key === contentKey;
   const content = contentReady
@@ -409,19 +426,41 @@ function lastIndexWhere<T>(values: T[], predicate: (value: T) => boolean): numbe
   return -1;
 }
 
-function workerOutputContentKey(role: WorkerRole | undefined, logPath: string | null, nanoOutput = false): string {
-  return `${role ?? ""}:${logPath ?? ""}:${nanoOutput ? "nano" : "full"}`;
+function workerOutputContentKey(
+  role: WorkerRole | undefined,
+  featureId: string | undefined,
+  logPath: string | null,
+  nanoOutput = false
+): string {
+  return `${role ?? ""}:${featureId ?? ""}:${logPath ?? ""}:${nanoOutput ? "nano" : "full"}`;
 }
 
 export function workerOutputTitleDisplay(title: string, width: number): string {
-  const match = title.match(/^(.+?)\s+\(([^)]+)\)\s+output(?:\s+\((\d+\/\d+)\))?$/i);
+  const match = title.match(/^(.+?)\s+\(([^)]+)\)(?:\s+·\s+(.+?))?\s+output(?:\s+\((\d+\/\d+)\))?$/i);
   if (!match) {
     return compactEndByDisplayWidth(title.replace(/\s+output\b/i, "").trim(), width);
   }
 
   const role = (match[1] ?? "").trim().toLowerCase();
   const provider = (match[2] ?? "").trim().toLowerCase();
-  const page = match[3] ?? "";
+  const detail = (match[3] ?? "").trim();
+  const page = match[4] ?? "";
+  const detailed = joinWorkerOutputChromeParts([`${role}/${provider}`, detail, page]);
+  if (detail && displayWidth(detailed) <= width) {
+    return detailed;
+  }
+  if (detail) {
+    const fixed = joinWorkerOutputChromeParts([`${role}/${provider}`, page]);
+    const detailBudget = width - displayWidth(fixed) - displayWidth(" · ");
+    if (detailBudget >= 8) {
+      return joinWorkerOutputChromeParts([
+        `${role}/${provider}`,
+        compactEndByDisplayWidth(detail, detailBudget),
+        page
+      ]);
+    }
+  }
+
   const compact = joinWorkerOutputChromeParts([`${role}/${provider}`, page]);
   if (displayWidth(compact) <= width) {
     return compact;
@@ -711,7 +750,8 @@ function latestSectionBoundaryWithinTail(
 async function loadWorkerOutputSections(
   role: WorkerRole | undefined,
   logPath: string,
-  processOutput?: string
+  processOutput?: string,
+  featureId?: string
 ): Promise<WorkerOutputSection[]> {
   const workerDir = dirname(logPath);
   const sections: WorkerOutputSection[] = [];
@@ -725,7 +765,7 @@ async function loadWorkerOutputSections(
     sections.push({ group: "role", title: file, text });
   }
 
-  for (const artifact of await featureArtifactSections(role, workerDir)) {
+  for (const artifact of await featureArtifactSections(role, workerDir, featureId)) {
     const text = artifact.text.trim();
     if (!text) {
       continue;
@@ -804,7 +844,11 @@ function roleArtifactFiles(role: WorkerRole | undefined): string[] {
   return [];
 }
 
-async function featureArtifactSections(role: WorkerRole | undefined, workerDir: string): Promise<Array<{ label: string; text: string }>> {
+async function featureArtifactSections(
+  role: WorkerRole | undefined,
+  workerDir: string,
+  featureId?: string
+): Promise<Array<{ label: string; text: string }>> {
   const files = featureArtifactFiles(role);
   if (files.length === 0) {
     return [];
@@ -816,11 +860,7 @@ async function featureArtifactSections(role: WorkerRole | undefined, workerDir: 
     return [];
   }
 
-  const entries = await readdir(featuresDir, { withFileTypes: true });
-  const featureDirs = entries
-    .filter((entry) => entry.isDirectory())
-    .map((entry) => entry.name)
-    .sort();
+  const featureDirs = await scopedFeatureDirectoryNames(featuresDir, workerDir, featureId);
   const sections: Array<{ label: string; text: string }> = [];
 
   for (const featureDir of featureDirs) {
@@ -837,6 +877,70 @@ async function featureArtifactSections(role: WorkerRole | undefined, workerDir: 
   }
 
   return sections;
+}
+
+async function workerArtifactSignature(
+  role: WorkerRole | undefined,
+  workerDir: string,
+  featureId?: string
+): Promise<string> {
+  const paths = roleArtifactFiles(role).map((file) => join(workerDir, file));
+  const featureFiles = featureArtifactFiles(role);
+  if (featureFiles.length > 0) {
+    const featuresDir = join(dirname(workerDir), "features");
+    if (await pathExists(featuresDir)) {
+      const featureDirs = await scopedFeatureDirectoryNames(featuresDir, workerDir, featureId);
+      for (const featureDir of featureDirs) {
+        for (const file of featureFiles) {
+          paths.push(join(featuresDir, featureDir, file));
+        }
+      }
+    }
+  }
+
+  const signatures = await Promise.all(paths.map(async (path) => {
+    try {
+      const metadata = await stat(path);
+      return `${path}\0${metadata.dev}:${metadata.ino}:${metadata.size}:${metadata.mtimeMs}:${metadata.ctimeMs}`;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+        return `${path}\0missing`;
+      }
+      throw error;
+    }
+  }));
+  return signatures.join("\u0001");
+}
+
+async function scopedFeatureDirectoryNames(
+  featuresDir: string,
+  workerDir: string,
+  featureId?: string
+): Promise<string[]> {
+  if (featureId) {
+    return [featureId];
+  }
+  const turnId = workerTurnIdFromDirectory(workerDir);
+  const entries = await readdir(featuresDir, { withFileTypes: true });
+  return entries
+    .filter((entry) => entry.isDirectory() && (
+      !turnId || entry.name === turnId || entry.name.startsWith(`${turnId}-`)
+    ))
+    .map((entry) => entry.name)
+    .sort();
+}
+
+function workerTurnIdFromDirectory(workerDir: string): string | null {
+  const workerId = basename(workerDir);
+  const waveTurn = workerId.match(/-wave-(\d{4,})-/)?.[1];
+  if (waveTurn) {
+    return waveTurn;
+  }
+  const scopedTurn = workerId.match(/-(\d{4,})(?:-|$)/)?.[1];
+  if (scopedTurn) {
+    return scopedTurn;
+  }
+  return /^(?:judge|actor|critic)-/.test(workerId) ? "0001" : null;
 }
 
 function featureArtifactFiles(role: WorkerRole | undefined): string[] {
@@ -2030,11 +2134,18 @@ interface ShieldedProcessDiff {
 function shieldProcessDiffBlocks(lines: string[]): ShieldedProcessDiff {
   const shielded: string[] = [];
   const originals = new Map<string, string>();
+  const occupied = new Set(lines.map((line) => normalizedProcessLine(line)));
+  let namespace = 0;
+  let tokenPrefix = "pct protected diff line";
+  while (Array.from(occupied).some((line) => line.startsWith(`${tokenPrefix} `))) {
+    namespace += 1;
+    tokenPrefix = `pct protected diff line namespace ${namespace}`;
+  }
   let tokenIndex = 0;
 
   const appendBlock = (blockLines: string[]) => {
     for (const line of blockLines) {
-      const token = `pct protected diff line ${String(tokenIndex).padStart(8, "0")}`;
+      const token = `${tokenPrefix} ${String(tokenIndex).padStart(8, "0")}`;
       tokenIndex += 1;
       originals.set(token, line);
       shielded.push(token);

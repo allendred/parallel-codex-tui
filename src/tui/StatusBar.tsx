@@ -79,8 +79,7 @@ function resolveStatusBar(text: string, terminalWidth: number, showTask: boolean
     terminalWidth
   );
   const segments = fitCompletedMainIdentityBesideRoute(baseSegments, terminalWidth);
-  const compact = !segments.some((segment) => segment.hideLabel)
-    && shouldUseCompactStatus(segments, terminalWidth);
+  const compact = shouldUseCompactStatus(segments, terminalWidth);
   const fittedSegments = fitStatusSegments(segments, terminalWidth, compact);
   return { segments: fittedSegments, compact };
 }
@@ -119,12 +118,17 @@ function omitTinyCurrentSegment(segments: Segment[], terminalWidth: number): Seg
   if (terminalWidth >= 24 || segments.length <= 1) {
     return segments;
   }
-  const activeCurrent = segments.find((segment) => (
-    segment.label.toLowerCase() === "current"
-    && (segment.tone === "run" || segment.tone === "wait" || segment.tone === "fail")
-    && workerIdentityStatus(segment.value)?.role === "main"
-  ));
-  if (activeCurrent) {
+  const current = segments.find((segment) => segment.label.toLowerCase() === "current");
+  const currentRole = current ? workerIdentityStatus(current.value)?.role : undefined;
+  if (
+    current
+    && (
+      currentRole === "main"
+      || current.tone === "run"
+      || current.tone === "wait"
+      || current.tone === "fail"
+    )
+  ) {
     return segments;
   }
   const compacted = segments.filter((segment) => segment.label.toLowerCase() !== "current");
@@ -140,9 +144,6 @@ function shouldUseCompactStatus(segments: Segment[], terminalWidth: number): boo
 }
 
 function readableCompletedSegments(segments: Segment[], terminalWidth: number): Segment[] {
-  if (terminalWidth < 35) {
-    return segments;
-  }
   const workersIndex = segments.findIndex((segment) => segment.label.toLowerCase() === "workers");
   const doneIndex = segments.findIndex((segment) => (
     segment.label.toLowerCase() === "done" && segment.tone === "done"
@@ -166,9 +167,7 @@ function readableCompletedSegments(segments: Segment[], terminalWidth: number): 
         ? { ...segment, hideLabel: true }
         : segment
   ));
-  return statusSegmentsWidth(readable, false) <= Math.max(1, terminalWidth - 2)
-    ? readable
-    : segments;
+  return readable;
 }
 
 function fitCompletedMainIdentityBesideRoute(segments: Segment[], terminalWidth: number): Segment[] {
@@ -197,16 +196,18 @@ function fitCompletedMainIdentityBesideRoute(segments: Segment[], terminalWidth:
     return segments;
   }
   const contentWidth = Math.max(1, terminalWidth - 2);
-  const currentValueWidth = Math.max(
+  const currentWidth = Math.max(
     1,
     contentWidth
       - statusSegmentsWidth([route], false)
       - displayWidth(statusSegmentSeparator(false))
-      - displayWidth("@ ")
   );
-  const value = compactCurrentStatusValue(current.value, currentValueWidth);
+  const fittedCurrent = fitCurrentStatusSegment(current, currentWidth, false);
+  if (!fittedCurrent) {
+    return segments;
+  }
   const fitted = segments.map((segment, index) => (
-    index === currentIndex ? { ...segment, value } : segment
+    index === currentIndex ? fittedCurrent : segment
   ));
   return statusSegmentsWidth(fitted, false) <= contentWidth ? fitted : segments;
 }
@@ -253,30 +254,28 @@ function fitStatusSegments(segments: Segment[], terminalWidth: number, compact: 
     return activeMainPair;
   }
 
-  const displays = semanticSegments.map((segment) => statusSegmentDisplay(segment, compact));
-  const totalWidth = statusSegmentsDisplayWidth(displays, compact);
   const currentIndex = semanticSegments.map((segment) => segment.label.toLowerCase()).lastIndexOf("current");
   if (currentIndex >= 0) {
-    const currentDisplay = displays[currentIndex];
-    if (currentDisplay) {
-      const overflow = totalWidth - contentWidth;
-      const nextValueWidth = Math.max(1, displayWidth(currentDisplay.value) - overflow);
-      const currentRole = workerIdentityRole(semanticSegments[currentIndex]?.value ?? "");
-      if (currentRole && displayWidth(currentRole) > nextValueWidth) {
-        return selectStatusSegmentsThatFit(
-          semanticSegments.filter((_, index) => index !== currentIndex),
-          contentWidth,
-          compact
-        );
+    const current = semanticSegments[currentIndex];
+    if (current) {
+      const others = semanticSegments.filter((_, index) => index !== currentIndex);
+      const besideWidth = contentWidth
+        - statusSegmentsWidth(others, compact)
+        - (others.length > 0 ? displayWidth(statusSegmentSeparator(compact)) : 0);
+      const fittedBeside = fitCurrentStatusSegment(current, besideWidth, compact, true);
+      if (fittedBeside) {
+        const fitted = semanticSegments.map((segment, index) => (
+          index === currentIndex ? fittedBeside : segment
+        ));
+        if (statusSegmentsWidth(fitted, compact) <= contentWidth) {
+          return fitted;
+        }
       }
-      const fitted = semanticSegments.map((segment, index) =>
-        index === currentIndex
-          ? { ...segment, value: compactCurrentStatusValue(segment.value, nextValueWidth) }
-          : segment
-      );
-      if (statusSegmentsWidth(fitted, compact) <= contentWidth) {
-        return fitted;
-      }
+
+      const fittedCurrent = fitCurrentStatusSegment(current, contentWidth, compact);
+      const fitted = fittedCurrent
+        ? semanticSegments.map((segment, index) => index === currentIndex ? fittedCurrent : segment)
+        : semanticSegments.filter((_, index) => index !== currentIndex);
       return selectStatusSegmentsThatFit(fitted, contentWidth, compact);
     }
   }
@@ -308,30 +307,28 @@ function fitActiveMainWithCompletedRoute(
     return null;
   }
 
-  const currentDisplay = statusSegmentDisplay(current, compact);
-  const currentValueWidth = Math.max(
-    1,
-    contentWidth - displayWidth(`${currentDisplay.label}${currentDisplay.separator}`)
-  );
-  const fittedCurrent = {
-    ...current,
-    value: compactActiveMainStatusValue(current.value, currentValueWidth)
-  };
-  if (statusSegmentsWidth([fittedCurrent], compact) > contentWidth) {
-    return null;
+  for (const value of currentStatusValueCandidates(current.value)) {
+    const fittedCurrent = { ...current, value };
+    if (!currentStatusDisplay(value, compact).value) {
+      continue;
+    }
+    const remaining = contentWidth
+      - statusSegmentsWidth([fittedCurrent], compact)
+      - displayWidth(statusSegmentSeparator(compact));
+    const fittedRoute = fitCompletedRouteSegment(route, remaining, compact);
+    if (!fittedRoute) {
+      continue;
+    }
+    const pair = segments.map((segment, index) => (
+      index === currentIndex ? fittedCurrent : fittedRoute
+    ));
+    if (statusSegmentsWidth(pair, compact) <= contentWidth) {
+      return pair;
+    }
   }
 
-  const remaining = contentWidth
-    - statusSegmentsWidth([fittedCurrent], compact)
-    - displayWidth(statusSegmentSeparator(compact));
-  const fittedRoute = fitCompletedRouteSegment(route, remaining, compact);
-  if (!fittedRoute) {
-    return [fittedCurrent];
-  }
-  const pair = segments.map((segment, index) => (
-    index === currentIndex ? fittedCurrent : fittedRoute
-  ));
-  return statusSegmentsWidth(pair, compact) <= contentWidth ? pair : [fittedCurrent];
+  const fittedCurrent = fitCurrentStatusSegment(current, contentWidth, compact);
+  return fittedCurrent ? [fittedCurrent] : null;
 }
 
 function fitCompletedRouteSegment(segment: Segment, maxWidth: number, compact: boolean): Segment | null {
@@ -366,50 +363,86 @@ function compactCompletedRouteStatusValue(value: string, maxWidth: number): stri
   return candidates.find((candidate) => displayWidth(candidate) <= maxWidth) ?? null;
 }
 
-function compactActiveMainStatusValue(text: string, maxWidth: number): string {
-  if (displayWidth(text) <= maxWidth) {
-    return text;
+function fitCurrentStatusSegment(
+  segment: Segment,
+  maxWidth: number,
+  compact: boolean,
+  requireDetail = false
+): Segment | null {
+  if (maxWidth <= 0) {
+    return null;
   }
+  for (const value of currentStatusValueCandidates(segment.value)) {
+    const candidate = { ...segment, value };
+    if (requireDetail && !currentStatusDisplay(value, compact).value) {
+      continue;
+    }
+    if (statusSegmentsWidth([candidate], compact) <= maxWidth) {
+      return candidate;
+    }
+  }
+  return null;
+}
+
+function currentStatusValueCandidates(text: string): string[] {
   const identity = workerIdentityStatus(text);
-  if (!identity) {
-    return compactCurrentStatusValue(text, maxWidth);
+  const roleMatch = identity ? null : text.match(/^(main|judge|actor|critic)(?:\s+(.+))?$/i);
+  const role = identity?.role ?? roleMatch?.[1]?.toLowerCase();
+  if (!role) {
+    return [text];
   }
-  const fullIdentity = `${identity.role}/${identity.engine}`;
-  const detail = text.slice(fullIdentity.length).trim();
-  const progress = detail.match(/^(waiting output|responding)\s+·\s+(\d+(?:\.\d+)?s)\s*\/\s*(\d+(?:\.\d+)?(?:ms|s|m))\s+(?:first|idle)$/i);
-  const rawAlias = /^(starting|stopping|run|done|fail|failed|idle)\b/i.exec(detail)?.[1]?.toLowerCase();
-  const alias = progress?.[1]?.toLowerCase() === "responding"
-    ? "reply"
-    : progress
-      ? "wait"
-      : rawAlias === "starting"
-        ? "start"
-        : rawAlias === "stopping"
-          ? "stop"
-          : rawAlias === "failed"
-            ? "fail"
-            : rawAlias;
-  const elapsedBudget = progress ? `${progress[2]}/${progress[3]}` : null;
-  const role = workerIdentityRole(text);
-  const candidates = [
-    ...(alias && elapsedBudget ? [
-      `${fullIdentity} ${alias} ${elapsedBudget}`,
-      `${identity.engine} ${alias} ${elapsedBudget}`
-    ] : []),
-    ...(alias ? [
-      `${fullIdentity} ${alias}`,
-      `${identity.engine} ${alias}`
-    ] : []),
+
+  const fullIdentity = identity ? `${identity.role}/${identity.engine}` : role;
+  const detail = identity
+    ? text.slice(fullIdentity.length).trim()
+    : roleMatch?.[2]?.trim() ?? "";
+  const compactDetail = compactCurrentStatusDetail(detail);
+  const compactState = compactDetail.split(/\s+/, 1)[0] ?? "";
+  return Array.from(new Set([
+    text,
+    ...(compactDetail ? [`${fullIdentity} ${compactDetail}`] : []),
+    ...(compactDetail ? [`${role} ${compactDetail}`] : []),
+    ...(compactState ? [`${fullIdentity} ${compactState}`] : []),
+    ...(compactState ? [`${role} ${compactState}`] : []),
     fullIdentity,
-    identity.engine,
-    ...(role ? [role] : [])
-  ];
-  return candidates.find((candidate) => displayWidth(candidate) <= maxWidth)
-    ?? compactStatusTextEnd(text, maxWidth);
+    role,
+    compactRoleStatusLabel(role)
+  ].filter(Boolean)));
+}
+
+function compactCurrentStatusDetail(detail: string): string {
+  const progress = detail.match(
+    /^(waiting output|responding)\s+·\s+(\d+(?:\.\d+)?s)\s*\/\s*(\d+(?:\.\d+)?(?:ms|s|m))\s+(?:first|idle)$/i
+  );
+  if (progress) {
+    const state = progress[1]?.toLowerCase() === "responding" ? "reply" : "wait";
+    return `${state} ${progress[2]}/${progress[3]}`;
+  }
+
+  const state = detail.match(/^(starting|running|run|done|failed|fail|waiting|wait|queued|stopping|stop|idle|cancelled|canceled)\b/i)?.[1]?.toLowerCase();
+  if (state === "starting") {
+    return "start";
+  }
+  if (state === "running") {
+    return "run";
+  }
+  if (state === "failed") {
+    return "fail";
+  }
+  if (state === "waiting" || state === "queued") {
+    return "wait";
+  }
+  if (state === "stopping" || state === "cancelled" || state === "canceled") {
+    return "stop";
+  }
+  return state ?? "";
 }
 
 function fitAtomicStatusSegment(segment: Segment, contentWidth: number, compact: boolean): Segment {
-  if (segment.label.toLowerCase() !== "route" || segment.tone !== "wait") {
+  if (
+    segment.label.toLowerCase() !== "route"
+    || (segment.tone !== "wait" && segment.tone !== "fail")
+  ) {
     return segment;
   }
   const display = statusSegmentDisplay(segment, compact);
@@ -454,6 +487,9 @@ function selectStatusSegmentsThatFit(segments: Segment[], contentWidth: number, 
 
 function statusSegmentKeepPriority(segment: Segment): number {
   const label = segment.label.toLowerCase();
+  if (label === "route" && segment.tone === "fail") {
+    return -1;
+  }
   if (segment.tone === "fail" || label === "fail") {
     return 0;
   }
@@ -481,9 +517,19 @@ function statusSegmentKeepPriority(segment: Segment): number {
 function compactSingleStatusSegment(segment: Segment, contentWidth: number, compact: boolean): Segment {
   const display = statusSegmentDisplay(segment, compact);
   const labelWidth = displayWidth(`${display.label}${display.separator}`);
+  const valueWidth = Math.max(1, contentWidth - labelWidth);
+  if (segment.label.toLowerCase() === "route") {
+    return {
+      ...segment,
+      value: compactRouteStatusValueToWidth(segment.value, valueWidth)
+    };
+  }
+  if (segment.label.toLowerCase() === "current") {
+    return fitCurrentStatusSegment(segment, contentWidth, compact) ?? segment;
+  }
   return {
     ...segment,
-    value: compactStatusTextEnd(display.value, Math.max(1, contentWidth - labelWidth))
+    value: compactStatusTextEnd(display.value, valueWidth)
   };
 }
 
@@ -493,35 +539,6 @@ function statusSegmentSeparator(compact: boolean): string {
 
 function compactStatusTextEnd(text: string, maxLength: number): string {
   return compactEndByDisplayWidth(text, maxLength);
-}
-
-function compactCurrentStatusValue(text: string, maxLength: number): string {
-  if (displayWidth(text) <= maxLength) {
-    return text;
-  }
-  const identity = workerIdentityStatus(text);
-  if (identity) {
-    const fullIdentity = `${identity.role}/${identity.engine}`;
-    if (displayWidth(fullIdentity) <= maxLength) {
-      return fullIdentity;
-    }
-    if (displayWidth(identity.engine) <= maxLength) {
-      return identity.engine;
-    }
-  }
-  const role = workerIdentityRole(text);
-  if (role && displayWidth(role) <= maxLength) {
-    return role;
-  }
-  return compactStatusTextEnd(text, maxLength);
-}
-
-function workerIdentityRole(text: string): string | null {
-  const identity = workerIdentityStatus(text);
-  if (!identity) {
-    return null;
-  }
-  return displayRoleStatusLabel(identity.role);
 }
 
 function workerIdentityStatus(text: string): { role: string; engine: string } | null {
@@ -546,7 +563,7 @@ function statusSegmentDisplay(segment: Segment, compact: boolean): { label: stri
   if (isRoleStatusLabel(label)) {
     return {
       label: compact ? compactRoleStatusLabel(label) : displayRoleStatusLabel(label),
-      separator: compact ? ":" : " ",
+      separator: compact ? ":" : " · ",
       value: segment.value
     };
   }
@@ -566,13 +583,13 @@ function statusSegmentDisplay(segment: Segment, compact: boolean): { label: stri
   }
   if (!compact) {
     if (label === "current") {
-      return { label: "@", separator: " ", value: segment.value };
+      return currentStatusDisplay(segment.value, false);
     }
     if (label === "workers") {
-      return { label: "", separator: "", value: workerCountDisplay(segment.value) };
+      return { label: "workers", separator: " ", value: segment.value };
     }
     if (segment.tone && segment.tone !== "idle" && label === segment.tone) {
-      return { label: "", separator: "", value: statusCountDisplay(segment.tone, segment.value) };
+      return { label: segment.tone, separator: " ", value: segment.value };
     }
     if (segment.tone && segment.tone !== "idle") {
       return { label: segment.tone, separator: " ", value: segment.value };
@@ -580,22 +597,40 @@ function statusSegmentDisplay(segment: Segment, compact: boolean): { label: stri
     return { label, separator: " ", value: segment.value };
   }
   if (label === "workers") {
-    return { label: "w", separator: "", value: segment.value };
+    return { label: "wk", separator: "", value: segment.value };
   }
   if (label === "current") {
-    const identity = workerIdentityStatus(segment.value);
-    return {
-      label: "@",
-      separator: " ",
-      value: identity?.role === "main"
-        ? segment.value
-        : workerIdentityRole(segment.value) ?? segment.value
-    };
+    return currentStatusDisplay(segment.value, true);
   }
   if (segment.tone && segment.tone !== "idle") {
     return { label: compactToneLabel(segment.tone), separator: "", value: segment.value };
   }
   return { label, separator: " ", value: segment.value };
+}
+
+function currentStatusDisplay(text: string, compact: boolean): { label: string; separator: string; value: string } {
+  const identity = workerIdentityStatus(text);
+  if (identity) {
+    const fullIdentity = `${identity.role}/${identity.engine}`;
+    const detail = text.slice(fullIdentity.length).trim();
+    return {
+      label: fullIdentity,
+      separator: detail ? (compact ? ":" : " · ") : "",
+      value: detail
+    };
+  }
+
+  const role = text.match(/^(main|judge|actor|critic)(?:\s+(.+))?$/i);
+  if (role) {
+    const detail = role[2]?.trim() ?? "";
+    return {
+      label: displayRoleStatusLabel(role[1] ?? ""),
+      separator: detail ? (compact ? ":" : " · ") : "",
+      value: detail
+    };
+  }
+
+  return { label: text, separator: "", value: "" };
 }
 
 function compactRouteStatusValue(value: string, compact: boolean): string {
@@ -752,35 +787,15 @@ function compactToneLabel(tone: Exclude<StatusTone, "idle">): string {
   return "w";
 }
 
-function workerCountDisplay(value: string): string {
-  return `${value} ${value === "1" ? "worker" : "workers"}`;
-}
-
-function statusCountDisplay(tone: Exclude<StatusTone, "idle">, value: string): string {
-  if (tone === "run") {
-    return `${value} running`;
-  }
-  if (tone === "fail") {
-    return `${value} failed`;
-  }
-  if (tone === "wait") {
-    return `${value} waiting`;
-  }
-  return `${value} done`;
-}
-
 function isRoleStatusLabel(label: string): boolean {
   return label === "main" || label === "judge" || label === "actor" || label === "critic";
 }
 
 function displayRoleStatusLabel(label: string): string {
-  return label === "main" ? "chat" : label;
+  return label;
 }
 
 function compactRoleStatusLabel(label: string): string {
-  if (label === "main") {
-    return "chat";
-  }
   return label.slice(0, 1);
 }
 
@@ -825,9 +840,11 @@ function parseStatusText(text: string, options: { hideTask?: boolean } = {}): Se
       segments.push({
         label: "ROUTE",
         value,
-        tone: /(?:^|\s·\s)fallback(?:\s·\s|$)|^(?:checking|follow-up|starting|retry|waiting output|diagnostics|receiving|parsing|stopping)\b/i.test(value)
-          ? "wait"
-          : undefined
+        tone: /(?:^|\s·\s)fallback(?:\s·\s|$)/i.test(value)
+          ? "fail"
+          : /^(?:checking|follow-up|starting|retry|waiting output|diagnostics|receiving|parsing|stopping)\b/i.test(value)
+            ? "wait"
+            : undefined
       });
       continue;
     }
@@ -848,7 +865,9 @@ function isStatusPart(part: string): boolean {
   return parseWaveProgress(part) !== null
     || /^workers\s+\d+$/i.test(part)
     || /^route\s+\S+/i.test(part)
-    || parseStateCounts(part).length > 0;
+    || parseStateCounts(part).length > 0
+    || parseRoleStatus(part) !== null
+    || workerIdentityStatus(part) !== null;
 }
 
 function parseWaveProgress(part: string): Segment | null {
@@ -890,6 +909,13 @@ function parseCurrentStatus(part: string): Segment {
 
   const toneMatch = part.match(/\b(run|done|fail|wait|idle)\b/i);
   const tone = toneMatch ? normalizeTone(toneMatch[1] ?? "idle") : undefined;
+  if (workerIdentityStatus(part)) {
+    return {
+      label: "CURRENT",
+      value: part,
+      tone
+    };
+  }
   const value = toneMatch ? part.replace(toneMatch[0], "").trim() || part : part;
   return {
     label: "CURRENT",

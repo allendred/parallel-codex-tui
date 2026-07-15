@@ -771,6 +771,10 @@ export class SessionManager {
     return active;
   }
 
+  async hasRetiredNativeSession(worker: Pick<WorkerFiles, "dir">): Promise<boolean> {
+    return Boolean(await readRetiredNativeSessionIfValid(join(worker.dir, "native-session.retired.json")));
+  }
+
   async reconcileNativeSessionState(): Promise<number> {
     const root = sessionsRoot(this.projectRoot, this.dataDir);
     if (!(await pathExists(root))) {
