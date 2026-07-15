@@ -60,6 +60,7 @@ async function main(): Promise<void> {
       interactive: false
     });
     const result = await runDoctor(cliArgs.appRoot, workspaceRoot, process.env, {
+      probeAgents: cliArgs.probeAgents,
       probeRouter: cliArgs.probeRouter,
       theme: cliArgs.theme
     });

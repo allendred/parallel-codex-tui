@@ -23,6 +23,8 @@ describe("CLI help and version", () => {
     expect(stdout).toContain("combine with --theme to filter");
     expect(stdout).toContain("--init");
     expect(stdout).toContain("--doctor");
+    expect(stdout).toContain("--probe-agents");
+    expect(stdout).toContain("fresh + resume probes");
     expect(stdout).toContain("--probe-router");
     expect(stdout).toContain("live Codex Router request");
     expect(stdout).toContain("theme palette");

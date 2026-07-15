@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import { StringDecoder } from "node:string_decoder";
 import { appendText, writeJson } from "../core/file-store.js";
 import { clearWorkerProcessRecord, writeWorkerProcessRecord } from "../core/process-ownership.js";
@@ -18,6 +19,7 @@ interface ProcessLaunch {
   args: string[];
   isResume: boolean;
   nativeSession: WorkerRunSpec["nativeSession"];
+  initialNativeSessionId?: string;
 }
 
 interface ProcessAttemptOptions {
@@ -69,7 +71,9 @@ export class ProcessWorkerAdapter implements WorkerAdapter {
       modelConfig: model
     };
 
-    const first = await this.runAttempt(runSpec, launch);
+    const first = await this.runAttempt(runSpec, launch, {
+      initialNativeSessionId: launch.initialNativeSessionId
+    });
     if (!shouldFallbackToNewNativeSession(first, runSpec.nativeSessionConfig)) {
       return first.result;
     }
@@ -88,7 +92,8 @@ export class ProcessWorkerAdapter implements WorkerAdapter {
       this.name,
       model,
       runSpec.writableDirs,
-      runSpec.enforceWorkspaceIsolation
+      runSpec.enforceWorkspaceIsolation,
+      runSpec.nativeSessionConfig
     );
     return (await this.runAttempt(
       {
@@ -97,7 +102,7 @@ export class ProcessWorkerAdapter implements WorkerAdapter {
       },
       freshLaunch,
       {
-        initialNativeSessionId: undefined,
+        initialNativeSessionId: freshLaunch.initialNativeSessionId,
         startPhase: "native-resume-fallback",
         startSummary: `${this.command} starting fresh session after unrecoverable native resume`
       }
@@ -164,6 +169,10 @@ export class ProcessWorkerAdapter implements WorkerAdapter {
       let persistenceError: unknown;
       let hasPersistenceError = false;
       let detectedNativeSessionId = options.initialNativeSessionId ?? runSpec.nativeSession?.session_id;
+      let initialNativeSessionPersisted = !options.initialNativeSessionId;
+      const persistedNativeSessionId = (): string | undefined => (
+        initialNativeSessionPersisted ? detectedNativeSessionId : undefined
+      );
       let stdoutSessionDetectionTail = "";
       let stderrSessionDetectionTail = "";
       let sawOutput = false;
@@ -257,6 +266,10 @@ export class ProcessWorkerAdapter implements WorkerAdapter {
         }
         queuePersistence(async () => {
           await appendText(runSpec.outputLogPath, text);
+          if (!initialNativeSessionPersisted && options.initialNativeSessionId) {
+            await runSpec.onNativeSession?.(options.initialNativeSessionId);
+            initialNativeSessionPersisted = true;
+          }
           if (!detectedNativeSessionId && runSpec.nativeSessionConfig?.detectSessionId !== false) {
             const detectionTail = stream === "stdout" ? stdoutSessionDetectionTail : stderrSessionDetectionTail;
             const detectionText = `${detectionTail}${text}`;
@@ -273,7 +286,7 @@ export class ProcessWorkerAdapter implements WorkerAdapter {
             }
           }
           if (!settled && !terminalState) {
-            await setStatus(runSpec, "running", "process-output", summarizeOutput(text), detectedNativeSessionId);
+            await setStatus(runSpec, "running", "process-output", summarizeOutput(text), persistedNativeSessionId());
           }
         });
       };
@@ -302,7 +315,7 @@ export class ProcessWorkerAdapter implements WorkerAdapter {
             "running",
             "process-stopping",
             `${summary}; stopping process tree`,
-            detectedNativeSessionId
+            persistedNativeSessionId()
           );
         });
         void ensureProcessTreeStopped().catch(finishAfterCleanupFailure);
@@ -333,7 +346,7 @@ export class ProcessWorkerAdapter implements WorkerAdapter {
           // Preserve the original finalization error.
         }
         try {
-          await setStatus(runSpec, "failed", phase, summary, detectedNativeSessionId);
+          await setStatus(runSpec, "failed", phase, summary, persistedNativeSessionId());
         } catch {
           // The ownership record remains the recovery authority when status cannot be written.
         }
@@ -369,7 +382,7 @@ export class ProcessWorkerAdapter implements WorkerAdapter {
             const phase = "process-cleanup-error";
             const summary = `${this.command} process tree cleanup failed: ${detail}`;
             await appendText(runSpec.outputLogPath, `\nProcess tree cleanup failed: ${detail}\n`);
-            await setStatus(runSpec, "failed", phase, summary, detectedNativeSessionId);
+            await setStatus(runSpec, "failed", phase, summary, persistedNativeSessionId());
             resolve({
               result: {
                 workerId: runSpec.workerId,
@@ -396,7 +409,7 @@ export class ProcessWorkerAdapter implements WorkerAdapter {
             terminalState ?? (result.exitCode === 0 ? "done" : "failed"),
             phase,
             summary,
-            detectedNativeSessionId
+            persistedNativeSessionId()
           );
           if (!processRecordError) {
             await clearWorkerProcessRecord(runSpec.filesDir);
@@ -506,7 +519,7 @@ export class ProcessWorkerAdapter implements WorkerAdapter {
           try {
             await processRecordReady;
             await ensureProcessTreeStopped();
-            await setStatus(runSpec, "failed", "process-error", error.message, detectedNativeSessionId);
+            await setStatus(runSpec, "failed", "process-error", error.message, persistedNativeSessionId());
             if (!processRecordError) {
               await clearWorkerProcessRecord(runSpec.filesDir);
             }
@@ -548,7 +561,7 @@ export class ProcessWorkerAdapter implements WorkerAdapter {
             "running",
             "process-stopping",
             `${terminalSummary}; stopping process tree`,
-            detectedNativeSessionId
+            persistedNativeSessionId()
           );
         });
         void ensureProcessTreeStopped().catch(finishAfterCleanupFailure);
@@ -608,7 +621,14 @@ function buildLaunch(
 ): ProcessLaunch {
   const modelArgs = buildModelArgs(modelConfig);
   if (!nativeSession || !nativeSessionConfig?.enabled || nativeSessionConfig.resumeArgs.length === 0) {
-    return buildFreshLaunch(defaultArgs, engine, modelConfig, writableDirs, enforceWorkspaceIsolation);
+    return buildFreshLaunch(
+      defaultArgs,
+      engine,
+      modelConfig,
+      writableDirs,
+      enforceWorkspaceIsolation,
+      nativeSessionConfig
+    );
   }
 
   return {
@@ -631,21 +651,56 @@ function buildFreshLaunch(
   engine: EngineName,
   modelConfig?: WorkerModelRunConfig,
   writableDirs?: string[],
-  enforceWorkspaceIsolation = false
+  enforceWorkspaceIsolation = false,
+  nativeSessionConfig?: WorkerRunSpec["nativeSessionConfig"]
 ): ProcessLaunch {
+  const isolatedArgs = enforceWorkerIsolationArgs(
+    [...defaultArgs, ...buildModelArgs(modelConfig)],
+    engine,
+    enforceWorkspaceIsolation
+  );
+  const claudeSession = engine === "claude"
+    ? withFreshClaudeSessionId(isolatedArgs, nativeSessionConfig)
+    : { args: isolatedArgs, sessionId: undefined };
   return {
     args: withWritableDirectoryArgs(
-      enforceWorkerIsolationArgs(
-        [...defaultArgs, ...buildModelArgs(modelConfig)],
-        engine,
-        enforceWorkspaceIsolation
-      ),
+      claudeSession.args,
       engine,
       false,
       writableDirs
     ),
     isResume: false,
-    nativeSession: null
+    nativeSession: null,
+    ...(claudeSession.sessionId ? { initialNativeSessionId: claudeSession.sessionId } : {})
+  };
+}
+
+function withFreshClaudeSessionId(
+  args: string[],
+  nativeSessionConfig: WorkerRunSpec["nativeSessionConfig"]
+): { args: string[]; sessionId?: string } {
+  if (
+    !nativeSessionConfig?.enabled
+    || nativeSessionConfig.detectSessionId === false
+    || nativeSessionConfig.resumeArgs.length === 0
+  ) {
+    return { args };
+  }
+  for (let index = 0; index < args.length; index += 1) {
+    const arg = args[index] ?? "";
+    if (arg === "--session-id") {
+      const sessionId = args[index + 1]?.trim();
+      return sessionId ? { args, sessionId } : { args };
+    }
+    const match = arg.match(/^--session-id=(.+)$/);
+    if (match?.[1]?.trim()) {
+      return { args, sessionId: match[1].trim() };
+    }
+  }
+  const sessionId = randomUUID();
+  return {
+    args: [...args, "--session-id", sessionId],
+    sessionId
   };
 }
 

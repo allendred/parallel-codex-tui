@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { chmod, mkdir, mkdtemp, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readdir, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -22,7 +22,7 @@ function runCli(args: string[], options: { env?: NodeJS.ProcessEnv } = {}): Prom
           ...process.env,
           ...options.env
         },
-        timeout: 5000
+        timeout: 8000
       },
       (error, stdout, stderr) => {
         if (error && !("code" in error)) {
@@ -49,8 +49,8 @@ describe("CLI doctor", () => {
 
     await mkdir(binDir, { recursive: true });
     await mkdir(appRoot, { recursive: true });
-    await writeExecutable(join(binDir, "codex"), "#!/bin/sh\necho codex 1.0\n");
-    await writeExecutable(join(binDir, "claude"), "#!/bin/sh\necho claude 1.0\n");
+    await writeExecutable(join(binDir, "codex"), codexCapabilityScript());
+    await writeExecutable(join(binDir, "claude"), claudeCapabilityScript());
 
     await expect(runCli(["--app-root", appRoot, "--init"])).resolves.toMatchObject({ exitCode: 0 });
 
@@ -74,9 +74,64 @@ describe("CLI doctor", () => {
     expect(result.stdout).toContain("theme contrast: ok (minimum 4.59:1 across 16 rendered pairs)");
     expect(result.stdout).toContain("codex: ok");
     expect(result.stdout).toContain("claude: ok");
+    expect(result.stdout).toContain(
+      "codex capabilities: ok (exec sandbox/add-dir, exec resume, native resume sandbox/add-dir)"
+    );
+    expect(result.stdout).toContain(
+      "claude capabilities: ok (print/resume/permissions/add-dir)"
+    );
+    expect(result.stdout).toContain(
+      "native workspace trust: interactive (confirm only workspaces you trust when prompted)"
+    );
     expect(result.stdout).toContain("router retry: 2 attempts; transient only; 500ms backoff (TUI routing; live probe runs once)");
     expect(result.stdout).toContain("router budget: total 30000ms; follow-up 20000ms; first output 15000ms; idle 15000ms");
     await expect(pathExists(workspace)).resolves.toBe(true);
+  });
+
+  it("fails before startup when recognized Codex help lacks required add-dir support", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pct-cli-doctor-capabilities-"));
+    const binDir = join(root, "bin");
+    const appRoot = join(root, "app");
+
+    await mkdir(binDir, { recursive: true });
+    await mkdir(appRoot, { recursive: true });
+    await writeExecutable(join(binDir, "codex"), codexCapabilityScript({ addDir: false }));
+    await writeExecutable(join(binDir, "claude"), claudeCapabilityScript());
+    await expect(runCli(["--app-root", appRoot, "--init"])).resolves.toMatchObject({ exitCode: 0 });
+
+    const result = await runCli(["--app-root", appRoot, "--doctor"], {
+      env: { PATH: `${binDir}${delimiter}${process.env.PATH ?? ""}` }
+    });
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr).toBe("");
+    expect(result.stdout).toContain("codex capabilities: incompatible");
+    expect(result.stdout).toContain("exec sandbox/add-dir missing --add-dir");
+    expect(result.stdout).toContain("native resume sandbox/add-dir missing --add-dir");
+  });
+
+  it("runs explicit fresh and resume probes through configured Codex and Claude commands", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pct-cli-doctor-agent-probes-"));
+    const binDir = join(root, "bin");
+    const appRoot = join(root, "app");
+    const workspace = join(root, "workspace");
+
+    await mkdir(binDir, { recursive: true });
+    await mkdir(appRoot, { recursive: true });
+    await writeExecutable(join(binDir, "codex"), agentProbeScript("codex"));
+    await writeExecutable(join(binDir, "claude"), agentProbeScript("claude"));
+    await expect(runCli(["--app-root", appRoot, "--init"])).resolves.toMatchObject({ exitCode: 0 });
+
+    const result = await runCli(
+      ["--app-root", appRoot, "--workspace", workspace, "--doctor", "--probe-agents"],
+      { env: { PATH: `${binDir}${delimiter}${process.env.PATH ?? ""}` } }
+    );
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stderr).toBe("");
+    expect(result.stdout).toContain("codex live probe: ok (fresh + resume; session codex-ag...;");
+    expect(result.stdout).toMatch(/claude live probe: ok \(fresh \+ resume; session [0-9a-f]{8}\.\.\.;/i);
+    expect(await readdir(join(workspace, ".parallel-codex", "probes"))).toEqual([]);
   });
 
   it("runs an explicit live Codex Router probe without claiming the proxy endpoint proves upstream health", async () => {
@@ -551,4 +606,66 @@ describe("CLI doctor", () => {
 async function writeExecutable(path: string, contents: string): Promise<void> {
   await writeFile(path, contents, "utf8");
   await chmod(path, 0o755);
+}
+
+function codexCapabilityScript(options: { addDir?: boolean } = {}): string {
+  const addDir = options.addDir === false ? "" : "  --add-dir <DIR>\\n";
+  return [
+    "#!/bin/sh",
+    "if [ \"$1\" = \"exec\" ] && [ \"$2\" = \"resume\" ] && [ \"$3\" = \"--help\" ]; then",
+    "  printf 'Usage: codex exec resume [OPTIONS] [SESSION_ID]\\n  --skip-git-repo-check\\n'",
+    "elif [ \"$1\" = \"exec\" ] && [ \"$2\" = \"--help\" ]; then",
+    `  printf 'Usage: codex exec [OPTIONS] [PROMPT]\\n  --sandbox <MODE>\\n${addDir}  --skip-git-repo-check\\n'`,
+    "elif [ \"$1\" = \"resume\" ] && [ \"$2\" = \"--help\" ]; then",
+    `  printf 'Usage: codex resume [OPTIONS] [SESSION_ID]\\n  --sandbox <MODE>\\n${addDir}'`,
+    "else",
+    "  echo 'codex 1.0'",
+    "fi",
+    ""
+  ].join("\n");
+}
+
+function claudeCapabilityScript(): string {
+  return [
+    "#!/bin/sh",
+    "if [ \"$1\" = \"--help\" ]; then",
+    "  printf 'Usage: claude [options] [prompt]\\n  --print\\n  --resume [value]\\n  --permission-mode <mode>\\n  --add-dir <directories...>\\n'",
+    "else",
+    "  echo 'claude 1.0'",
+    "fi",
+    ""
+  ].join("\n");
+}
+
+function agentProbeScript(engine: "codex" | "claude"): string {
+  const help = engine === "codex"
+    ? [
+        "if [ \"$1\" = \"exec\" ] && [ \"$2\" = \"resume\" ] && [ \"$3\" = \"--help\" ]; then",
+        "  printf 'Usage: codex exec resume [OPTIONS] [SESSION_ID]\\n  --skip-git-repo-check\\n'",
+        "  exit 0",
+        "fi",
+        "if [ \"$1\" = \"exec\" ] && [ \"$2\" = \"--help\" ]; then",
+        "  printf 'Usage: codex exec [OPTIONS] [PROMPT]\\n  --sandbox <MODE>\\n  --add-dir <DIR>\\n  --skip-git-repo-check\\n'",
+        "  exit 0",
+        "fi",
+        "if [ \"$1\" = \"resume\" ] && [ \"$2\" = \"--help\" ]; then",
+        "  printf 'Usage: codex resume [OPTIONS] [SESSION_ID]\\n  --sandbox <MODE>\\n  --add-dir <DIR>\\n'",
+        "  exit 0",
+        "fi"
+      ]
+    : [
+        "if [ \"$1\" = \"--help\" ]; then",
+        "  printf 'Usage: claude [options] [prompt]\\n  --print\\n  --resume [value]\\n  --permission-mode <mode>\\n  --add-dir <directories...>\\n'",
+        "  exit 0",
+        "fi"
+      ];
+  return [
+    "#!/bin/sh",
+    ...help,
+    "input=$(cat)",
+    "answer=$(printf '%s\\n' \"$input\" | sed -n 's/^Join these segments with underscores and reply with only the joined value: //p' | sed 's/ | /_/g')",
+    "printf '%s\\n' \"$answer\"",
+    `printf 'session id: ${engine}-agent-1234\\n'`,
+    ""
+  ].join("\n");
 }

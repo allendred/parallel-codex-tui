@@ -15,6 +15,11 @@ import type { RouteDecision } from "./domain/schemas.js";
 import { auditTuiThemeContrast, TUI_THEME_MIN_CONTRAST_RATIO, type TuiThemeContrastAudit } from "./tui/theme-contrast.js";
 import { formatTuiThemePreview } from "./tui/theme-preview.js";
 import { resolveTuiTheme } from "./tui/theme.js";
+import {
+  diagnoseAgentCapabilities,
+  type CapabilityCommandRunner
+} from "./workers/capabilities.js";
+import { runLiveAgentProbes, type LiveAgentProbeOptions } from "./workers/live-probe.js";
 
 export interface DoctorResult {
   ok: boolean;
@@ -35,9 +40,13 @@ type LoadedConfig = Awaited<ReturnType<typeof loadConfig>>;
 type ProxyConnector = (host: string, port: number) => Promise<boolean>;
 
 export interface DoctorOptions {
+  probeAgents?: boolean;
   probeRouter?: boolean;
   routeRunner?: CodexRouteRunner;
   theme?: Awaited<ReturnType<typeof loadConfig>>["ui"]["theme"] | null;
+  capabilityRunner?: CapabilityCommandRunner;
+  capabilityTimeoutMs?: number;
+  liveAgentProbeOptions?: LiveAgentProbeOptions;
 }
 
 type ConfiguredEngine = "router-codex" | "codex" | "claude" | "mock";
@@ -102,8 +111,10 @@ export async function runDoctor(
       `router budget: total ${config.router.codex.timeoutMs}ms; follow-up ${config.router.codex.followUpTimeoutMs}ms; first output ${config.router.codex.firstOutputTimeoutMs}ms; idle ${config.router.codex.idleTimeoutMs}ms`
     );
   }
+  const availableCommands = new Set<string>();
   for (const command of configuredCommands(config, includeRouter)) {
     if (await commandExists(command, env)) {
+      availableCommands.add(command);
       lines.push(`${command}: ok`);
     } else {
       ok = false;
@@ -120,6 +131,16 @@ export async function runDoctor(
     }
   }
 
+  const capabilityDiagnostics = await diagnoseAgentCapabilities(config, env, {
+    includeRouter,
+    workerEngines: configuredWorkerEngines(config),
+    availableCommands,
+    ...(options.capabilityRunner ? { runner: options.capabilityRunner } : {}),
+    ...(options.capabilityTimeoutMs ? { timeoutMs: options.capabilityTimeoutMs } : {})
+  });
+  lines.push(...capabilityDiagnostics.lines);
+  ok = ok && capabilityDiagnostics.ok;
+
   const proxyDiagnostics = await diagnoseProxyEnvironment(
     config,
     env,
@@ -129,6 +150,23 @@ export async function runDoctor(
   );
   lines.push(...proxyDiagnostics.lines);
   ok = ok && proxyDiagnostics.ok;
+
+  if (options.probeAgents) {
+    if (ok) {
+      const liveAgents = await runLiveAgentProbes(
+        config,
+        preparedWorkspace,
+        configuredWorkerEngines(config),
+        options.liveAgentProbeOptions
+      );
+      lines.push(...liveAgents.lines);
+      ok = ok && liveAgents.ok;
+    } else {
+      lines.push("agent live probe: skipped (preflight failed)");
+    }
+  } else {
+    lines.push("agent live probe: not run (add --probe-agents; may use model quota)");
+  }
 
   if (options.probeRouter) {
     const probe = await runRouterProbe(config, appRoot, options.routeRunner);
@@ -301,13 +339,15 @@ export function isSupportedNodeVersion(version: string): boolean {
 }
 
 function configuredCommands(config: Awaited<ReturnType<typeof loadConfig>>, includeRouter: boolean): string[] {
-  return Array.from(
-    new Set(
-      configuredEngines(config, { includeRouter })
-        .map((engine) => commandForEngine(config, engine))
-        .filter((command): command is string => Boolean(command) && command !== "mock")
-    )
-  );
+  const commands = includeRouter ? [config.router.codex.command] : [];
+  for (const engine of configuredWorkerEngines(config)) {
+    const worker = config.workers[engine];
+    commands.push(worker.command);
+    if (worker.nativeSession.enabled) {
+      commands.push(worker.interactive.command);
+    }
+  }
+  return [...new Set(commands.filter((command) => command && command !== "mock"))];
 }
 
 function themeOverrideSummary(colors: Awaited<ReturnType<typeof loadConfig>>["ui"]["colors"]): string {
@@ -355,22 +395,6 @@ function themeSummary(
   }
 
   return effectiveTheme;
-}
-
-function commandForEngine(config: Awaited<ReturnType<typeof loadConfig>>, engine: ConfiguredEngine): string | null {
-  if (engine === "router-codex") {
-    return config.router.codex.command;
-  }
-
-  if (engine === "codex") {
-    return config.workers.codex.command;
-  }
-
-  if (engine === "claude") {
-    return config.workers.claude.command;
-  }
-
-  return null;
 }
 
 function configuredEngines(

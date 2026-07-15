@@ -1,0 +1,251 @@
+import { execFile } from "node:child_process";
+import { basename } from "node:path";
+import type { AppConfig } from "../core/config.js";
+
+export type DiagnosedWorkerEngine = "codex" | "claude";
+
+export interface CapabilityCommandResult {
+  exitCode: number | null;
+  stdout: string;
+  stderr: string;
+  timedOut: boolean;
+}
+
+export type CapabilityCommandRunner = (
+  command: string,
+  args: string[],
+  env: NodeJS.ProcessEnv,
+  timeoutMs: number
+) => Promise<CapabilityCommandResult>;
+
+export interface AgentCapabilityDiagnostics {
+  ok: boolean;
+  lines: string[];
+}
+
+export interface AgentCapabilityOptions {
+  includeRouter: boolean;
+  workerEngines: DiagnosedWorkerEngine[];
+  availableCommands?: ReadonlySet<string>;
+  runner?: CapabilityCommandRunner;
+  timeoutMs?: number;
+}
+
+type CapabilitySurface = "codex-exec" | "codex-exec-resume" | "codex-native" | "claude";
+
+interface CapabilityTarget {
+  command: string;
+  engine: DiagnosedWorkerEngine;
+  surfaces: Set<CapabilitySurface>;
+}
+
+interface CapabilityProbeSpec {
+  args: string[];
+  label: string;
+  requiredOptions: string[];
+  usagePattern: RegExp;
+}
+
+export async function diagnoseAgentCapabilities(
+  config: AppConfig,
+  env: NodeJS.ProcessEnv,
+  options: AgentCapabilityOptions
+): Promise<AgentCapabilityDiagnostics> {
+  const targets = capabilityTargets(config, options);
+  const runner = options.runner ?? runCapabilityCommand;
+  const timeoutMs = options.timeoutMs ?? 3000;
+  const reports = await Promise.all(targets.map(async (target) => {
+    if (options.availableCommands && !options.availableCommands.has(target.command)) {
+      return null;
+    }
+    return diagnoseCapabilityTarget(target, config, env, runner, timeoutMs);
+  }));
+  const lines = reports.flatMap((report) => report?.lines ?? []);
+  const ok = reports.every((report) => report?.ok !== false);
+
+  if (targets.some((target) => target.surfaces.has("codex-native") || target.engine === "claude")) {
+    lines.push("native workspace trust: interactive (confirm only workspaces you trust when prompted)");
+  }
+
+  return { ok, lines };
+}
+
+function capabilityTargets(config: AppConfig, options: AgentCapabilityOptions): CapabilityTarget[] {
+  const targets = new Map<string, CapabilityTarget>();
+  const addTarget = (engine: DiagnosedWorkerEngine, command: string, surface: CapabilitySurface) => {
+    const key = `${engine}\0${command}`;
+    const current = targets.get(key) ?? { engine, command, surfaces: new Set<CapabilitySurface>() };
+    current.surfaces.add(surface);
+    targets.set(key, current);
+  };
+
+  if (options.includeRouter) {
+    addTarget("codex", config.router.codex.command, "codex-exec");
+  }
+  for (const engine of [...new Set(options.workerEngines)]) {
+    const worker = config.workers[engine];
+    if (engine === "codex") {
+      addTarget(engine, worker.command, "codex-exec");
+      if (worker.nativeSession.enabled) {
+        addTarget(engine, worker.command, "codex-exec-resume");
+        addTarget(engine, worker.interactive.command, "codex-native");
+      }
+    } else {
+      addTarget(engine, worker.command, "claude");
+      if (worker.nativeSession.enabled) {
+        addTarget(engine, worker.interactive.command, "claude");
+      }
+    }
+  }
+
+  return [...targets.values()];
+}
+
+async function diagnoseCapabilityTarget(
+  target: CapabilityTarget,
+  config: AppConfig,
+  env: NodeJS.ProcessEnv,
+  runner: CapabilityCommandRunner,
+  timeoutMs: number
+): Promise<AgentCapabilityDiagnostics> {
+  const specs = capabilityProbeSpecs(target);
+  const results = await Promise.all(specs.map(async (spec) => ({
+    spec,
+    result: await runner(target.command, spec.args, env, timeoutMs)
+  })));
+  const incompatible: string[] = [];
+  const unverified: string[] = [];
+
+  for (const { spec, result } of results) {
+    const output = stripTerminalControl(`${result.stdout}\n${result.stderr}`);
+    if (result.timedOut) {
+      unverified.push(`${spec.label} help timed out`);
+      continue;
+    }
+    if (result.exitCode !== 0 || !spec.usagePattern.test(output)) {
+      unverified.push(`${spec.label} help not recognized`);
+      continue;
+    }
+    const missing = spec.requiredOptions.filter((option) => !output.includes(option));
+    if (missing.length > 0) {
+      incompatible.push(`${spec.label} missing ${missing.join(", ")}`);
+    }
+  }
+
+  if (target.surfaces.has("codex-native")) {
+    const sandbox = configuredCodexSandbox(config.workers.codex.interactive.args);
+    if (sandbox === "read-only") {
+      incompatible.push("native resume uses read-only but feature attach requires writable --add-dir roots");
+    }
+  }
+
+  const label = capabilityTargetLabel(target);
+  if (incompatible.length > 0) {
+    return {
+      ok: false,
+      lines: [`${label}: incompatible (${incompatible.join("; ")})`]
+    };
+  }
+  if (unverified.length > 0) {
+    return {
+      ok: true,
+      lines: [`${label}: warning (${unverified.join("; ")}; compatibility unverified)`]
+    };
+  }
+  return {
+    ok: true,
+    lines: [`${label}: ok (${specs.map((spec) => spec.label).join(", ")})`]
+  };
+}
+
+function capabilityProbeSpecs(target: CapabilityTarget): CapabilityProbeSpec[] {
+  if (target.engine === "claude") {
+    return [{
+      args: ["--help"],
+      label: "print/resume/permissions/add-dir",
+      requiredOptions: ["--print", "--resume", "--permission-mode", "--add-dir"],
+      usagePattern: /Usage:\s+claude\b/i
+    }];
+  }
+
+  const specs: CapabilityProbeSpec[] = [];
+  if (target.surfaces.has("codex-exec")) {
+    specs.push({
+      args: ["exec", "--help"],
+      label: "exec sandbox/add-dir",
+      requiredOptions: ["--sandbox", "--add-dir", "--skip-git-repo-check"],
+      usagePattern: /Usage:\s+codex exec\b/i
+    });
+  }
+  if (target.surfaces.has("codex-exec-resume")) {
+    specs.push({
+      args: ["exec", "resume", "--help"],
+      label: "exec resume",
+      requiredOptions: ["--skip-git-repo-check"],
+      usagePattern: /Usage:\s+codex exec resume\b/i
+    });
+  }
+  if (target.surfaces.has("codex-native")) {
+    specs.push({
+      args: ["resume", "--help"],
+      label: "native resume sandbox/add-dir",
+      requiredOptions: ["--sandbox", "--add-dir"],
+      usagePattern: /Usage:\s+codex resume\b/i
+    });
+  }
+  return specs;
+}
+
+function configuredCodexSandbox(args: string[]): string | null {
+  for (let index = 0; index < args.length; index += 1) {
+    const arg = args[index] ?? "";
+    if (arg === "--sandbox" || arg === "-s") {
+      return args[index + 1]?.trim().toLowerCase() || null;
+    }
+    const match = arg.match(/^(?:--sandbox|-s)=(.+)$/);
+    if (match) {
+      return match[1]?.trim().toLowerCase() || null;
+    }
+    if (arg === "--dangerously-bypass-approvals-and-sandbox") {
+      return "danger-full-access";
+    }
+  }
+  return null;
+}
+
+function capabilityTargetLabel(target: CapabilityTarget): string {
+  const executable = basename(target.command);
+  return executable === target.engine
+    ? `${target.engine} capabilities`
+    : `${target.engine} capabilities (${executable})`;
+}
+
+function stripTerminalControl(value: string): string {
+  return value
+    .replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, "")
+    .replace(/\x1b\][^\x07]*(?:\x07|\x1b\\)/g, "")
+    .replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g, " ");
+}
+
+function runCapabilityCommand(
+  command: string,
+  args: string[],
+  env: NodeJS.ProcessEnv,
+  timeoutMs: number
+): Promise<CapabilityCommandResult> {
+  return new Promise((resolve) => {
+    execFile(command, args, {
+      env,
+      timeout: timeoutMs,
+      maxBuffer: 512 * 1024
+    }, (error, stdout, stderr) => {
+      const processError = error as NodeJS.ErrnoException & { code?: number | string; killed?: boolean } | null;
+      resolve({
+        exitCode: typeof processError?.code === "number" ? processError.code : processError ? null : 0,
+        stdout,
+        stderr,
+        timedOut: Boolean(processError?.killed)
+      });
+    });
+  });
+}

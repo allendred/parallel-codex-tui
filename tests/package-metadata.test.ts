@@ -205,7 +205,15 @@ describe("package metadata", () => {
     expect(readme).toContain("Chat drafts support Unicode-safe Left/Right, Home/End, Backspace, and Delete editing");
     expect(readme).toContain("Up/Down recalls persisted user requests and returns to the exact unsent draft");
     expect(readme).toContain("Bracketed multiline paste stays in one draft");
-    expect(readme).toContain('`--doctor` checks configured commands and `{env:NAME}` references');
+    expect(readme).toContain('`--doctor` checks configured automated and interactive commands, `{env:NAME}` references');
+    expect(readme).toContain("CLI help surfaces required for Codex exec/resume sandboxing and Claude print/resume permissions");
+    expect(readme).toContain("an opaque third-party wrapper is reported as unverified without being rejected");
+    expect(readme).toContain("parallel-codex-tui --doctor --probe-agents");
+    expect(readme).toContain("one minimal fresh request and one same-session resume request");
+    expect(readme).toContain("This explicit probe uses model quota");
+    expect(readme).toContain("preserves failed artifacts under `.parallel-codex/probes/`");
+    expect(readme).toContain("Fresh Claude runs receive a generated native `--session-id`");
+    expect(readme).toContain("a silent failed launch cannot create a false resumable session");
     expect(readme).toContain("proxy host/port reachability as a local-endpoint check");
     expect(readme).toContain("parallel-codex-tui --doctor --probe-router");
     expect(readme).toContain("one real classification through the configured Codex Router");

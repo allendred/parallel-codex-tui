@@ -95,14 +95,31 @@ function nativeAttachArgs(input: { args: string[]; engine: EngineName; additiona
 }
 
 function withCodexWritableSandbox(args: string[]): string[] {
-  const hasExplicitSandbox = args.some((arg) => (
-    arg === "--sandbox"
-    || arg === "-s"
-    || arg.startsWith("--sandbox=")
-    || arg.startsWith("-s=")
-    || arg === "--dangerously-bypass-approvals-and-sandbox"
-  ));
-  return hasExplicitSandbox ? args : [...args, "--sandbox", "workspace-write"];
+  const sandbox = codexSandboxSelection(args);
+  if (sandbox === "read-only") {
+    throw new Error(
+      "Codex native attach cannot use recorded worker directories with a read-only sandbox. "
+      + "Set workers.codex.interactive.args to workspace-write or danger-full-access."
+    );
+  }
+  return sandbox ? args : [...args, "--sandbox", "workspace-write"];
+}
+
+function codexSandboxSelection(args: string[]): string | null {
+  for (let index = 0; index < args.length; index += 1) {
+    const arg = args[index] ?? "";
+    if (arg === "--dangerously-bypass-approvals-and-sandbox") {
+      return "danger-full-access";
+    }
+    if (arg === "--sandbox" || arg === "-s") {
+      return args[index + 1]?.trim().toLowerCase() || null;
+    }
+    const match = arg.match(/^(?:--sandbox|-s)=(.+)$/);
+    if (match) {
+      return match[1]?.trim().toLowerCase() || null;
+    }
+  }
+  return null;
 }
 
 function isWithin(path: string, root: string): boolean {

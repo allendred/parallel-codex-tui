@@ -9,6 +9,7 @@ export interface CliArgs {
   explicitWorkspace: string | null;
   help: boolean;
   init: boolean;
+  probeAgents: boolean;
   probeRouter: boolean;
   workspaceRoot: string;
   taskId: string | null;
@@ -18,7 +19,7 @@ export interface CliArgs {
 }
 
 const allowedValueOptions = new Set(["--app-root", "--workspace", "-w", "--task", "-t", "--theme"]);
-const allowedBooleanOptions = new Set(["--doctor", "--help", "-h", "--init", "--probe-router", "--themes", "--version", "-v"]);
+const allowedBooleanOptions = new Set(["--doctor", "--help", "-h", "--init", "--probe-agents", "--probe-router", "--themes", "--version", "-v"]);
 
 export function parseCliArgs(args: string[], cwd: string): CliArgs {
   const optionArgs = argsBeforeTerminator(args);
@@ -38,6 +39,7 @@ export function parseCliArgs(args: string[], cwd: string): CliArgs {
   const doctor = optionArgs.includes("--doctor");
   const help = optionArgs.includes("--help") || optionArgs.includes("-h");
   const init = optionArgs.includes("--init");
+  const probeAgents = optionArgs.includes("--probe-agents");
   const probeRouter = optionArgs.includes("--probe-router");
   const themes = optionArgs.includes("--themes");
   const version = optionArgs.includes("--version") || optionArgs.includes("-v");
@@ -54,6 +56,7 @@ export function parseCliArgs(args: string[], cwd: string): CliArgs {
     explicitWorkspace,
     help,
     init,
+    probeAgents,
     probeRouter,
     workspaceRoot,
     taskId,
@@ -111,6 +114,9 @@ export function validateCliArgs(args: string[]): string[] {
   }
   if (optionArgs.includes("--probe-router") && !optionArgs.includes("--doctor")) {
     errors.push("--probe-router requires --doctor");
+  }
+  if (optionArgs.includes("--probe-agents") && !optionArgs.includes("--doctor")) {
+    errors.push("--probe-agents requires --doctor");
   }
   return errors;
 }

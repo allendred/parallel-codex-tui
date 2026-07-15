@@ -1059,6 +1059,83 @@ describe("ProcessWorkerAdapter", () => {
     expect(status.native_session_id).toBe("native-123");
   });
 
+  it("assigns and persists a Claude session id after the fresh worker produces output", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pct-process-claude-session-id-"));
+    const filesDir = join(root, "actor-claude");
+    const promptPath = join(filesDir, "prompt.md");
+    const outputLogPath = join(filesDir, "output.log");
+    const statusPath = join(filesDir, "status.json");
+    const script = "console.log(process.argv.slice(1).join('|'))";
+    const detected: string[] = [];
+    await writeText(promptPath, "hello");
+
+    const adapter = new ProcessWorkerAdapter(process.execPath, ["-e", script, "--"], "claude");
+    const result = await adapter.run({
+      workerId: "actor-claude",
+      role: "actor",
+      engine: "claude",
+      cwd: root,
+      filesDir,
+      promptPath,
+      outputLogPath,
+      statusPath,
+      prompt: "hello",
+      nativeSessionConfig: {
+        enabled: true,
+        resumeArgs: ["--resume", "{sessionId}"],
+        detectSessionId: true,
+        fallback: "fail"
+      },
+      onNativeSession: (sessionId) => {
+        detected.push(sessionId);
+      }
+    });
+
+    expect(result.exitCode).toBe(0);
+    expect(detected).toHaveLength(1);
+    expect(detected[0]).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i);
+    expect(await readTextIfExists(outputLogPath)).toContain(`--session-id|${detected[0]}`);
+    expect(await readJson(statusPath, WorkerStatusSchema)).toMatchObject({
+      native_session_id: detected[0]
+    });
+  });
+
+  it("does not persist a generated Claude session id when the command exits without output", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pct-process-claude-session-no-output-"));
+    const filesDir = join(root, "actor-claude");
+    const promptPath = join(filesDir, "prompt.md");
+    const outputLogPath = join(filesDir, "output.log");
+    const statusPath = join(filesDir, "status.json");
+    const detected: string[] = [];
+    await writeText(promptPath, "hello");
+
+    const adapter = new ProcessWorkerAdapter(process.execPath, ["-e", "process.exit(1)", "--"], "claude");
+    const result = await adapter.run({
+      workerId: "actor-claude",
+      role: "actor",
+      engine: "claude",
+      cwd: root,
+      filesDir,
+      promptPath,
+      outputLogPath,
+      statusPath,
+      prompt: "hello",
+      nativeSessionConfig: {
+        enabled: true,
+        resumeArgs: ["--resume", "{sessionId}"],
+        detectSessionId: true,
+        fallback: "fail"
+      },
+      onNativeSession: (sessionId) => {
+        detected.push(sessionId);
+      }
+    });
+
+    expect(result.exitCode).toBe(1);
+    expect(detected).toEqual([]);
+    expect((await readJson(statusPath, WorkerStatusSchema)).native_session_id).toBeUndefined();
+  });
+
   it("locks the first streamed native session id instead of adopting ids printed by agent tools", async () => {
     const root = await mkdtemp(join(tmpdir(), "pct-process-lock-session-"));
     const filesDir = join(root, "critic-codex");
