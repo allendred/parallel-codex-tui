@@ -168,6 +168,12 @@ describe("package metadata", () => {
     const readme = await readFile(join(process.cwd(), "README.md"), "utf8");
 
     expect(readme).toContain("## Requirements");
+    expect(readme).toContain("## Current Release");
+    expect(readme).toContain("v0.1.5` is available from [npm]");
+    expect(readme).toContain("completes the earlier stability, collaboration, session-management, Provider, TUI, and release roadmap");
+    expect(readme).toContain("real three-Feature Tetris task");
+    expect(readme).toContain("1,233 tests across 118 files");
+    expect(readme).toContain("authenticate the Claude CLI");
     expect(readme).toContain("Node.js 24.15+");
     expect(readme).toContain("Codex CLI");
     expect(readme).toContain("Claude CLI");
@@ -459,14 +465,14 @@ describe("package metadata", () => {
     expect(readme).toContain(".parallel-codex/workspaces.json");
     expect(readme).toContain(".parallel-codex/sessions/");
     expect(readme).toContain("## Release");
-    expect(readme).toContain("GitHub Actions runs CI on Ubuntu with Node.js 24.15 and 26, plus macOS with Node.js 26");
+    expect(readme).toContain("GitHub Actions runs CI on Ubuntu with Node.js 24.15 and 26, plus macOS with Node.js 24.15");
     expect(readme).toContain("installs that tarball into a clean global prefix");
     expect(readme).toContain("npm Trusted Publishing with GitHub OIDC");
     expect(readme).toContain("In npm, configure Trusted Publishing");
     expect(readme).toContain('workflow filename `release.yml`');
     expect(readme).toContain("Do not configure `NPM_TOKEN` for the release workflow");
     expect(readme).toContain("npm `^11.5.1`");
-    expect(readme).toContain("npm install -g npm@^11.15.0");
+    expect(readme).toContain("npm install -g npm@^11.5.1");
     expect(readme).toContain(
       "npm trust github parallel-codex-tui --repo allendred/parallel-codex-tui --file release.yml --allow-publish --dry-run",
     );
@@ -478,9 +484,10 @@ describe("package metadata", () => {
     expect(readme).toContain("runs on Node `24.15.x`");
     expect(readme).toContain("npm returns `ENEEDAUTH` or `E401`");
     expect(readme).toContain("fix the npm Trusted Publishing package settings rather than adding a token fallback");
-    expect(readme).toContain("git tag v0.1.5");
-    expect(readme).toContain("git push origin v0.1.5");
+    expect(readme).toContain('git tag "v$VERSION"');
+    expect(readme).toContain('git push origin "v$VERSION"');
     expect(readme).toContain("The release tag must match `package.json`");
+    expect(readme).toContain("Published tags such as `v0.1.5` are immutable");
   });
 
   it("publishes the CLI bin as an executable file", async () => {

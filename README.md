@@ -4,6 +4,21 @@ A standalone TypeScript TUI wrapper for routed parallel coding workflows. It kee
 
 Built with Codex-assisted development.
 
+## Current Release
+
+`v0.1.5` is available from [npm](https://www.npmjs.com/package/parallel-codex-tui/v/0.1.5) and as a [GitHub Release](https://github.com/allendred/parallel-codex-tui/releases/tag/v0.1.5). It completes the earlier stability, collaboration, session-management, Provider, TUI, and release roadmap in one consolidated release:
+
+- Runtime preflight checks Codex, Claude, named third-party Providers, proxy reachability, workspace access, CLI capabilities, and native attach policy before work starts.
+- Judge produces validated requirements, acceptance criteria, and a dependency-aware Feature plan. Actor/Critic pairs exchange checked JSONL findings and replies across revision rounds, followed by Wave Critic and final Judge acceptance.
+- Tasks retain every Turn, Worker log, native session binding, model snapshot, and collaboration artifact across follow-ups and restarts. Sessions can be inspected, continued, forked, renamed, archived, exported, restored, or deleted from the TUI.
+- Named Worker Providers support Codex-compatible, Claude-compatible, OpenAI-compatible, Anthropic-compatible, and custom generic commands with independent role, model, environment, permission, resume, and interactive settings.
+- Worker overview, Feature board, collaboration timeline, status details, rendered Markdown/Diff/error logs, Unicode search, keyboard navigation, mouse scrolling, and configurable themes share one terminal UI system.
+- SQLite migrations and recovery backups, owned-process cleanup, ten-turn Worker-history recovery, packaged CLI installation, and cross-platform CI are covered by automated tests.
+
+Release acceptance included a real three-Feature Tetris task with parallel Actor/Critic waves, final integration review, 43 project tests, and a clean build. The repository suite passed 1,233 tests across 118 files on Ubuntu Node.js 24.15 and 26 plus macOS Node.js 24.15. The npm package was independently installed and returned `parallel-codex-tui 0.1.5`.
+
+Real Provider probes still depend on valid local CLI credentials. In particular, authenticate the Claude CLI before selecting a Claude-compatible Worker, then run `parallel-codex-tui --doctor --probe-agents` to prove fresh and resumed calls on that machine.
+
 ## Requirements
 
 - Node.js 24.15+.
@@ -434,12 +449,12 @@ If a native resume fails because the underlying CLI reports that its context win
 
 ## Release
 
-GitHub Actions runs CI on Ubuntu with Node.js 24.15 and 26, plus macOS with Node.js 26, for pushes and pull requests to `main`. Every job also packs the release artifact, installs that tarball into a clean global prefix, and executes the installed `--version` and `--help` entrypoints.
+GitHub Actions runs CI on Ubuntu with Node.js 24.15 and 26, plus macOS with Node.js 24.15, for pushes and pull requests to `main`. Every job also packs the release artifact, installs that tarball into a clean global prefix, and executes the installed `--version` and `--help` entrypoints.
 
 Releases publish to npm through npm Trusted Publishing with GitHub OIDC. Do not configure `NPM_TOKEN` for the release workflow. In npm, configure Trusted Publishing for organization/user `allendred`, repository `parallel-codex-tui`, workflow filename `release.yml`, and allowed action `npm publish`. The package already exists on npm, so future releases can use Trusted Publishing directly. You can also configure the trust relationship from an authenticated npm CLI session:
 
 ```bash
-npm install -g npm@^11.15.0
+npm install -g npm@^11.5.1
 npm trust github parallel-codex-tui --repo allendred/parallel-codex-tui --file release.yml --allow-publish --dry-run
 npm trust github parallel-codex-tui --repo allendred/parallel-codex-tui --file release.yml --allow-publish --yes
 ```
@@ -451,11 +466,12 @@ The release job installs npm `^11.5.1`, runs on Node `24.15.x`, publishes the pr
 To publish a release, update `package.json` and `src/version.ts` to the same version, then push a matching tag:
 
 ```bash
-git tag v0.1.5
-git push origin v0.1.5
+VERSION=0.1.6
+git tag "v$VERSION"
+git push origin "v$VERSION"
 ```
 
-You can also run the Release workflow manually and enter the same tag value. The release tag must match `package.json`; for example, package version `0.1.5` requires tag `v0.1.5`.
+You can also run the Release workflow manually and enter the same tag value. The release tag must match `package.json`; for example, package version `0.1.6` requires tag `v0.1.6`. Published tags such as `v0.1.5` are immutable and must not be moved or reused.
 
 ## Publishing Hygiene
 
