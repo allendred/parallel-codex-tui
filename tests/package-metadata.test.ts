@@ -169,10 +169,10 @@ describe("package metadata", () => {
 
     expect(readme).toContain("## Requirements");
     expect(readme).toContain("## Current Release");
-    expect(readme).toContain("v0.1.6` is available from [npm]");
+    expect(readme).toContain("v0.1.7` is available from [npm]");
     expect(readme).toContain("keeps terminal scrolling and copying available at the same time");
     expect(readme).toContain("real three-Feature Tetris task");
-    expect(readme).toContain("1,240 tests across 119 files");
+    expect(readme).toContain("1,241 tests across 119 files");
     expect(readme).toContain("authenticate the Claude CLI");
     expect(readme).toContain("Node.js 24.15+");
     expect(readme).toContain("Codex CLI");
@@ -229,7 +229,7 @@ describe("package metadata", () => {
     expect(readme).toContain("`.parallel-codex/sessions/main/chat.jsonl`");
     expect(readme).toContain("startup restores the latest 200 valid messages");
     expect(readme).toContain("Chat drafts support Unicode-safe Left/Right, Home/End, Backspace, and Delete editing");
-    expect(readme).toContain("Up/Down recalls persisted user requests and returns to the exact unsent draft");
+    expect(readme).toContain("Ctrl+Up/Down recalls persisted user requests and returns to the exact unsent draft");
     expect(readme).toContain("Bracketed multiline paste stays in one draft");
     expect(readme).toContain('`--doctor` checks configured automated and interactive commands, `{env:NAME}` references');
     expect(readme).toContain("CLI help surfaces required for Codex exec/resume sandboxing and Claude print/resume permissions");
@@ -316,7 +316,7 @@ describe("package metadata", () => {
     expect(readme).toContain("reports the loaded TUI theme, core palette values, ANSI swatch previews, and color override values");
     expect(readme).toContain("including any temporary `--theme` override");
     expect(readme).toContain('OPENAI_API_KEY = "{env:OPENAI_API_KEY}"');
-    expect(readme).toContain("In chat, scroll long conversation history with the mouse wheel or PageUp/PageDown");
+    expect(readme).toContain("In chat, scroll long conversation history with the mouse wheel, plain Up/Down, or PageUp/PageDown");
     expect(readme).toContain("sending a new message returns to the latest reply");
     expect(readme).toContain("Press `Ctrl+N` to preserve the current session and start a new task");
     expect(readme).toContain("the next complex request creates an independent task from turn `0001`");
@@ -433,7 +433,7 @@ describe("package metadata", () => {
     expect(readme).toContain("Enter moves to the next match and Up/Down moves backward or forward");
     expect(readme).toContain("The current match is marked with `>` without shifting Diff or source line-number columns");
     expect(readme).toContain("press `E` to cycle rendered error lines or `D` to cycle Diff files and hunks");
-    expect(readme).toContain("In worker-log views, scroll with the mouse wheel or PageUp/PageDown");
+    expect(readme).toContain("In worker-log views, scroll with the mouse wheel, Up/Down, or PageUp/PageDown");
     expect(readme).toContain("In chat or worker-log views, press `Ctrl+O`");
     expect(readme).toContain("Native attach follows outer terminal resize");
     expect(readme).toContain("recognizes read-only sandbox/add-dir conflicts, untrusted directories");
@@ -487,7 +487,7 @@ describe("package metadata", () => {
     expect(readme).toContain('git tag "v$VERSION"');
     expect(readme).toContain('git push origin "v$VERSION"');
     expect(readme).toContain("The release tag must match `package.json`");
-    expect(readme).toContain("Published tags such as `v0.1.5` are immutable");
+    expect(readme).toContain("Published tags such as `v0.1.6` are immutable");
   });
 
   it("publishes the CLI bin as an executable file", async () => {

@@ -92,6 +92,15 @@ export function rawHistoryDelta(input: string): number {
   return delta;
 }
 
+export function rawPlainArrowDelta(input: string): number {
+  let delta = 0;
+  for (const match of input.matchAll(/\x1b(?:O([AB])|\[([AB]))/g)) {
+    const direction = match[1] ?? match[2];
+    delta += direction === "A" ? 1 : -1;
+  }
+  return delta;
+}
+
 export function mouseScrollDelta(input: string, linesPerWheel = 3): number {
   let delta = 0;
 

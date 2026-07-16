@@ -188,11 +188,13 @@ async function main(): Promise<void> {
     );
 
     const removeSigintHandler = installInteractiveSigintExitHandler(() => shutdownController.abort());
+    enterInteractiveTerminal();
     try {
       instance = render(appElement(current), { exitOnCtrlC: false });
       await instance.waitUntilExit();
     } finally {
       removeSigintHandler();
+      restoreInteractiveTerminal();
       retryDeferredWorkspaceClosures(deferredWorkspaceClosures);
     }
   }
@@ -342,7 +344,13 @@ function restoreInteractiveTerminal(): void {
   }
   process.stdin.pause();
   if (process.stdout.isTTY) {
-    process.stdout.write("\x1b[?1006l\x1b[?1000l\x1b[?2004l\x1b[?25h");
+    process.stdout.write("\x1b[?1006l\x1b[?1003l\x1b[?1002l\x1b[?1000l\x1b[?1007l\x1b[?1049l\x1b[?2004l\x1b[?25h");
+  }
+}
+
+function enterInteractiveTerminal(): void {
+  if (process.stdout.isTTY) {
+    process.stdout.write("\x1b[?1049h\x1b[?1007h\x1b[?1006l\x1b[?1003l\x1b[?1002l\x1b[?1000l");
   }
 }
 

@@ -8,7 +8,7 @@ import { TaskMetaSchema, WorkerStatusSchema } from "../src/domain/schemas.js";
 import { NativeTerminalScreen } from "../src/tui/terminal-screen.js";
 
 describe("CLI worker log scroll smoke", () => {
-  it("scrolls worker logs with SGR mouse wheel input", async () => {
+  it("scrolls worker logs through alternate-scroll arrows without grabbing the mouse", async () => {
     const workspace = await mkdtemp(join(tmpdir(), "pct-cli-wheel-"));
     const taskId = "task-20260702-000000-wheel";
     const taskDir = join(workspace, ".parallel-codex", "sessions", taskId);
@@ -42,23 +42,26 @@ describe("CLI worker log scroll smoke", () => {
     try {
       await waitForText(chunks, "attach");
       await screenWrites;
-      child.write("\x1b[<65;10;5M");
+      child.write("\x1b[B\x1b[B\x1b[B");
       await new Promise((resolve) => setTimeout(resolve, 100));
       await screenWrites;
       expect(screen.snapshot().split("\n")[0]).toContain("chat");
       expect(screen.snapshot().split("\n")[0]).not.toContain("logs");
 
       let outputCursor = chunks.length;
-      child.write("\x1b[<64;10;5M");
-      child.write("\x1b[<64;10;5M");
-      child.write("\x1b[<64;10;5M");
+      child.write("\x17");
+      await waitForText(chunks, "tail", outputCursor);
+      outputCursor = chunks.length;
+      child.write("\x1b[A\x1b[A\x1b[A");
+      child.write("\x1b[A\x1b[A\x1b[A");
+      child.write("\x1b[A\x1b[A\x1b[A");
       await waitForText(chunks, "back 9/", outputCursor);
       await settleScreen(() => screenWrites);
       expect(screen.snapshot()).toContain("back 9/");
       outputCursor = chunks.length;
-      child.write("\x1b[<65;10;5M");
-      child.write("\x1b[<65;10;5M");
-      child.write("\x1b[<65;10;5M");
+      child.write("\x1b[B\x1b[B\x1b[B");
+      child.write("\x1b[B\x1b[B\x1b[B");
+      child.write("\x1b[B\x1b[B\x1b[B");
       await waitForText(chunks, "tail", outputCursor);
       await settleScreen(() => screenWrites);
       expect(screen.snapshot()).toContain("tail");
@@ -66,7 +69,10 @@ describe("CLI worker log scroll smoke", () => {
 
       const rawOutput = chunks.join("");
       expect(rawOutput).toContain("back 9/");
-      expect(rawOutput).toContain("\x1b[?1000h\x1b[?1006h");
+      expect(rawOutput).toContain("\x1b[?1049h\x1b[?1007h");
+      expect(rawOutput).toContain("\x1b[?1006l\x1b[?1003l\x1b[?1002l\x1b[?1000l");
+      expect(rawOutput).not.toContain("\x1b[?1000h");
+      expect(rawOutput).not.toContain("\x1b[?1006h");
       expect(rawOutput).not.toContain("\x1b[?1002h");
     } finally {
       child.kill("SIGTERM");

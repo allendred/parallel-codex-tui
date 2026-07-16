@@ -190,6 +190,19 @@ describe("keyboard shortcuts", () => {
     expect(rawHistoryDelta?.("\x1b[C\x1b[D")).toBe(0);
   });
 
+  it("separates unmodified alternate-scroll arrows from modified history arrows", () => {
+    const rawPlainArrowDelta = (
+      keyboardModule as typeof keyboardModule & {
+        rawPlainArrowDelta?: (input: string) => number;
+      }
+    ).rawPlainArrowDelta;
+
+    expect(rawPlainArrowDelta).toBeTypeOf("function");
+    expect(rawPlainArrowDelta?.("\x1b[A\x1b[A\x1b[A")).toBe(3);
+    expect(rawPlainArrowDelta?.("\x1bOB\x1bOB\x1bOB")).toBe(-3);
+    expect(rawPlainArrowDelta?.("\x1b[1;5A\x1b[1;5B")).toBe(0);
+  });
+
   it("maps SGR mouse wheel sequences to scroll deltas", () => {
     expect(mouseScrollDelta("\x1b[<64;10;5M", 3)).toBe(3);
     expect(mouseScrollDelta("\x1b[<65;10;5M", 3)).toBe(-3);

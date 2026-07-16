@@ -117,7 +117,7 @@ describe("CLI input smoke", () => {
     }
   }, 10000);
 
-  it("recalls persisted user requests and restores the unsent draft with Up and Down", async () => {
+  it("recalls persisted user requests with modified arrows and restores the unsent draft", async () => {
     const workspace = await mkdtemp(join(tmpdir(), "pct-cli-input-history-"));
     const chatDir = join(workspace, ".parallel-codex", "sessions", "main");
     await mkdir(chatDir, { recursive: true });
@@ -152,20 +152,20 @@ describe("CLI input smoke", () => {
       child.write("草稿");
       await waitForScreenText(() => screenWrites, screen, "> 草稿|");
 
-      child.write("\x1b[A");
+      child.write("\x1b[1;5A");
       await waitForScreenText(() => screenWrites, screen, "> 第二条|");
-      child.write("\x1b[A");
+      child.write("\x1b[1;5A");
       await waitForScreenText(() => screenWrites, screen, "> 第一条|");
-      child.write("\x1b[B");
+      child.write("\x1b[1;5B");
       await waitForScreenText(() => screenWrites, screen, "> 第二条|");
-      child.write("\x1b[B");
+      child.write("\x1b[1;5B");
       await waitForScreenText(() => screenWrites, screen, "> 草稿|");
 
-      child.write("\x1b[A");
+      child.write("\x1b[1;5A");
       await waitForScreenText(() => screenWrites, screen, "> 第二条|");
       child.write("改");
       await waitForScreenText(() => screenWrites, screen, "> 第二条改|");
-      child.write("\x1b[B");
+      child.write("\x1b[1;5B");
       await new Promise((resolve) => setTimeout(resolve, 100));
       await screenWrites;
 

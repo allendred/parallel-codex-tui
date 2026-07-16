@@ -42,7 +42,7 @@ import { TerminalOutput } from "./TerminalOutput.js";
 import { NativeTerminalScreen } from "./terminal-screen.js";
 import { WorkerOutputView, type WorkerOutputNavigationTargets } from "./WorkerOutputView.js";
 import { compactEndByDisplayWidth, displayWidth, wrapByDisplayWidth } from "./display-width.js";
-import { isAttachShortcut, isCopyShortcut, isExitShortcut, isLogsShortcut, isNewTaskShortcut, isRouterDiagnosticsShortcut, isStatusDetailsShortcut, isTaskResultShortcut, isTaskSessionsShortcut, isWorkerOverviewShortcut, isWorkerSearchShortcut, isWorkspaceShortcut, mouseScrollDelta, rawHistoryDelta, rawPageScrollDelta, scrollDelta, workerLogJumpKind } from "./keyboard.js";
+import { isAttachShortcut, isCopyShortcut, isExitShortcut, isLogsShortcut, isNewTaskShortcut, isRouterDiagnosticsShortcut, isStatusDetailsShortcut, isTaskResultShortcut, isTaskSessionsShortcut, isWorkerOverviewShortcut, isWorkerSearchShortcut, isWorkspaceShortcut, mouseScrollDelta, rawHistoryDelta, rawPageScrollDelta, rawPlainArrowDelta, scrollDelta, workerLogJumpKind } from "./keyboard.js";
 import { createRawInputDecoder, tokenizeRawInput } from "./raw-input-decoder.js";
 import { decodeHtmlEntities } from "./markdown-text.js";
 import { configureTuiTheme, TUI_THEME } from "./theme.js";
@@ -883,7 +883,7 @@ export function App({
 
   useEffect(() => {
     setRawMode(true);
-    process.stdout.write("\x1b[?2004h\x1b[?1000h\x1b[?1006h");
+    process.stdout.write("\x1b[?2004h\x1b[?1006l\x1b[?1003l\x1b[?1002l\x1b[?1000l");
     const commitChatInputUpdate = (
       update: ReturnType<typeof applyChatInputChunk>,
       previousValue: string,
@@ -1392,6 +1392,7 @@ export function App({
           }
           if (collaborationDetailOpenRef.current) {
             const detailDelta = mouseScrollDelta(timelineChunk, 3)
+              + rawPlainArrowDelta(timelineChunk)
               + rawPageScrollDelta(timelineChunk, Math.max(1, outputHeight - 3));
             if (detailDelta !== 0) {
               setCollaborationScrollOffset((current) => (
@@ -1578,6 +1579,7 @@ export function App({
             return;
           }
           const routeDelta = mouseScrollDelta(routerChunk, 3)
+            + rawPlainArrowDelta(routerChunk)
             + rawPageScrollDelta(routerChunk, Math.max(1, outputHeight - 1));
           if (routeDelta !== 0) {
             setRouterScrollOffset((current) => (
@@ -1655,7 +1657,7 @@ export function App({
             setView("chat");
             return;
           }
-          const delta = mouseScrollDelta(workerChunk, 3);
+          const delta = mouseScrollDelta(workerChunk, 3) + rawPlainArrowDelta(workerChunk);
           if (delta !== 0) {
             setWorkerScrollOffset((current) => nextScrollOffset(current, delta, null));
           }
@@ -1724,8 +1726,9 @@ export function App({
           return;
         }
         const wheelDelta = mouseScrollDelta(chunk, 3);
+        const arrowScrollDelta = rawPlainArrowDelta(chunk);
         const pageDelta = rawPageScrollDelta(chunk, Math.max(1, outputHeight - 1));
-        const historyDelta = wheelDelta + pageDelta;
+        const historyDelta = wheelDelta + arrowScrollDelta + pageDelta;
         if (historyDelta !== 0 && chatMaxScrollOffsetRef.current > 0) {
           setChatScrollOffset((current) => {
             const next = nextScrollOffset(
@@ -1779,7 +1782,7 @@ export function App({
           return;
         }
 
-        const draftHistoryDelta = rawHistoryDelta(chunk);
+        const draftHistoryDelta = rawHistoryDelta(chunk) - arrowScrollDelta;
         if (draftHistoryDelta !== 0) {
           if (busyRef.current) {
             return;
@@ -1856,7 +1859,7 @@ export function App({
       stdinEvents.removeListener("input", handleRawInput);
       rawInputDecoderRef.current.end();
       chatPasteDecoderRef.current.reset();
-      process.stdout.write("\x1b[?1006l\x1b[?1000l\x1b[?2004l");
+      process.stdout.write("\x1b[?1006l\x1b[?1003l\x1b[?1002l\x1b[?1000l\x1b[?2004l");
       setRawMode(false);
     };
   }, [outputHeight, setRawMode, stdinEvents]);
