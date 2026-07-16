@@ -129,7 +129,7 @@ describe("CLI exit shortcuts", () => {
       await waitForExit(exits);
 
       expect(exits[0]).toBe(0);
-      expect(chunks.join("")).toContain("\x1b[?1006l\x1b[?1002l\x1b[?1000l\x1b[?2004l\x1b[?25h");
+      expect(chunks.join("")).toContain("\x1b[?1006l\x1b[?1000l\x1b[?2004l\x1b[?25h");
     } finally {
       if (exits.length === 0) {
         child.kill("SIGTERM");

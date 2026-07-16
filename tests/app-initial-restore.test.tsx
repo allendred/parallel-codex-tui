@@ -1,7 +1,7 @@
 import React from "react";
 import { EventEmitter } from "node:events";
 import { render } from "ink-testing-library";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { defaultConfig } from "../src/core/config.js";
 import type { Orchestrator, WorkerLogRef } from "../src/orchestrator/orchestrator.js";
 import { App } from "../src/tui/App.js";
@@ -141,6 +141,33 @@ describe("App initial task restore", () => {
 });
 
 describe("App empty worker shortcuts", () => {
+  it("copies the visible chat with Ctrl+Y while mouse scrolling stays configured", async () => {
+    const testInput = installTestInputStream();
+    const copyToClipboard = vi.fn(async () => {});
+    const view = render(
+      <App
+        config={defaultConfig("/tmp/pct-app-copy")}
+        orchestrator={{} as Orchestrator}
+        cwd="/tmp/pct-workspace"
+        initialMessages={[{ from: "system", text: "visible clipboard target" }]}
+        copyToClipboard={copyToClipboard}
+      />
+    );
+
+    try {
+      await waitForFrame(view.lastFrame, "visible clipboard target");
+      await settleEffects();
+      testInput.send(view.stdin, "\x19");
+      await waitForFrame(view.lastFrame, "copied visible chat");
+
+      expect(copyToClipboard).toHaveBeenCalledOnce();
+      expect(copyToClipboard).toHaveBeenCalledWith(expect.stringContaining("visible clipboard target"));
+    } finally {
+      view.unmount();
+      testInput.restore();
+    }
+  });
+
   it("keeps Ctrl+W in chat with a dismissible no-worker explanation", async () => {
     const testInput = installTestInputStream();
     const view = render(

@@ -32,6 +32,7 @@ export interface InputBarProps {
   nativeClosed?: boolean;
   searchMatchIndex?: number;
   searchMatchCount?: number;
+  clipboardNotice?: { state: "copying" | "copied"; text: string } | null;
   value: string;
   cursor?: number;
   terminalWidth?: number;
@@ -72,6 +73,7 @@ export function InputBar({
   nativeClosed = false,
   searchMatchIndex = 0,
   searchMatchCount = 0,
+  clipboardNotice = null,
   value,
   cursor,
   terminalWidth: providedTerminalWidth,
@@ -80,6 +82,22 @@ export function InputBar({
 }: InputBarProps) {
   const terminalWidth = providedTerminalWidth ?? process.stdout.columns ?? 120;
   const fillRail = providedTerminalWidth !== undefined || typeof process.stdout.columns === "number";
+
+  if (clipboardNotice) {
+    const contentWidth = Math.max(1, terminalWidth - (terminalWidth > 1 ? 2 : 0));
+    const text = compactEndByDisplayWidth(clipboardNotice.text, contentWidth);
+    return (
+      <InputRail terminalWidth={terminalWidth} textWidth={displayWidth(text)} fill={fillRail}>
+        <Text
+          backgroundColor={TUI_THEME.rail}
+          color={clipboardNotice.state === "copied" ? TUI_THEME.success : TUI_THEME.warning}
+          bold
+        >
+          {text}
+        </Text>
+      </InputRail>
+    );
+  }
 
   if (mode === "worker-search") {
     const suffix = workerSearchInputSuffix(terminalWidth, searchMatchIndex, searchMatchCount);

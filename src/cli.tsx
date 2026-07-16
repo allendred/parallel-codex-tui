@@ -342,7 +342,7 @@ function restoreInteractiveTerminal(): void {
   }
   process.stdin.pause();
   if (process.stdout.isTTY) {
-    process.stdout.write("\x1b[?1006l\x1b[?1002l\x1b[?1000l\x1b[?2004l\x1b[?25h");
+    process.stdout.write("\x1b[?1006l\x1b[?1000l\x1b[?2004l\x1b[?25h");
   }
 }
 

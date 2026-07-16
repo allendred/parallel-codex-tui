@@ -64,7 +64,10 @@ describe("CLI worker log scroll smoke", () => {
       expect(screen.snapshot()).toContain("tail");
       expect(screen.snapshot()).not.toContain("back 9/");
 
-      expect(chunks.join("")).toContain("back 9/");
+      const rawOutput = chunks.join("");
+      expect(rawOutput).toContain("back 9/");
+      expect(rawOutput).toContain("\x1b[?1000h\x1b[?1006h");
+      expect(rawOutput).not.toContain("\x1b[?1002h");
     } finally {
       child.kill("SIGTERM");
     }

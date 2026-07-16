@@ -133,6 +133,19 @@ describe("keyboard shortcuts", () => {
     expect(workerLogJumpKind?.("plain")).toBeNull();
   });
 
+  it("recognizes ctrl-y as copy without colliding with plain input", () => {
+    const isCopyShortcut = (
+      keyboardModule as typeof keyboardModule & {
+        isCopyShortcut?: (input: string, key: { ctrl?: boolean }) => boolean;
+      }
+    ).isCopyShortcut;
+
+    expect(isCopyShortcut).toBeTypeOf("function");
+    expect(isCopyShortcut?.("y", { ctrl: true })).toBe(true);
+    expect(isCopyShortcut?.("\u0019", { ctrl: false })).toBe(true);
+    expect(isCopyShortcut?.("y", { ctrl: false })).toBe(false);
+  });
+
   it("does not treat plain letters as shortcuts", () => {
     expect(isLogsShortcut("w", { ctrl: false })).toBe(false);
     expect(isAttachShortcut("o", { ctrl: false })).toBe(false);

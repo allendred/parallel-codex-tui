@@ -111,6 +111,7 @@ export interface WorkerOutputViewProps {
   searchMatchIndex?: number;
   onViewportChange?: (viewport: { offset: number; maxOffset: number }) => void;
   onNavigationChange?: (targets: WorkerOutputNavigationTargets) => void;
+  onCopyTextChange?: (text: string) => void;
 }
 
 export function workerOutputNavigationTargets(
@@ -158,7 +159,8 @@ export function WorkerOutputView({
   searchQuery = "",
   searchMatchIndex = 0,
   onViewportChange,
-  onNavigationChange
+  onNavigationChange,
+  onCopyTextChange
 }: WorkerOutputViewProps) {
   const nanoOutput = isNanoWorkerOutputWidth(terminalWidth);
   const contentKey = workerOutputContentKey(role, featureId, logPath, nanoOutput);
@@ -280,6 +282,7 @@ export function WorkerOutputView({
     preferLatestSection: selection.clampedOffset === 0 && selection.maxOffset > 0
   });
   const visibleLines = displayLines.slice(start, end);
+  const visibleCopyText = visibleLines.map((line) => line.text).join("\n");
   const topPaddingLines = start > rawStart
     ? 0
     : workerOutputTailTopPaddingLines(
@@ -308,6 +311,10 @@ export function WorkerOutputView({
     navigationTargets.searchOffsets.join(","),
     onNavigationChange
   ]);
+
+  useEffect(() => {
+    onCopyTextChange?.(visibleCopyText);
+  }, [onCopyTextChange, visibleCopyText]);
 
   const scrollLabel = workerOutputScrollDisplay(selection.clampedOffset, selection.maxOffset, terminalWidth);
   const normalizedSearchQuery = searchQuery.trim();

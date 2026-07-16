@@ -4,6 +4,7 @@ import { Box, Text, useApp, useInput, useStdin, type TextProps } from "ink";
 import { Lexer, type Token, type Tokens } from "marked";
 import type { AppConfig } from "../core/config.js";
 import type { CollaborationTimeline } from "../core/collaboration-timeline.js";
+import { copyTextToClipboard } from "../core/clipboard.js";
 import { readJson } from "../core/file-store.js";
 import type { RouterAuditRecord } from "../core/router-audit.js";
 import type { RouterExecutionProgress } from "../core/router.js";
@@ -41,7 +42,7 @@ import { TerminalOutput } from "./TerminalOutput.js";
 import { NativeTerminalScreen } from "./terminal-screen.js";
 import { WorkerOutputView, type WorkerOutputNavigationTargets } from "./WorkerOutputView.js";
 import { compactEndByDisplayWidth, displayWidth, wrapByDisplayWidth } from "./display-width.js";
-import { isAttachShortcut, isExitShortcut, isLogsShortcut, isNewTaskShortcut, isRouterDiagnosticsShortcut, isStatusDetailsShortcut, isTaskResultShortcut, isTaskSessionsShortcut, isWorkerOverviewShortcut, isWorkerSearchShortcut, isWorkspaceShortcut, mouseScrollDelta, rawHistoryDelta, rawPageScrollDelta, scrollDelta, workerLogJumpKind } from "./keyboard.js";
+import { isAttachShortcut, isCopyShortcut, isExitShortcut, isLogsShortcut, isNewTaskShortcut, isRouterDiagnosticsShortcut, isStatusDetailsShortcut, isTaskResultShortcut, isTaskSessionsShortcut, isWorkerOverviewShortcut, isWorkerSearchShortcut, isWorkspaceShortcut, mouseScrollDelta, rawHistoryDelta, rawPageScrollDelta, scrollDelta, workerLogJumpKind } from "./keyboard.js";
 import { createRawInputDecoder, tokenizeRawInput } from "./raw-input-decoder.js";
 import { decodeHtmlEntities } from "./markdown-text.js";
 import { configureTuiTheme, TUI_THEME } from "./theme.js";
@@ -124,6 +125,7 @@ export interface AppProps {
       onError: (error: Error) => void;
     }
   ) => NativeAttachProcessRef;
+  copyToClipboard?: (text: string) => Promise<unknown>;
   shutdownSignal?: AbortSignal;
 }
 
@@ -228,6 +230,7 @@ export function App({
   prepareNativeAttach,
   prepareNativeFork,
   startNativeAttach,
+  copyToClipboard = copyTextToClipboard,
   shutdownSignal
 }: AppProps) {
   configureTuiTheme({
@@ -258,6 +261,10 @@ export function App({
   const [activeMode, setActiveMode] = useState<"simple" | "complex" | null>(initialTaskId ? "complex" : null);
   const [canRetryTask, setCanRetryTask] = useState(initialCanRetryTask);
   const [attachError, setAttachError] = useState<string | null>(null);
+  const [clipboardNotice, setClipboardNotice] = useState<{
+    state: "copying" | "copied";
+    text: string;
+  } | null>(null);
   const [nativeInput, setNativeInput] = useState("");
   const [workerScrollOffset, setWorkerScrollOffset] = useState(0);
   const [workerSearch, setWorkerSearch] = useState<WorkerSearchState>({
@@ -314,6 +321,8 @@ export function App({
   const mountedRef = useRef(true);
   const nativeAttachRef = useRef(nativeAttach);
   const nativeAttachRequestSequenceRef = useRef(0);
+  const clipboardNoticeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const copyTextByViewRef = useRef<{ chat: string; worker: string }>({ chat: "", worker: "" });
   const messagesRef = useRef<Message[]>([...initialMessages]);
   const activeRunControllerRef = useRef<AbortController | null>(null);
   const activeTaskIdRef = useRef<string | null>(initialTaskId);
@@ -382,6 +391,7 @@ export function App({
   const openTaskSessionDetailWorkerRef = useRef<(mode: "logs" | "resume" | "fork") => Promise<void>>(
     openTaskSessionDetailWorker
   );
+  const copyVisibleViewRef = useRef<() => Promise<void>>(copyVisibleView);
   const workspaceReturnViewRef = useRef<"chat" | "worker" | "workers" | "sessions">("chat");
   const routerReturnViewRef = useRef<"chat" | "worker" | "workers" | "sessions">("chat");
   const workerOverviewReturnViewRef = useRef<"chat" | "worker">("chat");
@@ -616,6 +626,7 @@ export function App({
     openSelectedTaskSessionDetailsRef.current = openSelectedTaskSessionDetails;
     refreshTaskSessionDetailsRef.current = refreshTaskSessionDetails;
     openTaskSessionDetailWorkerRef.current = openTaskSessionDetailWorker;
+    copyVisibleViewRef.current = copyVisibleView;
   });
 
   useEffect(() => {
@@ -872,7 +883,7 @@ export function App({
 
   useEffect(() => {
     setRawMode(true);
-    process.stdout.write("\x1b[?2004h\x1b[?1000h\x1b[?1002h\x1b[?1006h");
+    process.stdout.write("\x1b[?2004h\x1b[?1000h\x1b[?1006h");
     const commitChatInputUpdate = (
       update: ReturnType<typeof applyChatInputChunk>,
       previousValue: string,
@@ -995,6 +1006,10 @@ export function App({
         return;
       }
       const currentView = viewRef.current;
+      if (currentView !== "workspace" && tokenizeRawInput(chunk).some((inputChunk) => isCopyShortcut(inputChunk, {}))) {
+        void copyVisibleViewRef.current();
+        return;
+      }
       if (currentView === "chat" && routeFallbackPromptRef.current) {
         const fallbackChunks = tokenizeRawInput(chunk);
         if (fallbackChunks.some((fallbackChunk) => isExitShortcut(fallbackChunk, {}))) {
@@ -1841,7 +1856,7 @@ export function App({
       stdinEvents.removeListener("input", handleRawInput);
       rawInputDecoderRef.current.end();
       chatPasteDecoderRef.current.reset();
-      process.stdout.write("\x1b[?1006l\x1b[?1002l\x1b[?1000l\x1b[?2004l");
+      process.stdout.write("\x1b[?1006l\x1b[?1000l\x1b[?2004l");
       setRawMode(false);
     };
   }, [outputHeight, setRawMode, stdinEvents]);
@@ -1857,6 +1872,10 @@ export function App({
       collaborationLoadSequenceRef.current += 1;
       routerLoadSequenceRef.current += 1;
       taskSessionsLoadSequenceRef.current += 1;
+      if (clipboardNoticeTimerRef.current) {
+        clearTimeout(clipboardNoticeTimerRef.current);
+        clipboardNoticeTimerRef.current = null;
+      }
     };
   }, []);
 
@@ -1875,6 +1894,98 @@ export function App({
     shutdownSignal.addEventListener("abort", shutdown, { once: true });
     return () => shutdownSignal.removeEventListener("abort", shutdown);
   }, [shutdownSignal]);
+
+  async function copyVisibleView(): Promise<void> {
+    const payload = visibleClipboardPayload(viewRef.current);
+    if (!payload?.text.trim()) {
+      setAttachError("No visible text to copy in this view");
+      return;
+    }
+    if (clipboardNoticeTimerRef.current) {
+      clearTimeout(clipboardNoticeTimerRef.current);
+      clipboardNoticeTimerRef.current = null;
+    }
+    setAttachError(null);
+    setClipboardNotice({ state: "copying", text: `copying visible ${payload.label}` });
+    try {
+      await copyToClipboard(payload.text);
+      setClipboardNotice({ state: "copied", text: `copied visible ${payload.label} · wheel still active` });
+      clipboardNoticeTimerRef.current = setTimeout(() => {
+        clipboardNoticeTimerRef.current = null;
+        setClipboardNotice(null);
+      }, 1800);
+    } catch (error) {
+      setClipboardNotice(null);
+      setAttachError(`Copy failed · ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  function visibleClipboardPayload(currentView: AppView | "workspace"): { label: string; text: string } | null {
+    if (currentView === "chat") {
+      return { label: "chat", text: copyTextByViewRef.current.chat };
+    }
+    if (currentView === "worker") {
+      return { label: "logs", text: copyTextByViewRef.current.worker };
+    }
+    if (currentView === "native") {
+      return { label: "native output", text: nativeAttachRef.current?.screen.snapshot() ?? "" };
+    }
+    if (currentView === "status") {
+      return {
+        label: "status",
+        text: [cwd, activeTaskIdRef.current, visibleTaskStatus, visibleRouteSummary]
+          .filter(Boolean)
+          .join("\n")
+      };
+    }
+    if (currentView === "workers") {
+      return {
+        label: "workers",
+        text: workersRef.current.map((worker) => [
+          worker.label,
+          worker.runtimeStatus?.state,
+          worker.runtimeStatus?.phase,
+          worker.runtimeStatus?.summary
+        ].filter(Boolean).join(" · ")).join("\n")
+      };
+    }
+    if (currentView === "features") {
+      return {
+        label: "features",
+        text: (collaborationTimelineRef.current?.features ?? []).map((feature) => [
+          feature.id,
+          feature.title,
+          feature.state
+        ].filter(Boolean).join(" · ")).join("\n")
+      };
+    }
+    if (currentView === "sessions") {
+      const details = taskSessionDetailsRef.current;
+      return {
+        label: "sessions",
+        text: details
+          ? details.workers.map((worker) => [worker.id, worker.role, worker.engine, worker.state].join(" · ")).join("\n")
+          : taskSessionsRef.current.map((task) => [task.id, task.title, task.status].join(" · ")).join("\n")
+      };
+    }
+    if (currentView === "router") {
+      return { label: "routes", text: routerRecords.map((record) => JSON.stringify(record)).join("\n") };
+    }
+    if (currentView === "collaboration") {
+      const timeline = collaborationTimelineRef.current;
+      return {
+        label: "timeline",
+        text: timeline
+          ? collaborationTimelineEvents(
+              timeline,
+              collaborationFeatureIndexRef.current,
+              collaborationUnresolvedOnlyRef.current
+            ).map((event) => JSON.stringify(event)).join("\n")
+          : ""
+      };
+    }
+    return null;
+  }
 
   useInput((inputKey, key) => {
     if (view === "worker") {
@@ -3035,6 +3146,7 @@ export function App({
           nativeClosed={view === "native" && nativeAttach?.closedCode !== null}
           searchMatchIndex={workerSearch.matchIndex}
           searchMatchCount={workerNavigationTargets.searchOffsets.length}
+          clipboardNotice={clipboardNotice}
           value={workerSearch.open && view === "worker"
             ? workerSearch.query
             : view === "native" || view === "router" || view === "workers" || view === "features" || view === "sessions" || view === "collaboration" || view === "status" ? "" : input}
@@ -3169,6 +3281,9 @@ export function App({
                 setChatScrollOffset(offset);
               }
             }}
+            onCopyTextChange={(text) => {
+              copyTextByViewRef.current.chat = text;
+            }}
           />
         ) : (
           <WorkerOutputView
@@ -3182,6 +3297,9 @@ export function App({
             height={Math.max(1, outputHeight - 1)}
             terminalWidth={terminalWidth}
             onNavigationChange={updateWorkerNavigationTargets}
+            onCopyTextChange={(text) => {
+              copyTextByViewRef.current.worker = text;
+            }}
             onViewportChange={({ offset }) => {
               if (offset !== workerScrollOffset) {
                 setWorkerScrollOffset(offset);
@@ -3208,7 +3326,8 @@ export function ChatView({
   viewportHeight,
   scrollOffset = 0,
   expandedTaskResult = false,
-  onViewportChange
+  onViewportChange,
+  onCopyTextChange
 }: {
   messages: Message[];
   cwd: string;
@@ -3218,6 +3337,7 @@ export function ChatView({
   scrollOffset?: number;
   expandedTaskResult?: boolean;
   onViewportChange?: (viewport: { offset: number; maxOffset: number }) => void;
+  onCopyTextChange?: (text: string) => void;
 }) {
   const height = viewportHeight ? Math.max(1, viewportHeight) : undefined;
   const viewport = useMemo(
@@ -3234,6 +3354,11 @@ export function ChatView({
       maxOffset: viewport.maxOffset
     });
   }, [onViewportChange, viewport.clampedOffset, viewport.maxOffset]);
+
+  const visibleCopyText = viewport.lines.map((line) => line.text).join("\n");
+  useEffect(() => {
+    onCopyTextChange?.(visibleCopyText);
+  }, [onCopyTextChange, visibleCopyText]);
 
   if (messages.length === 0) {
     const spacerLines = chatViewportSpacerLineCount(1, height);

@@ -43,7 +43,7 @@ describe("CLI help and version", () => {
     );
 
     expect(stderr).toBe("");
-    expect(stdout.trim()).toBe("parallel-codex-tui 0.1.5");
+    expect(stdout.trim()).toBe("parallel-codex-tui 0.1.6");
   });
 
   it("prints the built-in theme catalog and exits without starting the TUI", async () => {

@@ -169,10 +169,10 @@ describe("package metadata", () => {
 
     expect(readme).toContain("## Requirements");
     expect(readme).toContain("## Current Release");
-    expect(readme).toContain("v0.1.5` is available from [npm]");
-    expect(readme).toContain("completes the earlier stability, collaboration, session-management, Provider, TUI, and release roadmap");
+    expect(readme).toContain("v0.1.6` is available from [npm]");
+    expect(readme).toContain("keeps terminal scrolling and copying available at the same time");
     expect(readme).toContain("real three-Feature Tetris task");
-    expect(readme).toContain("1,233 tests across 118 files");
+    expect(readme).toContain("1,240 tests across 119 files");
     expect(readme).toContain("authenticate the Claude CLI");
     expect(readme).toContain("Node.js 24.15+");
     expect(readme).toContain("Codex CLI");

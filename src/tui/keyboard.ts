@@ -50,6 +50,10 @@ export function isWorkerSearchShortcut(input: string, key: KeyboardKey): boolean
   return (key.ctrl === true && input.toLowerCase() === "f") || input === "\u0006";
 }
 
+export function isCopyShortcut(input: string, key: KeyboardKey): boolean {
+  return (key.ctrl === true && input.toLowerCase() === "y") || input === "\u0019";
+}
+
 export function workerLogJumpKind(input: string): "error" | "diff" | null {
   if (input === "e" || input === "E") {
     return "error";

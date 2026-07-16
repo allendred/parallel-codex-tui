@@ -5,6 +5,27 @@ import { chatBusyDisplayValue, chatInputDisplayValue, chatPlaceholderDisplayValu
 import { displayWidth } from "../src/tui/display-width.js";
 
 describe("InputBar", () => {
+  it("shows copy confirmation without overflowing any terminal width", () => {
+    const invalid: string[] = [];
+    for (let width = 8; width <= 100; width += 1) {
+      const view = render(
+        <InputBar
+          mode="worker"
+          value=""
+          terminalWidth={width}
+          clipboardNotice={{ state: "copied", text: "copied visible logs · wheel still active" }}
+          onChange={() => {}}
+        />
+      );
+      const frame = view.lastFrame() ?? "";
+      if (frame.split("\n").length !== 1 || displayWidth(frame) > width) {
+        invalid.push(`${width}:${displayWidth(frame)}:${frame}`);
+      }
+      view.unmount();
+    }
+    expect(invalid).toEqual([]);
+  });
+
   it("keeps generated chat placeholders semantic across every supported width", () => {
     const states = [
       ["idle", {}],
