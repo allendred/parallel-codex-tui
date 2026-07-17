@@ -667,6 +667,10 @@ export function App({
         Boolean(attachError),
         config.ui.showStatusBar
       );
+      const dimensions = screen.dimensions();
+      if (dimensions.cols === cols && dimensions.rows === rows) {
+        return;
+      }
       screen.resize(cols, rows);
       nativeProcess.resize(cols, rows);
       setNativeAttach((current) =>

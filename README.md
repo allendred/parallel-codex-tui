@@ -6,7 +6,9 @@ Built with Codex-assisted development.
 
 ## Current Release
 
-`v0.1.7` is available from [npm](https://www.npmjs.com/package/parallel-codex-tui/v/0.1.7) and as a [GitHub Release](https://github.com/allendred/parallel-codex-tui/releases/tag/v0.1.7). It keeps terminal scrolling and copying available at the same time without requiring Shift: the outer TUI explicitly disables application mouse tracking, enters the alternate screen, and enables alternate scroll. Kitty and Zellij therefore keep ordinary left-drag selection while translating the wheel into cursor-scroll input for the active TUI view. `Ctrl+Y` remains an additional fallback that copies the visible chat, rendered Worker log, native Agent screen, or structured overview without changing terminal modes. Unicode text and Diff indentation are preserved.
+`v0.1.8` is available from [npm](https://www.npmjs.com/package/parallel-codex-tui/v/0.1.8) and as a [GitHub Release](https://github.com/allendred/parallel-codex-tui/releases/tag/v0.1.8). It preserves the embedded native Agent scrollback when status details are opened and closed by skipping no-op xterm resizes, while still resizing both the screen and PTY after a real terminal size change.
+
+The release retains the `v0.1.7` terminal behavior: it keeps terminal scrolling and copying available at the same time without requiring Shift. The outer TUI explicitly disables application mouse tracking, enters the alternate screen, and enables alternate scroll. Kitty and Zellij therefore keep ordinary left-drag selection while translating the wheel into cursor-scroll input for the active TUI view. `Ctrl+Y` remains an additional fallback that copies the visible chat, rendered Worker log, native Agent screen, or structured overview without changing terminal modes. Unicode text and Diff indentation are preserved.
 
 The release also includes the stability, collaboration, session-management, Provider, TUI, and release work completed in `v0.1.5`:
 
@@ -17,7 +19,7 @@ The release also includes the stability, collaboration, session-management, Prov
 - Worker overview, Feature board, collaboration timeline, status details, rendered Markdown/Diff/error logs, Unicode search, keyboard navigation, mouse scrolling, and configurable themes share one terminal UI system.
 - SQLite migrations and recovery backups, owned-process cleanup, ten-turn Worker-history recovery, packaged CLI installation, and cross-platform CI are covered by automated tests.
 
-Release acceptance included a real three-Feature Tetris task with parallel Actor/Critic waves, final integration review, 43 project tests, and a clean build. The repository suite passed 1,241 tests across 119 files, including PTY coverage for alternate-scroll delivery with every application mouse mode disabled. A local Zellij 0.44 probe confirmed that one wheel event becomes three cursor-up events while a left-button drag sends no mouse bytes to the app. The npm package was independently installed and returned `parallel-codex-tui 0.1.7`.
+Release acceptance includes a real three-Feature Tetris task with parallel Actor/Critic waves and final integration review. For `v0.1.8`, the persisted Tetris workspace was rechecked with 30 passing project tests, a passing browser smoke test, and a clean build. The repository suite passed 1,241 tests across 119 files, including PTY coverage for alternate-scroll delivery with every application mouse mode disabled and for preserving the native output tail across status-detail round trips. A local Zellij 0.44 probe confirmed that one wheel event becomes three cursor-up events while a left-button drag sends no mouse bytes to the app. The npm tarball was independently installed and returned `parallel-codex-tui 0.1.8`; its installed `node-pty` path also launched a child process successfully.
 
 Real Provider probes still depend on valid local CLI credentials. In particular, authenticate the Claude CLI before selecting a Claude-compatible Worker, then run `parallel-codex-tui --doctor --probe-agents` to prove fresh and resumed calls on that machine.
 
@@ -468,12 +470,12 @@ The release job installs npm `^11.5.1`, runs on Node `24.15.x`, publishes the pr
 To publish a release, update `package.json` and `src/version.ts` to the same version, then push a matching tag:
 
 ```bash
-VERSION=0.1.7
+VERSION=0.1.8
 git tag "v$VERSION"
 git push origin "v$VERSION"
 ```
 
-You can also run the Release workflow manually and enter the same tag value. The release tag must match `package.json`; for example, package version `0.1.7` requires tag `v0.1.7`. Published tags such as `v0.1.6` are immutable and must not be moved or reused.
+You can also run the Release workflow manually and enter the same tag value. The release tag must match `package.json`; for example, package version `0.1.8` requires tag `v0.1.8`. Published tags such as `v0.1.7` are immutable and must not be moved or reused.
 
 ## Publishing Hygiene
 

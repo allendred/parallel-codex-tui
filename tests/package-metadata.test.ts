@@ -169,7 +169,8 @@ describe("package metadata", () => {
 
     expect(readme).toContain("## Requirements");
     expect(readme).toContain("## Current Release");
-    expect(readme).toContain("v0.1.7` is available from [npm]");
+    expect(readme).toContain("v0.1.8` is available from [npm]");
+    expect(readme).toContain("preserves the embedded native Agent scrollback");
     expect(readme).toContain("keeps terminal scrolling and copying available at the same time");
     expect(readme).toContain("real three-Feature Tetris task");
     expect(readme).toContain("1,241 tests across 119 files");
@@ -487,7 +488,7 @@ describe("package metadata", () => {
     expect(readme).toContain('git tag "v$VERSION"');
     expect(readme).toContain('git push origin "v$VERSION"');
     expect(readme).toContain("The release tag must match `package.json`");
-    expect(readme).toContain("Published tags such as `v0.1.6` are immutable");
+    expect(readme).toContain("Published tags such as `v0.1.7` are immutable");
   });
 
   it("publishes the CLI bin as an executable file", async () => {
