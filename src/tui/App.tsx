@@ -42,7 +42,7 @@ import { TerminalOutput } from "./TerminalOutput.js";
 import { NativeTerminalScreen } from "./terminal-screen.js";
 import { WorkerOutputView, type WorkerOutputNavigationTargets } from "./WorkerOutputView.js";
 import { compactEndByDisplayWidth, displayWidth, wrapByDisplayWidth } from "./display-width.js";
-import { isAttachShortcut, isCopyShortcut, isDiagnosticsShortcut, isExitShortcut, isLogsShortcut, isNewTaskShortcut, isRouterDiagnosticsShortcut, isStatusDetailsShortcut, isTaskResultShortcut, isTaskSessionsShortcut, isWorkerOverviewShortcut, isWorkerSearchShortcut, isWorkspaceShortcut, mouseScrollDelta, rawHistoryDelta, rawPageScrollDelta, rawPlainArrowDelta, scrollDelta, workerLogJumpKind } from "./keyboard.js";
+import { isAttachShortcut, isCopyShortcut, isDiagnosticsShortcut, isExitShortcut, isLogsShortcut, isNewTaskShortcut, isRouterDiagnosticsShortcut, isStatusDetailsShortcut, isTaskResultShortcut, isTaskSessionsShortcut, isWorkerOverviewShortcut, isWorkerSearchShortcut, isWorkspaceShortcut, mouseScrollDelta, rawChatScrollArrowDelta, rawHistoryDelta, rawPageScrollDelta, rawPlainArrowDelta, scrollDelta, workerLogJumpKind } from "./keyboard.js";
 import { createRawInputDecoder, tokenizeRawInput } from "./raw-input-decoder.js";
 import { decodeHtmlEntities } from "./markdown-text.js";
 import { configureTuiTheme, TUI_THEME } from "./theme.js";
@@ -1743,7 +1743,7 @@ export function App({
           return;
         }
         const wheelDelta = mouseScrollDelta(chunk, 3);
-        const arrowScrollDelta = rawPlainArrowDelta(chunk);
+        const arrowScrollDelta = rawChatScrollArrowDelta(chunk);
         const pageDelta = rawPageScrollDelta(chunk, Math.max(1, outputHeight - 1));
         const historyDelta = wheelDelta + arrowScrollDelta + pageDelta;
         if (historyDelta !== 0 && chatMaxScrollOffsetRef.current > 0) {

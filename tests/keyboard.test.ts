@@ -216,6 +216,21 @@ describe("keyboard shortcuts", () => {
     expect(rawPlainArrowDelta?.("\x1b[1;5A\x1b[1;5B")).toBe(0);
   });
 
+  it("keeps a single plain arrow for draft history and arrow bursts for chat scrolling", () => {
+    const rawChatScrollArrowDelta = (
+      keyboardModule as typeof keyboardModule & {
+        rawChatScrollArrowDelta?: (input: string) => number;
+      }
+    ).rawChatScrollArrowDelta;
+
+    expect(rawChatScrollArrowDelta).toBeTypeOf("function");
+    expect(rawChatScrollArrowDelta?.("\x1b[A")).toBe(0);
+    expect(rawChatScrollArrowDelta?.("\x1b[B")).toBe(0);
+    expect(rawChatScrollArrowDelta?.("\x1b[A\x1b[A\x1b[A")).toBe(3);
+    expect(rawChatScrollArrowDelta?.("\x1bOB\x1bOB\x1bOB")).toBe(-3);
+    expect(rawChatScrollArrowDelta?.("\x1b[1;5A")).toBe(0);
+  });
+
   it("maps SGR mouse wheel sequences to scroll deltas", () => {
     expect(mouseScrollDelta("\x1b[<64;10;5M", 3)).toBe(3);
     expect(mouseScrollDelta("\x1b[<65;10;5M", 3)).toBe(-3);

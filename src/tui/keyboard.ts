@@ -105,6 +105,12 @@ export function rawPlainArrowDelta(input: string): number {
   return delta;
 }
 
+export function rawChatScrollArrowDelta(input: string): number {
+  const delta = rawPlainArrowDelta(input);
+  // Alternate-scroll wheels arrive as arrow bursts; one arrow remains a draft-history keypress.
+  return Math.abs(delta) > 1 ? delta : 0;
+}
+
 export function mouseScrollDelta(input: string, linesPerWheel = 3): number {
   let delta = 0;
 
