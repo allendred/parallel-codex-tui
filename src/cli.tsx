@@ -15,6 +15,7 @@ import { prepareAppRoot } from "./core/app-root.js";
 import { formatConfigErrorMessage } from "./core/config-errors.js";
 import { configPath, loadConfig, withUiThemeOverride, writeDefaultConfig } from "./core/config.js";
 import { pathExists } from "./core/file-store.js";
+import { exportDiagnostics } from "./core/diagnostics.js";
 import { readRouterAudit } from "./core/router-audit.js";
 import { loadTaskSessionDetails as loadPersistedTaskSessionDetails } from "./core/task-session-details.js";
 import { listWorkspaceChoices } from "./core/workspace.js";
@@ -68,6 +69,22 @@ async function main(): Promise<void> {
     });
     process.stdout.write(result.text);
     process.exitCode = result.ok ? 0 : 1;
+  } else if (cliArgs.diagnostics) {
+    const workspaceRoot = await selectWorkspaceForCli({
+      appRoot: cliArgs.appRoot,
+      cwd: process.cwd(),
+      explicitWorkspace: cliArgs.explicitWorkspace,
+      interactive: false
+    });
+    const runtime = await createRuntime(cliArgs.appRoot, workspaceRoot);
+    try {
+      const result = await exportDiagnostics(cliArgs.appRoot, runtime, {
+        destinationPath: cliArgs.diagnosticsPath
+      });
+      console.log(`Diagnostics exported: ${result.path}`);
+    } finally {
+      runtime.index.close();
+    }
   } else if (cliArgs.init) {
     if (await pathExists(localConfigPath)) {
       console.log(`Config already exists: ${localConfigPath}`);
@@ -137,6 +154,9 @@ async function main(): Promise<void> {
         }}
         exportTaskSession={async (taskId) => (
           await state.runtime.sessions.exportTask(taskId)
+        ).path}
+        exportDiagnostics={async () => (
+          await exportDiagnostics(cliArgs.appRoot, state.runtime)
         ).path}
         loadCollaborationTimeline={(taskId) => state.runtime.sessions.readCollaborationTimeline(taskId)}
         activateTaskSession={async (taskId) => {

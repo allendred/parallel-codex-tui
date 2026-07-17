@@ -54,6 +54,7 @@ export interface CreateFeatureChannelInput {
   judgeDir: string;
   feature?: FeatureDefinition;
   resume?: boolean;
+  refreshDefinition?: boolean;
   actorEngine?: EngineName;
   criticEngine?: EngineName;
 }
@@ -130,7 +131,7 @@ export async function createFeatureChannel(input: CreateFeatureChannelInput): Pr
   await ensureDir(dir);
   await ensureDir(join(input.task.dir, "dialogue"));
   if (input.resume) {
-    await ensureFeatureChannelFiles(input, channel);
+    await ensureFeatureChannelFiles(input, channel, input.refreshDefinition ?? false);
     const repairedState = await repairFeatureStatus(channel);
     if (repairedState) {
       await appendFeatureDialogue(
@@ -156,7 +157,11 @@ export async function createFeatureChannel(input: CreateFeatureChannelInput): Pr
   return channel;
 }
 
-async function ensureFeatureChannelFiles(input: CreateFeatureChannelInput, channel: FeatureChannel): Promise<void> {
+async function ensureFeatureChannelFiles(
+  input: CreateFeatureChannelInput,
+  channel: FeatureChannel,
+  refreshDefinition: boolean
+): Promise<void> {
   const files: Array<[string, string]> = [
     [channel.specPath, buildFeatureSpec(input, channel)],
     [channel.actorWorklogPath, ""],
@@ -164,7 +169,7 @@ async function ensureFeatureChannelFiles(input: CreateFeatureChannelInput, chann
     [channel.criticFindingsPath, ""]
   ];
   for (const [path, initialContent] of files) {
-    if (!(await pathExists(path))) {
+    if ((refreshDefinition && path === channel.specPath) || !(await pathExists(path))) {
       await writeText(path, initialContent);
     }
   }

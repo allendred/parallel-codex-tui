@@ -1,6 +1,6 @@
 {
   "name": "parallel-codex-tui",
-  "version": "0.1.8",
+  "version": "0.2.0",
   "description": "A TypeScript TUI wrapper for routed parallel coding with Codex and Claude workers.",
   "license": "MIT",
   "type": "module",
@@ -41,8 +41,14 @@
     "postbuild": "node -e \"require('node:fs').chmodSync('dist/cli.js', 0o755)\"",
     "prepack": "npm run build",
     "pretest": "node scripts/fix-node-pty-permissions.mjs",
+    "pretest:stability": "node scripts/fix-node-pty-permissions.mjs",
+    "pretest:terminal-hosts": "node scripts/fix-node-pty-permissions.mjs",
+    "pretest:real-agents": "node scripts/fix-node-pty-permissions.mjs",
     "verify:package": "node scripts/verify-package.mjs",
     "test": "vitest run",
+    "test:stability": "vitest run tests/cli-worker-history-smoke.test.ts tests/cli-workspace-switch-smoke.test.ts tests/cli-orphan-process-recovery-smoke.test.ts tests/cli-startup-recovery-smoke.test.ts",
+    "test:terminal-hosts": "vitest run tests/cli-terminal-host-compat-smoke.test.ts",
+    "test:real-agents": "PCT_REAL_AGENT_TESTS=1 vitest run tests/cli-real-multi-workspace.test.ts",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit -p tsconfig.typecheck.json",
     "lint": "tsc --noEmit -p tsconfig.typecheck.json"

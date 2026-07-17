@@ -6,6 +6,8 @@ dist/
 .parallel-codex/session-index.sqlite
 .parallel-codex/sessions/
 .parallel-codex/exports/
+.parallel-codex/diagnostics/
+.parallel-codex/probes/
 .parallel-codex/workspaces.json
 docs/superpowers/
 npm-debug.log*

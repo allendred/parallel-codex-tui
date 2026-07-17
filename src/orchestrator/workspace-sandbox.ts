@@ -116,8 +116,21 @@ interface IntegrationCommitIntent {
 export class WorkspaceMergeConflictError extends Error {
   readonly paths: string[];
   readonly conflictDir: string;
+  readonly wave?: number;
+  readonly featureId?: string;
+  readonly waveFeatureIds: string[];
+  readonly integratedFeatureIds: string[];
 
-  constructor(paths: string[], conflictDir: string) {
+  constructor(
+    paths: string[],
+    conflictDir: string,
+    context: {
+      wave?: number;
+      featureId?: string;
+      waveFeatureIds?: string[];
+      integratedFeatureIds?: string[];
+    } = {}
+  ) {
     const count = paths.length;
     super(
       `Workspace integration conflict in ${count} ${count === 1 ? "path" : "paths"}: ${paths.join(", ")}. `
@@ -126,6 +139,10 @@ export class WorkspaceMergeConflictError extends Error {
     this.name = "WorkspaceMergeConflictError";
     this.paths = paths;
     this.conflictDir = conflictDir;
+    this.wave = context.wave;
+    this.featureId = context.featureId;
+    this.waveFeatureIds = [...(context.waveFeatureIds ?? [])];
+    this.integratedFeatureIds = [...(context.integratedFeatureIds ?? [])];
   }
 }
 
@@ -301,7 +318,7 @@ export class ParallelWorkspaceManager {
     await rm(wave.verificationDir, { recursive: true, force: true });
     await cloneTree(wave.baselineDir, wave.stagingDir);
 
-    for (const featureId of wave.featureIds) {
+    for (const [featureIndex, featureId] of wave.featureIds.entries()) {
       const featureDir = wave.featureDirs.get(featureId);
       if (!featureDir) {
         throw new Error(`Feature workspace missing for ${featureId}`);
@@ -315,7 +332,12 @@ export class ParallelWorkspaceManager {
         (path) => this.excludeRelativePath(path)
       );
       if (plan.conflicts.length > 0) {
-        throw new WorkspaceMergeConflictError(plan.conflicts, featureConflictDir);
+        throw new WorkspaceMergeConflictError(plan.conflicts, featureConflictDir, {
+          wave: wave.wave,
+          featureId,
+          waveFeatureIds: wave.featureIds,
+          integratedFeatureIds: wave.featureIds.slice(0, featureIndex)
+        });
       }
       await applyMergePlan(wave.stagingDir, plan);
     }
@@ -335,6 +357,30 @@ export class ParallelWorkspaceManager {
       changed_paths: changedPaths
     });
     return { changedPaths };
+  }
+
+  async discardWavesFrom(turnId: string, firstWave: number): Promise<void> {
+    if (!/^\d{4,}$/.test(turnId)) {
+      throw new Error(`Unsafe workspace turn id: ${turnId}`);
+    }
+    if (!Number.isInteger(firstWave) || firstWave < 1) {
+      throw new Error(`Workspace wave must be a positive integer: ${firstWave}`);
+    }
+    const turnRoot = join(this.taskDir, "workspaces", `turn-${turnId}`);
+    if (!(await pathIsDirectory(turnRoot))) {
+      return;
+    }
+    for (const entry of await readdir(turnRoot, { withFileTypes: true })) {
+      if (!entry.isDirectory()) {
+        continue;
+      }
+      const match = entry.name.match(/^wave-(\d+)$/);
+      if (match && Number(match[1] ?? 0) >= firstWave) {
+        await rm(join(turnRoot, entry.name), { recursive: true, force: true });
+      }
+    }
+    await rm(join(turnRoot, "final-verification"), { recursive: true, force: true });
+    await rm(join(turnRoot, "final-verification.json"), { force: true });
   }
 
   async prepareVerificationWorkspace(wave: FeatureWorkspaceWave): Promise<string> {

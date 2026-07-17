@@ -8,7 +8,7 @@ const TASK_STATE_TRANSITIONS: Record<TaskState, ReadonlySet<TaskState>> = {
   actor_running: new Set(["critic_running", "verifying", "paused", "failed", "cancelled"]),
   critic_running: new Set(["revision_needed", "integrating", "paused", "failed", "cancelled"]),
   revision_needed: new Set(["actor_running", "paused", "failed", "cancelled"]),
-  integrating: new Set(["actor_running", "verifying", "paused", "done", "failed", "cancelled"]),
+  integrating: new Set(["judging", "actor_running", "verifying", "paused", "done", "failed", "cancelled"]),
   verifying: new Set(["revision_needed", "integrating", "paused", "done", "failed", "cancelled"]),
   paused: new Set(["routed", "judging", "ready_for_pair", "failed", "cancelled"]),
   done: new Set(["routed", "cancelled"]),

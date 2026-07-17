@@ -3,6 +3,6 @@ import { version } from "../src/version.js";
 
 describe("version", () => {
   it("exposes the package version used by the CLI", () => {
-    expect(version).toBe("0.1.8");
+    expect(version).toBe("0.2.0");
   });
 });

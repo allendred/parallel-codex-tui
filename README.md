@@ -6,22 +6,23 @@ Built with Codex-assisted development.
 
 ## Current Release
 
-`v0.1.8` is available from [npm](https://www.npmjs.com/package/parallel-codex-tui/v/0.1.8) and as a [GitHub Release](https://github.com/allendred/parallel-codex-tui/releases/tag/v0.1.8). It preserves the embedded native Agent scrollback when status details are opened and closed by skipping no-op xterm resizes, while still resizing both the screen and PTY after a real terminal size change.
+`v0.2.0` is available from [npm](https://www.npmjs.com/package/parallel-codex-tui/v/0.2.0) and as a [GitHub Release](https://github.com/allendred/parallel-codex-tui/releases/tag/v0.2.0). It adds automatic Judge-guided recovery for isolated Feature merge conflicts, a sanitized diagnostics bundle, longer restart soak coverage, and real multi-workspace Agent acceptance.
 
-The release retains the `v0.1.7` terminal behavior: it keeps terminal scrolling and copying available at the same time without requiring Shift. The outer TUI explicitly disables application mouse tracking, enters the alternate screen, and enables alternate scroll. Kitty and Zellij therefore keep ordinary left-drag selection while translating the wheel into cursor-scroll input for the active TUI view. `Ctrl+Y` remains an additional fallback that copies the visible chat, rendered Worker log, native Agent screen, or structured overview without changing terminal modes. Unicode text and Diff indentation are preserved.
+The release keeps terminal scrolling and copying available at the same time without requiring Shift. Ordinary left-drag selection remains owned by the terminal while alternate-scroll delivers the wheel to chat, Worker logs, and structured views. `Ctrl+Y` copies the visible view as a fallback. It preserves the embedded native Agent scrollback across status-detail round trips and real PTY resizes.
 
-The release also includes the stability, collaboration, session-management, Provider, TUI, and release work completed in `v0.1.5`:
+Highlights:
 
+- Judge produces validated requirements, acceptance criteria, and a dependency-aware Feature DAG. Actor/Critic pairs exchange checked JSONL findings and replies, followed by Wave Critic and final Judge acceptance.
+- A conflicting parallel wave is archived with its merge evidence and returned to the same Judge native session for a bounded DAG replan. The replacement plan must retain the same Feature IDs and serialize every conflicting pair; a deterministic serialized fallback is used when the Judge response is invalid.
+- Tasks retain every Turn, historical Worker log, native session binding, model snapshot, and collaboration artifact across follow-ups and restarts. A 20-turn soak verifies 80 ordered Workers before and after restart.
+- `--diagnostics` and `Ctrl+X` export bounded, redacted support evidence without prompts, role instructions, command arguments, source files, or environment-variable values.
 - Runtime preflight checks Codex, Claude, named third-party Providers, proxy reachability, workspace access, CLI capabilities, and native attach policy before work starts.
-- Judge produces validated requirements, acceptance criteria, and a dependency-aware Feature plan. Actor/Critic pairs exchange checked JSONL findings and replies across revision rounds, followed by Wave Critic and final Judge acceptance.
-- Tasks retain every Turn, Worker log, native session binding, model snapshot, and collaboration artifact across follow-ups and restarts. Sessions can be inspected, continued, forked, renamed, archived, exported, restored, or deleted from the TUI.
 - Named Worker Providers support Codex-compatible, Claude-compatible, OpenAI-compatible, Anthropic-compatible, and custom generic commands with independent role, model, environment, permission, resume, and interactive settings.
-- Worker overview, Feature board, collaboration timeline, status details, rendered Markdown/Diff/error logs, Unicode search, keyboard navigation, mouse scrolling, and configurable themes share one terminal UI system.
-- SQLite migrations and recovery backups, owned-process cleanup, ten-turn Worker-history recovery, packaged CLI installation, and cross-platform CI are covered by automated tests.
+- Worker overview, Feature board, collaboration timeline, Task center, status details, rendered Markdown/Diff/error logs, Unicode search, keyboard navigation, mouse scrolling, and configurable themes share one terminal UI system.
 
-Release acceptance includes a real three-Feature Tetris task with parallel Actor/Critic waves and final integration review. For `v0.1.8`, the persisted Tetris workspace was rechecked with 30 passing project tests, a passing browser smoke test, and a clean build. The repository suite passed 1,241 tests across 119 files, including PTY coverage for alternate-scroll delivery with every application mouse mode disabled and for preserving the native output tail across status-detail round trips. A local Zellij 0.44 probe confirmed that one wheel event becomes three cursor-up events while a left-button drag sends no mouse bytes to the app. The npm tarball was independently installed and returned `parallel-codex-tui 0.1.8`; its installed `node-pty` path also launched a child process successfully.
+Release acceptance includes a real three-Feature Tetris task with parallel Actor/Critic waves and final integration review. Real Codex and Claude probes both proved fresh and same-session resume calls, the semantic Router completed a live classification, and one TUI completed Main calls in two workspaces before restoring the first workspace without leaking chat state. PTY coverage runs in Apple Terminal, tmux, and Zellij profiles at narrow and wide sizes, including status/log equivalence and preserving the native output tail across status-detail round trips. The deterministic repository suite passed 1,256 tests across 122 files; one quota-consuming real-Agent test is skipped by default and passes through `npm run test:real-agents`.
 
-Real Provider probes still depend on valid local CLI credentials. In particular, authenticate the Claude CLI before selecting a Claude-compatible Worker, then run `parallel-codex-tui --doctor --probe-agents` to prove fresh and resumed calls on that machine.
+Real Provider probes depend on valid local CLI credentials. In particular, authenticate the Claude CLI before selecting a Claude-compatible Worker, then run `parallel-codex-tui --doctor --probe-agents` to prove fresh and resumed calls on that machine.
 
 ## Requirements
 
@@ -45,6 +46,8 @@ parallel-codex-tui --init
 parallel-codex-tui --doctor
 parallel-codex-tui --doctor --probe-agents
 parallel-codex-tui --doctor --probe-router
+parallel-codex-tui --diagnostics
+parallel-codex-tui --diagnostics ./support-bundle
 parallel-codex-tui --workspace /path/to/project
 parallel-codex-tui --theme aurora --workspace /path/to/project
 parallel-codex-tui --theme studio --workspace /path/to/project
@@ -85,10 +88,25 @@ parallel-codex-tui --help
 parallel-codex-tui --doctor
 parallel-codex-tui --doctor --probe-agents
 parallel-codex-tui --doctor --probe-router
+parallel-codex-tui --diagnostics
+parallel-codex-tui --diagnostics ./support-bundle
 parallel-codex-tui --version
 ```
 
 `--doctor` checks configured automated and interactive commands, `{env:NAME}` references, and the CLI help surfaces required for Codex exec/resume sandboxing and Claude print/resume permissions before workers start. Recognized standard CLI help that lacks a required option fails the check; an opaque wrapper keeps the compatible built-in profile's unverified warning, while an explicit `generic` capability contract is validated without guessing vendor-specific help. Doctor performs these checks for every named Worker Provider used by the active route, rejects an explicitly read-only Codex-compatible interactive sandbox when feature attach needs writable roots, and reminds you that native workspace trust remains an interactive decision. It reports proxy host/port reachability as a local-endpoint check, not as proof that the proxy upstream or model API is healthy. Add `--probe-agents` to make one minimal fresh request and, when configured, one same-session resume request through every active process Worker Provider. This explicit probe uses model quota, removes successful probe artifacts, preserves failed artifacts under `.parallel-codex/probes/`, and exits non-zero when a fresh or resumed request cannot be proven. Fresh sessions use the configured `freshSessionArgs`; Claude-compatible profiles default to a generated native `--session-id`, persisted only after the process emits output, so a silent failed launch cannot create a false resumable session. Add `--probe-router` to run one real classification through the configured Codex Router; the command exits non-zero when that live request falls back or fails. Doctor also reports the loaded TUI theme, core palette values, ANSI swatch previews, and color override values, including any temporary `--theme` override.
+
+## Diagnostics
+
+Export a support bundle without starting the TUI:
+
+```bash
+parallel-codex-tui --workspace /path/to/project --diagnostics
+parallel-codex-tui --workspace /path/to/project --diagnostics ./support-bundle
+```
+
+Without an explicit destination, the bundle is created under `.parallel-codex/diagnostics/<timestamp>/`. An explicit destination must not already exist. While the TUI is open, `Ctrl+X` creates the same bundle without interrupting chat, logs, Task center, or an active Worker; native attach keeps `Ctrl+X` available to the attached Agent.
+
+The bundle contains `manifest.json`, `report.md`, `report.json`, `doctor.txt`, `tasks.json`, `workers.json`, `router-audit.jsonl`, and bounded Worker log tails. It exports at most the latest 20 tasks, 200 Workers, 100 Router rows, and 200 lines or 64 KiB per Worker log. Workspace, app-root, and home paths are aliased; URL credentials and paths, authorization values, secret assignments, common token formats, and environment-variable values are redacted. Prompts, role instructions, command arguments, source files, and lifetime logs are excluded. Review the bundle before sharing it, because application output can still contain project-specific text that no automatic redactor can fully understand.
 
 ## Quick Start
 
@@ -128,11 +146,14 @@ Limit how many feature-level Actor or Critic agents may run at once:
 [orchestration]
 maxParallelFeatures = 3 # 1..8
 maxRevisionRounds = 3   # 1..10
+maxConflictReplans = 2  # 0..8
 ```
 
 Judge may plan up to eight dependency-aware features. The orchestrator keeps dependency order while running at most this many agents concurrently. When one worker fails, already-running peers are allowed to finish cleanly and queued features are not started.
 
 Actor and Critic reuse their native sessions across revision rounds. Blocking findings and Actor replies remain in the Feature JSONL mailbox; the task stops with an explicit error when `maxRevisionRounds` is exhausted.
+
+When isolated Features conflict during wave staging, `maxConflictReplans` controls how many times the same Judge native session may replace the remaining dependency DAG. Conflict evidence and every Judge response are archived under the turn workspace. Completed earlier waves remain integrated; only the conflicting and later waves are discarded and rerun. Old configs inherit the default value `2`, so no SQLite migration is required, but adding the field makes the policy explicit.
 
 Queued Feature workers remain `queued` until they acquire a concurrency slot. Their persisted state changes to `actor_running` or `critic_running` only after the Worker is registered as cancellable, then to `actor_done` or `critic_done` before that active registration is removed. As a result, only `actor_running` and `critic_running` expose Feature cancellation; queued and role-complete Features cannot present a cancel action that has no live process behind it.
 
@@ -208,7 +229,7 @@ The doctor output includes `preview:` and `semantic:` ANSI swatch rows so you ca
 - Every staged wave gets a combined Wave Critic run in a disposable verification copy. It checks the full Judge acceptance criteria, cross-feature behavior, tests, and builds. A missing `APPROVED`/`REVISION_REQUIRED` decision fails safely instead of being treated as approval.
 - When combined verification requests changes, a session-backed Wave Actor fixes the integration workspace and the same Wave Critic native session reviews it again. Only an explicit final `APPROVED` allows the wave to reach the live workspace.
 - Wave Actor/Critic prompts, logs, immutable `verification-review-01.md`/`02.md` rounds, native session ids, minimized additional-directory permissions, and `verification.json` audit evidence are stored with the task and remain available through worker logs and native attach.
-- Overlapping edits fail the task without partially changing the live workspace. The chat error names the conflicting paths and points to marker files under the wave's `conflicts/` directory; `Ctrl+R` retries in the same task and native worker sessions.
+- Overlapping edits never partially change the live workspace. The orchestrator archives the conflicting paths and merge evidence, returns to `judging`, and asks the same Judge native session to serialize the affected Feature DAG. The replanned run keeps integrated earlier waves and every historical Worker log. If the bounded replan budget is exhausted or the replacement plan is invalid, the task fails with the evidence path and remains retryable through `Ctrl+R`.
 - If the live workspace changes after a wave baseline is captured, staging or commit stops with the changed paths instead of silently absorbing an escaped worker edit or overwriting concurrent user work.
 - Feature workspaces persist with the task so native attach can reopen the exact worker cwd. Delete an old task session when its audit trail and attachable workspaces are no longer needed.
 - Complex follow-ups stay in the active task, append a numbered turn, restore the same Judge session to re-clarify the new direction, and save a turn-local Judge snapshot. A new multi-feature plan can start parallel workers immediately.
@@ -227,7 +248,7 @@ The doctor output includes `preview:` and `semantic:` ANSI swatch rows so you ca
 - Terminal completion is evidence-guarded. The latest `supervisor-summary.md`, feature `decisions.md`, and approved feature states are published before task status can become `done`; duplicate task and feature state writes are idempotent, every real task transition records its `from` and `to` state, and a complete `done` task cannot regress unless a new follow-up turn has first been created. Each committed task state change carries a unique transition marker in `meta.json`; same-process retries repair missing projections immediately, and startup repairs a missing event or SQLite projection from that marker before another transition can replace it. Startup also audits legacy `done` tasks that have an integrated latest-turn checkpoint: missing summaries or unfinished feature states are recovered to `cancelled`, then `Ctrl+R` rebuilds final evidence without rerunning completed workers. Legacy log-only `done` sessions without integration proof remain untouched.
 - Simple follow-up questions run through the persistent Main native session with the active task directory, original request, up to five recent turn summaries, valid worker statuses, and log tails as file-backed context. They hold the active task lease while committing the route, taking that context snapshot, and running Main, so the answer cannot race an in-progress complex turn. A failed or cancelled Main answer replaces the transient `running` state with its real terminal state and releases both task and Main leases, so the next question can proceed. They do not start another Judge, Actor, or Critic turn.
 - Worker prompts, logs, status, and outputs are written to disk.
-- The bottom status line shows the active task state and feature progress such as `wave 1/2 · actor 2/3`, `wave 1/2 · integration 0/1`, and `wave 1/2 · verification 0/1`. While classification is running, it follows the real subprocess through `starting`, `waiting output`, `diagnostics`, `receiving`, `parsing`, and `stopping`, keeps live elapsed/limit progress, identifies a non-default Router runner, and identifies the path as `direct` or `via <proxy-host:port>`. Before output arrives it shows the active first-output deadline and total ceiling; after activity begins it shows total elapsed progress and the idle watchdog. As soon as a fresh initial or follow-up route settles, chat temporarily inserts a themed route rail with `route · <mode> · <source>` followed by the indented Router reason before Main or parallel execution finishes, then replaces it with the final answer or error without adding noise to persisted chat history. Task retry restores its saved route without announcing it as a new Router decision. The status line then replaces the wait state with the final route source, duration, or fallback cause.
+- The bottom status line shows the active task state and feature progress such as `wave 1/2 · actor 2/3`, `wave 1/2 · integration 0/1`, and `wave 1/2 · verification 0/1`. Chat, Worker logs, status details, and native attach derive this summary from the same persisted runtime snapshot, so changing views does not rename or reorder task state. While classification is running, it follows the real subprocess through `starting`, `waiting output`, `diagnostics`, `receiving`, `parsing`, and `stopping`, keeps live elapsed/limit progress, identifies a non-default Router runner, and identifies the path as `direct` or `via <proxy-host:port>`. Before output arrives it shows the active first-output deadline and total ceiling; after activity begins it shows total elapsed progress and the idle watchdog. As soon as a fresh initial or follow-up route settles, chat temporarily inserts a themed route rail with `route · <mode> · <source>` followed by the indented Router reason before Main or parallel execution finishes, then replaces it with the final answer or error without adding noise to persisted chat history. Task retry restores its saved route without announcing it as a new Router decision. The status line then replaces the wait state with the final route source, duration, or fallback cause.
 - Completed complex tasks open as a structured result at the top of the chat viewport. Requirements, the complete bounded Actor worklog, authoritative integrated changed paths, Critic review, verification evidence, and findings render as themed full-width sections instead of losing everything after each section's first line. Changed files come from the workspace integration result rather than an Actor claim; verification keeps the Critic decision and reported test/build evidence. Multi-feature delivery uses the same result protocol and includes combined Wave verification. Long results start at the title and scroll toward findings; `Ctrl+D` toggles the focused result between full detail and its five-line compact summary, and beginning the next message collapses it automatically. Result lookup follows the persisted task id, so restoring one task cannot display another task's result. Empty state and ordinary short chat remain adjacent to the input.
 - Restarting an existing task restores the latest persisted route evidence in the bottom status line, including fallback cause and duration. Follow-up Router classification has no task-side effects: it records the attempt in shared `routes.jsonl`, then a complex turn or simple question refreshes `sessions/<task>/latest-route.json` only after acquiring the task lease. A conflicting TUI leaves the previous committed route and turn files untouched. A corrupt latest-route record safely falls back to the latest worker turn and then the task's initial route record.
 - Task session ids are single `task-...` path segments. CLI `--task` input, persisted metadata, startup scanning, and SQLite rebuilding reject path separators and ignore a task whose `meta.json` id differs from its directory, so restoring a session cannot escape or alias the workspace session root.
@@ -451,6 +472,31 @@ In chat or worker-log views, press `Ctrl+O` to attach to the selected worker's n
 
 If a native resume fails because the underlying CLI reports that its context window is full, configure `fallback = "new"` under `[workers.<engine>.nativeSession]`. The old native session is archived as `native-session.retired.json`, removed from active use, and the worker is retried once with the normal fresh-session command. A valid retirement tombstone is also a cross-turn inheritance barrier: a retry or later turn cannot resurrect the same session from an older worker copy, while a newer replacement session remains reusable. A `process-cleanup-error` or `process-ownership-error` always blocks native-session fallback, even when the CLI output also mentions a full context window, so a fresh Worker cannot overlap an untracked or still-running resume process.
 
+## Testing
+
+Run the deterministic release checks from a source checkout:
+
+```bash
+npm test
+npm run test:stability
+npm run test:terminal-hosts
+npm run typecheck
+npm run build
+npm run verify:package
+```
+
+`test:stability` covers 20 same-task turns, 80 historical Workers, restart recovery, workspace switching, orphan cleanup, and interrupted startup. `test:terminal-hosts` uses real PTYs and exercises Apple Terminal, tmux, and Zellij profiles when those hosts are installed; unsupported hosts are reported as skipped.
+
+Real Agent acceptance is deliberately opt-in because it uses model quota and local credentials:
+
+```bash
+HTTP_PROXY=http://127.0.0.1:7890 \
+HTTPS_PROXY=http://127.0.0.1:7890 \
+npm run test:real-agents
+```
+
+The test performs real Main calls in two temporary workspaces through one running TUI, switches back, and verifies that each persisted `chat.jsonl` contains only its own response. Configure the corresponding Worker environment in local `config.toml` when the CLI does not inherit process proxy variables.
+
 ## Release
 
 GitHub Actions runs CI on Ubuntu with Node.js 24.15 and 26, plus macOS with Node.js 24.15, for pushes and pull requests to `main`. Every job also packs the release artifact, installs that tarball into a clean global prefix, and executes the installed `--version` and `--help` entrypoints.
@@ -470,12 +516,12 @@ The release job installs npm `^11.5.1`, runs on Node `24.15.x`, publishes the pr
 To publish a release, update `package.json` and `src/version.ts` to the same version, then push a matching tag:
 
 ```bash
-VERSION=0.1.8
+VERSION=0.2.0
 git tag "v$VERSION"
 git push origin "v$VERSION"
 ```
 
-You can also run the Release workflow manually and enter the same tag value. The release tag must match `package.json`; for example, package version `0.1.8` requires tag `v0.1.8`. Published tags such as `v0.1.7` are immutable and must not be moved or reused.
+You can also run the Release workflow manually and enter the same tag value. The release tag must match `package.json`; for example, package version `0.2.0` requires tag `v0.2.0`. Published tags such as `v0.1.8` are immutable and must not be moved or reused.
 
 ## Publishing Hygiene
 
@@ -483,4 +529,6 @@ You can also run the Release workflow manually and enter the same tag value. The
 - `.parallel-codex/last-workspace` and `.parallel-codex/workspaces.json` are local workspace-selection state and are ignored.
 - `.parallel-codex/router/` contains local request classification audit records and is ignored.
 - `.parallel-codex/sessions/` contains the workspace chat transcript, task prompts, logs, native session ids, isolated feature workspaces, and conflict evidence; never commit it.
+- `.parallel-codex/diagnostics/` contains redacted support bundles and is ignored; review a bundle before sharing it.
+- `.parallel-codex/probes/` contains failed live Agent probe evidence and is ignored.
 - `docs/superpowers/` contains internal planning notes and is ignored for public releases.

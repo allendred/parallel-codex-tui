@@ -23,6 +23,7 @@ describe("CLI help and version", () => {
     expect(stdout).toContain("combine with --theme to filter");
     expect(stdout).toContain("--init");
     expect(stdout).toContain("--doctor");
+    expect(stdout).toContain("--diagnostics [dir]");
     expect(stdout).toContain("--probe-agents");
     expect(stdout).toContain("fresh + resume probes");
     expect(stdout).toContain("--probe-router");
@@ -43,7 +44,7 @@ describe("CLI help and version", () => {
     );
 
     expect(stderr).toBe("");
-    expect(stdout.trim()).toBe("parallel-codex-tui 0.1.8");
+    expect(stdout.trim()).toBe("parallel-codex-tui 0.2.0");
   });
 
   it("prints the built-in theme catalog and exits without starting the TUI", async () => {

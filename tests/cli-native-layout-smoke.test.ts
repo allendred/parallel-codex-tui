@@ -100,6 +100,7 @@ describe("CLI native layout smoke", () => {
       expect(statusSnapshot).toContain("session · native-layout");
       child.write("\x13");
       await waitForScreenText(() => screenWrites, screen, "native actor/mock");
+      await waitForScreenText(() => screenWrites, screen, "native line 40");
       expect(screen.snapshot()).toContain("native line 40");
     } finally {
       child.write("\x1d");

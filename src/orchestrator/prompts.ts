@@ -11,6 +11,15 @@ export interface JudgePromptInput {
   workspaceDir?: string;
   turn?: PromptTurnContext;
   role?: RolePromptConfig;
+  replan?: JudgeReplanContext;
+}
+
+export interface JudgeReplanContext {
+  round: number;
+  reportPath: string;
+  conflictPaths: string[];
+  waveFeatureIds: string[];
+  previousFeatureIds: string[];
 }
 
 export interface RolePromptInput {
@@ -135,6 +144,20 @@ export function buildJudgePrompt(input: JudgePromptInput): string {
     "Use safe lowercase ids made from letters, numbers, and hyphens.",
     "List dependencies in \"depends_on\"; independent features can run in parallel.",
     "Example: {\"version\":1,\"features\":[{\"id\":\"ui\",\"title\":\"UI\",\"description\":\"Build the interface\",\"depends_on\":[]}]}",
+    ...(input.replan ? [
+      "",
+      `# Conflict replan ${input.replan.round}`,
+      "",
+      `Conflict report: ${input.replan.reportPath}`,
+      `Conflicting paths: ${input.replan.conflictPaths.join(", ")}`,
+      `Features from the conflicting wave: ${input.replan.waveFeatureIds.join(", ")}`,
+      "The previous parallel DAG produced an isolated merge conflict; the live workspace was not changed by that wave.",
+      "Read the conflict report and rewrite the Judge artifacts for a safe retry.",
+      `Preserve exactly these feature ids: ${input.replan.previousFeatureIds.join(", ")}.`,
+      "Do not add, remove, or rename Features during this replan.",
+      "Use depends_on to serialize the Features from the conflicting wave so they no longer execute together.",
+      "Keep unrelated safe Features parallel when their dependencies allow it."
+    ] : []),
     "",
     "User request:",
     input.request,

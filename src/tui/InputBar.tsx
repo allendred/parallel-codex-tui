@@ -716,7 +716,8 @@ function workerInputHints(width: number): { label: string; detail: string } {
 
 function statusDetailInputHints(width: number): { label: string; detail: string } {
   return selectInputHints(width, [
-    { label: "status", detail: " · ^S/Esc back · ^C exit" },
+    { label: "status", detail: " · ^X diagnostics · ^S/Esc back · ^C exit" },
+    { label: "status", detail: " · ^X diag · ^S/Esc back · ^C exit" },
     { label: "status", detail: " · ^S back · ^C exit" },
     { label: "status", detail: " · ^S back" },
     { label: "status", detail: "" },

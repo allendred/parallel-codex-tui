@@ -1551,7 +1551,7 @@ describe("InputBar", () => {
       <InputBar mode="status" value="" terminalWidth={12} onChange={() => {}} />
     );
 
-    expect(roomy.lastFrame()).toContain("status · ^S/Esc back · ^C exit");
+    expect(roomy.lastFrame()).toContain("status · ^X diagnostics · ^S/Esc back · ^C exit");
     expect(narrow.lastFrame()).toContain("status");
     expect(displayWidth(narrow.lastFrame() ?? "")).toBeLessThanOrEqual(12);
     roomy.unmount();

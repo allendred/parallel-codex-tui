@@ -50,6 +50,7 @@ describe("config", () => {
     expect(config.pairing.critic).toBe("codex");
     expect(config.orchestration.maxParallelFeatures).toBe(3);
     expect(config.orchestration.maxRevisionRounds).toBe(3);
+    expect(config.orchestration.maxConflictReplans).toBe(2);
     expect(config.roles.actor.title).toBe("Actor");
     expect(config.roles.critic.instructions.join("\n")).toContain("blocking findings");
     expect(config.ui.theme).toBe("codex");
@@ -106,12 +107,13 @@ describe("config", () => {
     const root = await mkdtemp(join(tmpdir(), "pct-config-parallel-limit-"));
     await writeText(
       join(root, ".parallel-codex", "config.toml"),
-      ["[orchestration]", "maxParallelFeatures = 2", "maxRevisionRounds = 4"].join("\n")
+      ["[orchestration]", "maxParallelFeatures = 2", "maxRevisionRounds = 4", "maxConflictReplans = 5"].join("\n")
     );
 
     const config = await loadConfig(root);
     expect(config.orchestration.maxParallelFeatures).toBe(2);
     expect(config.orchestration.maxRevisionRounds).toBe(4);
+    expect(config.orchestration.maxConflictReplans).toBe(5);
 
     await writeText(
       join(root, ".parallel-codex", "config.toml"),

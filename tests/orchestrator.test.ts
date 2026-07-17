@@ -813,6 +813,7 @@ describe("Orchestrator", () => {
     const root = await mkdtemp(join(tmpdir(), "pct-orch-parallel-conflict-"));
     await writeText(join(root, "src", "shared.ts"), "export const owner = 'base';\n");
     const config = mockConfig(root);
+    config.orchestration.maxConflictReplans = 0;
     const manager = new SessionManager({
       projectRoot: root,
       dataDir: config.dataDir,
@@ -848,6 +849,69 @@ describe("Orchestrator", () => {
     expect(conflict).toContain("<<<<<<< current");
     expect(conflict).toContain("owner = 'ui'");
     expect(conflict).toContain("owner = 'engine'");
+  });
+
+  it("asks Judge to serialize a conflicting Feature wave and resumes from clean workspaces", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pct-orch-parallel-replan-"));
+    await writeText(join(root, "src", "shared.ts"), "export const owner = 'base';\n");
+    const config = mockConfig(root);
+    const manager = new SessionManager({
+      projectRoot: root,
+      dataDir: config.dataDir,
+      now: () => new Date("2026-06-30T03:30:16.000Z"),
+      randomId: () => "replan"
+    });
+    const adapter = new ConflictingFeatureAdapter();
+    const orchestrator = new Orchestrator(config, manager, new Map([["mock", adapter]]));
+
+    const result = await orchestrator.handleRequest({
+      request: "并行实现两个会修改共享配置的功能",
+      cwd: root
+    });
+
+    const taskDir = join(root, ".parallel-codex", "sessions", "task-20260630-033016-replan");
+    expect(result.mode).toBe("complex");
+    expect((await readJson(join(taskDir, "meta.json"), TaskMetaSchema)).status).toBe("done");
+    expect(adapter.replanPrompts).toBe(1);
+    expect(await readTextIfExists(join(root, "src", "shared.ts"))).toBe(
+      "export const owners = ['ui', 'engine'];\n"
+    );
+    expect(JSON.parse(await readTextIfExists(join(taskDir, "turns", "0001", "feature-plan.json"))))
+      .toMatchObject({
+        features: [
+          { id: "ui", depends_on: [] },
+          { id: "engine", depends_on: ["ui"] }
+        ]
+      });
+    const report = JSON.parse(await readTextIfExists(join(
+      taskDir,
+      "turns",
+      "0001",
+      "feature-replan-01.json"
+    )));
+    expect(report).toMatchObject({
+      state: "applied",
+      source: "judge",
+      conflict_paths: ["src/shared.ts"],
+      definition_ids: ["ui", "engine"]
+    });
+    const archivedConflict = await readTextIfExists(join(
+      taskDir,
+      "turns",
+      "0001",
+      "conflicts",
+      "replan-01",
+      "src",
+      "shared.ts"
+    ));
+    expect(archivedConflict).toContain("<<<<<<< current");
+    expect(archivedConflict).toContain("owner = 'ui'");
+    expect(archivedConflict).toContain("owner = 'engine'");
+    expect(await readTextIfExists(join(taskDir, "events.jsonl"))).toContain("feature.conflict_replan_applied");
+    expect(JSON.parse(await readTextIfExists(join(taskDir, "features", "0001-ui", "status.json"))))
+      .toMatchObject({ state: "approved", depends_on: [] });
+    expect(JSON.parse(await readTextIfExists(join(taskDir, "features", "0001-engine", "status.json"))))
+      .toMatchObject({ state: "approved", depends_on: ["ui"] });
   });
 
   it("stops scheduling queued feature workers after a parallel failure", async () => {
@@ -4379,21 +4443,38 @@ class MissingWaveDecisionAdapter extends CombinedVerificationAdapter {
 }
 
 class ConflictingFeatureAdapter extends MockWorkerAdapter {
+  replanPrompts = 0;
+
   async run(spec: WorkerRunSpec): Promise<WorkerResult> {
     if (spec.role === "judge") {
       const result = await super.run(spec);
+      const replanning = spec.prompt.includes("# Conflict replan");
+      if (replanning) {
+        this.replanPrompts += 1;
+      }
       await writeJson(join(spec.filesDir, "features.json"), {
         version: 1,
         features: [
           { id: "ui", title: "UI", description: "Update shared ownership for UI", depends_on: [] },
-          { id: "engine", title: "Engine", description: "Update shared ownership for engine", depends_on: [] }
+          {
+            id: "engine",
+            title: "Engine",
+            description: "Update shared ownership for engine",
+            depends_on: replanning ? ["ui"] : []
+          }
         ]
       });
       return result;
     }
     if (spec.role === "actor") {
       const owner = spec.featureId === "0001-ui" ? "ui" : "engine";
-      await writeText(join(spec.cwd, "src", "shared.ts"), `export const owner = '${owner}';\n`);
+      const current = await readTextIfExists(join(spec.cwd, "src", "shared.ts"));
+      await writeText(
+        join(spec.cwd, "src", "shared.ts"),
+        owner === "engine" && current.includes("owner = 'ui'")
+          ? "export const owners = ['ui', 'engine'];\n"
+          : `export const owner = '${owner}';\n`
+      );
     }
     return super.run(spec);
   }

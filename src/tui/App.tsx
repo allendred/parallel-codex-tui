@@ -42,7 +42,7 @@ import { TerminalOutput } from "./TerminalOutput.js";
 import { NativeTerminalScreen } from "./terminal-screen.js";
 import { WorkerOutputView, type WorkerOutputNavigationTargets } from "./WorkerOutputView.js";
 import { compactEndByDisplayWidth, displayWidth, wrapByDisplayWidth } from "./display-width.js";
-import { isAttachShortcut, isCopyShortcut, isExitShortcut, isLogsShortcut, isNewTaskShortcut, isRouterDiagnosticsShortcut, isStatusDetailsShortcut, isTaskResultShortcut, isTaskSessionsShortcut, isWorkerOverviewShortcut, isWorkerSearchShortcut, isWorkspaceShortcut, mouseScrollDelta, rawHistoryDelta, rawPageScrollDelta, rawPlainArrowDelta, scrollDelta, workerLogJumpKind } from "./keyboard.js";
+import { isAttachShortcut, isCopyShortcut, isDiagnosticsShortcut, isExitShortcut, isLogsShortcut, isNewTaskShortcut, isRouterDiagnosticsShortcut, isStatusDetailsShortcut, isTaskResultShortcut, isTaskSessionsShortcut, isWorkerOverviewShortcut, isWorkerSearchShortcut, isWorkspaceShortcut, mouseScrollDelta, rawHistoryDelta, rawPageScrollDelta, rawPlainArrowDelta, scrollDelta, workerLogJumpKind } from "./keyboard.js";
 import { createRawInputDecoder, tokenizeRawInput } from "./raw-input-decoder.js";
 import { decodeHtmlEntities } from "./markdown-text.js";
 import { configureTuiTheme, TUI_THEME } from "./theme.js";
@@ -113,6 +113,7 @@ export interface AppProps {
   setTaskSessionArchived?: (taskId: string, archived: boolean) => Promise<void>;
   deleteTaskSession?: (taskId: string) => Promise<void>;
   exportTaskSession?: (taskId: string) => Promise<string>;
+  exportDiagnostics?: () => Promise<string>;
   loadCollaborationTimeline?: (taskId: string) => Promise<CollaborationTimeline>;
   activateTaskSession?: (taskId: string | null) => Promise<ActivatedTaskSession | null>;
   prepareNativeAttach?: (worker: WorkerLogRef) => Promise<NativeAttachLaunch>;
@@ -225,6 +226,7 @@ export function App({
   setTaskSessionArchived,
   deleteTaskSession,
   exportTaskSession,
+  exportDiagnostics,
   loadCollaborationTimeline,
   activateTaskSession,
   prepareNativeAttach,
@@ -322,6 +324,7 @@ export function App({
   const nativeAttachRef = useRef(nativeAttach);
   const nativeAttachRequestSequenceRef = useRef(0);
   const clipboardNoticeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const diagnosticsExportingRef = useRef(false);
   const copyTextByViewRef = useRef<{ chat: string; worker: string }>({ chat: "", worker: "" });
   const messagesRef = useRef<Message[]>([...initialMessages]);
   const activeRunControllerRef = useRef<AbortController | null>(null);
@@ -392,6 +395,7 @@ export function App({
     openTaskSessionDetailWorker
   );
   const copyVisibleViewRef = useRef<() => Promise<void>>(copyVisibleView);
+  const exportDiagnosticsRef = useRef<() => Promise<void>>(exportDiagnosticsBundle);
   const workspaceReturnViewRef = useRef<"chat" | "worker" | "workers" | "sessions">("chat");
   const routerReturnViewRef = useRef<"chat" | "worker" | "workers" | "sessions">("chat");
   const workerOverviewReturnViewRef = useRef<"chat" | "worker">("chat");
@@ -627,6 +631,7 @@ export function App({
     refreshTaskSessionDetailsRef.current = refreshTaskSessionDetails;
     openTaskSessionDetailWorkerRef.current = openTaskSessionDetailWorker;
     copyVisibleViewRef.current = copyVisibleView;
+    exportDiagnosticsRef.current = exportDiagnosticsBundle;
   });
 
   useEffect(() => {
@@ -1012,6 +1017,14 @@ export function App({
       const currentView = viewRef.current;
       if (currentView !== "workspace" && tokenizeRawInput(chunk).some((inputChunk) => isCopyShortcut(inputChunk, {}))) {
         void copyVisibleViewRef.current();
+        return;
+      }
+      if (
+        currentView !== "workspace"
+        && currentView !== "native"
+        && tokenizeRawInput(chunk).some((inputChunk) => isDiagnosticsShortcut(inputChunk, {}))
+      ) {
+        void exportDiagnosticsRef.current();
         return;
       }
       if (currentView === "chat" && routeFallbackPromptRef.current) {
@@ -1924,6 +1937,45 @@ export function App({
     } catch (error) {
       setClipboardNotice(null);
       setAttachError(`Copy failed · ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  async function exportDiagnosticsBundle(): Promise<void> {
+    if (diagnosticsExportingRef.current) {
+      return;
+    }
+    if (!exportDiagnostics) {
+      setAttachError("Diagnostics export is unavailable");
+      return;
+    }
+    diagnosticsExportingRef.current = true;
+    if (clipboardNoticeTimerRef.current) {
+      clearTimeout(clipboardNoticeTimerRef.current);
+      clipboardNoticeTimerRef.current = null;
+    }
+    setAttachError(null);
+    setClipboardNotice({ state: "copying", text: "exporting sanitized diagnostics" });
+    try {
+      const path = await exportDiagnostics();
+      if (!mountedRef.current) {
+        return;
+      }
+      setClipboardNotice({ state: "copied", text: `diagnostics exported · ${path}` });
+      clipboardNoticeTimerRef.current = setTimeout(() => {
+        if (!mountedRef.current) {
+          return;
+        }
+        clipboardNoticeTimerRef.current = null;
+        setClipboardNotice(null);
+      }, 2600);
+    } catch (error) {
+      if (!mountedRef.current) {
+        return;
+      }
+      setClipboardNotice(null);
+      setAttachError(`Diagnostics export failed · ${error instanceof Error ? error.message : String(error)}`);
+    } finally {
+      diagnosticsExportingRef.current = false;
     }
   }
 

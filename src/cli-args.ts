@@ -5,6 +5,8 @@ import { TaskIdSchema } from "./domain/schemas.js";
 
 export interface CliArgs {
   appRoot: string;
+  diagnostics: boolean;
+  diagnosticsPath: string | null;
   doctor: boolean;
   explicitWorkspace: string | null;
   help: boolean;
@@ -18,7 +20,7 @@ export interface CliArgs {
   version: boolean;
 }
 
-const allowedValueOptions = new Set(["--app-root", "--workspace", "-w", "--task", "-t", "--theme"]);
+const allowedValueOptions = new Set(["--app-root", "--workspace", "-w", "--task", "-t", "--theme", "--diagnostics"]);
 const allowedBooleanOptions = new Set(["--doctor", "--help", "-h", "--init", "--probe-agents", "--probe-router", "--themes", "--version", "-v"]);
 
 export function parseCliArgs(args: string[], cwd: string): CliArgs {
@@ -36,6 +38,11 @@ export function parseCliArgs(args: string[], cwd: string): CliArgs {
     optionArgs,
     (arg) => arg === "--theme" || arg.startsWith("--theme=")
   );
+  const diagnosticsFlagIndex = lastFlagIndex(
+    optionArgs,
+    (arg) => arg === "--diagnostics" || arg.startsWith("--diagnostics=")
+  );
+  const diagnostics = diagnosticsFlagIndex >= 0;
   const doctor = optionArgs.includes("--doctor");
   const help = optionArgs.includes("--help") || optionArgs.includes("-h");
   const init = optionArgs.includes("--init");
@@ -49,9 +56,13 @@ export function parseCliArgs(args: string[], cwd: string): CliArgs {
   const workspaceRoot = explicitWorkspace ? resolvePathArg(cwd, explicitWorkspace) : cwd;
   const taskId = flagValue(optionArgs, taskFlagIndex);
   const theme = cliThemeValue(flagValue(optionArgs, themeFlagIndex));
+  const diagnosticsValue = flagValue(optionArgs, diagnosticsFlagIndex);
+  const diagnosticsPath = diagnosticsValue ? resolvePathArg(cwd, diagnosticsValue) : null;
 
   return {
     appRoot,
+    diagnostics,
+    diagnosticsPath,
     doctor,
     explicitWorkspace,
     help,

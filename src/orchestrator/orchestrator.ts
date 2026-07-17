@@ -1,4 +1,4 @@
-import { readdir } from "node:fs/promises";
+import { cp, readdir } from "node:fs/promises";
 import { join } from "node:path";
 import type { AppConfig } from "../core/config.js";
 import { appendJsonLine, ensureDir, pathExists, readJson, readTextIfExists, removeIfExists, writeJson, writeText } from "../core/file-store.js";
@@ -41,7 +41,8 @@ import {
   buildJudgePrompt,
   buildMainPrompt,
   buildWaveActorPrompt,
-  buildWaveCriticPrompt
+  buildWaveCriticPrompt,
+  type JudgeReplanContext
 } from "./prompts.js";
 import { validateFinalJudgeAcceptance } from "./final-acceptance.js";
 import { featureExecutionWaves, parseFeaturePlan, type FeatureDefinition, type FeaturePlan } from "./feature-plan.js";
@@ -53,7 +54,7 @@ import {
   type JudgeValidationReport
 } from "./judge-artifacts.js";
 import { buildSupervisorSummary } from "./supervisor-summary.js";
-import { ParallelWorkspaceManager } from "./workspace-sandbox.js";
+import { ParallelWorkspaceManager, WorkspaceMergeConflictError } from "./workspace-sandbox.js";
 
 const PREVIOUS_TURN_SUMMARY_LIMIT = 5;
 const PREVIOUS_TURN_SUMMARY_LENGTH = 600;
@@ -709,7 +710,16 @@ export class Orchestrator {
           criticEngine: route.critic_engine,
           resume: input.retry
         })));
-        return await this.runFeaturePlan(input, task, route, turn, workers, judge, featurePlan, features);
+        return await this.runFeaturePlanWithConflictReplan(
+          input,
+          task,
+          route,
+          turn,
+          workers,
+          judge,
+          featurePlan,
+          features
+        );
       }
 
       const feature = await createFeatureChannel({
@@ -762,7 +772,16 @@ export class Orchestrator {
           criticEngine: route.critic_engine,
           resume: input.retry
         })));
-        return await this.runFeaturePlan(input, task, route, turn, workers, judge, featurePlan, features);
+        return await this.runFeaturePlanWithConflictReplan(
+          input,
+          task,
+          route,
+          turn,
+          workers,
+          judge,
+          featurePlan,
+          features
+        );
       }
 
       const feature = await createFeatureChannel({
@@ -853,6 +872,188 @@ export class Orchestrator {
       return plan;
     } catch (error) {
       throw new Error(`Invalid feature plan at ${sourcePath}: ${errorMessage(error)}`);
+    }
+  }
+
+  private async runFeaturePlanWithConflictReplan(
+    input: HandleRequestInput,
+    task: TaskSession,
+    route: RouteDecision,
+    turn: TaskTurn,
+    workers: WorkerLogRef[],
+    judge: WorkerFiles,
+    plan: FeaturePlan,
+    features: FeatureChannel[]
+  ): Promise<HandleRequestResult> {
+    let currentInput = input;
+    let currentJudge = judge;
+    let currentPlan = plan;
+    let currentFeatures = features;
+    let replanRound = 0;
+    const workspaceManager = new ParallelWorkspaceManager({
+      workspaceRoot: input.cwd,
+      taskDir: task.dir,
+      dataDir: this.config.dataDir
+    });
+
+    while (true) {
+      try {
+        return await this.runFeaturePlan(
+          currentInput,
+          task,
+          route,
+          turn,
+          workers,
+          currentJudge,
+          currentPlan,
+          currentFeatures
+        );
+      } catch (error) {
+        if (!(error instanceof WorkspaceMergeConflictError)
+          || error.wave === undefined
+          || !error.featureId
+          || error.waveFeatureIds.length < 2) {
+          throw error;
+        }
+        if (replanRound >= this.config.orchestration.maxConflictReplans) {
+          throw new Error(
+            `${error.message} Automatic Judge replan limit exhausted after ${replanRound} `
+            + `${replanRound === 1 ? "round" : "rounds"}.`,
+            { cause: error }
+          );
+        }
+
+        replanRound += 1;
+        const definitionIds = conflictDefinitionIds(currentPlan, currentFeatures, error.waveFeatureIds);
+        if (definitionIds.length < 2) {
+          throw error;
+        }
+        const reportPath = join(
+          turn.dir,
+          `feature-replan-${String(replanRound).padStart(2, "0")}.json`
+        );
+        const conflictArchiveDir = join(
+          turn.dir,
+          "conflicts",
+          `replan-${String(replanRound).padStart(2, "0")}`
+        );
+        await ensureDir(join(turn.dir, "conflicts"));
+        await cp(error.conflictDir, conflictArchiveDir, { recursive: true, force: true });
+        const requestedAt = new Date().toISOString();
+        const report = {
+          version: 1,
+          state: "requested",
+          round: replanRound,
+          requested_at: requestedAt,
+          reason: "workspace-merge-conflict",
+          wave: error.wave,
+          conflict_paths: error.paths,
+          conflict_evidence: conflictArchiveDir,
+          conflicting_feature_id: error.featureId,
+          wave_feature_ids: error.waveFeatureIds,
+          definition_ids: definitionIds,
+          previous_plan: currentPlan
+        } as const;
+        await writeJson(reportPath, report);
+        await this.sessions.appendEvent(
+          task,
+          "feature.conflict_replan_requested",
+          `Judge replan ${replanRound}/${this.config.orchestration.maxConflictReplans} requested for wave ${error.wave}: ${definitionIds.join(", ")}`
+        );
+        await Promise.all(currentFeatures
+          .filter((feature) => error.waveFeatureIds.includes(feature.id))
+          .map((feature) => appendFeatureDialogue(
+            feature,
+            "judge.conflict_replan_requested",
+            "judge",
+            `Workspace conflict in ${error.paths.join(", ")}; Judge is replanning the Feature DAG.`,
+            { report: reportPath, conflicts: conflictArchiveDir }
+          )));
+
+        await this.sessions.updateTaskStatus(task, "judging");
+        currentInput.onStatus?.({
+          taskId: task.id,
+          judge: `replanning ${replanRound}/${this.config.orchestration.maxConflictReplans}`,
+          actor: "waiting",
+          critic: "waiting"
+        });
+        await this.clearTurnJudgeArtifacts(turn);
+        const replanContext: JudgeReplanContext = {
+          round: replanRound,
+          reportPath,
+          conflictPaths: error.paths,
+          waveFeatureIds: definitionIds,
+          previousFeatureIds: currentPlan.features.map((feature) => feature.id)
+        };
+        const judgeWorker = await this.runJudge(
+          { ...currentInput, retry: true },
+          task,
+          route.judge_engine,
+          workers,
+          turn,
+          replanContext
+        );
+        const revisedJudge = await this.snapshotJudgeArtifacts(judgeWorker, turn);
+
+        let judgePlan: FeaturePlan | null = null;
+        let judgePlanError = "";
+        try {
+          judgePlan = await this.loadFeaturePlan(revisedJudge, turn);
+        } catch (planError) {
+          judgePlanError = errorMessage(planError);
+        }
+        const judgePlanAccepted = Boolean(
+          judgePlan
+          && sameFeatureIds(currentPlan, judgePlan)
+          && conflictFeaturesAreSerialized(judgePlan, definitionIds)
+        );
+        const revisedPlan = judgePlanAccepted
+          ? judgePlan as FeaturePlan
+          : serializeConflictWave(currentPlan, definitionIds);
+        await writeJson(join(turn.dir, "feature-plan.json"), revisedPlan);
+        await workspaceManager.discardWavesFrom(turn.turnId, error.wave);
+        const revisedFeatures = await Promise.all(revisedPlan.features.map((feature) => createFeatureChannel({
+          task,
+          turn,
+          request: input.request,
+          judgeDir: revisedJudge.dir,
+          feature,
+          actorEngine: route.actor_engine,
+          criticEngine: route.critic_engine,
+          resume: true,
+          refreshDefinition: true
+        })));
+        await this.sessions.updateTaskStatus(task, "ready_for_pair");
+        await writeJson(reportPath, {
+          ...report,
+          state: "applied",
+          applied_at: new Date().toISOString(),
+          source: judgePlanAccepted ? "judge" : "supervisor-serialization-fallback",
+          ...(judgePlanError ? { judge_plan_error: judgePlanError } : {}),
+          ...(judgePlan && !judgePlanAccepted ? { rejected_judge_plan: judgePlan } : {}),
+          revised_plan: revisedPlan
+        });
+        await this.sessions.appendEvent(
+          task,
+          "feature.conflict_replan_applied",
+          `Applied ${judgePlanAccepted ? "Judge" : "supervisor fallback"} DAG replan ${replanRound}; wave ${error.wave} will resume from isolated workspaces`
+        );
+        await Promise.all(revisedFeatures
+          .filter((feature) => error.waveFeatureIds.includes(feature.id))
+          .map((feature) => appendFeatureDialogue(
+            feature,
+            "judge.conflict_replan_applied",
+            "judge",
+            `Replanned dependencies: ${feature.dependsOn.length > 0 ? feature.dependsOn.join(", ") : "none"}.`,
+            { report: reportPath, plan: join(turn.dir, "feature-plan.json") }
+          )));
+
+        currentInput = { ...currentInput, retry: true };
+        currentJudge = revisedJudge;
+        currentPlan = revisedPlan;
+        features.splice(0, features.length, ...revisedFeatures);
+        currentFeatures = features;
+      }
     }
   }
 
@@ -1993,7 +2194,8 @@ export class Orchestrator {
     task: TaskSession,
     engine: EngineName,
     workers: WorkerLogRef[],
-    turn: TaskTurn
+    turn: TaskTurn,
+    replan?: JudgeReplanContext
   ): Promise<WorkerFiles> {
     const workerId = taskWorkerId("judge", engine, turn.turnId);
     const judgeFiles = this.workerFiles(task, workerId);
@@ -2001,14 +2203,15 @@ export class Orchestrator {
       workerId,
       role: "judge",
       engine,
-      preserveOutput: input.retry,
+      preserveOutput: input.retry || Boolean(replan),
       prompt: buildJudgePrompt({
         request: input.request,
         taskDir: task.dir,
         workerDir: judgeFiles.dir,
         workspaceDir: input.cwd,
         turn: await this.promptTurnContext(task, turn),
-        role: this.config.roles.judge
+        role: this.config.roles.judge,
+        replan
       })
     });
 
@@ -3148,6 +3351,55 @@ function requiredChannel(
     throw new Error(`Feature channel missing: ${definition.id}`);
   }
   return channel;
+}
+
+function conflictDefinitionIds(
+  plan: FeaturePlan,
+  channels: FeatureChannel[],
+  channelIds: string[]
+): string[] {
+  const definitionByChannel = new Map(channels.map((channel, index) => [
+    channel.id,
+    plan.features[index]?.id
+  ]));
+  return [...new Set(channelIds
+    .map((channelId) => definitionByChannel.get(channelId))
+    .filter((id): id is string => Boolean(id)))];
+}
+
+function sameFeatureIds(previous: FeaturePlan, revised: FeaturePlan): boolean {
+  const previousIds = previous.features.map((feature) => feature.id).sort();
+  const revisedIds = revised.features.map((feature) => feature.id).sort();
+  return previousIds.length === revisedIds.length
+    && previousIds.every((id, index) => id === revisedIds[index]);
+}
+
+function conflictFeaturesAreSerialized(plan: FeaturePlan, featureIds: string[]): boolean {
+  const waveByFeature = new Map<string, number>();
+  for (const [waveIndex, wave] of featureExecutionWaves(plan).entries()) {
+    for (const feature of wave) {
+      waveByFeature.set(feature.id, waveIndex);
+    }
+  }
+  const waveIndexes = featureIds.map((id) => waveByFeature.get(id));
+  return waveIndexes.every((index): index is number => index !== undefined)
+    && new Set(waveIndexes).size === featureIds.length;
+}
+
+function serializeConflictWave(plan: FeaturePlan, featureIds: string[]): FeaturePlan {
+  const serializedIds = new Set(featureIds);
+  let previousId: string | null = null;
+  const features = plan.features.map((feature) => {
+    if (!serializedIds.has(feature.id)) {
+      return feature;
+    }
+    const dependsOn = previousId
+      ? [...new Set([...feature.depends_on, previousId])]
+      : feature.depends_on;
+    previousId = feature.id;
+    return { ...feature, depends_on: dependsOn };
+  });
+  return parseFeaturePlan({ version: 1, features });
 }
 
 function requiredFeatureAssignment(

@@ -6,6 +6,8 @@ describe("parseCliArgs", () => {
     const parsed = parseCliArgs([], "/app");
 
     expect(parsed.appRoot).toBe("/app");
+    expect(parsed.diagnostics).toBe(false);
+    expect(parsed.diagnosticsPath).toBeNull();
     expect(parsed.doctor).toBe(false);
     expect(parsed.workspaceRoot).toBe("/app");
     expect(parsed.explicitWorkspace).toBeNull();
@@ -84,6 +86,16 @@ describe("parseCliArgs", () => {
     expect(parsed.appRoot).toBe("/app");
     expect(parsed.workspaceRoot).toBe("/app/game");
     expect(parsed.explicitWorkspace).toBe("game");
+  });
+
+  it("accepts diagnostics with an optional destination directory", () => {
+    const automatic = parseCliArgs(["--diagnostics", "--workspace", "game"], "/app");
+    const explicit = parseCliArgs(["--diagnostics=./support-bundle"], "/app");
+
+    expect(automatic.diagnostics).toBe(true);
+    expect(automatic.diagnosticsPath).toBeNull();
+    expect(explicit.diagnostics).toBe(true);
+    expect(explicit.diagnosticsPath).toBe("/app/support-bundle");
   });
 
   it("accepts themes without changing workspace parsing", () => {
@@ -217,6 +229,11 @@ describe("validateCliArgs", () => {
 
   it("accepts the theme catalog command", () => {
     expect(validateCliArgs(["--themes"])).toEqual([]);
+  });
+
+  it("accepts diagnostics as a standalone or value option", () => {
+    expect(validateCliArgs(["--diagnostics"])).toEqual([]);
+    expect(validateCliArgs(["--diagnostics=/tmp/support"])).toEqual([]);
   });
 
   it("requires doctor mode for a live Router probe", () => {

@@ -13,6 +13,7 @@ describe("task state machine", () => {
     ["revision_needed", "actor_running"],
     ["critic_running", "integrating"],
     ["integrating", "verifying"],
+    ["integrating", "judging"],
     ["verifying", "revision_needed"],
     ["verifying", "integrating"],
     ["verifying", "done"],

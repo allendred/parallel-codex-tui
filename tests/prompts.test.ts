@@ -81,6 +81,27 @@ describe("role prompts", () => {
     expect(prompt).toContain("Do not leave TODO, TBD, 待定, or placeholder-only content");
   });
 
+  it("asks the same Judge to preserve Feature ids and serialize a conflicting wave", () => {
+    const prompt = buildJudgePrompt({
+      request: "实现并行功能",
+      taskDir: "/tmp/task",
+      workerDir: "/tmp/task/judge",
+      workspaceDir: "/tmp/project",
+      replan: {
+        round: 1,
+        reportPath: "/tmp/task/turns/0001/feature-replan-01.json",
+        conflictPaths: ["src/shared.ts"],
+        waveFeatureIds: ["ui", "engine"],
+        previousFeatureIds: ["ui", "engine", "tests"]
+      }
+    });
+
+    expect(prompt).toContain("# Conflict replan 1");
+    expect(prompt).toContain("src/shared.ts");
+    expect(prompt).toContain("Preserve exactly these feature ids: ui, engine, tests");
+    expect(prompt).toContain("Use depends_on to serialize the Features from the conflicting wave");
+  });
+
   it("asks the Wave Critic to verify the combined workspace before live commit", () => {
     const prompt = buildWaveCriticPrompt({
       request: "实现 alpha 与 beta",

@@ -99,6 +99,19 @@ describe("package metadata", () => {
       "node-pty@1.1.0": true
     });
     expect(pkg.scripts?.pretest).toBe("node scripts/fix-node-pty-permissions.mjs");
+    expect(pkg.scripts?.["pretest:stability"]).toBe("node scripts/fix-node-pty-permissions.mjs");
+    expect(pkg.scripts?.["pretest:terminal-hosts"]).toBe("node scripts/fix-node-pty-permissions.mjs");
+    expect(pkg.scripts?.["pretest:real-agents"]).toBe("node scripts/fix-node-pty-permissions.mjs");
+    expect(pkg.scripts?.["test:stability"]).toContain("tests/cli-worker-history-smoke.test.ts");
+    expect(pkg.scripts?.["test:stability"]).toContain("tests/cli-workspace-switch-smoke.test.ts");
+    expect(pkg.scripts?.["test:stability"]).toContain("tests/cli-orphan-process-recovery-smoke.test.ts");
+    expect(pkg.scripts?.["test:stability"]).toContain("tests/cli-startup-recovery-smoke.test.ts");
+    expect(pkg.scripts?.["test:terminal-hosts"]).toBe(
+      "vitest run tests/cli-terminal-host-compat-smoke.test.ts"
+    );
+    expect(pkg.scripts?.["test:real-agents"]).toBe(
+      "PCT_REAL_AGENT_TESTS=1 vitest run tests/cli-real-multi-workspace.test.ts"
+    );
     expect(pkg.scripts?.prepack).toBe("npm run build");
     expect(pkg.scripts?.["verify:package"]).toBe("node scripts/verify-package.mjs");
     expect(pkg.scripts?.prepare).toBeUndefined();
@@ -118,6 +131,8 @@ describe("package metadata", () => {
     expect(gitignore).toContain(".parallel-codex/last-workspace");
     expect(gitignore).toContain(".parallel-codex/sessions/");
     expect(gitignore).toContain(".parallel-codex/exports/");
+    expect(gitignore).toContain(".parallel-codex/diagnostics/");
+    expect(gitignore).toContain(".parallel-codex/probes/");
     expect(gitignore).toContain(".parallel-codex/workspaces.json");
     expect(gitignore).toContain(".parallel-codex/router/");
     expect(gitignore).toContain("docs/superpowers/");
@@ -148,6 +163,7 @@ describe("package metadata", () => {
     expect(example).toContain('# extends = "generic"');
     expect(example).toContain('forkArgs = ["fork", "{sessionId}"]');
     expect(example).toContain('forkArgs = ["--resume", "{sessionId}", "--fork-session"]');
+    expect(example).toContain("maxConflictReplans = 2");
     for (const field of TUI_THEME_FIELDS) {
       expect(example).toContain(`# ${field} = `);
     }
@@ -169,11 +185,14 @@ describe("package metadata", () => {
 
     expect(readme).toContain("## Requirements");
     expect(readme).toContain("## Current Release");
-    expect(readme).toContain("v0.1.8` is available from [npm]");
+    expect(readme).toContain("v0.2.0` is available from [npm]");
     expect(readme).toContain("preserves the embedded native Agent scrollback");
     expect(readme).toContain("keeps terminal scrolling and copying available at the same time");
     expect(readme).toContain("real three-Feature Tetris task");
-    expect(readme).toContain("1,241 tests across 119 files");
+    expect(readme).toContain("20-turn soak verifies 80 ordered Workers");
+    expect(readme).toContain("1,256 tests across 122 files");
+    expect(readme).toContain("same Judge native session for a bounded DAG replan");
+    expect(readme).toContain("Real Codex and Claude probes both proved fresh and same-session resume calls");
     expect(readme).toContain("authenticate the Claude CLI");
     expect(readme).toContain("Node.js 24.15+");
     expect(readme).toContain("Codex CLI");
@@ -248,7 +267,14 @@ describe("package metadata", () => {
     expect(readme).toContain("a silent failed launch cannot create a false resumable session");
     expect(readme).toContain("proxy host/port reachability as a local-endpoint check");
     expect(readme).toContain("parallel-codex-tui --doctor --probe-router");
+    expect(readme).toContain("parallel-codex-tui --diagnostics");
+    expect(readme).toContain("parallel-codex-tui --diagnostics ./support-bundle");
     expect(readme).toContain("one real classification through the configured Codex Router");
+    expect(readme).toContain("## Diagnostics");
+    expect(readme).toContain("`.parallel-codex/diagnostics/<timestamp>/`");
+    expect(readme).toContain("`Ctrl+X` creates the same bundle");
+    expect(readme).toContain("at most the latest 20 tasks, 200 Workers, 100 Router rows");
+    expect(readme).toContain("Prompts, role instructions, command arguments, source files, and lifetime logs are excluded");
     expect(readme).toContain("spawn time, first-output time, process duration, stdout/stderr byte counts, and failure stage");
     expect(readme).toContain("dispatch, spawn, first output, process, parse, and total stages");
     expect(readme).toContain("I/O byte evidence on a separate line");
@@ -465,6 +491,14 @@ describe("package metadata", () => {
     expect(readme).toContain(".parallel-codex/last-workspace");
     expect(readme).toContain(".parallel-codex/workspaces.json");
     expect(readme).toContain(".parallel-codex/sessions/");
+    expect(readme).toContain(".parallel-codex/diagnostics/");
+    expect(readme).toContain(".parallel-codex/probes/");
+    expect(readme).toContain("## Testing");
+    expect(readme).toContain("npm run test:stability");
+    expect(readme).toContain("npm run test:terminal-hosts");
+    expect(readme).toContain("npm run test:real-agents");
+    expect(readme).toContain("maxConflictReplans = 2");
+    expect(readme).toContain("only the conflicting and later waves are discarded and rerun");
     expect(readme).toContain("## Release");
     expect(readme).toContain("GitHub Actions runs CI on Ubuntu with Node.js 24.15 and 26, plus macOS with Node.js 24.15");
     expect(readme).toContain("installs that tarball into a clean global prefix");
@@ -488,7 +522,9 @@ describe("package metadata", () => {
     expect(readme).toContain('git tag "v$VERSION"');
     expect(readme).toContain('git push origin "v$VERSION"');
     expect(readme).toContain("The release tag must match `package.json`");
-    expect(readme).toContain("Published tags such as `v0.1.7` are immutable");
+    expect(readme).toContain("VERSION=0.2.0");
+    expect(readme).toContain("package version `0.2.0` requires tag `v0.2.0`");
+    expect(readme).toContain("Published tags such as `v0.1.8` are immutable");
   });
 
   it("publishes the CLI bin as an executable file", async () => {

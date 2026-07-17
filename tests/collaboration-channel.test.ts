@@ -65,6 +65,62 @@ describe("feature collaboration mailbox", () => {
     });
   });
 
+  it("refreshes a replanned Feature definition without clearing its mailbox", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pct-collaboration-channel-replan-"));
+    const taskDir = join(root, "task-test");
+    const turnDir = join(taskDir, "turns", "0001");
+    const base = {
+      task: {
+        id: "task-test",
+        dir: taskDir,
+        metaPath: join(taskDir, "meta.json"),
+        routePath: join(taskDir, "route.json"),
+        eventsPath: join(taskDir, "events.jsonl")
+      },
+      turn: {
+        turnId: "0001",
+        dir: turnDir,
+        metaPath: join(turnDir, "turn.json"),
+        userPath: join(turnDir, "user.md"),
+        routePath: join(turnDir, "route.json")
+      },
+      request: "Replan overlapping features",
+      judgeDir: join(taskDir, "judge-mock")
+    };
+    const channel = await createFeatureChannel({
+      ...base,
+      feature: {
+        id: "engine",
+        title: "Engine",
+        description: "Build the engine",
+        depends_on: []
+      }
+    });
+    await writeText(channel.actorWorklogPath, "original actor evidence\n");
+    await writeText(channel.criticFindingsPath, '{"id":"C-001","summary":"overlap"}\n');
+
+    const resumed = await createFeatureChannel({
+      ...base,
+      feature: {
+        id: "engine",
+        title: "Engine after UI",
+        description: "Build the engine on the integrated UI baseline",
+        depends_on: ["ui"]
+      },
+      resume: true,
+      refreshDefinition: true
+    });
+
+    expect(await readTextIfExists(resumed.specPath)).toContain("Engine after UI");
+    expect(await readTextIfExists(resumed.specPath)).toContain("ui");
+    expect(await readTextIfExists(resumed.actorWorklogPath)).toBe("original actor evidence\n");
+    expect(await readTextIfExists(resumed.criticFindingsPath)).toContain("C-001");
+    expect(JSON.parse(await readTextIfExists(resumed.statusPath))).toMatchObject({
+      title: "Engine after UI",
+      depends_on: ["ui"]
+    });
+  });
+
   it("repairs a missing resumed status without clearing collaboration evidence", async () => {
     const root = await mkdtemp(join(tmpdir(), "pct-collaboration-channel-resume-"));
     const taskDir = join(root, "task-test");

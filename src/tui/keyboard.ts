@@ -54,6 +54,10 @@ export function isCopyShortcut(input: string, key: KeyboardKey): boolean {
   return (key.ctrl === true && input.toLowerCase() === "y") || input === "\u0019";
 }
 
+export function isDiagnosticsShortcut(input: string, key: KeyboardKey): boolean {
+  return (key.ctrl === true && input.toLowerCase() === "x") || input === "\u0018";
+}
+
 export function workerLogJumpKind(input: string): "error" | "diff" | null {
   if (input === "e" || input === "E") {
     return "error";

@@ -650,11 +650,35 @@ describe("ParallelWorkspaceManager", () => {
 
     expect(conflict).toBeInstanceOf(WorkspaceMergeConflictError);
     expect(conflict?.paths).toEqual(["src/game.ts"]);
+    expect(conflict?.wave).toBe(1);
+    expect(conflict?.featureId).toBe("0001-engine");
+    expect(conflict?.waveFeatureIds).toEqual(["0001-ui", "0001-engine"]);
+    expect(conflict?.integratedFeatureIds).toEqual(["0001-ui"]);
     expect(await readTextIfExists(sourcePath)).toBe("export const mode = 'base';\n");
     const evidence = await readTextIfExists(join(conflict?.conflictDir ?? "", "src", "game.ts"));
     expect(evidence).toContain("<<<<<<<");
     expect(evidence).toContain("mode = 'ui'");
     expect(evidence).toContain("mode = 'engine'");
+  });
+
+  it("discards only the conflicted and later wave workspaces before a DAG replan", async () => {
+    const workspaceRoot = await mkdtemp(join(tmpdir(), "pct-workspace-replan-reset-"));
+    const taskDir = join(workspaceRoot, ".parallel-codex", "sessions", "task-replan-reset");
+    const manager = new ParallelWorkspaceManager({ workspaceRoot, taskDir, dataDir: ".parallel-codex" });
+    const first = await manager.prepareWave({ turnId: "0001", wave: 1, featureIds: ["0001-base"] });
+    const second = await manager.prepareWave({ turnId: "0001", wave: 2, featureIds: ["0001-ui"] });
+    const third = await manager.prepareWave({ turnId: "0001", wave: 3, featureIds: ["0001-engine"] });
+    const finalVerification = join(taskDir, "workspaces", "turn-0001", "final-verification", "marker.txt");
+    await writeText(finalVerification, "stale\n");
+    await writeJson(join(taskDir, "workspaces", "turn-0001", "final-verification.json"), { version: 1 });
+
+    await manager.discardWavesFrom("0001", 2);
+
+    expect(await pathExists(first.rootDir)).toBe(true);
+    expect(await pathExists(second.rootDir)).toBe(false);
+    expect(await pathExists(third.rootDir)).toBe(false);
+    expect(await pathExists(finalVerification)).toBe(false);
+    expect(await pathExists(join(taskDir, "workspaces", "turn-0001", "final-verification.json"))).toBe(false);
   });
 
   it("preserves executable files and binary content while integrating", async () => {

@@ -10,7 +10,10 @@ import { NativeTerminalScreen } from "../src/tui/terminal-screen.js";
 import { resizeAndWaitForFreshScreenText } from "./pty-resize.js";
 
 describe("CLI worker history smoke", () => {
-  it("keeps ten task-turn worker logs, native sessions, and tab order across restart", async () => {
+  it("keeps twenty task-turn worker logs, native sessions, and tab order across restart", async () => {
+    const turnCount = 20;
+    const workersPerTurn = 4;
+    const workerCount = turnCount * workersPerTurn;
     const workspace = await mkdtemp(join(tmpdir(), "pct-cli-worker-history-workspace-"));
     const appRoot = await mkdtemp(join(tmpdir(), "pct-cli-worker-history-app-"));
     await mkdir(join(appRoot, ".parallel-codex"), { recursive: true });
@@ -46,7 +49,7 @@ describe("CLI worker history smoke", () => {
         readTextIfExists(join(taskDir, "critic-mock", "output.log"))
       ]);
 
-      for (let turn = 2; turn <= 10; turn += 1) {
+      for (let turn = 2; turn <= turnCount; turn += 1) {
         firstRun.child.write(`继续完成第${turn}轮功能\r`);
         await waitForTaskTurnDone(taskDir, String(turn).padStart(4, "0"));
         await waitForIdleInput(firstRun);
@@ -57,13 +60,13 @@ describe("CLI worker history smoke", () => {
         readTextIfExists(join(taskDir, "actor-mock", "output.log")),
         readTextIfExists(join(taskDir, "critic-mock", "output.log"))
       ])).toEqual(firstTurnLogs);
-      expect(await workerDirectories(taskDir)).toEqual(expectedWorkerDirectories(10));
+      expect(await workerDirectories(taskDir)).toEqual(expectedWorkerDirectories(turnCount));
       for (const role of ["judge", "actor", "critic"] as const) {
         const firstSession = await readJson(
           join(taskDir, `${role}-mock`, "native-session.json"),
           NativeSessionSchema
         );
-        for (let turn = 2; turn <= 10; turn += 1) {
+        for (let turn = 2; turn <= turnCount; turn += 1) {
           const workerId = `${role}-mock-${String(turn).padStart(4, "0")}`;
           const continuedSession = await readJson(
             join(taskDir, workerId, "native-session.json"),
@@ -78,7 +81,7 @@ describe("CLI worker history smoke", () => {
         join(taskDir, "judge-mock", "native-session.json"),
         NativeSessionSchema
       );
-      for (let turn = 1; turn <= 10; turn += 1) {
+      for (let turn = 1; turn <= turnCount; turn += 1) {
         const workerId = `judge-mock-final-${String(turn).padStart(4, "0")}`;
         const finalSession = await readJson(
           join(taskDir, workerId, "native-session.json"),
@@ -89,8 +92,8 @@ describe("CLI worker history smoke", () => {
       }
 
       firstRun.child.write("\x17");
-      await assertChronologicalWorkerTabs(firstRun, 40);
-      await assertNarrowWorkerChrome(firstRun, 40);
+      await assertChronologicalWorkerTabs(firstRun, workerCount);
+      await assertNarrowWorkerChrome(firstRun, workerCount);
 
       firstRun.child.write("\x03");
       await waitForExit(firstRun);
@@ -99,11 +102,11 @@ describe("CLI worker history smoke", () => {
       secondRun = startCli(appRoot, workspace, taskId);
       await waitForScreenText(secondRun, "> | message");
       secondRun.child.write("\x14");
-      await waitForScreenText(secondRun, "10 turns · 40 workers · 3 native");
+      await waitForScreenText(secondRun, `${turnCount} turns · ${workerCount} workers · 3 native`);
       secondRun.child.write("\x1b");
       await waitForScreenText(secondRun, "parallel-codex-tui · chat");
       secondRun.child.write("\x17");
-      await assertChronologicalWorkerTabs(secondRun, 40);
+      await assertChronologicalWorkerTabs(secondRun, workerCount);
 
       secondRun.child.write("\x03");
       await waitForExit(secondRun);

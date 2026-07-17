@@ -146,6 +146,19 @@ describe("keyboard shortcuts", () => {
     expect(isCopyShortcut?.("y", { ctrl: false })).toBe(false);
   });
 
+  it("recognizes ctrl-x as the sanitized diagnostics shortcut", () => {
+    const isDiagnosticsShortcut = (
+      keyboardModule as typeof keyboardModule & {
+        isDiagnosticsShortcut?: (input: string, key: { ctrl?: boolean }) => boolean;
+      }
+    ).isDiagnosticsShortcut;
+
+    expect(isDiagnosticsShortcut).toBeTypeOf("function");
+    expect(isDiagnosticsShortcut?.("x", { ctrl: true })).toBe(true);
+    expect(isDiagnosticsShortcut?.("\u0018", { ctrl: false })).toBe(true);
+    expect(isDiagnosticsShortcut?.("x", { ctrl: false })).toBe(false);
+  });
+
   it("does not treat plain letters as shortcuts", () => {
     expect(isLogsShortcut("w", { ctrl: false })).toBe(false);
     expect(isAttachShortcut("o", { ctrl: false })).toBe(false);

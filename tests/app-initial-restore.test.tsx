@@ -141,6 +141,32 @@ describe("App initial task restore", () => {
 });
 
 describe("App empty worker shortcuts", () => {
+  it("exports a sanitized diagnostics bundle with Ctrl+X", async () => {
+    const testInput = installTestInputStream();
+    const exportDiagnostics = vi.fn(async () => "/tmp/pct-workspace/.parallel-codex/diagnostics/bundle");
+    const view = render(
+      <App
+        config={defaultConfig("/tmp/pct-app-diagnostics")}
+        orchestrator={{} as Orchestrator}
+        cwd="/tmp/pct-workspace"
+        exportDiagnostics={exportDiagnostics}
+      />
+    );
+
+    try {
+      await waitForFrame(view.lastFrame, "ready");
+      await settleEffects();
+      testInput.send(view.stdin, "\x18");
+      await waitForFrame(view.lastFrame, "diagnostics exported");
+
+      expect(exportDiagnostics).toHaveBeenCalledOnce();
+      expect(view.lastFrame()).toContain("/diagnostics/bundle");
+    } finally {
+      view.unmount();
+      testInput.restore();
+    }
+  });
+
   it("copies the visible chat with Ctrl+Y while mouse scrolling stays configured", async () => {
     const testInput = installTestInputStream();
     const copyToClipboard = vi.fn(async () => {});
