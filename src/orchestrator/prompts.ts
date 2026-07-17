@@ -96,6 +96,13 @@ export function buildMainPrompt(input: MainPromptInput): string {
     `# Role: ${role.title}`,
     "",
     ...instructionLines(role.instructions),
+    "",
+    "# Non-interactive execution",
+    "",
+    "- Use available tools directly when the current permission mode allows them.",
+    "- Chat replies cannot grant CLI tool permissions. Never ask the user to approve a command by replying in chat.",
+    "- Never claim that a system permission dialog was shown unless a tool result explicitly confirms it.",
+    "- If a tool is denied because interactive approval is required, state that it was not run and direct the user to press Ctrl+O to continue in the native agent.",
     ...(input.context?.trim()
       ? ["", "# Active task context", "", input.context.trim()]
       : []),

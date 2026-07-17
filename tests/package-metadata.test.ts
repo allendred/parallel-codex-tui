@@ -185,12 +185,12 @@ describe("package metadata", () => {
 
     expect(readme).toContain("## Requirements");
     expect(readme).toContain("## Current Release");
-    expect(readme).toContain("v0.2.2` is available from [npm]");
+    expect(readme).toContain("v0.2.3` is available from [npm]");
     expect(readme).toContain("preserves the embedded native Agent scrollback");
     expect(readme).toContain("keeps terminal scrolling and copying available at the same time");
     expect(readme).toContain("real three-Feature Tetris task");
     expect(readme).toContain("20-turn soak verifies 80 ordered Workers");
-    expect(readme).toContain("1,262 tests across 123 files");
+    expect(readme).toContain("1,264 tests across 123 files");
     expect(readme).toContain("same Judge native session for a bounded DAG replan");
     expect(readme).toContain("Real Codex and Claude probes both proved fresh and same-session resume calls");
     expect(readme).toContain("authenticate the Claude CLI");
@@ -524,9 +524,9 @@ describe("package metadata", () => {
     expect(readme).toContain('git tag "v$VERSION"');
     expect(readme).toContain('git push origin "v$VERSION"');
     expect(readme).toContain("The release tag must match `package.json`");
-    expect(readme).toContain("VERSION=0.2.2");
-    expect(readme).toContain("package version `0.2.2` requires tag `v0.2.2`");
-    expect(readme).toContain("Published tags such as `v0.2.1` are immutable");
+    expect(readme).toContain("VERSION=0.2.3");
+    expect(readme).toContain("package version `0.2.3` requires tag `v0.2.3`");
+    expect(readme).toContain("Published tags such as `v0.2.2` are immutable");
   });
 
   it("publishes the CLI bin as an executable file", async () => {

@@ -6,7 +6,7 @@ Built with Codex-assisted development.
 
 ## Current Release
 
-`v0.2.2` is available from [npm](https://www.npmjs.com/package/parallel-codex-tui/v/0.2.2) and as a [GitHub Release](https://github.com/allendred/parallel-codex-tui/releases/tag/v0.2.2). It automatically inherits the macOS system proxy when explicit proxy variables are absent, expands the default Router cold-start budget, and retains the single Up/Down request-history fix from `v0.2.1`.
+`v0.2.3` is available from [npm](https://www.npmjs.com/package/parallel-codex-tui/v/0.2.3) and as a [GitHub Release](https://github.com/allendred/parallel-codex-tui/releases/tag/v0.2.3). Claude Main now uses non-interactive `auto` permissions so safe tool calls can run instead of asking for an approval that the chat cannot deliver. Isolated coding Workers remain clamped to `acceptEdits`; the macOS system-proxy and Up/Down history fixes from `v0.2.2` remain included.
 
 The release keeps terminal scrolling and copying available at the same time without requiring Shift. Ordinary left-drag selection remains owned by the terminal while alternate-scroll delivers the wheel to chat, Worker logs, and structured views. `Ctrl+Y` copies the visible view as a fallback. It preserves the embedded native Agent scrollback across status-detail round trips and real PTY resizes.
 
@@ -20,7 +20,7 @@ Highlights:
 - Named Worker Providers support Codex-compatible, Claude-compatible, OpenAI-compatible, Anthropic-compatible, and custom generic commands with independent role, model, environment, permission, resume, and interactive settings.
 - Worker overview, Feature board, collaboration timeline, Task center, status details, rendered Markdown/Diff/error logs, Unicode search, keyboard navigation, mouse scrolling, and configurable themes share one terminal UI system.
 
-Release acceptance includes a real three-Feature Tetris task with parallel Actor/Critic waves and final integration review. Real Codex and Claude probes both proved fresh and same-session resume calls, the semantic Router completed a live classification, and one TUI completed Main calls in two workspaces before restoring the first workspace without leaking chat state. PTY coverage runs in Apple Terminal, tmux, and Zellij profiles at narrow and wide sizes, including status/log equivalence and preserving the native output tail across status-detail round trips. The deterministic repository suite passed 1,262 tests across 123 files; one quota-consuming real-Agent test is skipped by default and passes through `npm run test:real-agents`.
+Release acceptance includes a real three-Feature Tetris task with parallel Actor/Critic waves and final integration review. Real Codex and Claude probes both proved fresh and same-session resume calls, and a Claude Main session executed safe Bash tools before and after resume with `auto` permissions. The semantic Router completed a live classification, and one TUI completed Main calls in two workspaces before restoring the first workspace without leaking chat state. PTY coverage runs in Apple Terminal, tmux, and Zellij profiles at narrow and wide sizes, including status/log equivalence and preserving the native output tail across status-detail round trips. The deterministic repository suite passed 1,264 tests across 123 files; one quota-consuming real-Agent test is skipped by default and passes through `npm run test:real-agents`.
 
 Real Provider probes depend on valid local CLI credentials. In particular, authenticate the Claude CLI before selecting a Claude-compatible Worker, then run `parallel-codex-tui --doctor --probe-agents` to prove fresh and resumed calls on that machine.
 
@@ -350,7 +350,7 @@ forkArgs = ["fork", "{sessionId}"]
 
 [workers.claude]
 command = "claude"
-args = ["--print", "--permission-mode", "acceptEdits", "--output-format", "text"]
+args = ["--print", "--permission-mode", "auto", "--output-format", "text"]
 
 [workers.claude.capabilities]
 profile = "claude"
@@ -363,7 +363,7 @@ args = ["--resume", "{sessionId}"]
 forkArgs = ["--resume", "{sessionId}", "--fork-session"]
 ```
 
-`model.args` and `model.env` apply to both automated worker runs and embedded native attach sessions. Native attach appends the rendered model arguments after `interactive.args`, so third-party `{model}` and `{provider}` selections remain active when you press `Ctrl+O`.
+`model.args` and `model.env` apply to both automated worker runs and embedded native attach sessions. Native attach appends the rendered model arguments after `interactive.args`, so third-party `{model}` and `{provider}` selections remain active when you press `Ctrl+O`. Claude Main uses `auto` so safe tool calls can complete in print mode; isolated Claude coding roles are still clamped to `acceptEdits`. When a command genuinely needs interactive approval, Main points to `Ctrl+O` instead of claiming that a chat reply can grant permission.
 
 `model.provider` names the remote model service; `capabilities.profile` describes the local CLI protocol. Worker Provider IDs are lowercase names using letters, digits, or `_`; excluding `-` keeps generated Worker directory names unambiguous. Existing `codex`, `claude`, and `mock` IDs remain compatible, while additional profiles can inherit `codex`, `claude`, another named profile, or conservative `generic` defaults.
 
@@ -516,12 +516,12 @@ The release job installs npm `^11.5.1`, runs on Node `24.15.x`, publishes the pr
 To publish a release, update `package.json` and `src/version.ts` to the same version, then push a matching tag:
 
 ```bash
-VERSION=0.2.2
+VERSION=0.2.3
 git tag "v$VERSION"
 git push origin "v$VERSION"
 ```
 
-You can also run the Release workflow manually and enter the same tag value. The release tag must match `package.json`; for example, package version `0.2.2` requires tag `v0.2.2`. Published tags such as `v0.2.1` are immutable and must not be moved or reused.
+You can also run the Release workflow manually and enter the same tag value. The release tag must match `package.json`; for example, package version `0.2.3` requires tag `v0.2.3`. Published tags such as `v0.2.2` are immutable and must not be moved or reused.
 
 ## Publishing Hygiene
 

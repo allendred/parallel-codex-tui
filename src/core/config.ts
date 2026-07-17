@@ -274,7 +274,7 @@ export function defaultConfig(projectRoot: string): AppConfig {
       },
       claude: {
         command: "claude",
-        args: ["--print", "--permission-mode", "acceptEdits", "--output-format", "text"],
+        args: ["--print", "--permission-mode", "auto", "--output-format", "text"],
         assignable: true,
         timeoutMs: 45 * 60 * 1000,
         idleTimeoutMs: 5 * 60 * 1000,
@@ -292,7 +292,7 @@ export function defaultConfig(projectRoot: string): AppConfig {
         },
         nativeSession: {
           enabled: true,
-          resumeArgs: ["--print", "--resume", "{sessionId}", "--permission-mode", "acceptEdits", "--output-format", "text"],
+          resumeArgs: ["--print", "--resume", "{sessionId}", "--permission-mode", "auto", "--output-format", "text"],
           detectSessionId: true,
           fallback: "new"
         },

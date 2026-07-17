@@ -4,11 +4,20 @@ import {
   buildCriticPrompt,
   buildFinalJudgePrompt,
   buildJudgePrompt,
+  buildMainPrompt,
   buildWaveActorPrompt,
   buildWaveCriticPrompt
 } from "../src/orchestrator/prompts.js";
 
 describe("role prompts", () => {
+  it("gives non-interactive Main an honest permission contract", () => {
+    const prompt = buildMainPrompt({ request: "检查本机网络" });
+
+    expect(prompt).toContain("Chat replies cannot grant CLI tool permissions");
+    expect(prompt).toContain("Never claim that a system permission dialog was shown");
+    expect(prompt).toContain("press Ctrl+O to continue in the native agent");
+  });
+
   it("includes configured role title and instructions", () => {
     const prompt = buildActorPrompt({
       request: "实现功能",

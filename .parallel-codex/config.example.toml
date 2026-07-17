@@ -75,8 +75,8 @@ fallback = "new"
 
 [workers.claude]
 command = "claude"
-# Automated isolated roles enforce acceptEdits and remove permission-bypass flags.
-args = ["--print", "--permission-mode", "acceptEdits", "--output-format", "text"]
+# Main uses Claude auto mode for non-interactive tools. Isolated roles are still clamped to acceptEdits.
+args = ["--print", "--permission-mode", "auto", "--output-format", "text"]
 # timeoutMs is the hard ceiling; first output owns silent startup and idle starts after actual output.
 # timeoutMs = 2700000
 # idleTimeoutMs = 300000

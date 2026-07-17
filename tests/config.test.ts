@@ -58,7 +58,16 @@ describe("config", () => {
     expect(config.workers.claude.args).toEqual([
       "--print",
       "--permission-mode",
-      "acceptEdits",
+      "auto",
+      "--output-format",
+      "text"
+    ]);
+    expect(config.workers.claude.nativeSession.resumeArgs).toEqual([
+      "--print",
+      "--resume",
+      "{sessionId}",
+      "--permission-mode",
+      "auto",
       "--output-format",
       "text"
     ]);

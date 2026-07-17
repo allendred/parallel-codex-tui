@@ -111,6 +111,40 @@ describe("ProcessWorkerAdapter", () => {
     expect(output).not.toContain("dangerously-skip-permissions");
   });
 
+  it("preserves Claude auto permissions for a non-isolated Main run", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pct-process-main-claude-permissions-"));
+    const filesDir = join(root, "main-claude");
+    const promptPath = join(filesDir, "prompt.md");
+    const outputLogPath = join(filesDir, "output.log");
+    const statusPath = join(filesDir, "status.json");
+    const script = "console.log(process.argv.slice(1).join('|'))";
+    await writeText(promptPath, "main prompt");
+
+    const adapter = new ProcessWorkerAdapter(process.execPath, [
+      "-e",
+      script,
+      "--",
+      "--permission-mode",
+      "auto"
+    ], "claude");
+    const result = await adapter.run({
+      workerId: "main-claude",
+      role: "main",
+      engine: "claude",
+      cwd: root,
+      filesDir,
+      promptPath,
+      outputLogPath,
+      statusPath,
+      prompt: "main prompt"
+    });
+
+    const output = await readTextIfExists(outputLogPath);
+    expect(result.exitCode).toBe(0);
+    expect(output).toContain("--permission-mode|auto");
+    expect(output).not.toContain("acceptEdits");
+  });
+
   it("uses a declared generic CLI contract without injecting Codex permission flags", async () => {
     const root = await mkdtemp(join(tmpdir(), "pct-process-generic-capabilities-"));
     const filesDir = join(root, "actor-vendor");
