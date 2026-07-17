@@ -63,6 +63,7 @@ describe("CLI native layout smoke", () => {
       child.write("\x0f");
       await waitForText(chunks, "native line 40");
       await waitForScreenText(() => screenWrites, screen, "native line 40");
+      await waitForScreenText(() => screenWrites, screen, "workers 1");
 
       const snapshot = screen.snapshot();
       const nativeTitleLine = screen
