@@ -191,6 +191,12 @@ function capabilityProbeSpecs(target: CapabilityTarget): CapabilityProbeSpec[] {
   const specs: CapabilityProbeSpec[] = [];
   if (target.surfaces.has("automated")) {
     specs.push({
+      args: ["--help"],
+      label: "approval policy",
+      requiredOptions: ["--ask-for-approval"],
+      usagePattern: /Usage:\s+codex\b/i
+    });
+    specs.push({
       args: ["exec", "--help"],
       label: "exec sandbox/add-dir",
       requiredOptions: ["--sandbox", "--add-dir", "--skip-git-repo-check"],

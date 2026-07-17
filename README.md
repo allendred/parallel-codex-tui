@@ -6,7 +6,7 @@ Built with Codex-assisted development.
 
 ## Current Release
 
-`v0.2.3` is available from [npm](https://www.npmjs.com/package/parallel-codex-tui/v/0.2.3) and as a [GitHub Release](https://github.com/allendred/parallel-codex-tui/releases/tag/v0.2.3). Claude Main now uses non-interactive `auto` permissions so safe tool calls can run instead of asking for an approval that the chat cannot deliver. Isolated coding Workers remain clamped to `acceptEdits`; the macOS system-proxy and Up/Down history fixes from `v0.2.2` remain included.
+`v0.2.4` is available from [npm](https://www.npmjs.com/package/parallel-codex-tui/v/0.2.4) and as a [GitHub Release](https://github.com/allendred/parallel-codex-tui/releases/tag/v0.2.4). Codex Router, Main, and automated Workers now place the non-interactive approval policy at the required root position as `-a never ... exec`, while retaining `read-only` routing and `workspace-write` coding sandboxes. Isolated Codex roles also replace unsafe or interactive approval arguments; native attach remains interactive. The Claude Main permission fix from `v0.2.3` remains included.
 
 The release keeps terminal scrolling and copying available at the same time without requiring Shift. Ordinary left-drag selection remains owned by the terminal while alternate-scroll delivers the wheel to chat, Worker logs, and structured views. `Ctrl+Y` copies the visible view as a fallback. It preserves the embedded native Agent scrollback across status-detail round trips and real PTY resizes.
 
@@ -20,7 +20,7 @@ Highlights:
 - Named Worker Providers support Codex-compatible, Claude-compatible, OpenAI-compatible, Anthropic-compatible, and custom generic commands with independent role, model, environment, permission, resume, and interactive settings.
 - Worker overview, Feature board, collaboration timeline, Task center, status details, rendered Markdown/Diff/error logs, Unicode search, keyboard navigation, mouse scrolling, and configurable themes share one terminal UI system.
 
-Release acceptance includes a real three-Feature Tetris task with parallel Actor/Critic waves and final integration review. Real Codex and Claude probes both proved fresh and same-session resume calls, and a Claude Main session executed safe Bash tools before and after resume with `auto` permissions. The semantic Router completed a live classification, and one TUI completed Main calls in two workspaces before restoring the first workspace without leaking chat state. PTY coverage runs in Apple Terminal, tmux, and Zellij profiles at narrow and wide sizes, including status/log equivalence and preserving the native output tail across status-detail round trips. The deterministic repository suite passed 1,264 tests across 123 files; one quota-consuming real-Agent test is skipped by default and passes through `npm run test:real-agents`.
+Release acceptance includes a real three-Feature Tetris task with parallel Actor/Critic waves and final integration review. Real Codex and Claude probes both proved fresh and same-session resume calls; Codex fresh and resume runs executed workspace writes with root-level `-a never`, and a Claude Main session executed safe Bash tools before and after resume with `auto` permissions. The semantic Router completed a live classification, and one TUI completed Main calls in two workspaces before restoring the first workspace without leaking chat state. PTY coverage runs in Apple Terminal, tmux, and Zellij profiles at narrow and wide sizes, including status/log equivalence and preserving the native output tail across status-detail round trips. The deterministic repository suite passed 1,265 tests across 123 files; one quota-consuming real-Agent test is skipped by default and passes through `npm run test:real-agents`.
 
 Real Provider probes depend on valid local CLI credentials. In particular, authenticate the Claude CLI before selecting a Claude-compatible Worker, then run `parallel-codex-tui --doctor --probe-agents` to prove fresh and resumed calls on that machine.
 
@@ -236,7 +236,7 @@ The doctor output includes `preview:` and `semantic:` ANSI swatch rows so you ca
 - Every numbered turn keeps its own immutable Judge, Actor, and Critic worker directories. Later turns use suffixed ids such as `judge-codex-0002`; the log viewer retains earlier workers, cycles them in turn order, and restores the same order after restart. The new worker record may reuse the prior native session id without overwriting the prior turn's prompt, status, log, or native-session metadata.
 - `Ctrl+N` leaves the active complex task intact on disk while clearing its live context, worker selection, retry state, and status so the next complex request creates an independent task from turn `0001`.
 - Single-feature follow-ups reuse the same Actor/Critic native sessions when available while moving them to the new turn's isolated workspace; prompts include up to five prior turn summaries as file-backed memory. A failed follow-up retry reuses a complete saved Judge plan, or restores Judge first when the earlier Judge run never produced one.
-- Automated Judge, Actor, Critic, Wave Actor, and Wave Critic runs enforce process-level isolation: Codex is clamped to `workspace-write`, and Claude is clamped to `acceptEdits`, even when private command arguments contain a broader bypass mode. Native attach remains an explicit interactive path.
+- Automated Judge, Actor, Critic, Wave Actor, and Wave Critic runs enforce process-level isolation: Codex is clamped to root-level `-a never` plus `workspace-write`, and Claude is clamped to `acceptEdits`, even when private command arguments request interactive approval or contain a broader bypass mode. Native attach remains an explicit interactive path.
 - Pressing `Esc` while a request is running stops the router or active worker and records an interrupted complex task as `cancelled`; exiting the outer TUI also terminates the active run.
 - Failed and cancelled tasks expose `Ctrl+R` retry. Retry keeps the same task and turn, reuses recorded native worker sessions, preserves prior output behind a retry separator, does not route the request again, and reuses the persisted feature dependency plan. A complete Judge snapshot and fully integrated waves are skipped; an unchanged in-progress wave reuses successful Actor and Critic checkpoints and runs only unfinished workers. If the live workspace no longer matches the saved baseline, the stale wave checkpoint is rejected and rebuilt from the current project before workers continue.
 - The shared Main chat holds its own `sessions/main/run-owner.json` lease across prompt initialization, native-session reuse, and Worker completion. A second TUI is rejected before it can clear or overwrite the active Main prompt, log, status, or native session, and startup native-session reconciliation skips a Main session owned by another live TUI. After a hard exit, startup atomically claims the stale Main lease, terminates every verifiable orphan process group, marks active Main Workers `cancelled`, preserves native session ids, and records recovery before exposing the runtime. An unverifiable or still-running Main process blocks startup without changing its status or checkpoints.
@@ -263,7 +263,7 @@ defaultMode = "auto"
 
 [router.codex]
 command = "codex"
-args = ["exec", "--ephemeral", "--ignore-rules", "-c", "model_reasoning_effort=low", "--skip-git-repo-check", "--sandbox", "read-only", "--color", "never", "-"]
+args = ["-a", "never", "exec", "--ephemeral", "--ignore-rules", "-c", "model_reasoning_effort=low", "--skip-git-repo-check", "--sandbox", "read-only", "--color", "never", "-"]
 timeoutMs = 60000
 firstOutputTimeoutMs = 30000
 idleTimeoutMs = 30000
@@ -328,7 +328,7 @@ Configure Codex and Claude commands in `.parallel-codex/config.toml`:
 ```toml
 [workers.codex]
 command = "codex"
-args = ["exec", "--skip-git-repo-check", "--sandbox", "workspace-write", "--color", "never", "-"]
+args = ["-a", "never", "exec", "--skip-git-repo-check", "--sandbox", "workspace-write", "--color", "never", "-"]
 
 [workers.codex.model]
 name = "gpt-5"
@@ -363,7 +363,7 @@ args = ["--resume", "{sessionId}"]
 forkArgs = ["--resume", "{sessionId}", "--fork-session"]
 ```
 
-`model.args` and `model.env` apply to both automated worker runs and embedded native attach sessions. Native attach appends the rendered model arguments after `interactive.args`, so third-party `{model}` and `{provider}` selections remain active when you press `Ctrl+O`. Claude Main uses `auto` so safe tool calls can complete in print mode; isolated Claude coding roles are still clamped to `acceptEdits`. When a command genuinely needs interactive approval, Main points to `Ctrl+O` instead of claiming that a chat reply can grant permission.
+`model.args` and `model.env` apply to both automated worker runs and embedded native attach sessions. Native attach appends the rendered model arguments after `interactive.args`, so third-party `{model}` and `{provider}` selections remain active when you press `Ctrl+O`. Codex Router and non-interactive Codex Workers use the root option `-a never` before `exec`, so they cannot stall on an approval UI the outer TUI cannot deliver; Router remains `read-only`, while coding Workers stay inside `workspace-write`. Isolated Codex roles remove broader bypass flags and replace any configured approval mode with this bounded policy. The dangerous `--dangerously-bypass-approvals-and-sandbox` mode is never required. Native Codex attach remains interactive. Claude Main uses `auto` so safe tool calls can complete in print mode; isolated Claude coding roles are still clamped to `acceptEdits`. When a command genuinely needs interactive approval, Main points to `Ctrl+O` instead of claiming that a chat reply can grant permission.
 
 `model.provider` names the remote model service; `capabilities.profile` describes the local CLI protocol. Worker Provider IDs are lowercase names using letters, digits, or `_`; excluding `-` keeps generated Worker directory names unambiguous. Existing `codex`, `claude`, and `mock` IDs remain compatible, while additional profiles can inherit `codex`, `claude`, another named profile, or conservative `generic` defaults.
 
@@ -516,12 +516,12 @@ The release job installs npm `^11.5.1`, runs on Node `24.15.x`, publishes the pr
 To publish a release, update `package.json` and `src/version.ts` to the same version, then push a matching tag:
 
 ```bash
-VERSION=0.2.3
+VERSION=0.2.4
 git tag "v$VERSION"
 git push origin "v$VERSION"
 ```
 
-You can also run the Release workflow manually and enter the same tag value. The release tag must match `package.json`; for example, package version `0.2.3` requires tag `v0.2.3`. Published tags such as `v0.2.2` are immutable and must not be moved or reused.
+You can also run the Release workflow manually and enter the same tag value. The release tag must match `package.json`; for example, package version `0.2.4` requires tag `v0.2.4`. Published tags such as `v0.2.3` are immutable and must not be moved or reused.
 
 ## Publishing Hygiene
 

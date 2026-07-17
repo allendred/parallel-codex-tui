@@ -163,6 +163,8 @@ describe("package metadata", () => {
     expect(example).toContain('# extends = "generic"');
     expect(example).toContain('forkArgs = ["fork", "{sessionId}"]');
     expect(example).toContain('forkArgs = ["--resume", "{sessionId}", "--fork-session"]');
+    expect(example).toContain('args = ["-a", "never", "exec", "--skip-git-repo-check"');
+    expect(example).toContain("Native attach stays interactive");
     expect(example).toContain("maxConflictReplans = 2");
     for (const field of TUI_THEME_FIELDS) {
       expect(example).toContain(`# ${field} = `);
@@ -177,6 +179,7 @@ describe("package metadata", () => {
     expect(example).toContain(`# success = "${TUI_THEME_PRESETS.codex.success}"`);
     expect(example).toContain(`# danger = "${TUI_THEME_PRESETS.codex.danger}"`);
     expect(example).not.toContain("danger-full-access");
+    expect(example).not.toContain("dangerously-bypass-approvals-and-sandbox");
     expect(example).not.toContain("bypassPermissions");
   });
 
@@ -185,12 +188,12 @@ describe("package metadata", () => {
 
     expect(readme).toContain("## Requirements");
     expect(readme).toContain("## Current Release");
-    expect(readme).toContain("v0.2.3` is available from [npm]");
+    expect(readme).toContain("v0.2.4` is available from [npm]");
     expect(readme).toContain("preserves the embedded native Agent scrollback");
     expect(readme).toContain("keeps terminal scrolling and copying available at the same time");
     expect(readme).toContain("real three-Feature Tetris task");
     expect(readme).toContain("20-turn soak verifies 80 ordered Workers");
-    expect(readme).toContain("1,264 tests across 123 files");
+    expect(readme).toContain("1,265 tests across 123 files");
     expect(readme).toContain("same Judge native session for a bounded DAG replan");
     expect(readme).toContain("Real Codex and Claude probes both proved fresh and same-session resume calls");
     expect(readme).toContain("authenticate the Claude CLI");
@@ -524,9 +527,9 @@ describe("package metadata", () => {
     expect(readme).toContain('git tag "v$VERSION"');
     expect(readme).toContain('git push origin "v$VERSION"');
     expect(readme).toContain("The release tag must match `package.json`");
-    expect(readme).toContain("VERSION=0.2.3");
-    expect(readme).toContain("package version `0.2.3` requires tag `v0.2.3`");
-    expect(readme).toContain("Published tags such as `v0.2.2` are immutable");
+    expect(readme).toContain("VERSION=0.2.4");
+    expect(readme).toContain("package version `0.2.4` requires tag `v0.2.4`");
+    expect(readme).toContain("Published tags such as `v0.2.3` are immutable");
   });
 
   it("publishes the CLI bin as an executable file", async () => {

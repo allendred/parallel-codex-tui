@@ -741,6 +741,13 @@ function enforceCodexWorkspaceSandbox(args: string[]): string[] {
     if (arg === "--dangerously-bypass-approvals-and-sandbox") {
       continue;
     }
+    if (arg === "-a" || arg === "--ask-for-approval") {
+      index += 1;
+      continue;
+    }
+    if (arg.startsWith("-a=") || arg.startsWith("--ask-for-approval=")) {
+      continue;
+    }
     if (arg === "--sandbox" || arg === "-s") {
       result.push(arg, "workspace-write");
       hasSandbox = true;
@@ -755,10 +762,17 @@ function enforceCodexWorkspaceSandbox(args: string[]): string[] {
     result.push(arg);
   }
 
+  const execIndex = result.indexOf("exec");
+  if (execIndex >= 0) {
+    result.splice(execIndex, 0, "-a", "never");
+  }
+
   if (!hasSandbox) {
-    const execIndex = result.indexOf("exec");
+    const normalizedExecIndex = result.indexOf("exec");
     const promptIndex = result.lastIndexOf("-");
-    const insertAt = execIndex >= 0 ? execIndex + 1 : promptIndex >= 0 ? promptIndex : result.length;
+    const insertAt = normalizedExecIndex >= 0
+      ? normalizedExecIndex + 1
+      : promptIndex >= 0 ? promptIndex : result.length;
     result.splice(insertAt, 0, "--sandbox", "workspace-write");
   }
   return result;

@@ -15,6 +15,8 @@ describe("config", () => {
     expect("engine" in config.router).toBe(false);
     expect("complexityThreshold" in config.router).toBe(false);
     expect(config.router.codex.args).toEqual([
+      "-a",
+      "never",
       "exec",
       "--ephemeral",
       "--ignore-rules",
@@ -37,6 +39,8 @@ describe("config", () => {
     expect(config.router.codex.env).toEqual({});
     expect(config.router.codex.followUpTimeoutMs).toBe(45000);
     expect(config.workers.codex.args).toEqual([
+      "-a",
+      "never",
       "exec",
       "--skip-git-repo-check",
       "--sandbox",
@@ -72,6 +76,8 @@ describe("config", () => {
       "text"
     ]);
     expect(config.workers.codex.nativeSession.resumeArgs).toEqual([
+      "-a",
+      "never",
       "exec",
       "resume",
       "{sessionId}",

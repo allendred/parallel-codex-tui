@@ -213,6 +213,8 @@ export function defaultConfig(projectRoot: string): AppConfig {
       codex: {
         command: "codex",
         args: [
+          "-a",
+          "never",
           "exec",
           "--ephemeral",
           "--ignore-rules",
@@ -244,7 +246,7 @@ export function defaultConfig(projectRoot: string): AppConfig {
     workers: {
       codex: {
         command: "codex",
-        args: ["exec", "--skip-git-repo-check", "--sandbox", "workspace-write", "--color", "never", "-"],
+        args: ["-a", "never", "exec", "--skip-git-repo-check", "--sandbox", "workspace-write", "--color", "never", "-"],
         assignable: true,
         timeoutMs: 45 * 60 * 1000,
         idleTimeoutMs: 5 * 60 * 1000,
@@ -262,7 +264,7 @@ export function defaultConfig(projectRoot: string): AppConfig {
         },
         nativeSession: {
           enabled: true,
-          resumeArgs: ["exec", "resume", "{sessionId}", "--skip-git-repo-check", "-"],
+          resumeArgs: ["-a", "never", "exec", "resume", "{sessionId}", "--skip-git-repo-check", "-"],
           detectSessionId: true,
           fallback: "new"
         },

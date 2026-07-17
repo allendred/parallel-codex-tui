@@ -5,6 +5,11 @@ import {
   type CapabilityCommandRunner
 } from "../src/workers/capabilities.js";
 
+const CODEX_ROOT_HELP = [
+  "Usage: codex [OPTIONS] [PROMPT]",
+  "--ask-for-approval <APPROVAL_POLICY>"
+].join("\n");
+
 const CODEX_EXEC_HELP = [
   "Usage: codex exec [OPTIONS] [PROMPT]",
   "--sandbox <SANDBOX_MODE>",
@@ -51,12 +56,36 @@ describe("diagnoseAgentCapabilities", () => {
     expect(result).toEqual({
       ok: true,
       lines: [
-        "codex capabilities: ok (exec sandbox/add-dir, exec resume, native resume sandbox/add-dir)",
+        "codex capabilities: ok (approval policy, exec sandbox/add-dir, exec resume, native resume sandbox/add-dir)",
         "claude capabilities: ok (print/resume/permissions/add-dir)",
         "native workspace trust: interactive (confirm only workspaces you trust when prompted)"
       ]
     });
-    expect(runner).toHaveBeenCalledTimes(4);
+    expect(runner).toHaveBeenCalledTimes(5);
+  });
+
+  it("fails when recognized Codex help is missing the root approval option", async () => {
+    const config = defaultConfig("/tmp/project");
+    const runner: CapabilityCommandRunner = async (command, args) => ({
+      exitCode: 0,
+      stdout: args[0] === "--help"
+        ? "Usage: codex [OPTIONS] [PROMPT]"
+        : helpFor(command, args),
+      stderr: "",
+      timedOut: false
+    });
+
+    const result = await diagnoseAgentCapabilities(config, {}, {
+      includeRouter: false,
+      workerEngines: ["codex"],
+      availableCommands: new Set(["codex"]),
+      runner
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.lines).toContain(
+      "codex capabilities: incompatible (approval policy missing --ask-for-approval)"
+    );
   });
 
   it("fails when recognized Codex help is missing a required native attach option", async () => {
@@ -102,7 +131,7 @@ describe("diagnoseAgentCapabilities", () => {
 
     expect(result.ok).toBe(true);
     expect(result.lines).toContain(
-      "codex capabilities (vendor-coder): warning (exec sandbox/add-dir help not recognized; exec resume help not recognized; native resume sandbox/add-dir help not recognized; compatibility unverified)"
+      "codex capabilities (vendor-coder): warning (approval policy help not recognized; exec sandbox/add-dir help not recognized; exec resume help not recognized; native resume sandbox/add-dir help not recognized; compatibility unverified)"
     );
   });
 
@@ -174,6 +203,9 @@ describe("diagnoseAgentCapabilities", () => {
 function helpFor(command: string, args: string[]): string {
   if (command === "claude") {
     return CLAUDE_HELP;
+  }
+  if (args[0] === "--help") {
+    return CODEX_ROOT_HELP;
   }
   if (args[0] === "exec" && args[1] === "resume") {
     return CODEX_EXEC_RESUME_HELP;

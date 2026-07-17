@@ -48,6 +48,9 @@ describe("ProcessWorkerAdapter", () => {
     const adapter = new ProcessWorkerAdapter(process.execPath, [
       "-e",
       script,
+      "--",
+      "--ask-for-approval",
+      "on-request",
       "exec",
       "--sandbox",
       "danger-full-access",
@@ -69,9 +72,10 @@ describe("ProcessWorkerAdapter", () => {
 
     const output = await readTextIfExists(outputLogPath);
     expect(result.exitCode).toBe(0);
-    expect(output).toContain("exec|--sandbox|workspace-write|-");
+    expect(output).toContain("-a|never|exec|--sandbox|workspace-write|-");
     expect(output).not.toContain("danger-full-access");
     expect(output).not.toContain("dangerously-bypass-approvals-and-sandbox");
+    expect(output).not.toContain("on-request");
   });
 
   it("forces isolated Claude workers back to acceptEdits", async () => {
@@ -343,6 +347,8 @@ describe("ProcessWorkerAdapter", () => {
         resumeArgs: [
           "-e",
           script,
+          "--",
+          "-a=on-request",
           "exec",
           "--sandbox",
           "danger-full-access",
@@ -358,9 +364,10 @@ describe("ProcessWorkerAdapter", () => {
 
     expect(result.exitCode).toBe(0);
     expect(await readTextIfExists(outputLogPath)).toContain(
-      `exec|--sandbox|workspace-write|--add-dir|${coordinationDir}|resume|session-456|-`
+      `-a|never|exec|--sandbox|workspace-write|--add-dir|${coordinationDir}|resume|session-456|-`
     );
     expect(await readTextIfExists(outputLogPath)).not.toContain("danger-full-access");
+    expect(await readTextIfExists(outputLogPath)).not.toContain("on-request");
   });
 
   it("streams process output into output.log", async () => {

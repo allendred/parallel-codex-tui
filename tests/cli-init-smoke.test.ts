@@ -27,9 +27,11 @@ describe("CLI init", () => {
     expect(stdout).toContain(`Wrote ${configPath}`);
     expect(config).toContain("[router]");
     expect(config).toContain("[workers.codex]");
+    expect(config).toContain('args = ["-a", "never", "exec", "--skip-git-repo-check"');
     expect(config).toContain('args = ["--print", "--permission-mode", "auto", "--output-format", "text"]');
     expect(config).toContain('fallback = "new"');
     expect(config).not.toContain("danger-full-access");
+    expect(config).not.toContain("dangerously-bypass-approvals-and-sandbox");
     expect(config).not.toContain("bypassPermissions");
   });
 

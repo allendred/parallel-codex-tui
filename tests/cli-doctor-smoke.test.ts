@@ -75,7 +75,7 @@ describe("CLI doctor", () => {
     expect(result.stdout).toContain("codex: ok");
     expect(result.stdout).toContain("claude: ok");
     expect(result.stdout).toContain(
-      "codex capabilities: ok (exec sandbox/add-dir, exec resume, native resume sandbox/add-dir)"
+      "codex capabilities: ok (approval policy, exec sandbox/add-dir, exec resume, native resume sandbox/add-dir)"
     );
     expect(result.stdout).toContain(
       "claude capabilities: ok (print/resume/permissions/add-dir)"
@@ -661,7 +661,9 @@ function codexCapabilityScript(options: { addDir?: boolean } = {}): string {
   const addDir = options.addDir === false ? "" : "  --add-dir <DIR>\\n";
   return [
     "#!/bin/sh",
-    "if [ \"$1\" = \"exec\" ] && [ \"$2\" = \"resume\" ] && [ \"$3\" = \"--help\" ]; then",
+    "if [ \"$1\" = \"--help\" ]; then",
+    "  printf 'Usage: codex [OPTIONS] [PROMPT]\\n  --ask-for-approval <POLICY>\\n'",
+    "elif [ \"$1\" = \"exec\" ] && [ \"$2\" = \"resume\" ] && [ \"$3\" = \"--help\" ]; then",
     "  printf 'Usage: codex exec resume [OPTIONS] [SESSION_ID]\\n  --skip-git-repo-check\\n'",
     "elif [ \"$1\" = \"exec\" ] && [ \"$2\" = \"--help\" ]; then",
     `  printf 'Usage: codex exec [OPTIONS] [PROMPT]\\n  --sandbox <MODE>\\n${addDir}  --skip-git-repo-check\\n'`,
@@ -689,6 +691,10 @@ function claudeCapabilityScript(): string {
 function agentProbeScript(engine: "codex" | "claude"): string {
   const help = engine === "codex"
     ? [
+        "if [ \"$1\" = \"--help\" ]; then",
+        "  printf 'Usage: codex [OPTIONS] [PROMPT]\\n  --ask-for-approval <POLICY>\\n'",
+        "  exit 0",
+        "fi",
         "if [ \"$1\" = \"exec\" ] && [ \"$2\" = \"resume\" ] && [ \"$3\" = \"--help\" ]; then",
         "  printf 'Usage: codex exec resume [OPTIONS] [SESSION_ID]\\n  --skip-git-repo-check\\n'",
         "  exit 0",

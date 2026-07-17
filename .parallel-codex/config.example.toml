@@ -3,7 +3,8 @@ defaultMode = "auto"
 
 [router.codex]
 command = "codex"
-args = ["exec", "--ephemeral", "--ignore-rules", "-c", "model_reasoning_effort=low", "--skip-git-repo-check", "--sandbox", "read-only", "--color", "never", "-"]
+# Codex approval policy is a root option and must appear before `exec`.
+args = ["-a", "never", "exec", "--ephemeral", "--ignore-rules", "-c", "model_reasoning_effort=low", "--skip-git-repo-check", "--sandbox", "read-only", "--color", "never", "-"]
 timeoutMs = 60000
 # Stop a silent Router before the total ceiling so one transient retry stays bounded.
 firstOutputTimeoutMs = 30000
@@ -37,8 +38,8 @@ maxConflictReplans = 2
 
 [workers.codex]
 command = "codex"
-# Automated Judge/Actor/Critic runs enforce workspace-write even if private args request a broader sandbox.
-args = ["exec", "--skip-git-repo-check", "--sandbox", "workspace-write", "--color", "never", "-"]
+# Non-interactive runs never wait for an approval UI. Isolated coding roles also enforce workspace-write.
+args = ["-a", "never", "exec", "--skip-git-repo-check", "--sandbox", "workspace-write", "--color", "never", "-"]
 # timeoutMs is the hard ceiling; first output owns silent startup and idle starts after actual output.
 # timeoutMs = 2700000
 # idleTimeoutMs = 300000
@@ -66,6 +67,7 @@ freshSessionArgs = []
 
 [workers.codex.interactive]
 command = "codex"
+# Native attach stays interactive; do not add `-a never` here.
 args = ["resume", "{sessionId}"]
 # Used by the Task session detail view when branching from a recorded native session.
 forkArgs = ["fork", "{sessionId}"]
