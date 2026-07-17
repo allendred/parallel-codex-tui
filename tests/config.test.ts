@@ -27,15 +27,15 @@ describe("config", () => {
       "never",
       "-"
     ]);
-    expect(config.router.codex.timeoutMs).toBe(30000);
-    expect(config.router.codex.firstOutputTimeoutMs).toBe(15000);
-    expect(config.router.codex.idleTimeoutMs).toBe(15000);
+    expect(config.router.codex.timeoutMs).toBe(60000);
+    expect(config.router.codex.firstOutputTimeoutMs).toBe(30000);
+    expect(config.router.codex.idleTimeoutMs).toBe(30000);
     expect(config.router.codex.maxOutputBytes).toBe(1024 * 1024);
     expect(config.router.codex.maxAttempts).toBe(2);
     expect(config.router.codex.retryDelayMs).toBe(500);
     expect(config.router.codex.fallback).toBe("simple");
     expect(config.router.codex.env).toEqual({});
-    expect(config.router.codex.followUpTimeoutMs).toBe(20000);
+    expect(config.router.codex.followUpTimeoutMs).toBe(45000);
     expect(config.workers.codex.args).toEqual([
       "exec",
       "--skip-git-repo-check",

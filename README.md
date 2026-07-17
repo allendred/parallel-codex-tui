@@ -6,7 +6,7 @@ Built with Codex-assisted development.
 
 ## Current Release
 
-`v0.2.1` is available from [npm](https://www.npmjs.com/package/parallel-codex-tui/v/0.2.1) and as a [GitHub Release](https://github.com/allendred/parallel-codex-tui/releases/tag/v0.2.1). It restores single Up/Down request-history navigation while preserving mouse-wheel chat scrolling, terminal text selection, and the parallel recovery and diagnostics work introduced in `v0.2.0`.
+`v0.2.2` is available from [npm](https://www.npmjs.com/package/parallel-codex-tui/v/0.2.2) and as a [GitHub Release](https://github.com/allendred/parallel-codex-tui/releases/tag/v0.2.2). It automatically inherits the macOS system proxy when explicit proxy variables are absent, expands the default Router cold-start budget, and retains the single Up/Down request-history fix from `v0.2.1`.
 
 The release keeps terminal scrolling and copying available at the same time without requiring Shift. Ordinary left-drag selection remains owned by the terminal while alternate-scroll delivers the wheel to chat, Worker logs, and structured views. `Ctrl+Y` copies the visible view as a fallback. It preserves the embedded native Agent scrollback across status-detail round trips and real PTY resizes.
 
@@ -20,7 +20,7 @@ Highlights:
 - Named Worker Providers support Codex-compatible, Claude-compatible, OpenAI-compatible, Anthropic-compatible, and custom generic commands with independent role, model, environment, permission, resume, and interactive settings.
 - Worker overview, Feature board, collaboration timeline, Task center, status details, rendered Markdown/Diff/error logs, Unicode search, keyboard navigation, mouse scrolling, and configurable themes share one terminal UI system.
 
-Release acceptance includes a real three-Feature Tetris task with parallel Actor/Critic waves and final integration review. Real Codex and Claude probes both proved fresh and same-session resume calls, the semantic Router completed a live classification, and one TUI completed Main calls in two workspaces before restoring the first workspace without leaking chat state. PTY coverage runs in Apple Terminal, tmux, and Zellij profiles at narrow and wide sizes, including status/log equivalence and preserving the native output tail across status-detail round trips. The deterministic repository suite passed 1,257 tests across 122 files; one quota-consuming real-Agent test is skipped by default and passes through `npm run test:real-agents`.
+Release acceptance includes a real three-Feature Tetris task with parallel Actor/Critic waves and final integration review. Real Codex and Claude probes both proved fresh and same-session resume calls, the semantic Router completed a live classification, and one TUI completed Main calls in two workspaces before restoring the first workspace without leaking chat state. PTY coverage runs in Apple Terminal, tmux, and Zellij profiles at narrow and wide sizes, including status/log equivalence and preserving the native output tail across status-detail round trips. The deterministic repository suite passed 1,262 tests across 123 files; one quota-consuming real-Agent test is skipped by default and passes through `npm run test:real-agents`.
 
 Real Provider probes depend on valid local CLI credentials. In particular, authenticate the Claude CLI before selecting a Claude-compatible Worker, then run `parallel-codex-tui --doctor --probe-agents` to prove fresh and resumed calls on that machine.
 
@@ -264,17 +264,17 @@ defaultMode = "auto"
 [router.codex]
 command = "codex"
 args = ["exec", "--ephemeral", "--ignore-rules", "-c", "model_reasoning_effort=low", "--skip-git-repo-check", "--sandbox", "read-only", "--color", "never", "-"]
-timeoutMs = 30000
-firstOutputTimeoutMs = 15000
-idleTimeoutMs = 15000
+timeoutMs = 60000
+firstOutputTimeoutMs = 30000
+idleTimeoutMs = 30000
 maxOutputBytes = 1048576
 maxAttempts = 2
 retryDelayMs = 500
-followUpTimeoutMs = 20000
+followUpTimeoutMs = 45000
 fallback = "simple"
 ```
 
-Set `defaultMode = "simple"` / `defaultMode = "complex"` to force one path. In `auto` mode, routing is semantic through an ephemeral, low-reasoning Codex run. Only `simple` and `complex` are accepted route modes; harmless casing and surrounding whitespace are normalized, while invalid JSON or an unknown mode uses the configured fallback and appears as `invalid output` in the status bar. `fallback = "simple"` or `fallback = "complex"` supplies the non-interactive fallback path; the safe default is `simple` and there is no keyword-only router. `firstOutputTimeoutMs` stops a silent process, `idleTimeoutMs` resets after every stdout or stderr chunk, and `timeoutMs` remains the hard ceiling even while output continues. `maxOutputBytes` bounds combined Router stdout and stderr in memory; exceeding it stops the process tree and reports invalid output instead of waiting for a timeout. The 1 MiB default can be configured from 1 KiB through 16 MiB. The 15-second first-output and idle defaults stay below the 30-second total ceiling, so their failure kinds remain visible. Two repeated silent starts settle in about 30.5 seconds instead of two full 30-second waits; an idle deadline begins after the latest output, while the hard ceiling still bounds every attempt. A watchdog only runs separately when its limit is lower than the active initial or follow-up total timeout, avoiding competing timers at the same deadline.
+Set `defaultMode = "simple"` / `defaultMode = "complex"` to force one path. In `auto` mode, routing is semantic through an ephemeral, low-reasoning Codex run. Only `simple` and `complex` are accepted route modes; harmless casing and surrounding whitespace are normalized, while invalid JSON or an unknown mode uses the configured fallback and appears as `invalid output` in the status bar. `fallback = "simple"` or `fallback = "complex"` supplies the non-interactive fallback path; the safe default is `simple` and there is no keyword-only router. `firstOutputTimeoutMs` stops a silent process, `idleTimeoutMs` resets after every stdout or stderr chunk, and `timeoutMs` remains the hard ceiling even while output continues. `maxOutputBytes` bounds combined Router stdout and stderr in memory; exceeding it stops the process tree and reports invalid output instead of waiting for a timeout. The 1 MiB default can be configured from 1 KiB through 16 MiB. The 30-second first-output and idle defaults stay below the 60-second total ceiling, leaving room for a proxied Codex cold start while preserving distinct failure evidence. An idle deadline begins after the latest output, while the hard ceiling still bounds every attempt. A watchdog only runs separately when its limit is lower than the active initial or follow-up total timeout, avoiding competing timers at the same deadline.
 
 On POSIX systems the Router command runs in its own process group. Timeout, cancellation, and stdin failure send `SIGTERM`, wait briefly for graceful cleanup, then use `SIGKILL` when any group member remains. A retry, fallback choice, or completed cancellation is not exposed until that command tree is confirmed stopped, so a previous classifier cannot overlap the next Router or Worker. If termination cannot be verified after `SIGKILL`, the request fails closed instead of continuing around a live process.
 
@@ -290,7 +290,7 @@ Every new Router fallback persists an authoritative `router_failure_kind` alongs
 
 ### Proxy Environment
 
-Some CLI runtimes do not inherit the macOS System Settings proxy. Configure the router explicitly when direct OpenAI connections are blocked:
+On macOS, startup automatically inherits enabled HTTP, HTTPS, SOCKS, and bypass settings from System Settings when the corresponding process environment variables are absent. Explicit shell variables and local config remain authoritative. Set `PARALLEL_CODEX_INHERIT_SYSTEM_PROXY=0` to opt out. Configure provider-specific values explicitly when one agent needs a different route:
 
 ```toml
 [router.codex.env]
@@ -308,7 +308,7 @@ NO_PROXY = "localhost,127.0.0.1"
 
 `router.codex.env` applies only to semantic classification. `workers.<id>.model.env` applies to fresh/resumed runs and embedded native attach for that named Worker Provider. Keep these values in local `config.toml`, which is ignored by Git.
 
-Run `parallel-codex-tui --doctor` after changing proxy settings. Doctor checks referenced environment variables, reports when a macOS system proxy is not inherited by Codex subprocesses, and labels configured proxy host/port checks as local-endpoint reachability without printing credentials. Then run `parallel-codex-tui --doctor --probe-router` when you also need to verify the real Codex Router path through that proxy; this explicit probe can take up to `router.codex.timeoutMs`. A timed-out request is identified as `first output timeout`, `idle timeout after stdout/stderr`, or `total timeout`; `via <proxy-host:port>` remains context, not a claim that the proxy caused the failure. The audit never exposes the proxy URL or credentials.
+Run `parallel-codex-tui --doctor` after changing proxy settings. Doctor checks referenced environment variables and labels inherited or configured proxy host/port checks as local-endpoint reachability without printing credentials. If system-proxy detection is unavailable, Doctor reports that the macOS proxy was not inherited and points to the explicit config table. Then run `parallel-codex-tui --doctor --probe-router` when you also need to verify the real Codex Router path through that proxy; this explicit probe can take up to `router.codex.timeoutMs`. A timed-out request is identified as `first output timeout`, `idle timeout after stdout/stderr`, or `total timeout`; `via <proxy-host:port>` remains context, not a claim that the proxy caused the failure. The audit never exposes the proxy URL or credentials.
 
 ## Mock Mode
 
@@ -516,12 +516,12 @@ The release job installs npm `^11.5.1`, runs on Node `24.15.x`, publishes the pr
 To publish a release, update `package.json` and `src/version.ts` to the same version, then push a matching tag:
 
 ```bash
-VERSION=0.2.1
+VERSION=0.2.2
 git tag "v$VERSION"
 git push origin "v$VERSION"
 ```
 
-You can also run the Release workflow manually and enter the same tag value. The release tag must match `package.json`; for example, package version `0.2.1` requires tag `v0.2.1`. Published tags such as `v0.2.0` are immutable and must not be moved or reused.
+You can also run the Release workflow manually and enter the same tag value. The release tag must match `package.json`; for example, package version `0.2.2` requires tag `v0.2.2`. Published tags such as `v0.2.1` are immutable and must not be moved or reused.
 
 ## Publishing Hygiene
 

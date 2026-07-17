@@ -4,18 +4,18 @@ defaultMode = "auto"
 [router.codex]
 command = "codex"
 args = ["exec", "--ephemeral", "--ignore-rules", "-c", "model_reasoning_effort=low", "--skip-git-repo-check", "--sandbox", "read-only", "--color", "never", "-"]
-timeoutMs = 30000
+timeoutMs = 60000
 # Stop a silent Router before the total ceiling so one transient retry stays bounded.
-firstOutputTimeoutMs = 15000
+firstOutputTimeoutMs = 30000
 # Reset after every stdout/stderr chunk; timeoutMs remains the hard ceiling.
-idleTimeoutMs = 15000
+idleTimeoutMs = 30000
 # Stop a noisy or malformed classifier before it can grow Router memory without bound (1 KiB..16 MiB).
 maxOutputBytes = 1048576
 # Retry one transient Router failure before asking the user; 1 disables automatic retry.
 maxAttempts = 2
 retryDelayMs = 500
 # Active-task follow-ups fail safely to Main after this shorter Codex timeout.
-followUpTimeoutMs = 20000
+followUpTimeoutMs = 45000
 # Non-interactive fallback; the TUI pauses and asks before executing it.
 fallback = "simple"
 

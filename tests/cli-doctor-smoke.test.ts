@@ -84,7 +84,7 @@ describe("CLI doctor", () => {
       "native workspace trust: interactive (confirm only workspaces you trust when prompted)"
     );
     expect(result.stdout).toContain("router retry: 2 attempts; transient only; 500ms backoff (TUI routing; live probe runs once)");
-    expect(result.stdout).toContain("router budget: total 30000ms; follow-up 20000ms; first output 15000ms; idle 15000ms");
+    expect(result.stdout).toContain("router budget: total 60000ms; follow-up 45000ms; first output 30000ms; idle 30000ms");
     await expect(pathExists(workspace)).resolves.toBe(true);
   });
 

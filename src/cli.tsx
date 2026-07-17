@@ -17,6 +17,7 @@ import { configPath, loadConfig, withUiThemeOverride, writeDefaultConfig } from 
 import { pathExists } from "./core/file-store.js";
 import { exportDiagnostics } from "./core/diagnostics.js";
 import { readRouterAudit } from "./core/router-audit.js";
+import { inheritMacSystemProxy } from "./core/system-proxy.js";
 import { loadTaskSessionDetails as loadPersistedTaskSessionDetails } from "./core/task-session-details.js";
 import { listWorkspaceChoices } from "./core/workspace.js";
 import { runDoctor, runRuntimePreflight } from "./doctor.js";
@@ -44,6 +45,9 @@ async function main(): Promise<void> {
   }
 
   const cliArgs = parseCliArgs(rawArgs, process.cwd());
+  if (!cliArgs.help && !cliArgs.themes && !cliArgs.version && !cliArgs.init) {
+    await inheritMacSystemProxy(process.env);
+  }
   if (!cliArgs.help && !cliArgs.themes && !cliArgs.version) {
     await prepareAppRoot(cliArgs.appRoot);
   }

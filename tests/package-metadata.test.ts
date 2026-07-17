@@ -185,12 +185,12 @@ describe("package metadata", () => {
 
     expect(readme).toContain("## Requirements");
     expect(readme).toContain("## Current Release");
-    expect(readme).toContain("v0.2.1` is available from [npm]");
+    expect(readme).toContain("v0.2.2` is available from [npm]");
     expect(readme).toContain("preserves the embedded native Agent scrollback");
     expect(readme).toContain("keeps terminal scrolling and copying available at the same time");
     expect(readme).toContain("real three-Feature Tetris task");
     expect(readme).toContain("20-turn soak verifies 80 ordered Workers");
-    expect(readme).toContain("1,257 tests across 122 files");
+    expect(readme).toContain("1,262 tests across 123 files");
     expect(readme).toContain("same Judge native session for a bounded DAG replan");
     expect(readme).toContain("Real Codex and Claude probes both proved fresh and same-session resume calls");
     expect(readme).toContain("authenticate the Claude CLI");
@@ -322,8 +322,8 @@ describe("package metadata", () => {
     expect(readme).toContain("request and route kept");
     expect(readme).toContain("`firstOutputTimeoutMs` stops a silent process");
     expect(readme).toContain("`idleTimeoutMs` resets after every stdout or stderr chunk");
-    expect(readme).toContain("The 15-second first-output and idle defaults stay below the 30-second total ceiling");
-    expect(readme).toContain("Two repeated silent starts settle in about 30.5 seconds");
+    expect(readme).toContain("The 30-second first-output and idle defaults stay below the 60-second total ceiling");
+    expect(readme).toContain("leaving room for a proxied Codex cold start");
     expect(readme).toContain("A retry, fallback choice, or completed cancellation is not exposed until that command tree is confirmed stopped");
     expect(readme).toContain("If termination cannot be verified after `SIGKILL`, the request fails closed");
     expect(readme).toContain("`maxAttempts = 2` retries one transient classification failure after `retryDelayMs = 500`");
@@ -337,6 +337,8 @@ describe("package metadata", () => {
     expect(readme).toContain("`1` selects Main, `2` selects Parallel, `R` retries Codex routing, and `Esc` cancels");
     expect(readme).toContain("`router_attempt` and `router_fallback_resolution`");
     expect(readme).toContain("Active-task follow-ups use the same fallback choice");
+    expect(readme).toContain("startup automatically inherits enabled HTTP, HTTPS, SOCKS, and bypass settings from System Settings");
+    expect(readme).toContain("`PARALLEL_CODEX_INHERIT_SYSTEM_PROXY=0` to opt out");
     expect(readme).toContain("Follow-up Router classification has no task-side effects");
     expect(readme).toContain("a complex turn or simple question refreshes `sessions/<task>/latest-route.json` only after acquiring the task lease");
     expect(readme).toContain("A conflicting TUI leaves the previous committed route and turn files untouched");
@@ -522,9 +524,9 @@ describe("package metadata", () => {
     expect(readme).toContain('git tag "v$VERSION"');
     expect(readme).toContain('git push origin "v$VERSION"');
     expect(readme).toContain("The release tag must match `package.json`");
-    expect(readme).toContain("VERSION=0.2.1");
-    expect(readme).toContain("package version `0.2.1` requires tag `v0.2.1`");
-    expect(readme).toContain("Published tags such as `v0.2.0` are immutable");
+    expect(readme).toContain("VERSION=0.2.2");
+    expect(readme).toContain("package version `0.2.2` requires tag `v0.2.2`");
+    expect(readme).toContain("Published tags such as `v0.2.1` are immutable");
   });
 
   it("publishes the CLI bin as an executable file", async () => {

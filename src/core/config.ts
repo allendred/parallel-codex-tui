@@ -97,13 +97,13 @@ const CodexRouterConfigSchema = z.object({
     "never",
     "-"
   ]),
-  timeoutMs: z.number().int().positive().default(30000),
-  firstOutputTimeoutMs: z.number().int().positive().default(15000),
-  idleTimeoutMs: z.number().int().positive().default(15000),
+  timeoutMs: z.number().int().positive().default(60000),
+  firstOutputTimeoutMs: z.number().int().positive().default(30000),
+  idleTimeoutMs: z.number().int().positive().default(30000),
   maxOutputBytes: z.number().int().min(1024).max(16 * 1024 * 1024).default(1024 * 1024),
   maxAttempts: z.number().int().min(1).max(3).default(2),
   retryDelayMs: z.number().int().min(0).max(10000).default(500),
-  followUpTimeoutMs: z.number().int().positive().max(120000).default(20000),
+  followUpTimeoutMs: z.number().int().positive().max(120000).default(45000),
   fallback: z.enum(["simple", "complex"]).default("simple"),
   env: z.record(z.string()).default({})
 });
@@ -225,13 +225,13 @@ export function defaultConfig(projectRoot: string): AppConfig {
           "never",
           "-"
         ],
-        timeoutMs: 30000,
-        firstOutputTimeoutMs: 15000,
-        idleTimeoutMs: 15000,
+        timeoutMs: 60000,
+        firstOutputTimeoutMs: 30000,
+        idleTimeoutMs: 30000,
         maxOutputBytes: 1024 * 1024,
         maxAttempts: 2,
         retryDelayMs: 500,
-        followUpTimeoutMs: 20000,
+        followUpTimeoutMs: 45000,
         fallback: "simple",
         env: {}
       }

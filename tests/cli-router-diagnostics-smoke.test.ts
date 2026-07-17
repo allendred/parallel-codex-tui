@@ -110,7 +110,7 @@ describe("CLI Router diagnostics smoke", () => {
       expect(snapshot.split("\n")[0]).toContain("routes");
       expect(snapshot).toContain("scope · all · 27/27 routes · 2 workspaces");
       expect(snapshot).toContain("latency · successful attempts p50");
-      expect(snapshot).toContain("budget · initial healthy");
+      expect(snapshot).toContain("budget · initial high");
       expect(snapshot).toContain("proxy · direct now");
       expect(snapshot).not.toContain("user:secret");
 
