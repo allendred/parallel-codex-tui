@@ -79,6 +79,7 @@ describe("CLI route restore smoke", () => {
         screen,
         "route simple · fallback · timeout"
       );
+      await waitForScreenText(() => screenWrites, screen, "> | message");
       child.write("\x13");
       await waitForScreenText(() => screenWrites, screen, "parallel-codex-tui · status");
       await waitForScreenText(
