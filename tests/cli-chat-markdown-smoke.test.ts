@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { spawn } from "node-pty";
 import { readTextIfExists } from "../src/core/file-store.js";
+import { SessionManager } from "../src/core/session-manager.js";
 import { NativeTerminalScreen } from "../src/tui/terminal-screen.js";
 import { TUI_THEME_PRESETS } from "../src/tui/theme.js";
 
@@ -19,11 +20,17 @@ describe("CLI chat Markdown smoke", () => {
     await writeFile(
       mainScript,
       [
+        "const fs = require('node:fs');",
         "let input = '';",
         "process.stdin.setEncoding('utf8');",
         "process.stdin.on('data', (chunk) => { input += chunk; });",
         "process.stdin.on('end', () => {",
-        "  const restored = input.includes('User: 暗号是青色') && input.includes('User request:\\n暗号是什么');",
+        "  const archiveMatch = input.match(/Scoped JSONL snapshot: (\"(?:[^\"\\\\]|\\\\.)*\")/);",
+        "  let archive = '';",
+        "  if (archiveMatch) {",
+        "    try { archive = fs.readFileSync(JSON.parse(archiveMatch[1]), 'utf8'); } catch {}",
+        "  }",
+        "  const restored = !input.includes('User: 暗号是青色') && archive.includes('暗号是青色') && input.includes('User request:\\n暗号是什么');",
         "  process.stdout.write(restored ? '文件记忆恢复成功\\n' : '已经记住暗号\\n');",
         "});"
       ].join("\n")
@@ -66,6 +73,16 @@ describe("CLI chat Markdown smoke", () => {
       child.write("暗号是青色\r");
       await waitForScreenText(() => screenWrites, screen, "已经记住暗号");
       await waitForScreenText(() => screenWrites, screen, "> | message");
+      const sessions = new SessionManager({
+        projectRoot: workspace,
+        dataDir: ".parallel-codex"
+      });
+      for (let index = 1; index <= 16; index += 1) {
+        await sessions.appendChatMessage({
+          from: index % 2 === 0 ? "system" : "user",
+          text: `填充对话 ${index}`
+        });
+      }
       child.write("暗号是什么\r");
       await waitForScreenText(() => screenWrites, screen, "文件记忆恢复成功");
 
@@ -78,9 +95,21 @@ describe("CLI chat Markdown smoke", () => {
         "prompt.md"
       ));
       expect(prompt).toContain("# Recent conversation");
-      expect(prompt).toContain("User: 暗号是青色");
-      expect(prompt).toContain("Assistant: 已经记住暗号");
+      expect(prompt).not.toContain("User: 暗号是青色");
+      expect(prompt).toContain("# Extended conversation memory");
+      expect(prompt).toContain("conversation.jsonl");
       expect(prompt.split("暗号是什么")).toHaveLength(2);
+      const archive = await readTextIfExists(join(
+        workspace,
+        ".parallel-codex",
+        "sessions",
+        "main",
+        "main-codex",
+        "conversation.jsonl"
+      ));
+      expect(archive).toContain("暗号是青色");
+      expect(archive).toContain("已经记住暗号");
+      expect(archive).not.toContain("暗号是什么");
     } finally {
       child.kill("SIGTERM");
     }

@@ -151,11 +151,27 @@ describe("Orchestrator", () => {
     });
 
     const prompt = adapter.runs[0]?.prompt ?? "";
+    const archivePath = join(
+      root,
+      ".parallel-codex",
+      "sessions",
+      "main",
+      "main-mock",
+      "conversation.jsonl"
+    );
+    const archive = await readTextIfExists(archivePath);
     expect(prompt).toContain("# Recent conversation");
+    expect(prompt).toContain("# Extended conversation memory");
+    expect(prompt).toContain(`Scoped JSONL snapshot: ${JSON.stringify(archivePath)}`);
+    expect(prompt).toContain("Scope: ordinary chat records without task_id.");
     expect(prompt).toContain("User: 我叫小林");
     expect(prompt).toContain("Assistant: 记住了，你叫小林");
     expect(prompt).not.toContain("另一个任务里的秘密");
     expect(prompt.split("我刚才叫什么名字？")).toHaveLength(2);
+    expect(archive).toContain("我叫小林");
+    expect(archive).toContain("记住了，你叫小林");
+    expect(archive).not.toContain("另一个任务里的秘密");
+    expect(archive).not.toContain("我刚才叫什么名字？");
   });
 
   it("bounds file-backed Main memory while retaining the newest conversation", async () => {
@@ -180,13 +196,70 @@ describe("Orchestrator", () => {
 
     const prompt = adapter.runs[0]?.prompt ?? "";
     const conversationStart = prompt.indexOf("# Recent conversation");
-    const conversationEnd = prompt.indexOf("\nUser request:", conversationStart);
+    const archiveStart = prompt.indexOf("\n# Extended conversation memory", conversationStart);
+    const conversationEnd = archiveStart >= 0
+      ? archiveStart
+      : prompt.indexOf("\nUser request:", conversationStart);
     expect(conversationStart).toBeGreaterThanOrEqual(0);
     expect(conversationEnd).toBeGreaterThan(conversationStart);
     const conversation = prompt.slice(conversationStart, conversationEnd);
     expect(conversation).toContain("MEMORY_20_");
     expect(conversation).not.toContain("MEMORY_01_");
     expect(conversation.length).toBeLessThan(6400);
+    const archive = await readTextIfExists(join(
+      root,
+      ".parallel-codex",
+      "sessions",
+      "main",
+      "main-mock",
+      "conversation.jsonl"
+    ));
+    expect(archive).toContain("MEMORY_01_");
+    expect(archive).toContain("MEMORY_20_");
+    expect(archive).not.toContain("继续对话");
+  });
+
+  it("bounds extended Main memory while preserving its opening record and newest tail", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pct-orch-main-extended-memory-"));
+    const config = mockConfig(root);
+    config.router.defaultMode = "simple";
+    const manager = new SessionManager({
+      projectRoot: root,
+      dataDir: config.dataDir
+    });
+    for (let index = 1; index <= 205; index += 1) {
+      await manager.appendChatMessage({
+        from: "user",
+        text: `ARCHIVE_${String(index).padStart(3, "0")}_${index === 1 ? "x".repeat(2000) : index === 205 ? "saved\nsecond line" : "saved"}`
+      });
+    }
+    await manager.appendChatMessage({ from: "user", text: "读取深层记忆" });
+    const adapter = new CapturingAdapter();
+    const orchestrator = new Orchestrator(config, manager, new Map([["mock", adapter]]));
+
+    await orchestrator.handleRequest({ request: "读取深层记忆", cwd: root });
+
+    const archive = (await readTextIfExists(join(
+      root,
+      ".parallel-codex",
+      "sessions",
+      "main",
+      "main-mock",
+      "conversation.jsonl"
+    )))
+      .trim()
+      .split("\n")
+      .filter(Boolean)
+      .map((line) => JSON.parse(line) as { text: string });
+    expect(archive).toHaveLength(200);
+    expect(archive[0]?.text).toContain("ARCHIVE_001_");
+    expect(Array.from(archive[0]?.text ?? "")).toHaveLength(1200);
+    expect(archive.some((record) => record.text.includes("ARCHIVE_002_"))).toBe(false);
+    expect(archive.some((record) => record.text.includes("ARCHIVE_006_"))).toBe(false);
+    expect(archive.some((record) => record.text.includes("ARCHIVE_007_"))).toBe(true);
+    expect(archive.at(-1)?.text).toBe("ARCHIVE_205_saved\nsecond line");
+    expect(archive.some((record) => record.text.includes("读取深层记忆"))).toBe(false);
+    expect(adapter.runs[0]?.prompt).toContain("Records: 200");
   });
 
   it("reuses the main native session across simple chat turns and restarts", async () => {
@@ -2384,10 +2457,23 @@ describe("Orchestrator", () => {
     expect(adapter.runs[0]?.prompt).toContain("User: 这个任务关注得分");
     expect(adapter.runs[0]?.prompt).toContain("Assistant: 已记录得分任务上下文");
     expect(adapter.runs[0]?.prompt).not.toContain("普通聊天不应进入任务");
+    expect(adapter.runs[0]?.prompt).toContain("# Extended conversation memory");
+    expect(adapter.runs[0]?.prompt).toContain(`Scope: records whose task_id exactly equals ${JSON.stringify(task.id)}.`);
     expect(adapter.runs[0]?.prompt).toContain("User request:\n原因呢超时");
     expect(adapter.runs[0]?.nativeSession).toBeNull();
     expect(adapter.runs[1]?.nativeSession?.session_id).toBe("mock-main-mock");
     expect(await pathExists(join(task.dir, "turns", "0002", "user.md"))).toBe(false);
+    const archive = await readTextIfExists(join(
+      root,
+      ".parallel-codex",
+      "sessions",
+      "main",
+      "main-mock",
+      "conversation.jsonl"
+    ));
+    expect(archive).toContain("这个任务关注得分");
+    expect(archive).toContain("已记录得分任务上下文");
+    expect(archive).not.toContain("普通聊天不应进入任务");
   });
 
   it("keeps the root turn and recent twenty-turn task memory after native session rollover", async () => {

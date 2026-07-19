@@ -60,16 +60,17 @@ export async function appendText(path: string, value: string): Promise<void> {
   await appendFile(path, value);
 }
 
-export interface ReadRecentJsonLinesOptions {
+export interface ReadRecentJsonLinesOptions<TRecord = unknown> {
   chunkBytes?: number;
   maxLineBytes?: number;
+  filter?: (record: TRecord) => boolean;
 }
 
 export async function readRecentJsonLines<TSchema extends ZodTypeAny>(
   path: string,
   schema: TSchema,
   limit: number,
-  options: ReadRecentJsonLinesOptions = {}
+  options: ReadRecentJsonLinesOptions<output<TSchema>> = {}
 ): Promise<Array<output<TSchema>>> {
   const targetLimit = Number.isFinite(limit)
     ? Math.min(10000, Math.max(0, Math.trunc(limit)))
@@ -124,7 +125,7 @@ export async function readRecentJsonLines<TSchema extends ZodTypeAny>(
         if (line) {
           try {
             const parsed = schema.safeParse(JSON.parse(line));
-            if (parsed.success) {
+            if (parsed.success && (!options.filter || options.filter(parsed.data))) {
               newestFirst.push(parsed.data);
             }
           } catch {

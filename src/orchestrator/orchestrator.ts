@@ -60,10 +60,12 @@ import { ParallelWorkspaceManager, WorkspaceMergeConflictError } from "./workspa
 const PREVIOUS_TURN_SUMMARY_LIMIT = 20;
 const PREVIOUS_TURN_SUMMARY_LENGTH = 600;
 const PREVIOUS_TURN_SUMMARY_TOTAL_LENGTH = 12000;
-const MAIN_CONVERSATION_READ_LIMIT = 50;
+const MAIN_CONVERSATION_READ_LIMIT = 1000;
 const MAIN_CONVERSATION_RECORD_LIMIT = 12;
 const MAIN_CONVERSATION_MESSAGE_LENGTH = 800;
 const MAIN_CONVERSATION_TOTAL_LENGTH = 6000;
+const MAIN_CONVERSATION_ARCHIVE_RECORD_LIMIT = 200;
+const MAIN_CONVERSATION_ARCHIVE_MESSAGE_LENGTH = 1200;
 const JUDGE_ARTIFACTS = [
   ...JUDGE_REQUIRED_ARTIFACTS,
   "features.json"
@@ -2151,19 +2153,32 @@ export class Orchestrator {
     const promptPath = join(filesDir, "prompt.md");
     const outputLogPath = join(filesDir, "output.log");
     const statusPath = join(filesDir, "status.json");
-    const conversation = buildMainConversationContext(
-      await this.sessions.readChatHistory(MAIN_CONVERSATION_READ_LIMIT),
+    const conversationArchivePath = join(filesDir, "conversation.jsonl");
+    const conversation = buildMainConversationMemory(
+      await this.sessions.readScopedChatHistory(taskId, MAIN_CONVERSATION_READ_LIMIT),
       input.request,
       taskId
+    );
+
+    await ensureDir(filesDir);
+    await writeText(
+      conversationArchivePath,
+      conversation.archive.length > 0
+        ? `${conversation.archive.map((record) => JSON.stringify(record)).join("\n")}\n`
+        : ""
     );
     const prompt = buildMainPrompt({
       request: input.request,
       role: this.config.roles.main,
       context,
-      conversation
+      conversation: conversation.recent,
+      conversationArchive: {
+        path: conversationArchivePath,
+        taskId,
+        recordCount: conversation.archive.length
+      }
     });
 
-    await ensureDir(filesDir);
     await writeText(promptPath, prompt);
     await writeText(outputLogPath, "");
     await writeJson(statusPath, {
@@ -3053,11 +3068,11 @@ function buildTaskQuestionContext(input: {
   return lines.join("\n");
 }
 
-function buildMainConversationContext(
+function buildMainConversationMemory(
   records: ChatRecord[],
   currentRequest: string,
   taskId: string | null
-): string {
+): { recent: string; archive: ChatRecord[] } {
   const scoped = records.filter((record) => (
     taskId ? record.task_id === taskId : !record.task_id
   ));
@@ -3070,9 +3085,16 @@ function buildMainConversationContext(
     previous.pop();
   }
 
+  return {
+    recent: buildRecentMainConversation(previous),
+    archive: buildMainConversationArchive(previous)
+  };
+}
+
+function buildRecentMainConversation(records: ChatRecord[]): string {
   let remaining = MAIN_CONVERSATION_TOTAL_LENGTH;
   const newestFirst: string[] = [];
-  const candidates = previous.slice(-MAIN_CONVERSATION_RECORD_LIMIT);
+  const candidates = records.slice(-MAIN_CONVERSATION_RECORD_LIMIT);
   for (let index = candidates.length - 1; index >= 0; index -= 1) {
     const record = candidates[index];
     if (!record) {
@@ -3096,6 +3118,28 @@ function buildMainConversationContext(
   }
 
   return newestFirst.reverse().join("\n");
+}
+
+function buildMainConversationArchive(records: ChatRecord[]): ChatRecord[] {
+  const selected = records.length <= MAIN_CONVERSATION_ARCHIVE_RECORD_LIMIT
+    ? records
+    : [
+      records[0],
+      ...records.slice(-(MAIN_CONVERSATION_ARCHIVE_RECORD_LIMIT - 1))
+    ].filter((record): record is ChatRecord => Boolean(record));
+
+  return selected.map((record) => ({
+    ...record,
+    text: truncateConversationArchiveMessage(record.text, MAIN_CONVERSATION_ARCHIVE_MESSAGE_LENGTH)
+  }));
+}
+
+function truncateConversationArchiveMessage(message: string, maximumLength: number): string {
+  const characters = Array.from(message.trim());
+  if (characters.length <= maximumLength) {
+    return characters.join("");
+  }
+  return `${characters.slice(0, Math.max(1, maximumLength - 3)).join("")}...`;
 }
 
 function compactConversationMessage(message: string, maximumLength: number): string {

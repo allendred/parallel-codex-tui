@@ -56,6 +56,22 @@ describe("readRecentJsonLines", () => {
     ]);
   });
 
+  it("keeps scanning backward until the filtered record limit is satisfied", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pct-recent-jsonl-filter-"));
+    const path = join(root, "history.jsonl");
+    await writeText(path, [1, 2, 3, 4, 5]
+      .map((id) => JSON.stringify({ id, text: `record ${id}` }))
+      .join("\n") + "\n");
+
+    await expect(readRecentJsonLines(path, RecordSchema, 2, {
+      chunkBytes: 9,
+      filter: (record) => record.id % 2 === 0
+    })).resolves.toEqual([
+      { id: 2, text: "record 2" },
+      { id: 4, text: "record 4" }
+    ]);
+  });
+
   it("returns no records for a missing file or zero limit", async () => {
     const root = await mkdtemp(join(tmpdir(), "pct-recent-jsonl-empty-"));
     const path = join(root, "missing.jsonl");

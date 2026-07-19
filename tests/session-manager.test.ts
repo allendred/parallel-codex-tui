@@ -123,6 +123,8 @@ describe("SessionManager", () => {
     expect(chatManager.readChatHistory).toBeTypeOf("function");
     await chatManager.appendChatMessage?.({ from: "user", text: "记住暗号蓝色", taskId: "task-blue" });
     await chatManager.appendChatMessage?.({ from: "system", text: "已经记住。", taskId: "task-blue" });
+    await chatManager.appendChatMessage?.({ from: "user", text: "普通聊天" });
+    await chatManager.appendChatMessage?.({ from: "user", text: "其他任务", taskId: "task-other" });
 
     const chatPath = join(root, ".parallel-codex", "sessions", "main", "chat.jsonl");
     await appendText(chatPath, "not-json\n{\"from\":\"other\",\"text\":\"bad\"}\n");
@@ -139,14 +141,46 @@ describe("SessionManager", () => {
         from: "system",
         text: "已经记住。",
         task_id: "task-blue"
+      },
+      {
+        time: "2026-07-10T12:00:00.000Z",
+        from: "user",
+        text: "普通聊天"
+      },
+      {
+        time: "2026-07-10T12:00:00.000Z",
+        from: "user",
+        text: "其他任务",
+        task_id: "task-other"
       }
     ]);
     await expect(chatManager.readChatHistory?.(1)).resolves.toEqual([
       {
         time: "2026-07-10T12:00:00.000Z",
+        from: "user",
+        text: "其他任务",
+        task_id: "task-other"
+      }
+    ]);
+    await expect(manager.readScopedChatHistory("task-blue", 2)).resolves.toEqual([
+      {
+        time: "2026-07-10T12:00:00.000Z",
+        from: "user",
+        text: "记住暗号蓝色",
+        task_id: "task-blue"
+      },
+      {
+        time: "2026-07-10T12:00:00.000Z",
         from: "system",
         text: "已经记住。",
         task_id: "task-blue"
+      }
+    ]);
+    await expect(manager.readScopedChatHistory(null, 2)).resolves.toEqual([
+      {
+        time: "2026-07-10T12:00:00.000Z",
+        from: "user",
+        text: "普通聊天"
       }
     ]);
   });

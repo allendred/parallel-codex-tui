@@ -83,15 +83,40 @@ describe("CLI real Agent multi-workspace acceptance", () => {
         projectRoot: first,
         dataDir: ".parallel-codex"
       });
+      for (let index = 1; index <= 16; index += 1) {
+        await firstSessions.appendChatMessage({
+          from: index % 2 === 0 ? "system" : "user",
+          text: `深层记忆填充对话 ${index}`
+        });
+      }
       await firstSessions.retireNativeSession(
         { dir: join(first, ".parallel-codex", "sessions", "main", "main-claude") },
         "real file-backed memory acceptance"
       );
-      child.write("刚才让我记住的暗号是什么？只回复 MEMORY= 加暗号，不要使用工具。\r");
+      child.write("刚才让我记住的暗号是什么？如果最近上下文没有，请读取提示中的 Extended conversation memory。只回复 MEMORY= 加暗号。\r");
       await waitForScreenText(() => screenWrites, screen, "MEMORY=PCT_REAL_MEMORY_CYAN");
       await waitForScreenText(() => screenWrites, screen, "> | message");
       const replacementSession = JSON.parse(await readFile(firstSessionPath, "utf8")) as { session_id: string };
       expect(replacementSession.session_id).not.toBe(firstSession.session_id);
+      const deepMemoryPrompt = await readFile(join(
+        first,
+        ".parallel-codex",
+        "sessions",
+        "main",
+        "main-claude",
+        "prompt.md"
+      ), "utf8");
+      const deepMemoryArchive = await readFile(join(
+        first,
+        ".parallel-codex",
+        "sessions",
+        "main",
+        "main-claude",
+        "conversation.jsonl"
+      ), "utf8");
+      expect(deepMemoryPrompt).toContain("# Extended conversation memory");
+      expect(deepMemoryPrompt).not.toContain("PCT_REAL_MEMORY_CYAN");
+      expect(deepMemoryArchive).toContain("PCT_REAL_MEMORY_CYAN");
 
       child.write("\x10");
       await waitForScreenText(() => screenWrites, screen, "Open project");
@@ -106,7 +131,7 @@ describe("CLI real Agent multi-workspace acceptance", () => {
       await waitForScreenText(() => screenWrites, screen, "Open project");
       child.write("2");
       await waitForProjectChat(() => screenWrites, screen, first);
-      await waitForScreenText(() => screenWrites, screen, "PCT_REAL_WORKSPACE_ONE");
+      await waitForScreenText(() => screenWrites, screen, "MEMORY=PCT_REAL_MEMORY_CYAN");
       expect(screen.snapshot().split("\n")[0]).toContain(basename(first));
       expect(screen.snapshot()).not.toContain("PCT_REAL_WORKSPACE_TWO");
 

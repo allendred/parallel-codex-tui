@@ -403,6 +403,26 @@ export class SessionManager {
     }));
   }
 
+  async readScopedChatHistory(taskId: string | null, limit = 200): Promise<ChatRecord[]> {
+    const boundedLimit = Number.isFinite(limit)
+      ? Math.min(1000, Math.max(0, Math.trunc(limit)))
+      : 200;
+    const records = await readRecentJsonLines(
+      join(this.mainSessionDir(), "chat.jsonl"),
+      ChatRecordSchema,
+      boundedLimit,
+      {
+        filter: (record) => taskId
+          ? record.task_id === taskId
+          : !record.task_id
+      }
+    );
+    return records.map((record) => ({
+      ...record,
+      text: sanitizePersistedMainMessage(record.from, record.text)
+    }));
+  }
+
   taskFromId(taskId: string): TaskSession {
     const dir = taskDir(this.projectRoot, this.dataDir, taskId);
     return {

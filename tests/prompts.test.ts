@@ -30,6 +30,25 @@ describe("role prompts", () => {
     expect(prompt).toContain("User request:\n我刚才叫什么名字？");
   });
 
+  it("points Main at a scoped extended conversation snapshot", () => {
+    const prompt = buildMainPrompt({
+      request: "继续之前的方案",
+      conversation: "Assistant: 最近一轮",
+      conversationArchive: {
+        path: "/tmp/project/.parallel-codex/sessions/main/main-codex/conversation.jsonl",
+        taskId: "task-memory",
+        recordCount: 42
+      }
+    });
+
+    expect(prompt).toContain("# Extended conversation memory");
+    expect(prompt).toContain('Scoped JSONL snapshot: "/tmp/project/.parallel-codex/sessions/main/main-codex/conversation.jsonl"');
+    expect(prompt).toContain('Scope: records whose task_id exactly equals "task-memory".');
+    expect(prompt).toContain("Records: 42");
+    expect(prompt).toContain("read this snapshot with available tools before answering");
+    expect(prompt).toContain("Use only this scoped snapshot");
+  });
+
   it("includes configured role title and instructions", () => {
     const prompt = buildActorPrompt({
       request: "实现功能",
