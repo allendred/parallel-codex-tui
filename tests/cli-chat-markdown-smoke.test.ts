@@ -8,6 +8,84 @@ import { NativeTerminalScreen } from "../src/tui/terminal-screen.js";
 import { TUI_THEME_PRESETS } from "../src/tui/theme.js";
 
 describe("CLI chat Markdown smoke", () => {
+  it("restores file-backed Main memory when every Agent call starts fresh", async () => {
+    const workspace = await mkdtemp(join(tmpdir(), "pct-cli-main-file-memory-"));
+    const appRoot = await mkdtemp(join(tmpdir(), "pct-cli-main-file-memory-app-"));
+    const mainScript = join(appRoot, "memory-main.cjs");
+    const screen = new NativeTerminalScreen({ cols: 100, rows: 14, scrollback: 1000 });
+    let screenWrites = Promise.resolve();
+
+    await mkdir(join(appRoot, ".parallel-codex"), { recursive: true });
+    await writeFile(
+      mainScript,
+      [
+        "let input = '';",
+        "process.stdin.setEncoding('utf8');",
+        "process.stdin.on('data', (chunk) => { input += chunk; });",
+        "process.stdin.on('end', () => {",
+        "  const restored = input.includes('User: 暗号是青色') && input.includes('User request:\\n暗号是什么');",
+        "  process.stdout.write(restored ? '文件记忆恢复成功\\n' : '已经记住暗号\\n');",
+        "});"
+      ].join("\n")
+    );
+    await writeFile(
+      join(appRoot, ".parallel-codex", "config.toml"),
+      [
+        "[router]",
+        'defaultMode = "simple"',
+        "",
+        "[workers.codex]",
+        `command = "${escapeToml(process.execPath)}"`,
+        `args = ["${escapeToml(mainScript)}"]`,
+        "",
+        "[pairing]",
+        'main = "codex"',
+        'judge = "codex"',
+        'actor = "codex"',
+        'critic = "codex"'
+      ].join("\n") + "\n"
+    );
+
+    const child = spawn(
+      process.execPath,
+      ["./node_modules/.bin/tsx", "src/cli.tsx", "--app-root", appRoot, "--workspace", workspace],
+      {
+        cwd: process.cwd(),
+        cols: 100,
+        rows: 14,
+        name: "xterm-256color",
+        env: { ...process.env, TERM: "xterm-256color" }
+      }
+    );
+    child.onData((chunk) => {
+      screenWrites = screenWrites.then(() => screen.write(chunk));
+    });
+
+    try {
+      await waitForScreenText(() => screenWrites, screen, "> | message");
+      child.write("暗号是青色\r");
+      await waitForScreenText(() => screenWrites, screen, "已经记住暗号");
+      await waitForScreenText(() => screenWrites, screen, "> | message");
+      child.write("暗号是什么\r");
+      await waitForScreenText(() => screenWrites, screen, "文件记忆恢复成功");
+
+      const prompt = await readTextIfExists(join(
+        workspace,
+        ".parallel-codex",
+        "sessions",
+        "main",
+        "main-codex",
+        "prompt.md"
+      ));
+      expect(prompt).toContain("# Recent conversation");
+      expect(prompt).toContain("User: 暗号是青色");
+      expect(prompt).toContain("Assistant: 已经记住暗号");
+      expect(prompt.split("暗号是什么")).toHaveLength(2);
+    } finally {
+      child.kill("SIGTERM");
+    }
+  }, 10000);
+
   it("renders Main Markdown with semantic theme styles and hides local link targets", async () => {
     const workspace = await mkdtemp(join(tmpdir(), "pct-cli-chat-markdown-"));
     const appRoot = await mkdtemp(join(tmpdir(), "pct-cli-chat-markdown-app-"));

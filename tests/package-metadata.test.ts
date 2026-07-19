@@ -188,14 +188,16 @@ describe("package metadata", () => {
 
     expect(readme).toContain("## Requirements");
     expect(readme).toContain("## Current Release");
-    expect(readme).toContain("v0.2.5` is available from [npm]");
-    expect(readme).toContain("Main chat now extracts only the final Codex answer");
+    expect(readme).toContain("v0.2.6` is available from [npm]");
+    expect(readme).toContain("rebuilds bounded file-backed conversation context from `chat.jsonl`");
+    expect(readme).toContain("root Turn plus the latest 19 previous Turn summaries");
+    expect(readme).toContain("Main chat still extracts only the final Codex answer");
     expect(readme).toContain("Main/Judge/Actor on Codex and Critic on Claude");
     expect(readme).toContain("preserves the embedded native Agent scrollback");
     expect(readme).toContain("keeps terminal scrolling and copying available at the same time");
     expect(readme).toContain("real three-Feature Tetris task");
     expect(readme).toContain("20-turn soak verifies 80 ordered Workers");
-    expect(readme).toContain("1,281 tests across 127 files: 1,280 pass by default");
+    expect(readme).toContain("1,286 tests across 127 files: 1,285 pass by default");
     expect(readme).toContain("same Judge native session for a bounded DAG replan");
     expect(readme).toContain("Real Codex and Claude probes both proved fresh and same-session resume calls");
     expect(readme).toContain("authenticate the Claude CLI");
@@ -529,9 +531,9 @@ describe("package metadata", () => {
     expect(readme).toContain('git tag "v$VERSION"');
     expect(readme).toContain('git push origin "v$VERSION"');
     expect(readme).toContain("The release tag must match `package.json`");
-    expect(readme).toContain("VERSION=0.2.5");
-    expect(readme).toContain("package version `0.2.5` requires tag `v0.2.5`");
-    expect(readme).toContain("Published tags such as `v0.2.4` are immutable");
+    expect(readme).toContain("VERSION=0.2.6");
+    expect(readme).toContain("package version `0.2.6` requires tag `v0.2.6`");
+    expect(readme).toContain("Published tags such as `v0.2.5` are immutable");
   });
 
   it("publishes the CLI bin as an executable file", async () => {

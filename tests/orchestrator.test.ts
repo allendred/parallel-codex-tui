@@ -130,6 +130,65 @@ describe("Orchestrator", () => {
     expect(result.summary).toBe("Mock simple response for: 解释 actor critic");
   });
 
+  it("restores scoped file-backed chat context without duplicating the current request", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pct-orch-main-file-memory-"));
+    const config = mockConfig(root);
+    config.router.defaultMode = "simple";
+    const manager = new SessionManager({
+      projectRoot: root,
+      dataDir: config.dataDir
+    });
+    await manager.appendChatMessage({ from: "user", text: "我叫小林" });
+    await manager.appendChatMessage({ from: "system", text: "记住了，你叫小林" });
+    await manager.appendChatMessage({ from: "user", text: "另一个任务里的秘密", taskId: "task-other" });
+    await manager.appendChatMessage({ from: "user", text: "我刚才叫什么名字？" });
+    const adapter = new CapturingAdapter();
+    const orchestrator = new Orchestrator(config, manager, new Map([["mock", adapter]]));
+
+    await orchestrator.handleRequest({
+      request: "我刚才叫什么名字？",
+      cwd: root
+    });
+
+    const prompt = adapter.runs[0]?.prompt ?? "";
+    expect(prompt).toContain("# Recent conversation");
+    expect(prompt).toContain("User: 我叫小林");
+    expect(prompt).toContain("Assistant: 记住了，你叫小林");
+    expect(prompt).not.toContain("另一个任务里的秘密");
+    expect(prompt.split("我刚才叫什么名字？")).toHaveLength(2);
+  });
+
+  it("bounds file-backed Main memory while retaining the newest conversation", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pct-orch-main-bounded-memory-"));
+    const config = mockConfig(root);
+    config.router.defaultMode = "simple";
+    const manager = new SessionManager({
+      projectRoot: root,
+      dataDir: config.dataDir
+    });
+    for (let index = 1; index <= 20; index += 1) {
+      await manager.appendChatMessage({
+        from: "user",
+        text: `MEMORY_${String(index).padStart(2, "0")}_${"x".repeat(1000)}`
+      });
+    }
+    await manager.appendChatMessage({ from: "user", text: "继续对话" });
+    const adapter = new CapturingAdapter();
+    const orchestrator = new Orchestrator(config, manager, new Map([["mock", adapter]]));
+
+    await orchestrator.handleRequest({ request: "继续对话", cwd: root });
+
+    const prompt = adapter.runs[0]?.prompt ?? "";
+    const conversationStart = prompt.indexOf("# Recent conversation");
+    const conversationEnd = prompt.indexOf("\nUser request:", conversationStart);
+    expect(conversationStart).toBeGreaterThanOrEqual(0);
+    expect(conversationEnd).toBeGreaterThan(conversationStart);
+    const conversation = prompt.slice(conversationStart, conversationEnd);
+    expect(conversation).toContain("MEMORY_20_");
+    expect(conversation).not.toContain("MEMORY_01_");
+    expect(conversation.length).toBeLessThan(6400);
+  });
+
   it("reuses the main native session across simple chat turns and restarts", async () => {
     const root = await mkdtemp(join(tmpdir(), "pct-orch-main-session-"));
     const config = mockConfig(root);
@@ -2294,6 +2353,10 @@ describe("Orchestrator", () => {
       join(task.dir, "turns", "0001", "supervisor-summary.md"),
       "# Summary\n\nThe critic timed out while reviewing the scoring change.\n"
     );
+    await manager.appendChatMessage({ from: "user", text: "这个任务关注得分", taskId: task.id });
+    await manager.appendChatMessage({ from: "system", text: "已记录得分任务上下文", taskId: task.id });
+    await manager.appendChatMessage({ from: "user", text: "普通聊天不应进入任务" });
+    await manager.appendChatMessage({ from: "user", text: "原因呢超时", taskId: task.id });
 
     const first = await orchestrator.answerTaskQuestion({
       taskId: task.id,
@@ -2318,10 +2381,57 @@ describe("Orchestrator", () => {
     expect(adapter.runs[0]?.prompt).toContain("Critic (mock): failed/process-idle-timeout");
     expect(adapter.runs[0]?.prompt).toContain("Process idle timed out after 300000ms");
     expect(adapter.runs[0]?.prompt).toContain("0001: # Summary The critic timed out while reviewing the scoring change.");
+    expect(adapter.runs[0]?.prompt).toContain("User: 这个任务关注得分");
+    expect(adapter.runs[0]?.prompt).toContain("Assistant: 已记录得分任务上下文");
+    expect(adapter.runs[0]?.prompt).not.toContain("普通聊天不应进入任务");
     expect(adapter.runs[0]?.prompt).toContain("User request:\n原因呢超时");
     expect(adapter.runs[0]?.nativeSession).toBeNull();
     expect(adapter.runs[1]?.nativeSession?.session_id).toBe("mock-main-mock");
     expect(await pathExists(join(task.dir, "turns", "0002", "user.md"))).toBe(false);
+  });
+
+  it("keeps the root turn and recent twenty-turn task memory after native session rollover", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pct-orch-long-task-memory-"));
+    const config = mockConfig(root);
+    const manager = new SessionManager({
+      projectRoot: root,
+      dataDir: config.dataDir
+    });
+    const adapter = new CapturingAdapter();
+    const orchestrator = new Orchestrator(config, manager, new Map([["mock", adapter]]));
+    const task = await manager.createTask({
+      request: "建立长期任务根需求",
+      cwd: root,
+      route: {
+        mode: "complex",
+        reason: "Requires workers.",
+        suggested_roles: ["judge", "actor", "critic"],
+        judge_engine: "mock",
+        actor_engine: "mock",
+        critic_engine: "mock"
+      }
+    });
+    for (let turn = 1; turn <= 25; turn += 1) {
+      const turnId = String(turn).padStart(4, "0");
+      await writeText(
+        join(task.dir, "turns", turnId, "supervisor-summary.md"),
+        `MEMORY_TURN_${turnId} completed decision ${turn}`
+      );
+    }
+
+    await orchestrator.answerTaskQuestion({
+      taskId: task.id,
+      request: "恢复长期任务记忆",
+      cwd: root
+    });
+
+    const prompt = adapter.runs[0]?.prompt ?? "";
+    expect(prompt).toContain("0001: MEMORY_TURN_0001");
+    expect(prompt).toContain("0007: MEMORY_TURN_0007");
+    expect(prompt).toContain("0025: MEMORY_TURN_0025");
+    expect(prompt).not.toContain("0006: MEMORY_TURN_0006");
+    expect(prompt).toContain("history: 5 intermediate turn summaries omitted inline");
+    expect(prompt).toContain(join(task.dir, "turns"));
   });
 
   it("answers task questions from the latest turn worker evidence", async () => {

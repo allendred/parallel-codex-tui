@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { spawn } from "node-pty";
+import { SessionManager } from "../src/core/session-manager.js";
 import { prepareWorkspace } from "../src/core/workspace.js";
 import { NativeTerminalScreen } from "../src/tui/terminal-screen.js";
 
@@ -65,9 +66,32 @@ describe("CLI real Agent multi-workspace acceptance", () => {
     try {
       await waitForScreenText(() => screenWrites, screen, "> | message");
       expect(screen.snapshot().split("\n")[0]).toContain(basename(first));
-      child.write("这是连通性验收。请只回复 PCT_REAL_WORKSPACE_ONE，不要使用工具。\r");
+      child.write("这是连通性验收。记住暗号 PCT_REAL_MEMORY_CYAN，然后只回复 PCT_REAL_WORKSPACE_ONE，不要使用工具。\r");
       await waitForScreenText(() => screenWrites, screen, "PCT_REAL_WORKSPACE_ONE");
       await waitForScreenText(() => screenWrites, screen, "> | message");
+
+      const firstSessionPath = join(
+        first,
+        ".parallel-codex",
+        "sessions",
+        "main",
+        "main-claude",
+        "native-session.json"
+      );
+      const firstSession = JSON.parse(await readFile(firstSessionPath, "utf8")) as { session_id: string };
+      const firstSessions = new SessionManager({
+        projectRoot: first,
+        dataDir: ".parallel-codex"
+      });
+      await firstSessions.retireNativeSession(
+        { dir: join(first, ".parallel-codex", "sessions", "main", "main-claude") },
+        "real file-backed memory acceptance"
+      );
+      child.write("刚才让我记住的暗号是什么？只回复 MEMORY= 加暗号，不要使用工具。\r");
+      await waitForScreenText(() => screenWrites, screen, "MEMORY=PCT_REAL_MEMORY_CYAN");
+      await waitForScreenText(() => screenWrites, screen, "> | message");
+      const replacementSession = JSON.parse(await readFile(firstSessionPath, "utf8")) as { session_id: string };
+      expect(replacementSession.session_id).not.toBe(firstSession.session_id);
 
       child.write("\x10");
       await waitForScreenText(() => screenWrites, screen, "Open project");

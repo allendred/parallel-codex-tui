@@ -17,7 +17,7 @@ import {
   type RouterExecutionProgress
 } from "../core/router.js";
 import type { SessionManager, TaskSession, TaskTurn, WorkerFiles } from "../core/session-manager.js";
-import { FeatureStatusSchema, RouteDecisionSchema, TaskMetaSchema, WorkerStatusSchema, type EngineName, type FeatureAssignment, type NativeSession, type RouteDecision, type RouterFallbackResolution, type WorkerRole, type WorkerStatus } from "../domain/schemas.js";
+import { FeatureStatusSchema, RouteDecisionSchema, TaskMetaSchema, WorkerStatusSchema, type ChatRecord, type EngineName, type FeatureAssignment, type NativeSession, type RouteDecision, type RouterFallbackResolution, type WorkerRole, type WorkerStatus } from "../domain/schemas.js";
 import { getAdapter, type WorkerRegistry } from "../workers/registry.js";
 import { workerProvider } from "../workers/provider.js";
 import type { WorkerResult, WorkerRunSpec } from "../workers/types.js";
@@ -57,8 +57,13 @@ import {
 import { buildSupervisorSummary } from "./supervisor-summary.js";
 import { ParallelWorkspaceManager, WorkspaceMergeConflictError } from "./workspace-sandbox.js";
 
-const PREVIOUS_TURN_SUMMARY_LIMIT = 5;
+const PREVIOUS_TURN_SUMMARY_LIMIT = 20;
 const PREVIOUS_TURN_SUMMARY_LENGTH = 600;
+const PREVIOUS_TURN_SUMMARY_TOTAL_LENGTH = 12000;
+const MAIN_CONVERSATION_READ_LIMIT = 50;
+const MAIN_CONVERSATION_RECORD_LIMIT = 12;
+const MAIN_CONVERSATION_MESSAGE_LENGTH = 800;
+const MAIN_CONVERSATION_TOTAL_LENGTH = 6000;
 const JUDGE_ARTIFACTS = [
   ...JUDGE_REQUIRED_ARTIFACTS,
   "features.json"
@@ -619,7 +624,7 @@ export class Orchestrator {
 
     input.onStatus?.({ taskId: task.id, main: "starting" });
     try {
-      const output = await this.runMain(input, workers, context);
+      const output = await this.runMain(input, workers, context, task.id);
       input.onStatus?.({ taskId: task.id, main: "done" });
 
       return {
@@ -2104,7 +2109,12 @@ export class Orchestrator {
     });
   }
 
-  private async runMain(input: HandleRequestInput, workers: WorkerLogRef[], context?: string): Promise<string> {
+  private async runMain(
+    input: HandleRequestInput,
+    workers: WorkerLogRef[],
+    context?: string,
+    taskId: string | null = null
+  ): Promise<string> {
     throwIfCancelled(input.signal);
     const engine = this.config.pairing.main;
     const dir = this.sessions.mainSessionDir();
@@ -2123,7 +2133,7 @@ export class Orchestrator {
     return runWithLeaseFinalization(
       "Main session",
       lease,
-      () => this.runMainWithLease(input, workers, context, engine, dir)
+      () => this.runMainWithLease(input, workers, context, taskId, engine, dir)
     );
   }
 
@@ -2131,6 +2141,7 @@ export class Orchestrator {
     input: HandleRequestInput,
     workers: WorkerLogRef[],
     context: string | undefined,
+    taskId: string | null,
     engine: EngineName,
     dir: string
   ): Promise<string> {
@@ -2140,10 +2151,16 @@ export class Orchestrator {
     const promptPath = join(filesDir, "prompt.md");
     const outputLogPath = join(filesDir, "output.log");
     const statusPath = join(filesDir, "status.json");
+    const conversation = buildMainConversationContext(
+      await this.sessions.readChatHistory(MAIN_CONVERSATION_READ_LIMIT),
+      input.request,
+      taskId
+    );
     const prompt = buildMainPrompt({
       request: input.request,
       role: this.config.roles.main,
-      context
+      context,
+      conversation
     });
 
     await ensureDir(filesDir);
@@ -2933,21 +2950,36 @@ export class Orchestrator {
 
     const currentTurnNumber = Number(currentTurnId);
     const entries = await readdir(turnsDir, { withFileTypes: true });
-    const previousTurnIds = entries
+    const allPreviousTurnIds = entries
       .filter((entry) => entry.isDirectory() && /^\d{4,}$/.test(entry.name))
       .map((entry) => entry.name)
       .filter((turnId) => Number(turnId) < currentTurnNumber)
-      .sort((left, right) => Number(left) - Number(right))
-      .slice(-PREVIOUS_TURN_SUMMARY_LIMIT);
+      .sort((left, right) => Number(left) - Number(right));
+    const previousTurnIds = selectPreviousTurnIds(allPreviousTurnIds);
+    const summaryLength = Math.min(
+      PREVIOUS_TURN_SUMMARY_LENGTH,
+      Math.max(
+        160,
+        Math.floor(PREVIOUS_TURN_SUMMARY_TOTAL_LENGTH / Math.max(1, previousTurnIds.length)) - 8
+      )
+    );
     const summaries: string[] = [];
 
     for (const turnId of previousTurnIds) {
       const summary = compactPreviousTurnSummary(
-        await readTextIfExists(join(turnsDir, turnId, "supervisor-summary.md"))
+        await readTextIfExists(join(turnsDir, turnId, "supervisor-summary.md")),
+        summaryLength
       );
       if (summary) {
         summaries.push(`${turnId}: ${summary}`);
       }
+    }
+
+    const omittedCount = allPreviousTurnIds.length - previousTurnIds.length;
+    if (omittedCount > 0) {
+      summaries.push(
+        `history: ${omittedCount} intermediate turn summaries omitted inline; full history remains under ${turnsDir}`
+      );
     }
 
     return summaries;
@@ -3021,12 +3053,79 @@ function buildTaskQuestionContext(input: {
   return lines.join("\n");
 }
 
-function compactPreviousTurnSummary(summary: string): string {
-  const compact = summary.replace(/\s+/g, " ").trim();
-  if (compact.length <= PREVIOUS_TURN_SUMMARY_LENGTH) {
+function buildMainConversationContext(
+  records: ChatRecord[],
+  currentRequest: string,
+  taskId: string | null
+): string {
+  const scoped = records.filter((record) => (
+    taskId ? record.task_id === taskId : !record.task_id
+  ));
+  const previous = [...scoped];
+  const latest = previous.at(-1);
+  if (
+    latest?.from === "user"
+    && latest.text.trim() === currentRequest.trim()
+  ) {
+    previous.pop();
+  }
+
+  let remaining = MAIN_CONVERSATION_TOTAL_LENGTH;
+  const newestFirst: string[] = [];
+  const candidates = previous.slice(-MAIN_CONVERSATION_RECORD_LIMIT);
+  for (let index = candidates.length - 1; index >= 0; index -= 1) {
+    const record = candidates[index];
+    if (!record) {
+      continue;
+    }
+    const prefix = record.from === "user" ? "User: " : "Assistant: ";
+    const available = Math.min(
+      MAIN_CONVERSATION_MESSAGE_LENGTH,
+      remaining - prefix.length
+    );
+    if (available < 32) {
+      break;
+    }
+    const message = compactConversationMessage(record.text, available);
+    if (!message) {
+      continue;
+    }
+    const line = `${prefix}${message}`;
+    newestFirst.push(line);
+    remaining -= line.length + 1;
+  }
+
+  return newestFirst.reverse().join("\n");
+}
+
+function compactConversationMessage(message: string, maximumLength: number): string {
+  const compact = message.replace(/\s+/g, " ").trim();
+  const characters = Array.from(compact);
+  if (characters.length <= maximumLength) {
     return compact;
   }
-  return `${compact.slice(0, PREVIOUS_TURN_SUMMARY_LENGTH - 3)}...`;
+  return `${characters.slice(0, Math.max(1, maximumLength - 3)).join("")}...`;
+}
+
+function selectPreviousTurnIds(turnIds: string[]): string[] {
+  if (turnIds.length <= PREVIOUS_TURN_SUMMARY_LIMIT) {
+    return turnIds;
+  }
+  return [
+    turnIds[0] ?? "",
+    ...turnIds.slice(-(PREVIOUS_TURN_SUMMARY_LIMIT - 1))
+  ].filter(Boolean);
+}
+
+function compactPreviousTurnSummary(
+  summary: string,
+  maximumLength = PREVIOUS_TURN_SUMMARY_LENGTH
+): string {
+  const compact = summary.replace(/\s+/g, " ").trim();
+  if (compact.length <= maximumLength) {
+    return compact;
+  }
+  return `${compact.slice(0, Math.max(1, maximumLength - 3))}...`;
 }
 
 function ensureWorkerSuccess(result: WorkerResult): void {
