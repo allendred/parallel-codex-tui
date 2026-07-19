@@ -221,6 +221,13 @@ export const MainConversationStateSchema = z.object({
   previous_id: ConversationIdSchema.optional()
 });
 
+export const MainConversationArchiveSchema = z.object({
+  version: z.literal(1),
+  id: ConversationIdSchema.nullable(),
+  created_at: z.string().datetime(),
+  last_activated_at: z.string().datetime()
+});
+
 export const ChatRecordSchema = z.object({
   time: z.string().datetime(),
   from: z.enum(["user", "system"]),
@@ -264,5 +271,6 @@ export type NativeSession = z.infer<typeof NativeSessionSchema>;
 export type RetiredNativeSession = z.infer<typeof RetiredNativeSessionSchema>;
 export type NativeSessionSource = z.infer<typeof NativeSessionSourceSchema>;
 export type MainConversationState = z.infer<typeof MainConversationStateSchema>;
+export type MainConversationArchive = z.infer<typeof MainConversationArchiveSchema>;
 export type EventRecord = z.infer<typeof EventRecordSchema>;
 export type ChatRecord = z.infer<typeof ChatRecordSchema>;

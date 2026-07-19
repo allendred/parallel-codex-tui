@@ -19,6 +19,7 @@ export interface InputBarProps {
   featureAssignment?: boolean;
   taskSessionAction?: TaskSessionInputAction | null;
   taskSessionsIncludeArchived?: boolean;
+  mainConversationSessions?: boolean;
   taskSessionDetail?: boolean;
   taskSessionDetailHasNative?: boolean;
   taskSessionDetailCanFork?: boolean;
@@ -60,6 +61,7 @@ export function InputBar({
   featureAssignment = false,
   taskSessionAction = null,
   taskSessionsIncludeArchived = false,
+  mainConversationSessions = false,
   taskSessionDetail = false,
   taskSessionDetailHasNative = false,
   taskSessionDetailCanFork = false,
@@ -157,6 +159,15 @@ export function InputBar({
         taskSessionDetailHasNative,
         taskSessionDetailCanFork
       );
+      return (
+        <InputRail terminalWidth={terminalWidth} textWidth={displayWidth(`${hints.label}${hints.detail}`)} fill={fillRail}>
+          <Text backgroundColor={TUI_THEME.rail} color={TUI_THEME.accent} bold>{hints.label}</Text>
+          {hints.detail ? <Text backgroundColor={TUI_THEME.rail} color={TUI_THEME.muted}>{hints.detail}</Text> : null}
+        </InputRail>
+      );
+    }
+    if (mainConversationSessions) {
+      const hints = mainConversationSessionsInputHints(terminalWidth);
       return (
         <InputRail terminalWidth={terminalWidth} textWidth={displayWidth(`${hints.label}${hints.detail}`)} fill={fillRail}>
           <Text backgroundColor={TUI_THEME.rail} color={TUI_THEME.accent} bold>{hints.label}</Text>
@@ -883,9 +894,13 @@ function collaborationDetailInputHints(width: number): { label: string; detail: 
 function taskSessionsInputHints(width: number, includeArchived: boolean): { label: string; detail: string } {
   const archivedAction = includeArchived ? "H hide archived" : "H archived";
   return selectInputHints(width, [
-    { label: "sessions", detail: ` · Up/Dn select · Enter restore · I inspect · R rename · A archive · D delete · E export · ${archivedAction} · Esc back` },
-    { label: "sessions", detail: " · Up/Dn select · Enter restore · I inspect · R rename · A archive · D delete · E export · Esc back" },
-    { label: "sessions", detail: " · Up/Dn select · Enter restore · I inspect · R rename · A archive · D delete · Esc back" },
+    { label: "sessions", detail: ` · Up/Dn select · Enter restore · C conversations · I inspect · R rename · A archive · D delete · E export · ${archivedAction} · Esc back` },
+    { label: "sessions", detail: " · Up/Dn select · Enter restore · C conversations · I inspect · R rename · A archive · D delete · E export · Esc back" },
+    { label: "sessions", detail: " · Up/Dn select · Enter restore · C chats · I inspect · R rename · A archive · D delete · Esc back" },
+    { label: "sessions", detail: " · Up/Dn select · Enter restore · C chats · I inspect · R rename · A archive · Esc back" },
+    { label: "sessions", detail: " · Up/Dn select · Enter restore · C chats · I inspect · R rename · Esc back" },
+    { label: "sessions", detail: " · Up/Dn select · Enter restore · C chats · R rename · Esc back" },
+    { label: "sessions", detail: " · Up/Dn select · Enter restore · C chats · Esc back" },
     { label: "sessions", detail: " · Up/Dn select · Enter restore · I inspect · R rename · A archive · Esc back" },
     { label: "sessions", detail: " · Up/Dn select · Enter restore · I inspect · R rename · Esc back" },
     { label: "sessions", detail: " · Up/Dn select · Enter restore · R rename · Esc back" },
@@ -897,6 +912,19 @@ function taskSessionsInputHints(width: number, includeArchived: boolean): { labe
     { label: "sessions", detail: "" },
     { label: "ses", detail: "" },
     { label: "s", detail: "" }
+  ]);
+}
+
+function mainConversationSessionsInputHints(width: number): { label: string; detail: string } {
+  return selectInputHints(width, [
+    { label: "conversations", detail: " · Up/Dn select · Enter restore · N new · T tasks · Esc back" },
+    { label: "conversations", detail: " · Up/Dn select · Enter restore · T tasks · Esc back" },
+    { label: "conversations", detail: " · Up/Dn select · Enter restore · Esc back" },
+    { label: "conversations", detail: " · Up/Dn select · Esc back" },
+    { label: "conversations", detail: " · Esc back" },
+    { label: "Esc back", detail: "" },
+    { label: "chats", detail: "" },
+    { label: "c", detail: "" }
   ]);
 }
 

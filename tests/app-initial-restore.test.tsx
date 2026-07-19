@@ -168,6 +168,76 @@ describe("App initial task restore", () => {
       testInput.restore();
     }
   });
+
+  it("opens Main conversations from the Session center and restores the selected scope", async () => {
+    const testInput = installTestInputStream();
+    const previousId = "conversation-20260718-100000-previous";
+    const conversations = [
+      {
+        id: "conversation-20260719-120000-current",
+        title: "Current conversation",
+        createdAt: "2026-07-19T12:00:00.000Z",
+        lastActivityAt: "2026-07-19T12:01:00.000Z",
+        messageCount: 2,
+        userMessageCount: 1,
+        nativeSessionCount: 1,
+        current: true
+      },
+      {
+        id: previousId,
+        title: "Previous conversation",
+        createdAt: "2026-07-18T10:00:00.000Z",
+        lastActivityAt: "2026-07-18T10:02:00.000Z",
+        messageCount: 4,
+        userMessageCount: 2,
+        nativeSessionCount: 1,
+        current: false
+      }
+    ];
+    const activateMainConversation = vi.fn(async () => ({
+      conversation: { ...conversations[1]!, current: true },
+      restoredNativeSessions: 1,
+      changed: true
+    }));
+    const activateTaskSession = vi.fn(async () => null);
+    const persistChatMessage = vi.fn(async () => undefined);
+    const view = render(
+      <App
+        config={defaultConfig("/tmp/pct-app-conversation-sessions")}
+        orchestrator={{} as Orchestrator}
+        cwd="/tmp/pct-workspace"
+        loadTaskSessions={async () => []}
+        loadMainConversations={async () => conversations}
+        activateMainConversation={activateMainConversation}
+        activateTaskSession={activateTaskSession}
+        persistChatMessage={persistChatMessage}
+      />
+    );
+
+    try {
+      await settleEffects();
+      testInput.send(view.stdin, "\x14");
+      await waitForFrame(view.lastFrame, "Task sessions");
+      testInput.send(view.stdin, "c");
+      await waitForFrame(view.lastFrame, "Main conversations");
+      await waitForFrame(view.lastFrame, "2 conversations · 6 messages · 2 native");
+      testInput.send(view.stdin, "\x1b[B");
+      await waitForFrame(view.lastFrame, ">   Previous conversation");
+      testInput.send(view.stdin, "\r");
+      await waitForFrame(view.lastFrame, "conversation restored · Previous conversation · 1 native");
+
+      expect(activateMainConversation).toHaveBeenCalledWith(previousId);
+      expect(activateTaskSession).toHaveBeenCalledWith(null);
+      expect(persistChatMessage).toHaveBeenCalledWith(
+        expect.objectContaining({ text: "conversation restored · Previous conversation · 1 native" }),
+        undefined
+      );
+      expect((view.lastFrame() ?? "").split("\n")[0]).toContain("· chat ·");
+    } finally {
+      view.unmount();
+      testInput.restore();
+    }
+  });
 });
 
 describe("App empty worker shortcuts", () => {

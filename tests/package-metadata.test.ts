@@ -188,10 +188,11 @@ describe("package metadata", () => {
 
     expect(readme).toContain("## Requirements");
     expect(readme).toContain("## Current Release");
-    expect(readme).toContain("v0.2.8` is available from [npm]");
-    expect(readme).toContain("`Ctrl+N` now creates an explicit, durable Main conversation boundary");
-    expect(readme).toContain("writes the current scope to `conversation.json`");
-    expect(readme).toContain("include only the exact current `conversation_id`");
+    expect(readme).toContain("v0.2.9` is available from [npm]");
+    expect(readme).toContain("`Ctrl+T`, then `C`, now opens every persisted Main conversation");
+    expect(readme).toContain("`.parallel-codex/sessions/main/conversations/<conversation>/`");
+    expect(readme).toContain("restores those exact Main bindings");
+    expect(readme).toContain("A brand-new empty legacy scope is not added to the catalog");
     expect(readme).toContain("root Turn plus the latest 19 previous Turn summaries");
     expect(readme).toContain("Main chat still extracts only the final Codex answer");
     expect(readme).toContain("Main/Judge/Actor on Codex and Critic on Claude");
@@ -199,7 +200,7 @@ describe("package metadata", () => {
     expect(readme).toContain("keeps terminal scrolling and copying available at the same time");
     expect(readme).toContain("real three-Feature Tetris task");
     expect(readme).toContain("20-turn soak verifies 80 ordered Workers");
-    expect(readme).toContain("1,294 tests across 127 files: 1,293 pass by default");
+    expect(readme).toContain("1,305 tests across 129 files: 1,304 pass by default");
     expect(readme).toContain("same Judge native session for a bounded DAG replan");
     expect(readme).toContain("Real Codex and Claude probes both proved fresh and same-session resume calls");
     expect(readme).toContain("authenticate the Claude CLI");
@@ -533,9 +534,9 @@ describe("package metadata", () => {
     expect(readme).toContain('git tag "v$VERSION"');
     expect(readme).toContain('git push origin "v$VERSION"');
     expect(readme).toContain("The release tag must match `package.json`");
-    expect(readme).toContain("VERSION=0.2.8");
-    expect(readme).toContain("package version `0.2.8` requires tag `v0.2.8`");
-    expect(readme).toContain("Published tags such as `v0.2.7` are immutable");
+    expect(readme).toContain("VERSION=0.2.9");
+    expect(readme).toContain("package version `0.2.9` requires tag `v0.2.9`");
+    expect(readme).toContain("Published tags such as `v0.2.8` are immutable");
   });
 
   it("publishes the CLI bin as an executable file", async () => {

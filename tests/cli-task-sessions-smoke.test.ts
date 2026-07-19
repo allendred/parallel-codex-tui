@@ -89,7 +89,7 @@ describe("CLI Task sessions smoke", () => {
         revision: firstRun.outputRevision,
         cols: 110,
         rows: 18,
-        text: "sessions · Up/Dn select · Enter restore · I inspect · R rename · A archive · D delete · E export · Esc back"
+        text: "sessions · Up/Dn select · Enter restore · C chats · I inspect · R rename · A archive · D delete · Esc back"
       });
       await waitForScreenText(firstRun, "2 tasks · 2 done");
       let snapshot = firstRun.screen.snapshot();

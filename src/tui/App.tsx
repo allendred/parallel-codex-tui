@@ -9,6 +9,7 @@ import { readJson } from "../core/file-store.js";
 import type { RouterAuditRecord } from "../core/router-audit.js";
 import type { RouterExecutionProgress } from "../core/router.js";
 import type { TaskIndexSummary } from "../core/session-index.js";
+import type { MainConversationActivation, MainConversationSummary } from "../core/session-manager.js";
 import type { TaskSessionDetails, TaskSessionWorkerDetail } from "../core/task-session-details.js";
 import type { WorkspaceChoice } from "../core/workspace.js";
 import { WorkerStatusSchema, type EngineName, type RouteDecision, type WorkerStatus } from "../domain/schemas.js";
@@ -67,6 +68,7 @@ import {
   nextCollaborationFeatureIndex
 } from "./CollaborationTimelineView.js";
 import { moveTaskSessionSelection, TaskSessionsView } from "./TaskSessionsView.js";
+import { MainConversationsView, moveMainConversationSelection } from "./MainConversationsView.js";
 import {
   moveTaskSessionDetailSelection,
   TaskSessionDetailView
@@ -110,6 +112,8 @@ export interface AppProps {
     policy: RouterDiagnosticsPolicy;
   }>;
   loadTaskSessions?: (options?: { includeArchived?: boolean }) => Promise<TaskIndexSummary[]>;
+  loadMainConversations?: () => Promise<MainConversationSummary[]>;
+  activateMainConversation?: (conversationId: string | null) => Promise<MainConversationActivation>;
   loadTaskSessionDetails?: (task: TaskIndexSummary) => Promise<TaskSessionDetails>;
   renameTaskSession?: (taskId: string, title: string) => Promise<void>;
   setTaskSessionArchived?: (taskId: string, archived: boolean) => Promise<void>;
@@ -225,6 +229,8 @@ export function App({
   switchWorkspace,
   loadRouterDiagnostics,
   loadTaskSessions,
+  loadMainConversations,
+  activateMainConversation,
   loadTaskSessionDetails,
   renameTaskSession,
   setTaskSessionArchived,
@@ -295,6 +301,9 @@ export function App({
   const [routerMaxScrollOffset, setRouterMaxScrollOffset] = useState(0);
   const [taskSessions, setTaskSessions] = useState<TaskIndexSummary[]>([]);
   const [selectedTaskSessionIndex, setSelectedTaskSessionIndex] = useState(0);
+  const [sessionCenterMode, setSessionCenterMode] = useState<"tasks" | "conversations">("tasks");
+  const [mainConversations, setMainConversations] = useState<MainConversationSummary[]>([]);
+  const [selectedMainConversationIndex, setSelectedMainConversationIndex] = useState(0);
   const [taskSessionsLoading, setTaskSessionsLoading] = useState(false);
   const [taskSessionsError, setTaskSessionsError] = useState<string | null>(null);
   const [taskSessionsNotice, setTaskSessionsNotice] = useState<string | null>(null);
@@ -354,6 +363,9 @@ export function App({
   const routerMaxScrollOffsetRef = useRef(routerMaxScrollOffset);
   const taskSessionsRef = useRef(taskSessions);
   const selectedTaskSessionIndexRef = useRef(selectedTaskSessionIndex);
+  const sessionCenterModeRef = useRef<"tasks" | "conversations">("tasks");
+  const mainConversationsRef = useRef(mainConversations);
+  const selectedMainConversationIndexRef = useRef(selectedMainConversationIndex);
   const taskSessionsLoadingRef = useRef(taskSessionsLoading);
   const taskSessionsIncludeArchivedRef = useRef(taskSessionsIncludeArchived);
   const taskSessionActionRef = useRef<TaskSessionAction | null>(taskSessionAction);
@@ -391,6 +403,8 @@ export function App({
   const refreshCollaborationTimelineRef = useRef<(showLoading?: boolean) => Promise<void>>(refreshCollaborationTimeline);
   const activateSelectedTaskSessionRef = useRef<() => Promise<void>>(activateSelectedTaskSession);
   const refreshTaskSessionsRef = useRef<(preferredTaskId?: string | null) => Promise<void>>(refreshTaskSessions);
+  const openMainConversationsRef = useRef<() => Promise<void>>(openMainConversations);
+  const restoreSelectedMainConversationRef = useRef<() => Promise<void>>(restoreSelectedMainConversation);
   const renameSelectedTaskSessionRef = useRef<(action: Extract<TaskSessionAction, { type: "rename" }>) => Promise<void>>(renameSelectedTaskSession);
   const archiveSelectedTaskSessionRef = useRef<() => Promise<void>>(archiveSelectedTaskSession);
   const deleteSelectedTaskSessionRef = useRef<(action: Extract<TaskSessionAction, { type: "delete" }>) => Promise<void>>(deleteSelectedTaskSession);
@@ -582,6 +596,18 @@ export function App({
   }, [selectedTaskSessionIndex]);
 
   useEffect(() => {
+    sessionCenterModeRef.current = sessionCenterMode;
+  }, [sessionCenterMode]);
+
+  useEffect(() => {
+    mainConversationsRef.current = mainConversations;
+  }, [mainConversations]);
+
+  useEffect(() => {
+    selectedMainConversationIndexRef.current = selectedMainConversationIndex;
+  }, [selectedMainConversationIndex]);
+
+  useEffect(() => {
     taskSessionsLoadingRef.current = taskSessionsLoading;
   }, [taskSessionsLoading]);
 
@@ -665,6 +691,8 @@ export function App({
     refreshCollaborationTimelineRef.current = refreshCollaborationTimeline;
     activateSelectedTaskSessionRef.current = activateSelectedTaskSession;
     refreshTaskSessionsRef.current = refreshTaskSessions;
+    openMainConversationsRef.current = openMainConversations;
+    restoreSelectedMainConversationRef.current = restoreSelectedMainConversation;
     renameSelectedTaskSessionRef.current = renameSelectedTaskSession;
     archiveSelectedTaskSessionRef.current = archiveSelectedTaskSession;
     deleteSelectedTaskSessionRef.current = deleteSelectedTaskSession;
@@ -998,6 +1026,18 @@ export function App({
       setTaskSessionsError(null);
       setSelectedTaskSessionIndex(nextIndex);
     };
+    const moveSelectedMainConversation = (delta: number, wrap = false) => {
+      const nextIndex = moveMainConversationSelection(
+        selectedMainConversationIndexRef.current,
+        delta,
+        mainConversationsRef.current.length,
+        wrap
+      );
+      selectedMainConversationIndexRef.current = nextIndex;
+      setTaskSessionsError(null);
+      setTaskSessionsNotice(null);
+      setSelectedMainConversationIndex(nextIndex);
+    };
     const moveSelectedTaskSessionDetailWorker = (delta: number, wrap = false) => {
       const nextIndex = moveTaskSessionDetailSelection(
         taskSessionDetailSelectedWorkerIndexRef.current,
@@ -1174,6 +1214,51 @@ export function App({
           }
           return;
         }
+        if (sessionCenterModeRef.current === "conversations") {
+          if (isTaskSessionsShortcut(chunk, {}) || chunk === "\x1b") {
+            setTaskSessionsError(null);
+            setTaskSessionsNotice(null);
+            viewRef.current = taskSessionsReturnViewRef.current;
+            setView(taskSessionsReturnViewRef.current);
+            return;
+          }
+          if (taskSessionsLoadingRef.current) {
+            return;
+          }
+          if (isNewConversationShortcut(chunk, {}) || chunk === "n" || chunk === "N") {
+            void newConversationRef.current();
+            return;
+          }
+          if (chunk === "t" || chunk === "T") {
+            sessionCenterModeRef.current = "tasks";
+            setSessionCenterMode("tasks");
+            setTaskSessionsError(null);
+            setTaskSessionsNotice(null);
+            void refreshTaskSessionsRef.current(activeTaskIdRef.current);
+            return;
+          }
+          if (chunk === "c" || chunk === "C") {
+            void openMainConversationsRef.current();
+            return;
+          }
+          if (chunk === "\r" || chunk === "\n") {
+            void restoreSelectedMainConversationRef.current();
+            return;
+          }
+          if (chunk === "\t") {
+            moveSelectedMainConversation(1, true);
+            return;
+          }
+          const conversationSelectionDelta = -(
+            rawHistoryDelta(chunk)
+            + rawPageScrollDelta(chunk, Math.max(1, outputHeight - 2))
+            + mouseScrollDelta(chunk, 1)
+          );
+          if (conversationSelectionDelta !== 0) {
+            moveSelectedMainConversation(conversationSelectionDelta);
+          }
+          return;
+        }
         const sessionAction = taskSessionActionRef.current;
         if (sessionAction) {
           if (chunk === "\x1b") {
@@ -1226,6 +1311,10 @@ export function App({
         }
         if (isNewConversationShortcut(chunk, {}) && !busyRef.current) {
           void newConversationRef.current();
+          return;
+        }
+        if (chunk === "c" || chunk === "C") {
+          void openMainConversationsRef.current();
           return;
         }
         const selectedSession = taskSessionsRef.current[selectedTaskSessionIndexRef.current];
@@ -2061,6 +2150,14 @@ export function App({
         label: "sessions",
         text: details
           ? details.workers.map((worker) => [worker.id, worker.role, worker.engine, worker.state].join(" · ")).join("\n")
+          : sessionCenterModeRef.current === "conversations"
+            ? mainConversationsRef.current.map((conversation) => [
+                conversation.current ? "current" : "saved",
+                conversation.id ?? "legacy",
+                conversation.title,
+                `${conversation.messageCount} messages`,
+                `${conversation.nativeSessionCount} native`
+              ].join(" · ")).join("\n")
           : taskSessionsRef.current.map((task) => [task.id, task.title, task.status].join(" · ")).join("\n")
       };
     }
@@ -2535,6 +2632,11 @@ export function App({
       return;
     }
 
+    resetActiveTaskUiForMainConversation();
+    await appendVisibleMessage({ from: "system", text: "new conversation · ready" });
+  }
+
+  function resetActiveTaskUiForMainConversation(): void {
     const nextMemory = newTaskMemoryState();
     activeTaskIdRef.current = nextMemory.activeTaskId;
     setActiveTaskId(nextMemory.activeTaskId);
@@ -2559,7 +2661,6 @@ export function App({
       offset: 0,
       draft: { value: inputRef.current, cursor: inputCursorRef.current }
     };
-    await appendVisibleMessage({ from: "system", text: "new conversation · ready" });
   }
 
   async function openRouterDiagnostics(): Promise<void> {
@@ -2629,6 +2730,8 @@ export function App({
     setTaskSessionDetailSelectedWorkerIndex(0);
     setTaskSessionDetailNotice(null);
     updateTaskSessionAction(null);
+    sessionCenterModeRef.current = "tasks";
+    setSessionCenterMode("tasks");
     await refreshTaskSessions(activeTaskIdRef.current);
   }
 
@@ -2666,6 +2769,101 @@ export function App({
         taskSessionsLoadingRef.current = false;
         setTaskSessionsLoading(false);
       }
+    }
+  }
+
+  async function openMainConversations(): Promise<void> {
+    const currentView = viewRef.current;
+    if (busyRef.current || currentView === "native" || currentView === "workspace") {
+      return;
+    }
+    if (currentView !== "sessions") {
+      taskSessionsReturnViewRef.current = currentView === "worker" || currentView === "workers" || currentView === "router"
+        ? currentView
+        : "chat";
+      viewRef.current = "sessions";
+      setView("sessions");
+    }
+    const previousId = sessionCenterModeRef.current === "conversations"
+      ? mainConversationsRef.current[selectedMainConversationIndexRef.current]?.id
+      : undefined;
+    sessionCenterModeRef.current = "conversations";
+    setSessionCenterMode("conversations");
+    taskSessionDetailsRef.current = null;
+    setTaskSessionDetails(null);
+    updateTaskSessionAction(null);
+    setTaskSessionsError(null);
+    setTaskSessionsNotice(null);
+    taskSessionsLoadingRef.current = true;
+    setTaskSessionsLoading(true);
+    const sequence = taskSessionsLoadSequenceRef.current + 1;
+    taskSessionsLoadSequenceRef.current = sequence;
+    try {
+      if (!loadMainConversations) {
+        throw new Error("Main conversations are unavailable");
+      }
+      const conversations = await loadMainConversations();
+      if (taskSessionsLoadSequenceRef.current !== sequence) {
+        return;
+      }
+      mainConversationsRef.current = conversations;
+      setMainConversations(conversations);
+      const preservedIndex = previousId !== undefined
+        ? conversations.findIndex((conversation) => conversation.id === previousId)
+        : -1;
+      const currentIndex = conversations.findIndex((conversation) => conversation.current);
+      const selectedIndex = preservedIndex >= 0
+        ? preservedIndex
+        : currentIndex >= 0
+          ? currentIndex
+          : 0;
+      selectedMainConversationIndexRef.current = selectedIndex;
+      setSelectedMainConversationIndex(selectedIndex);
+    } catch (error) {
+      if (taskSessionsLoadSequenceRef.current === sequence) {
+        setTaskSessionsError(error instanceof Error ? error.message : String(error));
+      }
+    } finally {
+      if (taskSessionsLoadSequenceRef.current === sequence) {
+        taskSessionsLoadingRef.current = false;
+        setTaskSessionsLoading(false);
+      }
+    }
+  }
+
+  async function restoreSelectedMainConversation(): Promise<void> {
+    if (busyRef.current || taskSessionsLoadingRef.current) {
+      return;
+    }
+    const selected = mainConversationsRef.current[selectedMainConversationIndexRef.current];
+    if (!selected) {
+      return;
+    }
+    taskSessionsLoadingRef.current = true;
+    setTaskSessionsLoading(true);
+    setTaskSessionsError(null);
+    setTaskSessionsNotice(null);
+    try {
+      if (!activateMainConversation) {
+        throw new Error("Main conversation restore is unavailable");
+      }
+      const result = await activateMainConversation(selected.id);
+      if (!result.changed) {
+        await openMainConversations();
+        setTaskSessionsNotice(`Already current · ${result.conversation.title}`);
+        return;
+      }
+      await activateTaskSession?.(null);
+      resetActiveTaskUiForMainConversation();
+      await appendVisibleMessage({
+        from: "system",
+        text: `conversation restored · ${result.conversation.title} · ${result.restoredNativeSessions} native`
+      });
+    } catch (error) {
+      setTaskSessionsError(error instanceof Error ? error.message : String(error));
+    } finally {
+      taskSessionsLoadingRef.current = false;
+      setTaskSessionsLoading(false);
     }
   }
 
@@ -3230,6 +3428,7 @@ export function App({
               ? { type: "delete", title: taskSessionAction.title }
               : null}
           taskSessionsIncludeArchived={taskSessionsIncludeArchived}
+          mainConversationSessions={sessionCenterMode === "conversations" && !taskSessionDetails}
           taskSessionDetail={Boolean(taskSessionDetails)}
           taskSessionDetailHasNative={taskSessionDetailHasNative}
           taskSessionDetailCanFork={taskSessionDetailCanFork}
@@ -3285,6 +3484,16 @@ export function App({
               loading={taskSessionsLoading}
               error={taskSessionsError}
               notice={taskSessionDetailNotice}
+              height={contentHeight}
+              terminalWidth={terminalWidth}
+            />
+          ) : sessionCenterMode === "conversations" ? (
+            <MainConversationsView
+              conversations={mainConversations}
+              selectedIndex={selectedMainConversationIndex}
+              notice={taskSessionsNotice}
+              loading={taskSessionsLoading}
+              error={taskSessionsError}
               height={contentHeight}
               terminalWidth={terminalWidth}
             />

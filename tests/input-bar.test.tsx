@@ -1090,7 +1090,7 @@ describe("InputBar", () => {
       <InputBar mode="sessions" value="ignored" terminalWidth={80} onChange={() => {}} />
     );
     const roomyFrame = roomy.lastFrame() ?? "";
-    expect(roomyFrame).toContain("sessions · Up/Dn select · Enter restore · I inspect · R rename · Esc back");
+    expect(roomyFrame).toContain("sessions · Up/Dn select · Enter restore · C chats · R rename · Esc back");
     expect(roomyFrame).not.toContain("ignored");
     expect(roomyFrame.split("\n")).toHaveLength(1);
     expect(displayWidth(roomyFrame)).toBeLessThanOrEqual(80);
@@ -1114,6 +1114,7 @@ describe("InputBar", () => {
     const semantics = [
       ["select", /Up\/Dn select/],
       ["restore", /Enter restore/],
+      ["conversations", /C (?:conversations|chats)/],
       ["inspect", /I inspect/],
       ["rename", /R rename/],
       ["archive", /A archive/],
@@ -1156,16 +1157,38 @@ describe("InputBar", () => {
     [36, "sessions · Up/Dn select · Esc back"],
     [52, "sessions · Up/Dn select · Enter restore · Esc back"],
     [61, "sessions · Up/Dn select · Enter restore · Esc back"],
-    [63, "sessions · Up/Dn select · Enter restore · R rename · Esc back"],
-    [75, "sessions · Up/Dn select · Enter restore · I inspect · R rename · Esc back"],
-    [86, "sessions · Up/Dn select · Enter restore · I inspect · R rename · Esc back"],
-    [97, "sessions · Up/Dn select · Enter restore · I inspect · R rename · A archive · Esc back"]
+    [63, "sessions · Up/Dn select · Enter restore · C chats · Esc back"],
+    [75, "sessions · Up/Dn select · Enter restore · C chats · R rename · Esc back"],
+    [86, "sessions · Up/Dn select · Enter restore · C chats · I inspect · R rename · Esc back"],
+    [97, "sessions · Up/Dn select · Enter restore · C chats · I inspect · R rename · A archive · Esc back"]
   ])("uses semantic Task session guidance at the %i-column boundary", (width, expected) => {
     const view = render(
       <InputBar mode="sessions" value="" terminalWidth={width} onChange={() => {}} />
     );
 
     expect(view.lastFrame()).toContain(expected);
+    view.unmount();
+  });
+
+  it.each([
+    [12, "Esc back"],
+    [30, "conversations · Esc back"],
+    [52, "conversations · Up/Dn select · Esc back"],
+    [70, "conversations · Up/Dn select · Enter restore · T tasks · Esc back"],
+    [90, "conversations · Up/Dn select · Enter restore · N new · T tasks · Esc back"]
+  ])("uses semantic Main conversation guidance at the %i-column boundary", (width, expected) => {
+    const view = render(
+      <InputBar
+        mode="sessions"
+        value=""
+        terminalWidth={width}
+        mainConversationSessions
+        onChange={() => {}}
+      />
+    );
+
+    expect(view.lastFrame()).toContain(expected);
+    expect(displayWidth(view.lastFrame() ?? "")).toBeLessThanOrEqual(width);
     view.unmount();
   });
 

@@ -33,6 +33,9 @@ import {
 import {
   type ChatRecord,
   ChatRecordSchema,
+  ConversationIdSchema,
+  type MainConversationArchive,
+  MainConversationArchiveSchema,
   type MainConversationState,
   MainConversationStateSchema,
   type EngineName,
@@ -148,6 +151,23 @@ export interface TaskSessionExport {
   createdAt: string;
 }
 
+export interface MainConversationSummary {
+  id: string | null;
+  title: string;
+  createdAt: string;
+  lastActivityAt: string;
+  messageCount: number;
+  userMessageCount: number;
+  nativeSessionCount: number;
+  current: boolean;
+}
+
+export interface MainConversationActivation {
+  conversation: MainConversationSummary;
+  restoredNativeSessions: number;
+  changed: boolean;
+}
+
 type BlockingProcessTermination = Extract<WorkerProcessTermination, "unverifiable" | "still-running">;
 
 interface PendingTurnDirectory {
@@ -208,6 +228,9 @@ const ACTIVE_FEATURE_STATES = new Set([
 ]);
 const PENDING_TURN_DIRECTORY = /^\.turn-(\d{4})-.+\.pending$/;
 const PENDING_TASK_CREATION_CLAIM = /^\.(task-.+)\.creating\.json$/;
+const MAIN_CONVERSATION_ARCHIVE_DIRECTORY = "conversations";
+const LEGACY_MAIN_CONVERSATION_DIRECTORY = "legacy";
+const SAFE_MAIN_WORKER_ID = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
 const CompletionContractSchema = z.object({
   version: z.literal(1),
   final_judge_required: z.literal(true)
@@ -355,6 +378,99 @@ export class SessionManager {
     return readJson(path, MainConversationStateSchema);
   }
 
+  async listMainConversations(limit = 100): Promise<MainConversationSummary[]> {
+    const boundedLimit = Number.isFinite(limit)
+      ? Math.min(500, Math.max(0, Math.trunc(limit)))
+      : 100;
+    if (boundedLimit === 0) {
+      return [];
+    }
+
+    const [current, records, archives] = await Promise.all([
+      this.readMainConversationState(),
+      readRecentJsonLines(
+        join(this.mainSessionDir(), "chat.jsonl"),
+        ChatRecordSchema,
+        10000,
+        { filter: (record) => !record.task_id }
+      ),
+      this.readMainConversationArchives()
+    ]);
+    const currentId = current?.id ?? null;
+    const conversations = new Map<string, MainConversationSummary>();
+
+    const ensureConversation = (
+      id: string | null,
+      createdAt: string,
+      lastActivityAt = createdAt
+    ): MainConversationSummary => {
+      const key = mainConversationScopeKey(id);
+      const existing = conversations.get(key);
+      if (existing) {
+        if (createdAt < existing.createdAt) {
+          existing.createdAt = createdAt;
+        }
+        if (lastActivityAt > existing.lastActivityAt) {
+          existing.lastActivityAt = lastActivityAt;
+        }
+        return existing;
+      }
+      const summary: MainConversationSummary = {
+        id,
+        title: id ? "Untitled conversation" : "Legacy conversation",
+        createdAt,
+        lastActivityAt,
+        messageCount: 0,
+        userMessageCount: 0,
+        nativeSessionCount: 0,
+        current: id === currentId
+      };
+      conversations.set(key, summary);
+      return summary;
+    };
+
+    for (const archive of archives) {
+      ensureConversation(archive.id, archive.created_at, archive.last_activated_at);
+    }
+    for (const record of records) {
+      const id = record.conversation_id ?? null;
+      const conversation = ensureConversation(id, record.time, record.time);
+      conversation.messageCount += 1;
+      if (record.from === "user") {
+        conversation.userMessageCount += 1;
+        if (conversation.title === "Untitled conversation" || conversation.title === "Legacy conversation") {
+          conversation.title = mainConversationTitle(record.text, id);
+        }
+      }
+    }
+
+    if (current) {
+      ensureConversation(current.id, current.created_at, current.created_at).current = true;
+    } else if (!conversations.has(LEGACY_MAIN_CONVERSATION_DIRECTORY)) {
+      const createdAt = this.now().toISOString();
+      ensureConversation(null, createdAt, createdAt).current = true;
+    }
+
+    const activeNativeSessions = await this.activeMainNativeSessionIds();
+    await Promise.all([...conversations.values()].map(async (conversation) => {
+      const archived = await this.archivedMainNativeSessionIds(conversation.id);
+      if (conversation.current) {
+        for (const sessionId of activeNativeSessions) {
+          archived.add(sessionId);
+        }
+      }
+      conversation.nativeSessionCount = archived.size;
+    }));
+
+    return [...conversations.values()]
+      .sort((left, right) => (
+        Number(right.current) - Number(left.current)
+        || right.lastActivityAt.localeCompare(left.lastActivityAt)
+        || mainConversationScopeKey(right.id).localeCompare(mainConversationScopeKey(left.id))
+      ))
+      .slice(0, boundedLimit);
+  }
+
   async startNewMainConversation(): Promise<MainConversationState> {
     const main = this.taskFromId("main");
     await ensureDir(main.dir);
@@ -362,19 +478,15 @@ export class SessionManager {
 
     return runWithLeaseFinalization("Main conversation reset", lease, async () => {
       const previous = await this.readMainConversationState();
-      const entries = await readdir(main.dir, { withFileTypes: true });
-      for (const entry of entries) {
-        if (!entry.isDirectory()) {
-          continue;
-        }
-        const worker = { dir: join(main.dir, entry.name) };
-        const nativeSession = await this.readNativeSession(worker);
-        if (nativeSession?.scope === "main") {
-          await this.retireNativeSession(worker, "new Main conversation");
-        }
-      }
-
       const createdAt = this.now();
+      const currentSummary = (await this.listMainConversations(500)).find((conversation) => conversation.current);
+      await this.archiveAndRetireMainConversation(
+        main,
+        previous?.id ?? null,
+        currentSummary?.createdAt ?? previous?.created_at ?? createdAt.toISOString(),
+        "new Main conversation",
+        Boolean(previous) || (currentSummary?.messageCount ?? 0) > 0 || (currentSummary?.nativeSessionCount ?? 0) > 0
+      );
       const baseId = `conversation-${formatTaskTimestamp(createdAt)}-${this.randomId()}`;
       const state = MainConversationStateSchema.parse({
         version: 1,
@@ -383,8 +495,72 @@ export class SessionManager {
         ...(previous ? { previous_id: previous.id } : {})
       });
       await writeJson(join(main.dir, "conversation.json"), state);
+      await this.writeMainConversationArchive({
+        version: 1,
+        id: state.id,
+        created_at: state.created_at,
+        last_activated_at: state.created_at
+      });
       await this.appendEvent(main, "main.conversation_started", `Started ${state.id}`);
       return state;
+    });
+  }
+
+  async activateMainConversation(conversationId: string | null): Promise<MainConversationActivation> {
+    const id = conversationId === null ? null : ConversationIdSchema.parse(conversationId);
+    const main = this.taskFromId("main");
+    await ensureDir(main.dir);
+    const lease = await this.claimTaskRunLease(main.dir);
+
+    return runWithLeaseFinalization("Main conversation restore", lease, async () => {
+      const conversations = await this.listMainConversations(500);
+      const target = conversations.find((conversation) => conversation.id === id);
+      if (!target) {
+        throw new Error(`Main conversation not found: ${id ?? "legacy"}`);
+      }
+      const current = await this.readMainConversationState();
+      const currentId = current?.id ?? null;
+      if (currentId === id) {
+        return { conversation: target, restoredNativeSessions: 0, changed: false };
+      }
+
+      const currentSummary = conversations.find((conversation) => conversation.current);
+      const activatedAt = this.now().toISOString();
+      await this.archiveAndRetireMainConversation(
+        main,
+        currentId,
+        currentSummary?.createdAt ?? current?.created_at ?? activatedAt,
+        "switch Main conversation",
+        Boolean(current) || (currentSummary?.messageCount ?? 0) > 0 || (currentSummary?.nativeSessionCount ?? 0) > 0
+      );
+
+      if (id) {
+        await writeJson(join(main.dir, "conversation.json"), MainConversationStateSchema.parse({
+          version: 1,
+          id,
+          created_at: target.createdAt,
+          ...(current?.id ? { previous_id: current.id } : {})
+        }));
+      } else {
+        await removeIfExists(join(main.dir, "conversation.json"));
+      }
+      await this.writeMainConversationArchive({
+        version: 1,
+        id,
+        created_at: target.createdAt,
+        last_activated_at: activatedAt
+      });
+      const restoredNativeSessions = await this.restoreMainConversationNativeSessions(main, id);
+      await this.appendEvent(
+        main,
+        "main.conversation_restored",
+        `Restored ${id ?? "legacy conversation"}; ${restoredNativeSessions} native session(s)`
+      );
+      const restored = (await this.listMainConversations(500)).find((conversation) => conversation.id === id);
+      if (!restored) {
+        throw new Error(`Restored Main conversation disappeared from its catalog: ${id ?? "legacy"}`);
+      }
+      return { conversation: restored, restoredNativeSessions, changed: true };
     });
   }
 
@@ -1052,6 +1228,151 @@ export class SessionManager {
     await removeIfExists(nativeSessionPath);
     await this.clearWorkerStatusNativeSession(worker);
     await this.index?.deleteNativeSession(this.taskIdFromWorkerDir(worker.dir), record.worker_id);
+  }
+
+  private mainConversationArchiveDir(conversationId: string | null): string {
+    return join(
+      this.mainSessionDir(),
+      MAIN_CONVERSATION_ARCHIVE_DIRECTORY,
+      mainConversationScopeKey(conversationId)
+    );
+  }
+
+  private async readMainConversationArchives(): Promise<MainConversationArchive[]> {
+    const root = join(this.mainSessionDir(), MAIN_CONVERSATION_ARCHIVE_DIRECTORY);
+    if (!(await pathExists(root))) {
+      return [];
+    }
+    const archives: MainConversationArchive[] = [];
+    for (const entry of await readdir(root, { withFileTypes: true })) {
+      if (!entry.isDirectory()) {
+        continue;
+      }
+      const metadata = await readMainConversationArchiveIfValid(join(root, entry.name, "meta.json"));
+      if (metadata && mainConversationScopeKey(metadata.id) === entry.name) {
+        archives.push(metadata);
+      }
+    }
+    return archives;
+  }
+
+  private async writeMainConversationArchive(metadata: MainConversationArchive): Promise<void> {
+    const parsed = MainConversationArchiveSchema.parse(metadata);
+    const path = join(this.mainConversationArchiveDir(parsed.id), "meta.json");
+    const existing = await readMainConversationArchiveIfValid(path);
+    await writeJson(path, MainConversationArchiveSchema.parse({
+      ...parsed,
+      created_at: existing && existing.created_at < parsed.created_at
+        ? existing.created_at
+        : parsed.created_at
+    }));
+  }
+
+  private async archiveAndRetireMainConversation(
+    main: Pick<TaskSession, "dir">,
+    conversationId: string | null,
+    createdAt: string,
+    reason: string,
+    persistEmpty = true
+  ): Promise<void> {
+    const activatedAt = this.now().toISOString();
+    const archiveDir = join(this.mainConversationArchiveDir(conversationId), "native-sessions");
+    const entries = await readdir(main.dir, { withFileTypes: true });
+    let archivedNativeSession = false;
+    for (const entry of entries) {
+      if (!entry.isDirectory() || entry.name === MAIN_CONVERSATION_ARCHIVE_DIRECTORY) {
+        continue;
+      }
+      const worker = { dir: join(main.dir, entry.name) };
+      const nativeSession = await this.readNativeSession(worker);
+      if (
+        nativeSession?.scope !== "main"
+        || nativeSession.role !== "main"
+        || !safeMainWorkerId(nativeSession.worker_id)
+      ) {
+        continue;
+      }
+      await writeJson(join(archiveDir, `${nativeSession.worker_id}.json`), nativeSession);
+      await this.retireNativeSession(worker, reason);
+      archivedNativeSession = true;
+    }
+    if (persistEmpty || archivedNativeSession) {
+      await this.writeMainConversationArchive({
+        version: 1,
+        id: conversationId,
+        created_at: createdAt,
+        last_activated_at: activatedAt
+      });
+    }
+  }
+
+  private async restoreMainConversationNativeSessions(
+    main: Pick<TaskSession, "dir">,
+    conversationId: string | null
+  ): Promise<number> {
+    const archiveDir = join(this.mainConversationArchiveDir(conversationId), "native-sessions");
+    if (!(await pathExists(archiveDir))) {
+      return 0;
+    }
+    let restored = 0;
+    for (const entry of await readdir(archiveDir, { withFileTypes: true })) {
+      if (!entry.isFile() || !entry.name.endsWith(".json")) {
+        continue;
+      }
+      const record = await readNativeSessionIfValid(join(archiveDir, entry.name));
+      if (
+        !record
+        || record.scope !== "main"
+        || record.role !== "main"
+        || !safeMainWorkerId(record.worker_id)
+        || entry.name !== `${record.worker_id}.json`
+      ) {
+        continue;
+      }
+      const worker = { dir: join(main.dir, record.worker_id) };
+      await ensureDir(worker.dir);
+      await writeJson(join(worker.dir, "native-session.json"), record);
+      await removeIfExists(join(worker.dir, "native-session.retired.json"));
+      await this.syncNativeSessionProjection(worker, record);
+      restored += 1;
+    }
+    return restored;
+  }
+
+  private async archivedMainNativeSessionIds(conversationId: string | null): Promise<Set<string>> {
+    const archiveDir = join(this.mainConversationArchiveDir(conversationId), "native-sessions");
+    const ids = new Set<string>();
+    if (!(await pathExists(archiveDir))) {
+      return ids;
+    }
+    for (const entry of await readdir(archiveDir, { withFileTypes: true })) {
+      if (!entry.isFile() || !entry.name.endsWith(".json")) {
+        continue;
+      }
+      const record = await readNativeSessionIfValid(join(archiveDir, entry.name));
+      if (record?.scope === "main" && record.role === "main") {
+        ids.add(`${record.engine}\u0000${record.session_id}`);
+      }
+    }
+    return ids;
+  }
+
+  private async activeMainNativeSessionIds(): Promise<Set<string>> {
+    const ids = new Set<string>();
+    const mainDir = this.mainSessionDir();
+    if (!(await pathExists(mainDir))) {
+      return ids;
+    }
+    for (const entry of await readdir(mainDir, { withFileTypes: true })) {
+      if (!entry.isDirectory() || entry.name === MAIN_CONVERSATION_ARCHIVE_DIRECTORY) {
+        continue;
+      }
+      const record = await this.readNativeSession({ dir: join(mainDir, entry.name) });
+      if (record?.scope === "main" && record.role === "main") {
+        ids.add(`${record.engine}\u0000${record.session_id}`);
+      }
+    }
+    return ids;
   }
 
   async appendEvent(task: Pick<TaskSession, "id" | "dir">, type: string, message: string): Promise<void> {
@@ -1741,6 +2062,29 @@ function nextConversationId(baseId: string, previousId?: string): string {
     : `${baseId}-2`;
 }
 
+function mainConversationScopeKey(conversationId: string | null): string {
+  return conversationId ?? LEGACY_MAIN_CONVERSATION_DIRECTORY;
+}
+
+function mainConversationTitle(text: string, conversationId: string | null): string {
+  const sanitized = sanitizePersistedMainMessage("user", text)
+    .replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, "")
+    .replace(/[\u0000-\u001f\u007f]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!sanitized) {
+    return conversationId ? "Untitled conversation" : "Legacy conversation";
+  }
+  const characters = Array.from(sanitized);
+  return characters.length > 80
+    ? `${characters.slice(0, 77).join("")}...`
+    : sanitized;
+}
+
+function safeMainWorkerId(workerId: string): boolean {
+  return SAFE_MAIN_WORKER_ID.test(workerId) && workerId !== "." && workerId !== "..";
+}
+
 function normalizeTaskTitle(title: string): string {
   const normalized = title
     .replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, "")
@@ -1856,6 +2200,17 @@ async function readRetiredNativeSessionIfValid(retiredSessionPath: string) {
 
   try {
     return await readJson(retiredSessionPath, RetiredNativeSessionSchema);
+  } catch {
+    return null;
+  }
+}
+
+async function readMainConversationArchiveIfValid(path: string): Promise<MainConversationArchive | null> {
+  if (!(await pathExists(path))) {
+    return null;
+  }
+  try {
+    return await readJson(path, MainConversationArchiveSchema);
   } catch {
     return null;
   }
