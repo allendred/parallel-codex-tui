@@ -22,6 +22,8 @@ const MAX_TEXT_MERGE_BYTES = 10 * 1024 * 1024;
 const FEATURE_ID_PATTERN = /^[a-z0-9][a-z0-9-]{0,63}$/;
 const COMMIT_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9-]{0,63}$/;
 const LIVE_COMMIT_PROTOCOL = "atomic-claim-v1";
+const HOST_METADATA_FILES = new Set([".DS_Store", "Thumbs.db", "desktop.ini"]);
+const HOST_METADATA_DIRECTORIES = new Set([".Spotlight-V100", ".Trashes", ".fseventsd"]);
 
 export interface ParallelWorkspaceManagerOptions {
   workspaceRoot: string;
@@ -602,11 +604,22 @@ export class ParallelWorkspaceManager {
     if (segments.includes(".git")) {
       return true;
     }
+    if (isHostMetadataPath(segments)) {
+      return true;
+    }
     return Boolean(
       this.dataRelativePath
       && (path === this.dataRelativePath || path.startsWith(`${this.dataRelativePath}${sep}`))
     );
   }
+}
+
+function isHostMetadataPath(segments: string[]): boolean {
+  return segments.some((segment) => (
+    HOST_METADATA_FILES.has(segment)
+    || HOST_METADATA_DIRECTORIES.has(segment)
+    || segment.startsWith("._")
+  ));
 }
 
 async function readJsonRecord(path: string): Promise<Record<string, unknown> | null> {

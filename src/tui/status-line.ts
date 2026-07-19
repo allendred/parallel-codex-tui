@@ -95,6 +95,9 @@ function formatMainStatus(
   if (progress.phase === "initialized") {
     return "starting";
   }
+  if (progress.phase === "process-buffered") {
+    return "working · buffered";
+  }
   if (progress.phase === "process-starting" || progress.phase === "native-resume-fallback") {
     return formatMainWaitProgress(
       "waiting output",

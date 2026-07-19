@@ -98,6 +98,22 @@ describe("WorkerOverviewView", () => {
     });
     expect(activityLine?.(
       worker({
+        id: "buffered",
+        label: "Critic (claude)",
+        role: "critic",
+        engine: "claude",
+        state: "starting",
+        phase: "process-buffered",
+        summary: "text output is buffered until completion"
+      }),
+      Date.parse("2026-07-11T08:01:45.000Z"),
+      { timeoutMs: 45 * 60 * 1000, firstOutputTimeoutMs: 45 * 60 * 1000 }
+    )).toEqual({
+      text: "activity · working 1m 45s · output buffered until completion",
+      tone: "muted"
+    });
+    expect(activityLine?.(
+      worker({
         id: "running",
         label: "Actor (codex)",
         state: "running",

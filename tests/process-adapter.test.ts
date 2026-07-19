@@ -78,7 +78,7 @@ describe("ProcessWorkerAdapter", () => {
     expect(output).not.toContain("on-request");
   });
 
-  it("forces isolated Claude workers back to acceptEdits", async () => {
+  it("forces isolated Claude workers into non-interactive auto permissions", async () => {
     const root = await mkdtemp(join(tmpdir(), "pct-process-claude-permissions-"));
     const filesDir = join(root, "actor-claude");
     const promptPath = join(filesDir, "prompt.md");
@@ -110,7 +110,7 @@ describe("ProcessWorkerAdapter", () => {
 
     const output = await readTextIfExists(outputLogPath);
     expect(result.exitCode).toBe(0);
-    expect(output).toContain("--permission-mode|acceptEdits");
+    expect(output).toContain("--permission-mode|auto");
     expect(output).not.toContain("bypassPermissions");
     expect(output).not.toContain("dangerously-skip-permissions");
   });
@@ -1124,6 +1124,52 @@ describe("ProcessWorkerAdapter", () => {
     expect(await readJson(statusPath, WorkerStatusSchema)).toMatchObject({
       state: "failed",
       phase: "process-timeout"
+    });
+  });
+
+  it("does not kill a healthy Claude text run before its buffered result arrives", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pct-process-claude-buffered-"));
+    const filesDir = join(root, "critic-claude");
+    const promptPath = join(filesDir, "prompt.md");
+    const outputLogPath = join(filesDir, "output.log");
+    const statusPath = join(filesDir, "status.json");
+    const script = "setTimeout(() => console.log('buffered result'), 250)";
+    const phases: string[] = [];
+
+    await writeText(promptPath, "review this");
+
+    const adapter = new ProcessWorkerAdapter(process.execPath, [
+      "-e",
+      script,
+      "--",
+      "--print",
+      "--output-format",
+      "text"
+    ], "claude");
+    const result = await adapter.run({
+      workerId: "critic-claude-buffered",
+      role: "critic",
+      engine: "claude",
+      cwd: root,
+      filesDir,
+      promptPath,
+      outputLogPath,
+      statusPath,
+      prompt: "review this",
+      firstOutputTimeoutMs: 50,
+      timeoutMs: 2000,
+      onStatus: (status) => {
+        phases.push(status.phase);
+      }
+    });
+
+    expect(result.exitCode).toBe(0);
+    expect(result.failure).toBeUndefined();
+    expect(phases).toContain("process-buffered");
+    expect(await readTextIfExists(outputLogPath)).toContain("buffered result");
+    expect(await readJson(statusPath, WorkerStatusSchema)).toMatchObject({
+      state: "done",
+      phase: "process-exited"
     });
   });
 

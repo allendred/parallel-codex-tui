@@ -147,6 +147,12 @@ export function workerOverviewActivityLine(
       tone: "warning"
     };
   }
+  if (status.phase === "process-buffered") {
+    return {
+      text: `activity · working ${formatWorkerActivityDuration(ageMs)} · output buffered until completion`,
+      tone: "muted"
+    };
+  }
   const starting = status.state === "starting";
   const limitMs = effectiveWorkerWatchdog(
     starting ? policy.firstOutputTimeoutMs : policy.idleTimeoutMs,

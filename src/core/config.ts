@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { z, type ZodOptional } from "zod";
 import { EngineNameSchema } from "../domain/schemas.js";
 import { pathExists, readTextIfExists, writeText } from "./file-store.js";
+import { workerBuffersOutputUntilCompletion } from "./worker-output-policy.js";
 import {
   normalizeTuiThemeColorValue,
   normalizeTuiThemeName,
@@ -280,7 +281,7 @@ export function defaultConfig(projectRoot: string): AppConfig {
         assignable: true,
         timeoutMs: 45 * 60 * 1000,
         idleTimeoutMs: 5 * 60 * 1000,
-        firstOutputTimeoutMs: 2 * 60 * 1000,
+        firstOutputTimeoutMs: 45 * 60 * 1000,
         model: {
           name: "",
           provider: "",
@@ -333,10 +334,10 @@ export function defaultConfig(projectRoot: string): AppConfig {
       }
     },
     pairing: {
-      main: "claude",
+      main: "codex",
       judge: "codex",
       actor: "codex",
-      critic: "codex"
+      critic: "claude"
     },
     roles: {
       main: {
@@ -473,7 +474,7 @@ function resolveWorkerConfigs(
           parent = resolve(parentId);
         }
       }
-      const worker = mergeWorkerConfig(parent, override);
+      const worker = normalizeBufferedWorkerTimeout(mergeWorkerConfig(parent, override));
       resolved.set(id, worker);
       return worker;
     } finally {
@@ -548,6 +549,23 @@ function mergeWorkerConfig(
       ...base.interactive,
       ...(override.interactive ?? {})
     }
+  };
+}
+
+function normalizeBufferedWorkerTimeout(worker: WorkerCommandConfig): WorkerCommandConfig {
+  const launchArgs = [
+    worker.args,
+    ...(worker.nativeSession.enabled ? [worker.nativeSession.resumeArgs] : [])
+  ];
+  const buffersOutput = launchArgs.some((args) => (
+    workerBuffersOutputUntilCompletion(worker.capabilities.profile, args)
+  ));
+  if (!buffersOutput || !worker.timeoutMs || worker.firstOutputTimeoutMs === worker.timeoutMs) {
+    return worker;
+  }
+  return {
+    ...worker,
+    firstOutputTimeoutMs: worker.timeoutMs
   };
 }
 

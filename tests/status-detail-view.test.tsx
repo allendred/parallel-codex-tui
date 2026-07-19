@@ -39,6 +39,9 @@ describe("StatusDetailView", () => {
       taskStatus: "070751-5bb0 | workers 1 | run 1",
       routeStatus: "route complex · via 127.0.0.1:7890 · 15s",
       routeReason: "这个请求包含多个可以并行开发和审查的功能点，因此交给 Judge 与 Actor/Critic。",
+      pairing: { main: "codex", judge: "codex", actor: "codex", critic: "claude" },
+      configStatus: "config · roles/workers changed · restart required",
+      configRestartRequired: true,
       workers,
       selectedWorkerIndex: 0
     }, 100, 20);
@@ -46,6 +49,8 @@ describe("StatusDetailView", () => {
 
     expect(text).toContain("task · 070751-5bb0 · complex · running");
     expect(text).toContain("route complex · via 127.0.0.1:7890 · 15s");
+    expect(text).toContain("active roles · main/codex · judge/codex · actor/codex · critic/claude");
+    expect(text).toContain("config · roles/workers changed · restart required");
     expect(text).toContain("selected · actor/openai_compat · running · Input reliability");
     expect(text).toContain("model · acme/vendor-coder-v2");
     expect(text).toContain("session · native-provider-session-1234");
@@ -63,6 +68,7 @@ describe("StatusDetailView", () => {
         taskStatus="070751-5bb0 | workers 1 | done 1"
         routeStatus="route complex · 15s"
         routeReason="完成真实任务，并保留历史 Worker 日志。"
+        pairing={{ main: "codex", judge: "codex", actor: "codex", critic: "claude" }}
         workers={workers}
         selectedWorkerIndex={0}
         height={12}

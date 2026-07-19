@@ -3,6 +3,7 @@ import { join } from "node:path";
 import type { AppConfig } from "../core/config.js";
 import { appendJsonLine, ensureDir, pathExists, readJson, readTextIfExists, removeIfExists, writeJson, writeText } from "../core/file-store.js";
 import { runWithLeaseFinalization } from "../core/lease-finalization.js";
+import { extractMainResponse } from "../core/main-response.js";
 import { claimTaskRunLease, TaskRunLeaseConflictError, type TaskRunLease } from "../core/process-ownership.js";
 import { routerRuntimeDir } from "../core/paths.js";
 import { classifyRouterFailure, routerFallbackIsTransient } from "../core/router-audit.js";
@@ -3236,15 +3237,6 @@ async function recoverWorkerFileFromWorkspace(sourcePath: string, targetPath: st
     return;
   }
   await mirrorWorkerFileToFeature(sourcePath, targetPath);
-}
-
-function extractMainResponse(outputLog: string): string {
-  return outputLog
-    .split("\n")
-    .filter((line) => !line.startsWith("$ "))
-    .filter((line) => !line.startsWith("[mock:main]"))
-    .join("\n")
-    .trim();
 }
 
 function emptyMainResponseSummary(): string {

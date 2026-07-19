@@ -412,6 +412,9 @@ function currentStatusValueCandidates(text: string): string[] {
 }
 
 function compactCurrentStatusDetail(detail: string): string {
+  if (/^working\s+·\s+buffered$/i.test(detail)) {
+    return "run buffered";
+  }
   const progress = detail.match(
     /^(waiting output|responding)\s+·\s+(\d+(?:\.\d+)?s)\s*\/\s*(\d+(?:\.\d+)?(?:ms|s|m))\s+(?:first|idle)$/i
   );
@@ -420,11 +423,14 @@ function compactCurrentStatusDetail(detail: string): string {
     return `${state} ${progress[2]}/${progress[3]}`;
   }
 
-  const state = detail.match(/^(starting|running|run|done|failed|fail|waiting|wait|queued|stopping|stop|idle|cancelled|canceled)\b/i)?.[1]?.toLowerCase();
+  const state = detail.match(/^(starting|working|running|run|done|failed|fail|waiting|wait|queued|stopping|stop|idle|cancelled|canceled)\b/i)?.[1]?.toLowerCase();
   if (state === "starting") {
     return "start";
   }
   if (state === "running") {
+    return "run";
+  }
+  if (state === "working") {
     return "run";
   }
   if (state === "failed") {
@@ -945,7 +951,7 @@ function parseMainEngineStatus(part: string): Segment | null {
 }
 
 function runtimeStatusTone(status: string): StatusTone | undefined {
-  if (status === "run" || status === "running" || status === "starting" || status === "responding") {
+  if (status === "run" || status === "running" || status === "working" || status === "starting" || status === "responding") {
     return "run";
   }
   if (status === "done") {

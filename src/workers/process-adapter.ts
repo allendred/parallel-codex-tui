@@ -4,6 +4,7 @@ import { StringDecoder } from "node:string_decoder";
 import { appendText, writeJson } from "../core/file-store.js";
 import { clearWorkerProcessRecord, writeWorkerProcessRecord } from "../core/process-ownership.js";
 import { terminateProcessTree } from "../core/process-tree.js";
+import { workerBuffersOutputUntilCompletion } from "../core/worker-output-policy.js";
 import type { EngineName, WorkerStatus } from "../domain/schemas.js";
 import { detectNativeSessionId } from "./native-session-detection.js";
 import type {
@@ -33,6 +34,7 @@ interface ProcessAttemptOptions {
   initialNativeSessionId?: string;
   startPhase?: string;
   startSummary?: string;
+  outputBufferedUntilCompletion?: boolean;
 }
 
 interface ProcessAttemptResult {
@@ -80,7 +82,8 @@ export class ProcessWorkerAdapter implements WorkerAdapter {
     };
 
     const first = await this.runAttempt(runSpec, launch, {
-      initialNativeSessionId: launch.initialNativeSessionId
+      initialNativeSessionId: launch.initialNativeSessionId,
+      outputBufferedUntilCompletion: workerBuffersOutputUntilCompletion(capabilities.profile, launch.args)
     });
     if (!shouldFallbackToNewNativeSession(first, runSpec.nativeSessionConfig)) {
       return first.result;
@@ -112,7 +115,8 @@ export class ProcessWorkerAdapter implements WorkerAdapter {
       {
         initialNativeSessionId: freshLaunch.initialNativeSessionId,
         startPhase: "native-resume-fallback",
-        startSummary: `${this.command} starting fresh session after unrecoverable native resume`
+        startSummary: `${this.command} starting fresh session after unrecoverable native resume`,
+        outputBufferedUntilCompletion: workerBuffersOutputUntilCompletion(capabilities.profile, freshLaunch.args)
       }
     )).result;
   }
@@ -134,7 +138,18 @@ export class ProcessWorkerAdapter implements WorkerAdapter {
       return { result, output: "", launch };
     }
 
-    await setStatus(runSpec, "starting", options.startPhase ?? "process-starting", options.startSummary ?? `Starting ${this.command}`);
+    const startPhase = options.outputBufferedUntilCompletion
+      ? "process-buffered"
+      : options.startPhase ?? "process-starting";
+    const startSummary = options.startSummary ?? `Starting ${this.command}`;
+    await setStatus(
+      runSpec,
+      "starting",
+      startPhase,
+      options.outputBufferedUntilCompletion
+        ? `${startSummary}; text output is buffered until completion`
+        : startSummary
+    );
     await appendText(runSpec.outputLogPath, `$ ${formatShellCommand(this.command, launch.args)}\n`);
 
     return new Promise<ProcessAttemptResult>((resolve, reject) => {
@@ -587,6 +602,8 @@ export class ProcessWorkerAdapter implements WorkerAdapter {
       }
 
       if (
+        !options.outputBufferedUntilCompletion
+        &&
         runSpec.firstOutputTimeoutMs
         && runSpec.firstOutputTimeoutMs > 0
         && (!runSpec.timeoutMs || runSpec.timeoutMs <= 0 || runSpec.firstOutputTimeoutMs < runSpec.timeoutMs)
@@ -728,7 +745,7 @@ function enforceWorkerIsolationArgs(
     return enforceCodexWorkspaceSandbox(args);
   }
   if (profile === "claude") {
-    return enforceClaudeEditPermissions(args);
+    return enforceClaudeAutoPermissions(args);
   }
   return args;
 }
@@ -778,7 +795,7 @@ function enforceCodexWorkspaceSandbox(args: string[]): string[] {
   return result;
 }
 
-function enforceClaudeEditPermissions(args: string[]): string[] {
+function enforceClaudeAutoPermissions(args: string[]): string[] {
   const result: string[] = [];
   let hasPermissionMode = false;
   for (let index = 0; index < args.length; index += 1) {
@@ -787,20 +804,20 @@ function enforceClaudeEditPermissions(args: string[]): string[] {
       continue;
     }
     if (arg === "--permission-mode") {
-      result.push(arg, "acceptEdits");
+      result.push(arg, "auto");
       hasPermissionMode = true;
       index += 1;
       continue;
     }
     if (arg.startsWith("--permission-mode=")) {
-      result.push("--permission-mode=acceptEdits");
+      result.push("--permission-mode=auto");
       hasPermissionMode = true;
       continue;
     }
     result.push(arg);
   }
   if (!hasPermissionMode) {
-    result.push("--permission-mode", "acceptEdits");
+    result.push("--permission-mode", "auto");
   }
   return result;
 }

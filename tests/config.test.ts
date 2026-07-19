@@ -49,9 +49,9 @@ describe("config", () => {
       "never",
       "-"
     ]);
-    expect(config.pairing.main).toBe("claude");
+    expect(config.pairing.main).toBe("codex");
     expect(config.pairing.actor).toBe("codex");
-    expect(config.pairing.critic).toBe("codex");
+    expect(config.pairing.critic).toBe("claude");
     expect(config.orchestration.maxParallelFeatures).toBe(3);
     expect(config.orchestration.maxRevisionRounds).toBe(3);
     expect(config.orchestration.maxConflictReplans).toBe(2);
@@ -106,6 +106,38 @@ describe("config", () => {
       writableDirArgs: ["--add-dir", "{dir}"],
       freshSessionArgs: ["--session-id", "{sessionId}"]
     });
+    expect(config.workers.claude.firstOutputTimeoutMs).toBe(config.workers.claude.timeoutMs);
+  });
+
+  it("normalizes legacy Claude text startup watchdogs to the total timeout", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pct-config-claude-buffered-watchdog-"));
+    await writeText(
+      join(root, ".parallel-codex", "config.toml"),
+      ["[workers.claude]", "firstOutputTimeoutMs = 120000"].join("\n")
+    );
+
+    const config = await loadConfig(root);
+
+    expect(config.workers.claude.firstOutputTimeoutMs).toBe(45 * 60 * 1000);
+  });
+
+  it("preserves a shorter Claude watchdog for streaming output", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pct-config-claude-stream-watchdog-"));
+    await writeText(
+      join(root, ".parallel-codex", "config.toml"),
+      [
+        "[workers.claude]",
+        'args = ["--print", "--output-format", "stream-json"]',
+        "firstOutputTimeoutMs = 15000",
+        "",
+        "[workers.claude.nativeSession]",
+        'resumeArgs = ["--print", "--resume", "{sessionId}", "--output-format=stream-json"]'
+      ].join("\n")
+    );
+
+    const config = await loadConfig(root);
+
+    expect(config.workers.claude.firstOutputTimeoutMs).toBe(15000);
   });
 
   it("loads TOML overrides", async () => {

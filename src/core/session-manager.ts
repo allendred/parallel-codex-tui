@@ -15,6 +15,7 @@ import {
   writeText
 } from "./file-store.js";
 import { runWithLeaseFinalization } from "./lease-finalization.js";
+import { sanitizePersistedMainMessage } from "./main-response.js";
 import { formatTaskTimestamp, taskDir, taskSessionIdIsValid } from "./paths.js";
 import { sessionsRoot } from "./paths.js";
 import type { SessionIndex } from "./session-index.js";
@@ -391,11 +392,15 @@ export class SessionManager {
     const boundedLimit = Number.isFinite(limit)
       ? Math.min(1000, Math.max(0, Math.trunc(limit)))
       : 200;
-    return readRecentJsonLines(
+    const records = await readRecentJsonLines(
       join(this.mainSessionDir(), "chat.jsonl"),
       ChatRecordSchema,
       boundedLimit
     );
+    return records.map((record) => ({
+      ...record,
+      text: sanitizePersistedMainMessage(record.from, record.text)
+    }));
   }
 
   taskFromId(taskId: string): TaskSession {

@@ -186,7 +186,7 @@ describe("App Router reason", () => {
       await waitForFrame(view.lastFrame, "Short conversation without project work.");
       const routingFrame = view.lastFrame() ?? "";
       expect(routingFrame).toContain("route · simple · codex");
-      expect(routingFrame).toContain("main/claude · run");
+      expect(routingFrame).toContain("main/codex · run");
       expect(routingFrame).not.toContain("Final Main answer.");
 
       completion.resolve({
@@ -210,7 +210,7 @@ describe("App Router reason", () => {
     }
   });
 
-  it("shows the live Main first-output budget after the Router decision", async () => {
+  it("shows the live Main first-output budget for a streaming Worker after the Router decision", async () => {
     const testInput = installTestInputStream();
     const root = await mkdtemp(join(tmpdir(), "pct-app-main-progress-"));
     const statusPath = join(root, "status.json");
@@ -247,9 +247,12 @@ describe("App Router reason", () => {
       });
       return completion.promise;
     });
+    const config = configWithMainClaude(root);
+    config.workers.claude.args = ["--print", "--output-format", "stream-json"];
+    config.workers.claude.firstOutputTimeoutMs = 2 * 60 * 1000;
     const view = render(
       <App
-        config={defaultConfig(root)}
+        config={config}
         orchestrator={{ handleRequest } as unknown as Orchestrator}
         cwd={root}
       />
@@ -318,7 +321,7 @@ describe("App Router reason", () => {
     });
     const view = render(
       <App
-        config={defaultConfig(root)}
+        config={configWithMainClaude(root)}
         orchestrator={{ handleRequest } as unknown as Orchestrator}
         cwd={root}
       />
@@ -385,7 +388,7 @@ describe("App Router reason", () => {
     });
     const view = render(
       <App
-        config={defaultConfig(root)}
+        config={configWithMainClaude(root)}
         orchestrator={{ handleRequest } as unknown as Orchestrator}
         cwd={root}
       />
@@ -562,6 +565,12 @@ describe("App Router reason", () => {
     }
   });
 });
+
+function configWithMainClaude(root: string) {
+  const config = defaultConfig(root);
+  config.pairing.main = "claude";
+  return config;
+}
 
 function deferred<T>(): { promise: Promise<T>; resolve: (value: T) => void } {
   let resolve!: (value: T) => void;

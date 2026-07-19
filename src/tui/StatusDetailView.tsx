@@ -1,6 +1,7 @@
 import React from "react";
 import { basename } from "node:path";
 import { Box, Text, type TextProps } from "ink";
+import type { AppConfig } from "../core/config.js";
 import type { WorkerLogRef } from "../orchestrator/orchestrator.js";
 import { compactEndByDisplayWidth, displayWidth, wrapByDisplayWidth } from "./display-width.js";
 import { TUI_THEME } from "./theme.js";
@@ -21,6 +22,9 @@ export interface StatusDetailViewProps {
   taskStatus: string;
   routeStatus: string;
   routeReason?: string;
+  pairing: AppConfig["pairing"];
+  configStatus?: string;
+  configRestartRequired?: boolean;
   workers: WorkerLogRef[];
   selectedWorkerIndex: number;
   height?: number;
@@ -68,8 +72,19 @@ export function statusDetailDisplayLines(
     {
       text: fitStatusDetailText(`workspace · ${basename(input.cwd) || input.cwd} · ${input.cwd}`, safeWidth),
       tone: "muted"
+    },
+    {
+      text: fitStatusDetailText(rolePairingDetail(input.pairing), safeWidth),
+      tone: "text"
     }
   ];
+
+  if (input.configStatus?.trim()) {
+    lines.push({
+      text: fitStatusDetailText(input.configStatus, safeWidth),
+      tone: input.configRestartRequired ? "warning" : "success"
+    });
+  }
 
   if (input.routeStatus.trim()) {
     lines.push({
@@ -97,6 +112,16 @@ export function statusDetailDisplayLines(
   }
 
   return lines.slice(0, maxLines);
+}
+
+function rolePairingDetail(pairing: AppConfig["pairing"]): string {
+  return [
+    "active roles",
+    `main/${pairing.main}`,
+    `judge/${pairing.judge}`,
+    `actor/${pairing.actor}`,
+    `critic/${pairing.critic}`
+  ].join(" · ");
 }
 
 function taskDetail(input: Omit<StatusDetailViewProps, "height" | "terminalWidth">): string {

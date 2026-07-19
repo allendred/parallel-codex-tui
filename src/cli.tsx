@@ -208,6 +208,10 @@ async function main(): Promise<void> {
           ...message,
           taskId
         })}
+        reloadConfig={async () => withUiThemeOverride(
+          await loadConfig(cliArgs.appRoot),
+          cliArgs.theme
+        )}
       />
     );
 

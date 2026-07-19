@@ -528,6 +528,39 @@ describe("ParallelWorkspaceManager", () => {
     } satisfies Partial<WorkspaceLiveMutationError>);
   });
 
+  it("ignores host metadata drift without weakening real workspace mutation checks", async () => {
+    const workspaceRoot = await mkdtemp(join(tmpdir(), "pct-workspace-host-metadata-"));
+    const taskDir = join(workspaceRoot, ".parallel-codex", "sessions", "task-host-metadata");
+    await writeText(join(workspaceRoot, "base.txt"), "base\n");
+    await writeText(join(workspaceRoot, ".DS_Store"), "finder-before\n");
+    await writeText(join(workspaceRoot, "assets", "._sprite.png"), "apple-double\n");
+    const manager = new ParallelWorkspaceManager({ workspaceRoot, taskDir, dataDir: ".parallel-codex" });
+    const wave = await manager.prepareWave({ turnId: "0001", wave: 1, featureIds: ["0001-safe"] });
+    const featureRoot = wave.featureDirs.get("0001-safe") ?? "";
+
+    expect(await pathExists(join(featureRoot, ".DS_Store"))).toBe(false);
+    expect(await pathExists(join(featureRoot, "assets", "._sprite.png"))).toBe(false);
+
+    await writeText(join(workspaceRoot, ".DS_Store"), "finder-after\n");
+    await writeText(join(workspaceRoot, "src", ".DS_Store"), "nested-finder\n");
+    await writeText(join(workspaceRoot, ".Spotlight-V100", "index"), "metadata\n");
+    await writeText(join(featureRoot, "feature.txt"), "integrated\n");
+
+    const result = await manager.integrateWave(wave);
+
+    expect(result.changedPaths).toEqual(["feature.txt"]);
+    expect(await readTextIfExists(join(workspaceRoot, "feature.txt"))).toBe("integrated\n");
+    expect(await readTextIfExists(join(workspaceRoot, ".DS_Store"))).toBe("finder-after\n");
+    expect(await pathExists(join(wave.integrationDir, ".DS_Store"))).toBe(false);
+
+    const secondWave = await manager.prepareWave({ turnId: "0002", wave: 1, featureIds: ["0002-safe"] });
+    await writeText(join(workspaceRoot, "real-change.txt"), "must block\n");
+    await expect(manager.stageWave(secondWave)).rejects.toMatchObject({
+      name: "WorkspaceLiveMutationError",
+      paths: ["real-change.txt"]
+    });
+  });
+
   it("preserves a live edit that races after commit preflight but before path ownership", async () => {
     const workspaceRoot = await mkdtemp(join(tmpdir(), "pct-workspace-race-before-claim-"));
     const taskDir = join(workspaceRoot, ".parallel-codex", "sessions", "task-race-before-claim");

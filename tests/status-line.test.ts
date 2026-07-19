@@ -83,6 +83,21 @@ describe("formatStatusLine", () => {
     ).toBe("main | main/claude waiting output · 0s / 5s first");
   });
 
+  it("reports buffered Main output as active work instead of silent startup", () => {
+    expect(
+      formatStatusLine({
+        taskId: "main",
+        main: "starting · process buffered",
+        mainEngine: "claude",
+        mainProgress: {
+          phase: "process-buffered",
+          elapsedMs: 12_700,
+          firstOutputTimeoutMs: 45 * 60 * 1000
+        }
+      })
+    ).toBe("main | main/claude working · buffered");
+  });
+
   it("does not present an initialized Main worker as idle", () => {
     expect(
       formatStatusLine({

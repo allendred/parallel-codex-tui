@@ -151,6 +151,38 @@ describe("SessionManager", () => {
     ]);
   });
 
+  it("restores legacy Codex chat transcripts as final answers without rewriting evidence", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pct-chat-codex-transcript-"));
+    const manager = new SessionManager({
+      projectRoot: root,
+      dataDir: ".parallel-codex",
+      now: () => new Date("2026-07-17T08:31:03.000Z")
+    });
+    const transcript = [
+      "$ codex exec resume native-session -",
+      "OpenAI Codex v0.144.4",
+      "--------",
+      "workdir: /tmp/project",
+      "--------",
+      "user",
+      "User request:",
+      "你来监控啊",
+      "codex",
+      "好，我来持续监控。",
+      "tokens used",
+      "7,527",
+      "好，我来持续监控。"
+    ].join("\n");
+    await manager.appendChatMessage({ from: "system", text: transcript });
+
+    const restored = await manager.readChatHistory();
+    const persisted = await readTextIfExists(join(root, ".parallel-codex", "sessions", "main", "chat.jsonl"));
+
+    expect(restored[0]?.text).toBe("好，我来持续监控。");
+    expect(persisted).toContain("OpenAI Codex v0.144.4");
+    expect(persisted).toContain("tokens used");
+  });
+
   it("creates a complex task session with standard files", async () => {
     const root = await mkdtemp(join(tmpdir(), "pct-session-"));
     const manager = new SessionManager({

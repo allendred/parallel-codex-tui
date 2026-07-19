@@ -77,12 +77,13 @@ fallback = "new"
 
 [workers.claude]
 command = "claude"
-# Main uses Claude auto mode for non-interactive tools. Isolated roles are still clamped to acceptEdits.
+# Claude auto mode lets safe non-interactive tools run while retaining permission checks.
 args = ["--print", "--permission-mode", "auto", "--output-format", "text"]
-# timeoutMs is the hard ceiling; first output owns silent startup and idle starts after actual output.
+# Claude text output is buffered until completion, so timeoutMs is the effective startup ceiling.
+# A shorter firstOutputTimeoutMs is used only with --output-format stream-json.
 # timeoutMs = 2700000
 # idleTimeoutMs = 300000
-firstOutputTimeoutMs = 120000
+# firstOutputTimeoutMs = 2700000
 
 # [workers.claude.model]
 # name = "claude-sonnet"
@@ -157,10 +158,10 @@ freshSessionArgs = []
 # args = ["run", "--stdin"]
 
 [pairing]
-main = "claude"
+main = "codex"
 judge = "codex"
 actor = "codex"
-critic = "codex"
+critic = "claude"
 
 [roles.main]
 title = "Main"

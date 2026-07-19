@@ -90,6 +90,7 @@ import {
   workerProviders
 } from "../workers/provider.js";
 import { StatusDetailView } from "./StatusDetailView.js";
+import { runtimeConfigChange, type RuntimeConfigChange } from "./runtime-config-state.js";
 
 export interface AppProps {
   config: AppConfig;
@@ -101,6 +102,7 @@ export interface AppProps {
   initialCanRetryTask?: boolean;
   initialMessages?: Message[];
   persistChatMessage?: (message: Message, taskId?: string) => Promise<void>;
+  reloadConfig?: () => Promise<AppConfig>;
   workspaceChoices?: WorkspaceChoice[];
   switchWorkspace?: (workspace: string) => Promise<void>;
   loadRouterDiagnostics?: () => Promise<{
@@ -217,6 +219,7 @@ export function App({
   initialCanRetryTask = false,
   initialMessages = [],
   persistChatMessage,
+  reloadConfig,
   workspaceChoices = [],
   switchWorkspace,
   loadRouterDiagnostics,
@@ -263,6 +266,7 @@ export function App({
   const [activeMode, setActiveMode] = useState<"simple" | "complex" | null>(initialTaskId ? "complex" : null);
   const [canRetryTask, setCanRetryTask] = useState(initialCanRetryTask);
   const [attachError, setAttachError] = useState<string | null>(null);
+  const [configChange, setConfigChange] = useState<RuntimeConfigChange | null>(null);
   const [clipboardNotice, setClipboardNotice] = useState<{
     state: "copying" | "copied";
     text: string;
@@ -478,6 +482,42 @@ export function App({
       process.stdout.off("resize", updateTerminalSize);
     };
   }, []);
+
+  useEffect(() => {
+    if (!reloadConfig) {
+      return;
+    }
+    let active = true;
+    let loading = false;
+    const refresh = async () => {
+      if (loading) {
+        return;
+      }
+      loading = true;
+      try {
+        const latest = await reloadConfig();
+        if (active) {
+          setConfigChange(runtimeConfigChange(config, latest));
+        }
+      } catch (error) {
+        if (active) {
+          setConfigChange({
+            kind: "restart",
+            detail: `config · invalid · ${error instanceof Error ? error.message : String(error)}`,
+            compact: "config invalid"
+          });
+        }
+      } finally {
+        loading = false;
+      }
+    };
+    void refresh();
+    const interval = setInterval(() => void refresh(), 1500);
+    return () => {
+      active = false;
+      clearInterval(interval);
+    };
+  }, [config, reloadConfig]);
 
   useEffect(() => {
     inputCursorRef.current = inputCursor;
@@ -3168,7 +3208,7 @@ export function App({
       view={view}
       cwd={cwd}
       taskId={activeTaskId}
-      statusText={[visibleTaskStatus, visibleRouteSummary].filter(Boolean).join(" | ")}
+      statusText={[visibleTaskStatus, visibleRouteSummary, configChange?.compact].filter(Boolean).join(" | ")}
       contentHeight={contentHeight}
       showStatusBar={config.ui.showStatusBar}
       input={
@@ -3229,6 +3269,9 @@ export function App({
             taskStatus={visibleTaskStatus}
             routeStatus={visibleRouteStatus}
             routeReason={routePending ? undefined : lastRoute?.reason}
+            pairing={config.pairing}
+            configStatus={configChange?.detail}
+            configRestartRequired={configChange?.kind === "restart"}
             workers={workers}
             selectedWorkerIndex={selectedWorkerIndex}
             height={contentHeight}
