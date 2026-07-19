@@ -18,17 +18,18 @@ describe("keyboard shortcuts", () => {
     expect(isExitShortcut("\u0003", { ctrl: false })).toBe(true);
   });
 
-  it("recognizes ctrl-n as the new-task shortcut", () => {
-    const isNewTaskShortcut = (
+  it("recognizes ctrl-n as the new-conversation shortcut and keeps the legacy alias", () => {
+    const isNewConversationShortcut = (
       keyboardModule as typeof keyboardModule & {
-        isNewTaskShortcut?: (input: string, key: { ctrl?: boolean }) => boolean;
+        isNewConversationShortcut?: (input: string, key: { ctrl?: boolean }) => boolean;
       }
-    ).isNewTaskShortcut;
+    ).isNewConversationShortcut;
 
-    expect(isNewTaskShortcut).toBeTypeOf("function");
-    expect(isNewTaskShortcut?.("n", { ctrl: true })).toBe(true);
-    expect(isNewTaskShortcut?.("\u000e", { ctrl: false })).toBe(true);
-    expect(isNewTaskShortcut?.("n", { ctrl: false })).toBe(false);
+    expect(isNewConversationShortcut).toBeTypeOf("function");
+    expect(isNewConversationShortcut?.("n", { ctrl: true })).toBe(true);
+    expect(isNewConversationShortcut?.("\u000e", { ctrl: false })).toBe(true);
+    expect(isNewConversationShortcut?.("n", { ctrl: false })).toBe(false);
+    expect(keyboardModule.isNewTaskShortcut).toBe(isNewConversationShortcut);
   });
 
   it("recognizes ctrl-p as the workspace switcher shortcut", () => {

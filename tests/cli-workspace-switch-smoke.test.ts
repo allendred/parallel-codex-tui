@@ -66,7 +66,7 @@ describe("CLI workspace switch smoke", () => {
 
       child.write("\r");
       await waitForScreenText(() => screenWrites, screen, "Mock simple response for: draft survives");
-      await waitForScreenText(() => screenWrites, screen, "> | message · ^W logs");
+      await waitForScreenText(() => screenWrites, screen, "> | message · ^N new · ^W logs");
       child.write("\x10");
       await waitForScreenText(() => screenWrites, screen, "Open project");
       child.write("2");
@@ -80,7 +80,7 @@ describe("CLI workspace switch smoke", () => {
 
       child.write("second question\r");
       await waitForScreenText(() => screenWrites, screen, "Mock simple response for: second question");
-      await waitForScreenText(() => screenWrites, screen, "> | message · ^W logs");
+      await waitForScreenText(() => screenWrites, screen, "> | message · ^N new · ^W logs");
 
       child.write("\x10");
       await waitForScreenText(() => screenWrites, screen, "Open project");
@@ -153,7 +153,7 @@ describe("CLI workspace switch smoke", () => {
       await waitForScreenText(() => screenWrites, screen, "Workspace path");
       child.write(`${created}\r`);
       await waitForScreenText(() => screenWrites, screen, basename(created));
-      await waitForScreenText(() => screenWrites, screen, "> | message · ^P project");
+      await waitForScreenText(() => screenWrites, screen, "> | message · ^N new · ^P project");
 
       expect(screen.snapshot().split("\n")[0]).toContain(basename(created));
       expect(await pathExists(join(created, ".parallel-codex", "session-index.sqlite"))).toBe(true);

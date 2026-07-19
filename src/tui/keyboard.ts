@@ -18,9 +18,11 @@ export function isExitShortcut(input: string, key: KeyboardKey): boolean {
   return (key.ctrl === true && input.toLowerCase() === "c") || input === "\u0003";
 }
 
-export function isNewTaskShortcut(input: string, key: KeyboardKey): boolean {
+export function isNewConversationShortcut(input: string, key: KeyboardKey): boolean {
   return (key.ctrl === true && input.toLowerCase() === "n") || input === "\u000e";
 }
+
+export const isNewTaskShortcut = isNewConversationShortcut;
 
 export function isWorkspaceShortcut(input: string, key: KeyboardKey): boolean {
   return (key.ctrl === true && input.toLowerCase() === "p") || input === "\u0010";

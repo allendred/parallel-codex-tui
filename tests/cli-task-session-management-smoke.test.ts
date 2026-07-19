@@ -36,7 +36,7 @@ describe("CLI Task session management smoke", () => {
     try {
       await waitForScreenText(run, "> | message");
       run.child.write("\x0e");
-      await waitForScreenText(run, "new task · ready");
+      await waitForScreenText(run, "new conversation · ready");
       run.child.write("\x14");
       await waitForScreenText(run, "Task sessions");
       await waitForScreenText(run, ">   Managed session");

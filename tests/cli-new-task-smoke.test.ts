@@ -3,8 +3,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { spawn } from "node-pty";
-import { pathExists, readJson, readTextIfExists } from "../src/core/file-store.js";
-import { TaskMetaSchema } from "../src/domain/schemas.js";
+import { pathExists, readJson, readRecentJsonLines, readTextIfExists } from "../src/core/file-store.js";
+import { ChatRecordSchema, MainConversationStateSchema, TaskMetaSchema } from "../src/domain/schemas.js";
 import { NativeTerminalScreen } from "../src/tui/terminal-screen.js";
 
 describe("CLI new task smoke", () => {
@@ -56,10 +56,10 @@ describe("CLI new task smoke", () => {
       await waitForScreenText(() => screenWrites, screen, "^N new");
 
       child.write("\x0e");
-      await waitForScreenText(() => screenWrites, screen, "new task · ready");
+      await waitForScreenText(() => screenWrites, screen, "new conversation · ready");
       const firstTaskMarker = firstTaskId.replace(/^task-\d{8}-/, "");
       expect(screen.snapshot().split("\n")[0]).not.toContain(firstTaskMarker);
-      expect(screen.snapshot()).not.toContain("^N new");
+      expect(screen.snapshot()).toContain("^N new");
 
       child.write("实现第二个独立功能\r");
       const taskIds = await waitForTaskCount(workspace, 2);
@@ -77,9 +77,15 @@ describe("CLI new task smoke", () => {
       expect(await pathExists(join(workspace, ".parallel-codex", "sessions", secondTaskId ?? "", "turns", "0001"))).toBe(true);
 
       const chat = await readTextIfExists(join(workspace, ".parallel-codex", "sessions", "main", "chat.jsonl"));
-      expect(chat.match(/new task · ready/g)).toHaveLength(1);
+      expect(chat.match(/new conversation · ready/g)).toHaveLength(1);
       expect(chat).toContain("实现第一个独立功能");
       expect(chat).toContain("实现第二个独立功能");
+      const mainDir = join(workspace, ".parallel-codex", "sessions", "main");
+      const conversation = await readJson(join(mainDir, "conversation.json"), MainConversationStateSchema);
+      const chatRecords = await readRecentJsonLines(join(mainDir, "chat.jsonl"), ChatRecordSchema, 20);
+      expect(chatRecords.find((record) => record.text === "实现第一个独立功能")?.conversation_id).toBeUndefined();
+      expect(chatRecords.find((record) => record.text === "new conversation · ready")?.conversation_id).toBe(conversation.id);
+      expect(chatRecords.find((record) => record.text === "实现第二个独立功能")?.conversation_id).toBe(conversation.id);
 
       child.write("\x03");
       await waitForExit(exits);

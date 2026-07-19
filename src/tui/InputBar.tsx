@@ -476,7 +476,6 @@ export function chatPlaceholderDisplayValue(
       terminalWidth,
       Boolean(options.taskResultExpanded),
       Boolean(options.hasWorkers),
-      Boolean(options.hasActiveTask),
       scrollOffset,
       maxScrollOffset
     );
@@ -495,15 +494,16 @@ export function chatPlaceholderDisplayValue(
     ]);
   }
   if (options.hasWorkers) {
-    return chatTaskPlaceholderDisplayValue(terminalWidth, maxScrollOffset > 0, options.hasActiveTask);
+    return chatTaskPlaceholderDisplayValue(terminalWidth, maxScrollOffset > 0);
   }
   if (maxScrollOffset > 0 && terminalWidth >= 22) {
     return selectChatPlaceholder(terminalWidth, ["message · scroll", "message", "msg"]);
   }
   return selectChatPlaceholder(terminalWidth, [
-    "message · ^P project · ^T tasks · ^G routes",
-    "message · ^P project · ^G routes",
-    "message · ^P project",
+    "message · ^N new · ^P project · ^T tasks · ^G routes",
+    "message · ^N new · ^P project · ^G routes",
+    "message · ^N new · ^P project",
+    "message · ^N new",
     "message",
     "msg"
   ]);
@@ -523,7 +523,6 @@ function chatTaskResultPlaceholderDisplayValue(
   terminalWidth: number,
   expanded: boolean,
   hasWorkers: boolean,
-  hasActiveTask: boolean,
   scrollOffset: number,
   maxScrollOffset: number
 ): string {
@@ -544,7 +543,7 @@ function chatTaskResultPlaceholderDisplayValue(
         "^D"
       ]
     : [
-        `${position} · ${toggle}${hasActiveTask ? " · ^N new" : ""}`,
+        `${position} · ${toggle} · ^N new`,
         `${position} · ${toggle}`,
         toggle,
         "^D"
@@ -577,15 +576,17 @@ function chatHistoryPlaceholderDisplayValue(terminalWidth: number, offset: numbe
   ]);
 }
 
-function chatTaskPlaceholderDisplayValue(terminalWidth: number, scrollable = false, activeTask = false): string {
-  if (activeTask && terminalWidth >= 72) {
+function chatTaskPlaceholderDisplayValue(terminalWidth: number, scrollable = false): string {
+  if (terminalWidth >= 72) {
     const activeCandidates = scrollable
       ? [
           "message · scroll · ^N new · ^W logs · ^B workers · ^T tasks · Tab · ^O attach · ^G routes",
+          "scroll · ^N new · ^W logs · ^B workers · ^T tasks · Tab · ^O attach · ^G routes",
           "message · scroll · ^N new · ^W logs · ^B workers · Tab · ^O attach · ^G routes"
         ]
       : [
           "message · ^N new · ^W logs · ^B workers · ^T tasks · Tab · ^O attach · ^G routes",
+          "^N new · ^W logs · ^B workers · ^T tasks · Tab · ^O attach · ^G routes",
           "message · ^N new · ^W logs · ^B workers · Tab · ^O attach · ^G routes"
         ];
     const active = activeCandidates.find((candidate) => displayWidth(candidate) <= chatPlaceholderValueWidth(terminalWidth));

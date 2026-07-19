@@ -108,7 +108,7 @@ async function waitForIdleInput(
 ): Promise<void> {
   for (let attempt = 0; attempt < 160; attempt += 1) {
     await screenWritesRef();
-    if (screen.snapshot().split("\n").some((line) => line.includes("> | message"))) {
+    if (screen.snapshot().split("\n").some((line) => line.includes("> |"))) {
       return;
     }
     await new Promise((resolve) => setTimeout(resolve, 50));

@@ -47,7 +47,7 @@ describe("CLI Task sessions smoke", () => {
       await replaceNativeSession(workspace, firstTaskId, "judge-mock", "first-judge-native");
 
       firstRun.child.write("\x0e");
-      await waitForScreenText(firstRun, "new task · ready");
+      await waitForScreenText(firstRun, "new conversation · ready");
       firstRun.child.write("第二个会话标记\r");
       const taskIds = await waitForTaskCount(workspace, 2);
       const secondTaskId = taskIds.find((taskId) => taskId !== firstTaskId);
@@ -143,7 +143,7 @@ describe("CLI Task sessions smoke", () => {
       secondRun.child.write("\x1b");
       await waitForScreenText(secondRun, "parallel-codex-tui · chat");
       secondRun.child.write("\x0e");
-      await waitForScreenText(secondRun, "new task · ready");
+      await waitForScreenText(secondRun, "new conversation · ready");
       await waitForHeaderWithoutTaskMarker(secondRun);
       secondRun.child.write("\x03");
       await waitForExit(secondRun.exits);
@@ -159,7 +159,7 @@ describe("CLI Task sessions smoke", () => {
       await waitForScreenText(thirdRun, "^T tasks");
       const header = thirdRun.screen.snapshot().split("\n")[0] ?? "";
       expect(header).not.toContain("#");
-      expect(thirdRun.screen.snapshot()).not.toContain("^N new");
+      expect(thirdRun.screen.snapshot()).toContain("^N new");
       thirdRun.child.write("\x14");
       await waitForScreenText(thirdRun, "2 tasks · 2 done");
       expect(thirdRun.screen.snapshot()).not.toContain("> *");

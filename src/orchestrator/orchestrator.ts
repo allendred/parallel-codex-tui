@@ -2154,6 +2154,7 @@ export class Orchestrator {
     const outputLogPath = join(filesDir, "output.log");
     const statusPath = join(filesDir, "status.json");
     const conversationArchivePath = join(filesDir, "conversation.jsonl");
+    const mainConversation = taskId ? null : await this.sessions.readMainConversationState();
     const conversation = buildMainConversationMemory(
       await this.sessions.readScopedChatHistory(taskId, MAIN_CONVERSATION_READ_LIMIT),
       input.request,
@@ -2175,6 +2176,7 @@ export class Orchestrator {
       conversationArchive: {
         path: conversationArchivePath,
         taskId,
+        conversationId: mainConversation?.id,
         recordCount: conversation.archive.length
       }
     });

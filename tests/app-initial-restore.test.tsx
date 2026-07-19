@@ -80,7 +80,7 @@ describe("App initial task restore", () => {
       expect(view.stdin.listenerCount("readable")).toBeGreaterThan(0);
       expect(typeof (view.stdin as EventEmitter & { read?: () => string | null }).read).toBe("function");
       testInput.send(view.stdin, "\x0e");
-      await waitForFrame(view.lastFrame, "new task · ready");
+      await waitForFrame(view.lastFrame, "new conversation · ready");
 
       workerRestore.resolve([{
         id: "critic-codex",
@@ -124,7 +124,7 @@ describe("App initial task restore", () => {
       await waitForFrame(view.lastFrame, "message · ^N");
       await settleEffects();
       testInput.send(view.stdin, "\x0e");
-      await waitForFrame(view.lastFrame, "new task · ready");
+      await waitForFrame(view.lastFrame, "new conversation · ready");
 
       workerRestore.resolve([]);
       retryRestore.resolve(true);
@@ -133,6 +133,36 @@ describe("App initial task restore", () => {
       const frame = view.lastFrame() ?? "";
       expect(frame.split("\n")[0]).not.toContain("#033720-fefc");
       expect(frame).not.toContain("^R retry");
+    } finally {
+      view.unmount();
+      testInput.restore();
+    }
+  });
+
+  it("starts a fresh Main conversation with Ctrl+N even when no Task is active", async () => {
+    const testInput = installTestInputStream();
+    const startMainConversation = vi.fn(async () => undefined);
+    const activateTaskSession = vi.fn(async () => null);
+    const view = render(
+      <App
+        config={defaultConfig("/tmp/pct-app-main-conversation")}
+        orchestrator={{} as Orchestrator}
+        cwd="/tmp/pct-workspace"
+        initialMessages={[{ from: "system", text: "preserved earlier chat" }]}
+        startMainConversation={startMainConversation}
+        activateTaskSession={activateTaskSession}
+      />
+    );
+
+    try {
+      await settleEffects();
+      expect(view.lastFrame()).toContain("^N new");
+      testInput.send(view.stdin, "\x0e");
+      await waitForFrame(view.lastFrame, "new conversation · ready");
+
+      expect(startMainConversation).toHaveBeenCalledOnce();
+      expect(activateTaskSession).toHaveBeenCalledWith(null);
+      expect(view.lastFrame()).toContain("preserved earlier chat");
     } finally {
       view.unmount();
       testInput.restore();

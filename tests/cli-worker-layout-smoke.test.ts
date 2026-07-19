@@ -722,7 +722,7 @@ describe("CLI worker layout smoke", () => {
       await waitForScreenText(
         () => screenWrites,
         screen,
-        "> | message · ^N new · ^W logs · ^B workers · Tab · ^O attach · ^G routes"
+        "> | ^N new · ^W logs · ^B workers · ^T tasks · Tab · ^O attach · ^G routes"
       );
       child.write("\x17");
       await waitForScreenText(
@@ -740,7 +740,7 @@ describe("CLI worker layout smoke", () => {
       await waitForScreenText(
         () => screenWrites,
         screen,
-        "> | message · ^N new · ^W logs · ^B workers · Tab · ^O attach · ^G routes"
+        "> | ^N new · ^W logs · ^B workers · ^T tasks · Tab · ^O attach · ^G routes"
       );
       child.write("\x03");
       await waitForExit(exits);

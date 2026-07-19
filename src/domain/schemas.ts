@@ -44,6 +44,11 @@ export const TaskIdSchema = z
   .max(255)
   .regex(/^task-[A-Za-z0-9][A-Za-z0-9._-]*$/);
 export const TaskSessionIdSchema = z.union([z.literal("main"), TaskIdSchema]);
+export const ConversationIdSchema = z
+  .string()
+  .min(1)
+  .max(255)
+  .regex(/^conversation-[A-Za-z0-9][A-Za-z0-9._-]*$/);
 
 export const TaskStateSchema = z.enum([
   "created",
@@ -209,11 +214,19 @@ export const RetiredNativeSessionSchema = NativeSessionSchema.extend({
   retired_reason: z.string().min(1)
 });
 
+export const MainConversationStateSchema = z.object({
+  version: z.literal(1),
+  id: ConversationIdSchema,
+  created_at: z.string().datetime(),
+  previous_id: ConversationIdSchema.optional()
+});
+
 export const ChatRecordSchema = z.object({
   time: z.string().datetime(),
   from: z.enum(["user", "system"]),
   text: z.string(),
-  task_id: TaskIdSchema.optional()
+  task_id: TaskIdSchema.optional(),
+  conversation_id: ConversationIdSchema.optional()
 });
 
 export const EventRecordSchema = z.object({
@@ -250,5 +263,6 @@ export type TurnMeta = z.infer<typeof TurnMetaSchema>;
 export type NativeSession = z.infer<typeof NativeSessionSchema>;
 export type RetiredNativeSession = z.infer<typeof RetiredNativeSessionSchema>;
 export type NativeSessionSource = z.infer<typeof NativeSessionSourceSchema>;
+export type MainConversationState = z.infer<typeof MainConversationStateSchema>;
 export type EventRecord = z.infer<typeof EventRecordSchema>;
 export type ChatRecord = z.infer<typeof ChatRecordSchema>;

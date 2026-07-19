@@ -118,6 +118,39 @@ describe("CLI real Agent multi-workspace acceptance", () => {
       expect(deepMemoryPrompt).not.toContain("PCT_REAL_MEMORY_CYAN");
       expect(deepMemoryArchive).toContain("PCT_REAL_MEMORY_CYAN");
 
+      child.write("\x0e");
+      await waitForScreenText(() => screenWrites, screen, "new conversation · ready");
+      const conversation = await firstSessions.readMainConversationState();
+      expect(conversation?.version).toBe(1);
+      expect(conversation?.previous_id).toBeUndefined();
+      await expect(firstSessions.readNativeSession({
+        dir: join(first, ".parallel-codex", "sessions", "main", "main-claude")
+      })).resolves.toBeNull();
+      child.write("这是新对话隔离验收。不要使用工具，也不要猜测；如果当前上下文没有旧暗号，只回复 CONVERSATION_ISOLATED。\r");
+      await waitForScreenText(() => screenWrites, screen, "CONVERSATION_ISOLATED");
+      await waitForScreenText(() => screenWrites, screen, "> | message");
+      const isolatedSession = JSON.parse(await readFile(firstSessionPath, "utf8")) as { session_id: string };
+      expect(isolatedSession.session_id).not.toBe(replacementSession.session_id);
+      const isolatedPrompt = await readFile(join(
+        first,
+        ".parallel-codex",
+        "sessions",
+        "main",
+        "main-claude",
+        "prompt.md"
+      ), "utf8");
+      const isolatedArchive = await readFile(join(
+        first,
+        ".parallel-codex",
+        "sessions",
+        "main",
+        "main-claude",
+        "conversation.jsonl"
+      ), "utf8");
+      expect(isolatedPrompt).not.toContain("PCT_REAL_MEMORY_CYAN");
+      expect(isolatedPrompt).toContain("conversation_id exactly equals");
+      expect(isolatedArchive).not.toContain("PCT_REAL_MEMORY_CYAN");
+
       child.write("\x10");
       await waitForScreenText(() => screenWrites, screen, "Open project");
       child.write("2");

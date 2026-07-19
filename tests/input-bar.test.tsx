@@ -211,7 +211,7 @@ describe("InputBar", () => {
   it("uses intentional chat placeholders in ultra narrow terminals", () => {
     expect(chatPlaceholderDisplayValue(10)).toBe("msg");
     expect(chatPlaceholderDisplayValue(16)).toBe("message");
-    expect(chatPlaceholderDisplayValue(24)).toBe("message");
+    expect(chatPlaceholderDisplayValue(24)).toBe("message · ^N new");
 
     const { lastFrame } = render(
       <InputBar mode="chat" value="" terminalWidth={12} onChange={() => {}} />
@@ -224,8 +224,8 @@ describe("InputBar", () => {
   });
 
   it("exposes the workspace switcher when the input rail has room", () => {
-    expect(chatPlaceholderDisplayValue(40)).toBe("message · ^P project · ^G routes");
-    expect(chatPlaceholderDisplayValue(80)).toBe("message · ^P project · ^T tasks · ^G routes");
+    expect(chatPlaceholderDisplayValue(40)).toBe("message · ^N new · ^P project");
+    expect(chatPlaceholderDisplayValue(80)).toBe("message · ^N new · ^P project · ^T tasks · ^G routes");
     expect(chatPlaceholderDisplayValue(40, { hasActiveTask: true })).toBe(
       "message · ^N new · ^P project"
     );
@@ -257,8 +257,8 @@ describe("InputBar", () => {
     expect(displayWidth(frame)).toBeLessThanOrEqual(8);
   });
 
-  it("shows task shortcuts in the empty chat prompt once workers exist", () => {
-    expect(chatPlaceholderDisplayValue(80, { hasWorkers: true })).toBe("message · ^W logs · ^B workers · ^T tasks · Tab · ^O attach · ^G routes");
+  it("shows worker and new-conversation shortcuts in the empty chat prompt once workers exist", () => {
+    expect(chatPlaceholderDisplayValue(80, { hasWorkers: true })).toBe("^N new · ^W logs · ^B workers · ^T tasks · Tab · ^O attach · ^G routes");
     expect(chatPlaceholderDisplayValue(42, { hasWorkers: true })).toBe("message · ^W logs · Tab · ^O attach");
     expect(chatPlaceholderDisplayValue(41, { hasWorkers: true })).toBe("message · ^W logs · Tab · ^O attach");
     expect(chatPlaceholderDisplayValue(40, { hasWorkers: true })).toBe("message · ^W logs · ^O attach");
@@ -274,7 +274,7 @@ describe("InputBar", () => {
 
     const frame = lastFrame() ?? "";
     expect(frame).not.toContain("Type a message");
-    expect(frame).toContain("message");
+    expect(frame).toContain("^N new");
     expect(frame).toContain("^W logs");
     expect(frame).toContain("Tab");
     expect(frame).toContain("^O attach");
@@ -377,12 +377,12 @@ describe("InputBar", () => {
     expect(displayWidth(frame)).toBeLessThanOrEqual(40);
   });
 
-  it("shows the new-task shortcut only while a complex task is active", () => {
+  it("shows the new-conversation shortcut whenever the chat rail has room", () => {
     const roomy = render(
       <InputBar mode="chat" value="" hasWorkers hasActiveTask terminalWidth={80} onChange={() => {}} />
     );
     try {
-      expect(roomy.lastFrame()).toContain("message · ^N new · ^W logs · ^B workers · Tab · ^O attach · ^G routes");
+      expect(roomy.lastFrame()).toContain("^N new · ^W logs · ^B workers · ^T tasks · Tab · ^O attach · ^G routes");
     } finally {
       roomy.unmount();
     }
@@ -401,7 +401,7 @@ describe("InputBar", () => {
     const noTask = render(
       <InputBar mode="chat" value="" hasWorkers terminalWidth={80} onChange={() => {}} />
     );
-    expect(noTask.lastFrame()).not.toContain("^N");
+    expect(noTask.lastFrame()).toContain("^N new");
 
     const loadingWorkers = render(
       <InputBar mode="chat" value="" hasActiveTask terminalWidth={40} onChange={() => {}} />

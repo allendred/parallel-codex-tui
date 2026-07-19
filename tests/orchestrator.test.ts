@@ -163,7 +163,7 @@ describe("Orchestrator", () => {
     expect(prompt).toContain("# Recent conversation");
     expect(prompt).toContain("# Extended conversation memory");
     expect(prompt).toContain(`Scoped JSONL snapshot: ${JSON.stringify(archivePath)}`);
-    expect(prompt).toContain("Scope: ordinary chat records without task_id.");
+    expect(prompt).toContain("Scope: legacy ordinary chat records without task_id or conversation_id.");
     expect(prompt).toContain("User: 我叫小林");
     expect(prompt).toContain("Assistant: 记住了，你叫小林");
     expect(prompt).not.toContain("另一个任务里的秘密");
@@ -172,6 +172,47 @@ describe("Orchestrator", () => {
     expect(archive).toContain("记住了，你叫小林");
     expect(archive).not.toContain("另一个任务里的秘密");
     expect(archive).not.toContain("我刚才叫什么名字？");
+  });
+
+  it("keeps an explicitly new Main conversation out of legacy prompt memory", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pct-orch-main-conversation-boundary-"));
+    const config = mockConfig(root);
+    config.router.defaultMode = "simple";
+    const manager = new SessionManager({
+      projectRoot: root,
+      dataDir: config.dataDir,
+      now: () => new Date("2026-07-19T09:00:00.000Z"),
+      randomId: () => "fresh"
+    });
+    await manager.appendChatMessage({ from: "user", text: "旧会话暗号是紫色" });
+    await manager.appendChatMessage({ from: "system", text: "旧暗号已记住" });
+    const conversation = await manager.startNewMainConversation();
+    await manager.appendChatMessage({ from: "user", text: "这是新会话" });
+    await manager.appendChatMessage({ from: "system", text: "新会话已开始" });
+    await manager.appendChatMessage({ from: "user", text: "当前上下文是什么" });
+    const adapter = new CapturingAdapter();
+    const orchestrator = new Orchestrator(config, manager, new Map([["mock", adapter]]));
+
+    await orchestrator.handleRequest({ request: "当前上下文是什么", cwd: root });
+
+    const prompt = adapter.runs[0]?.prompt ?? "";
+    expect(prompt).toContain("User: 这是新会话");
+    expect(prompt).toContain("Assistant: 新会话已开始");
+    expect(prompt).toContain(`Scope: ordinary chat records whose conversation_id exactly equals "${conversation.id}".`);
+    expect(prompt).not.toContain("旧会话暗号是紫色");
+    expect(prompt).not.toContain("旧暗号已记住");
+    const archive = await readTextIfExists(join(
+      root,
+      ".parallel-codex",
+      "sessions",
+      "main",
+      "main-mock",
+      "conversation.jsonl"
+    ));
+    expect(archive).toContain(`"conversation_id":"${conversation.id}"`);
+    expect(archive).toContain("这是新会话");
+    expect(archive).not.toContain("旧会话暗号是紫色");
+    expect(archive).not.toContain("当前上下文是什么");
   });
 
   it("bounds file-backed Main memory while retaining the newest conversation", async () => {

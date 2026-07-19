@@ -3,8 +3,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { spawn } from "node-pty";
-import { readTextIfExists } from "../src/core/file-store.js";
+import { readJson, readRecentJsonLines, readTextIfExists } from "../src/core/file-store.js";
 import { SessionManager } from "../src/core/session-manager.js";
+import { ChatRecordSchema, MainConversationStateSchema } from "../src/domain/schemas.js";
 import { NativeTerminalScreen } from "../src/tui/terminal-screen.js";
 import { TUI_THEME_PRESETS } from "../src/tui/theme.js";
 
@@ -112,6 +113,93 @@ describe("CLI chat Markdown smoke", () => {
       expect(archive).not.toContain("暗号是什么");
     } finally {
       child.kill("SIGTERM");
+    }
+  }, 10000);
+
+  it("starts a file-backed Main conversation boundary with Ctrl+N", async () => {
+    const workspace = await mkdtemp(join(tmpdir(), "pct-cli-main-conversation-"));
+    const appRoot = await mkdtemp(join(tmpdir(), "pct-cli-main-conversation-app-"));
+    const mainScript = join(appRoot, "conversation-main.cjs");
+    const screen = new NativeTerminalScreen({ cols: 100, rows: 14, scrollback: 1000 });
+    const exits: number[] = [];
+    let screenWrites = Promise.resolve();
+
+    await mkdir(join(appRoot, ".parallel-codex"), { recursive: true });
+    await writeFile(
+      mainScript,
+      [
+        "let input = '';",
+        "process.stdin.setEncoding('utf8');",
+        "process.stdin.on('data', (chunk) => { input += chunk; });",
+        "process.stdin.on('end', () => {",
+        "  if (input.includes('新对话还能看到吗')) {",
+        "    process.stdout.write(input.includes('PCT_OLD_SECRET') ? 'CONVERSATION_LEAK\\n' : 'CONVERSATION_ISOLATED\\n');",
+        "    return;",
+        "  }",
+        "  process.stdout.write('OLD_CONVERSATION_SAVED\\n');",
+        "});"
+      ].join("\n")
+    );
+    await writeFile(
+      join(appRoot, ".parallel-codex", "config.toml"),
+      [
+        "[router]",
+        'defaultMode = "simple"',
+        "",
+        "[workers.codex]",
+        `command = "${escapeToml(process.execPath)}"`,
+        `args = ["${escapeToml(mainScript)}"]`,
+        "",
+        "[pairing]",
+        'main = "codex"',
+        'judge = "codex"',
+        'actor = "codex"',
+        'critic = "codex"'
+      ].join("\n") + "\n"
+    );
+
+    const child = spawn(
+      process.execPath,
+      ["./node_modules/.bin/tsx", "src/cli.tsx", "--app-root", appRoot, "--workspace", workspace],
+      {
+        cwd: process.cwd(),
+        cols: 100,
+        rows: 14,
+        name: "xterm-256color",
+        env: { ...process.env, TERM: "xterm-256color" }
+      }
+    );
+    child.onData((chunk) => {
+      screenWrites = screenWrites.then(() => screen.write(chunk));
+    });
+    child.onExit(({ exitCode }) => exits.push(exitCode));
+
+    try {
+      await waitForScreenText(() => screenWrites, screen, "> | message");
+      child.write("请记住 PCT_OLD_SECRET\r");
+      await waitForScreenText(() => screenWrites, screen, "OLD_CONVERSATION_SAVED");
+      child.write("\x0e");
+      await waitForScreenText(() => screenWrites, screen, "new conversation · ready");
+      child.write("新对话还能看到吗\r");
+      await waitForScreenText(() => screenWrites, screen, "CONVERSATION_ISOLATED");
+      expect(screen.snapshot()).not.toContain("CONVERSATION_LEAK");
+
+      const mainDir = join(workspace, ".parallel-codex", "sessions", "main");
+      const state = await readJson(join(mainDir, "conversation.json"), MainConversationStateSchema);
+      const records = await readRecentJsonLines(join(mainDir, "chat.jsonl"), ChatRecordSchema, 20);
+      expect(records.find((record) => record.text.includes("PCT_OLD_SECRET"))?.conversation_id).toBeUndefined();
+      expect(records.find((record) => record.text === "新对话还能看到吗")?.conversation_id).toBe(state.id);
+      const prompt = await readTextIfExists(join(mainDir, "main-codex", "prompt.md"));
+      expect(prompt).not.toContain("PCT_OLD_SECRET");
+      expect(prompt).toContain(`conversation_id exactly equals "${state.id}"`);
+
+      child.write("\x03");
+      await waitForExit(exits);
+      expect(exits[0]).toBe(0);
+    } finally {
+      if (exits.length === 0) {
+        child.kill("SIGTERM");
+      }
     }
   }, 10000);
 

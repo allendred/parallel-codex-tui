@@ -33,6 +33,8 @@ import {
 import {
   type ChatRecord,
   ChatRecordSchema,
+  type MainConversationState,
+  MainConversationStateSchema,
   type EngineName,
   type EventRecord,
   EventRecordSchema,
@@ -345,6 +347,47 @@ export class SessionManager {
     return join(this.projectRoot, this.dataDir, "sessions", "main");
   }
 
+  async readMainConversationState(): Promise<MainConversationState | null> {
+    const path = join(this.mainSessionDir(), "conversation.json");
+    if (!(await pathExists(path))) {
+      return null;
+    }
+    return readJson(path, MainConversationStateSchema);
+  }
+
+  async startNewMainConversation(): Promise<MainConversationState> {
+    const main = this.taskFromId("main");
+    await ensureDir(main.dir);
+    const lease = await this.claimTaskRunLease(main.dir);
+
+    return runWithLeaseFinalization("Main conversation reset", lease, async () => {
+      const previous = await this.readMainConversationState();
+      const entries = await readdir(main.dir, { withFileTypes: true });
+      for (const entry of entries) {
+        if (!entry.isDirectory()) {
+          continue;
+        }
+        const worker = { dir: join(main.dir, entry.name) };
+        const nativeSession = await this.readNativeSession(worker);
+        if (nativeSession?.scope === "main") {
+          await this.retireNativeSession(worker, "new Main conversation");
+        }
+      }
+
+      const createdAt = this.now();
+      const baseId = `conversation-${formatTaskTimestamp(createdAt)}-${this.randomId()}`;
+      const state = MainConversationStateSchema.parse({
+        version: 1,
+        id: nextConversationId(baseId, previous?.id),
+        created_at: createdAt.toISOString(),
+        ...(previous ? { previous_id: previous.id } : {})
+      });
+      await writeJson(join(main.dir, "conversation.json"), state);
+      await this.appendEvent(main, "main.conversation_started", `Started ${state.id}`);
+      return state;
+    });
+  }
+
   async reconcileInterruptedMainSession(): Promise<InterruptedMainSessionRecovery | null> {
     const main = this.taskFromId("main");
     if (!(await pathExists(main.dir))) {
@@ -379,11 +422,13 @@ export class SessionManager {
   }
 
   async appendChatMessage(input: AppendChatMessageInput): Promise<void> {
+    const conversation = input.taskId ? null : await this.readMainConversationState();
     const record = ChatRecordSchema.parse({
       time: this.now().toISOString(),
       from: input.from,
       text: input.text,
-      task_id: input.taskId
+      task_id: input.taskId,
+      conversation_id: conversation?.id
     });
     await appendJsonLine(join(this.mainSessionDir(), "chat.jsonl"), record);
   }
@@ -407,6 +452,7 @@ export class SessionManager {
     const boundedLimit = Number.isFinite(limit)
       ? Math.min(1000, Math.max(0, Math.trunc(limit)))
       : 200;
+    const conversation = taskId ? null : await this.readMainConversationState();
     const records = await readRecentJsonLines(
       join(this.mainSessionDir(), "chat.jsonl"),
       ChatRecordSchema,
@@ -414,7 +460,9 @@ export class SessionManager {
       {
         filter: (record) => taskId
           ? record.task_id === taskId
-          : !record.task_id
+          : !record.task_id && (conversation
+            ? record.conversation_id === conversation.id
+            : !record.conversation_id)
       }
     );
     return records.map((record) => ({
@@ -1678,6 +1726,19 @@ export class SessionManager {
 function titleFromRequest(request: string): string {
   const firstLine = request.trim().split("\n")[0] ?? "Untitled task";
   return firstLine.length > 80 ? `${firstLine.slice(0, 77)}...` : firstLine;
+}
+
+function nextConversationId(baseId: string, previousId?: string): string {
+  if (!previousId || (previousId !== baseId && !previousId.startsWith(`${baseId}-`))) {
+    return baseId;
+  }
+  if (previousId === baseId) {
+    return `${baseId}-2`;
+  }
+  const suffix = Number(previousId.slice(baseId.length + 1));
+  return Number.isSafeInteger(suffix) && suffix >= 2
+    ? `${baseId}-${suffix + 1}`
+    : `${baseId}-2`;
 }
 
 function normalizeTaskTitle(title: string): string {

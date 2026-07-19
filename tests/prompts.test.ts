@@ -49,6 +49,22 @@ describe("role prompts", () => {
     expect(prompt).toContain("Use only this scoped snapshot");
   });
 
+  it("labels an ordinary conversation snapshot with its exact persisted scope", () => {
+    const prompt = buildMainPrompt({
+      request: "继续",
+      conversationArchive: {
+        path: "/tmp/conversation.jsonl",
+        taskId: null,
+        conversationId: "conversation-20260719-090000-fresh",
+        recordCount: 2
+      }
+    });
+
+    expect(prompt).toContain(
+      'Scope: ordinary chat records whose conversation_id exactly equals "conversation-20260719-090000-fresh".'
+    );
+  });
+
   it("includes configured role title and instructions", () => {
     const prompt = buildActorPrompt({
       request: "实现功能",

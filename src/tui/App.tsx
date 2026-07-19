@@ -42,7 +42,7 @@ import { TerminalOutput } from "./TerminalOutput.js";
 import { NativeTerminalScreen } from "./terminal-screen.js";
 import { WorkerOutputView, type WorkerOutputNavigationTargets } from "./WorkerOutputView.js";
 import { compactEndByDisplayWidth, displayWidth, wrapByDisplayWidth } from "./display-width.js";
-import { isAttachShortcut, isCopyShortcut, isDiagnosticsShortcut, isExitShortcut, isLogsShortcut, isNewTaskShortcut, isRouterDiagnosticsShortcut, isStatusDetailsShortcut, isTaskResultShortcut, isTaskSessionsShortcut, isWorkerOverviewShortcut, isWorkerSearchShortcut, isWorkspaceShortcut, mouseScrollDelta, rawChatScrollArrowDelta, rawHistoryDelta, rawPageScrollDelta, rawPlainArrowDelta, scrollDelta, workerLogJumpKind } from "./keyboard.js";
+import { isAttachShortcut, isCopyShortcut, isDiagnosticsShortcut, isExitShortcut, isLogsShortcut, isNewConversationShortcut, isRouterDiagnosticsShortcut, isStatusDetailsShortcut, isTaskResultShortcut, isTaskSessionsShortcut, isWorkerOverviewShortcut, isWorkerSearchShortcut, isWorkspaceShortcut, mouseScrollDelta, rawChatScrollArrowDelta, rawHistoryDelta, rawPageScrollDelta, rawPlainArrowDelta, scrollDelta, workerLogJumpKind } from "./keyboard.js";
 import { createRawInputDecoder, tokenizeRawInput } from "./raw-input-decoder.js";
 import { decodeHtmlEntities } from "./markdown-text.js";
 import { configureTuiTheme, TUI_THEME } from "./theme.js";
@@ -118,6 +118,7 @@ export interface AppProps {
   exportDiagnostics?: () => Promise<string>;
   loadCollaborationTimeline?: (taskId: string) => Promise<CollaborationTimeline>;
   activateTaskSession?: (taskId: string | null) => Promise<ActivatedTaskSession | null>;
+  startMainConversation?: () => Promise<void>;
   prepareNativeAttach?: (worker: WorkerLogRef) => Promise<NativeAttachLaunch>;
   prepareNativeFork?: (worker: WorkerLogRef) => Promise<NativeAttachLaunch>;
   startNativeAttach?: (
@@ -232,6 +233,7 @@ export function App({
   exportDiagnostics,
   loadCollaborationTimeline,
   activateTaskSession,
+  startMainConversation,
   prepareNativeAttach,
   prepareNativeFork,
   startNativeAttach,
@@ -374,7 +376,7 @@ export function App({
   ) => Promise<void>>(attachSelectedWorker);
   const submitRef = useRef<(value: string) => Promise<void>>(submit);
   const retryRef = useRef<() => Promise<void>>(retryActiveTask);
-  const newTaskRef = useRef<() => Promise<void>>(startNewTask);
+  const newConversationRef = useRef<() => Promise<void>>(startNewConversation);
   const openWorkspacePickerRef = useRef<() => void>(openWorkspacePicker);
   const openRouterDiagnosticsRef = useRef<() => Promise<void>>(openRouterDiagnostics);
   const openWorkerOverviewRef = useRef<() => void>(openWorkerOverview);
@@ -652,7 +654,7 @@ export function App({
     attachSelectedWorkerRef.current = attachSelectedWorker;
     submitRef.current = submit;
     retryRef.current = retryActiveTask;
-    newTaskRef.current = startNewTask;
+    newConversationRef.current = startNewConversation;
     openWorkspacePickerRef.current = openWorkspacePicker;
     openRouterDiagnosticsRef.current = openRouterDiagnostics;
     openWorkerOverviewRef.current = openWorkerOverview;
@@ -1222,13 +1224,8 @@ export function App({
           openWorkspacePickerRef.current();
           return;
         }
-        if (isNewTaskShortcut(chunk, {}) && !busyRef.current) {
-          if (activeTaskIdRef.current) {
-            void newTaskRef.current();
-          } else {
-            viewRef.current = "chat";
-            setView("chat");
-          }
+        if (isNewConversationShortcut(chunk, {}) && !busyRef.current) {
+          void newConversationRef.current();
           return;
         }
         const selectedSession = taskSessionsRef.current[selectedTaskSessionIndexRef.current];
@@ -1565,8 +1562,8 @@ export function App({
           openWorkspacePickerRef.current();
           return;
         }
-        if (isNewTaskShortcut(chunk, {}) && !busyRef.current) {
-          void newTaskRef.current();
+        if (isNewConversationShortcut(chunk, {}) && !busyRef.current) {
+          void newConversationRef.current();
           return;
         }
         if (chunk === "f" || chunk === "F") {
@@ -1688,8 +1685,8 @@ export function App({
             jumpWorkerLog(jumpKind);
             continue;
           }
-          if (isNewTaskShortcut(workerChunk, {}) && !busyRef.current) {
-            void newTaskRef.current();
+          if (isNewConversationShortcut(workerChunk, {}) && !busyRef.current) {
+            void newConversationRef.current();
             return;
           }
           if (isWorkspaceShortcut(workerChunk, {}) && !busyRef.current) {
@@ -1768,8 +1765,8 @@ export function App({
           }
           return;
         }
-        if (isNewTaskShortcut(chunk, {}) && !busyRef.current) {
-          void newTaskRef.current();
+        if (isNewConversationShortcut(chunk, {}) && !busyRef.current) {
+          void newConversationRef.current();
           return;
         }
         if (chunk === "\x1b") {
@@ -2093,8 +2090,8 @@ export function App({
         exitRef.current();
         return;
       }
-      if (isNewTaskShortcut(inputKey, key) && !busy) {
-        void startNewTask();
+      if (isNewConversationShortcut(inputKey, key) && !busy) {
+        void startNewConversation();
         return;
       }
       const delta = scrollDelta(inputKey, key, outputHeight - 1);
@@ -2525,12 +2522,13 @@ export function App({
     }
   }
 
-  async function startNewTask(): Promise<void> {
-    if (busyRef.current || !activeTaskIdRef.current) {
+  async function startNewConversation(): Promise<void> {
+    if (busyRef.current) {
       return;
     }
 
     try {
+      await startMainConversation?.();
       await activateTaskSession?.(null);
     } catch (error) {
       setAttachError(error instanceof Error ? error.message : String(error));
@@ -2561,7 +2559,7 @@ export function App({
       offset: 0,
       draft: { value: inputRef.current, cursor: inputCursorRef.current }
     };
-    await appendVisibleMessage({ from: "system", text: "new task · ready" });
+    await appendVisibleMessage({ from: "system", text: "new conversation · ready" });
   }
 
   async function openRouterDiagnostics(): Promise<void> {

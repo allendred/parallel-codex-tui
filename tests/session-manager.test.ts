@@ -15,6 +15,7 @@ import {
 } from "../src/core/process-ownership.js";
 import {
   NativeSessionSchema,
+  RetiredNativeSessionSchema,
   RouteDecisionSchema,
   TaskMetaSchema,
   TurnMetaSchema,
@@ -183,6 +184,77 @@ describe("SessionManager", () => {
         text: "普通聊天"
       }
     ]);
+  });
+
+  it("starts an isolated Main conversation without deleting legacy chat or reusing its native session", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pct-main-conversation-"));
+    const randomIds = ["first", "second"];
+    const manager = new SessionManager({
+      projectRoot: root,
+      dataDir: ".parallel-codex",
+      now: () => new Date("2026-07-10T12:00:00.000Z"),
+      randomId: () => randomIds.shift() ?? "later"
+    });
+    await manager.appendChatMessage({ from: "user", text: "legacy memory" });
+
+    const workerDir = join(manager.mainSessionDir(), "main-codex");
+    await manager.writeNativeSession({ dir: workerDir }, NativeSessionSchema.parse({
+      engine: "codex",
+      role: "main",
+      worker_id: "main-codex",
+      session_id: "native-before-reset",
+      scope: "main",
+      cwd: root,
+      created_at: "2026-07-10T11:00:00.000Z",
+      last_used_at: "2026-07-10T11:30:00.000Z",
+      source: "output-detected"
+    }));
+
+    const first = await manager.startNewMainConversation();
+    expect(first).toEqual({
+      version: 1,
+      id: "conversation-20260710-120000-first",
+      created_at: "2026-07-10T12:00:00.000Z"
+    });
+    await expect(manager.readNativeSession({ dir: workerDir })).resolves.toBeNull();
+    await expect(readJson(
+      join(workerDir, "native-session.retired.json"),
+      RetiredNativeSessionSchema
+    )).resolves.toEqual(expect.objectContaining({
+      session_id: "native-before-reset",
+      retired_reason: "new Main conversation"
+    }));
+    await expect(manager.readScopedChatHistory(null)).resolves.toEqual([]);
+
+    await manager.appendChatMessage({ from: "system", text: "fresh context" });
+    await manager.appendChatMessage({ from: "user", text: "task context", taskId: "task-other" });
+    await expect(manager.readScopedChatHistory(null)).resolves.toEqual([{
+      time: "2026-07-10T12:00:00.000Z",
+      from: "system",
+      text: "fresh context",
+      conversation_id: first.id
+    }]);
+    await expect(manager.readScopedChatHistory("task-other")).resolves.toEqual([{
+      time: "2026-07-10T12:00:00.000Z",
+      from: "user",
+      text: "task context",
+      task_id: "task-other"
+    }]);
+    expect(await manager.readChatHistory()).toEqual([
+      expect.objectContaining({ text: "legacy memory" }),
+      expect.objectContaining({ text: "fresh context", conversation_id: first.id }),
+      expect.objectContaining({ text: "task context", task_id: "task-other" })
+    ]);
+
+    const second = await manager.startNewMainConversation();
+    expect(second).toEqual({
+      version: 1,
+      id: "conversation-20260710-120000-second",
+      created_at: "2026-07-10T12:00:00.000Z",
+      previous_id: first.id
+    });
+    await expect(manager.readScopedChatHistory(null)).resolves.toEqual([]);
+    await expect(manager.readChatHistory()).resolves.toHaveLength(3);
   });
 
   it("restores legacy Codex chat transcripts as final answers without rewriting evidence", async () => {

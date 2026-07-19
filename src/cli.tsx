@@ -184,6 +184,9 @@ async function main(): Promise<void> {
           await state.runtime.index.setActiveTaskId(taskId);
           return { taskId, route, workers, canRetry };
         }}
+        startMainConversation={async () => {
+          await state.runtime.sessions.startNewMainConversation();
+        }}
         switchWorkspace={async (workspace) => {
           if (workspace === current.runtime.workspaceRoot) {
             return;

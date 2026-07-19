@@ -188,9 +188,10 @@ describe("package metadata", () => {
 
     expect(readme).toContain("## Requirements");
     expect(readme).toContain("## Current Release");
-    expect(readme).toContain("v0.2.7` is available from [npm]");
-    expect(readme).toContain("combines a lightweight inline transcript with an extended, file-backed memory snapshot");
-    expect(readme).toContain("`conversation.jsonl` retains up to 200 scoped records");
+    expect(readme).toContain("v0.2.8` is available from [npm]");
+    expect(readme).toContain("`Ctrl+N` now creates an explicit, durable Main conversation boundary");
+    expect(readme).toContain("writes the current scope to `conversation.json`");
+    expect(readme).toContain("include only the exact current `conversation_id`");
     expect(readme).toContain("root Turn plus the latest 19 previous Turn summaries");
     expect(readme).toContain("Main chat still extracts only the final Codex answer");
     expect(readme).toContain("Main/Judge/Actor on Codex and Critic on Claude");
@@ -198,7 +199,7 @@ describe("package metadata", () => {
     expect(readme).toContain("keeps terminal scrolling and copying available at the same time");
     expect(readme).toContain("real three-Feature Tetris task");
     expect(readme).toContain("20-turn soak verifies 80 ordered Workers");
-    expect(readme).toContain("1,289 tests across 127 files: 1,288 pass by default");
+    expect(readme).toContain("1,294 tests across 127 files: 1,293 pass by default");
     expect(readme).toContain("same Judge native session for a bounded DAG replan");
     expect(readme).toContain("Real Codex and Claude probes both proved fresh and same-session resume calls");
     expect(readme).toContain("authenticate the Claude CLI");
@@ -355,9 +356,9 @@ describe("package metadata", () => {
     expect(readme).toContain('OPENAI_API_KEY = "{env:OPENAI_API_KEY}"');
     expect(readme).toContain("In chat, scroll long conversation history with the mouse wheel or PageUp/PageDown");
     expect(readme).toContain("sending a new message returns to the latest reply");
-    expect(readme).toContain("Press `Ctrl+N` to preserve the current session and start a new task");
-    expect(readme).toContain("the next complex request creates an independent task from turn `0001`");
-    expect(readme).toContain("`Ctrl+W` to open worker logs");
+    expect(readme).toContain("Press `Ctrl+N` to preserve all history and start a fresh conversation");
+    expect(readme).toContain("the next complex request creates an independent Task from turn `0001`");
+    expect(readme).toContain("`Ctrl+W` to open Worker logs");
     expect(readme).toContain("`Ctrl+B` opens a live Worker overview without replacing the `Ctrl+W` log shortcut");
     expect(readme).toContain("The selected active worker gets a live activity line");
     expect(readme).toContain("first-output deadline while starting and its idle deadline after output begins");
@@ -447,15 +448,15 @@ describe("package metadata", () => {
     expect(readme).toContain("Up/Down, PageUp/PageDown, the mouse wheel, or `Tab` changes the selected worker");
     expect(readme).toContain("Enter or `Ctrl+W` opens its rendered log");
     expect(readme).toContain("`Ctrl+T` opens the workspace's persisted Task sessions");
-    expect(readme).toContain("turn and worker counts, plus the number of distinct native sessions");
+    expect(readme).toContain("turn and Worker counts, plus the number of distinct native sessions");
     expect(readme).toContain("`I` to inspect the complete session hierarchy");
     expect(readme).toContain("`Project -> Task -> Turn -> Worker -> Native session`");
     expect(readme).toContain("Historical Workers from earlier turns remain selectable after same-task follow-ups");
     expect(readme).toContain("`C` or `Ctrl+O` to continue the original native session");
     expect(readme).toContain("`B` to ask the native CLI to fork it");
     expect(readme).toContain("The child fork is owned and persisted by the native CLI");
-    expect(readme).toContain("The selected active task is stored in `session-index.sqlite`");
-    expect(readme).toContain("Restoring a task reloads its route, workers, retry state, and recorded native session ids");
+    expect(readme).toContain("The selected active Task is stored in `session-index.sqlite`");
+    expect(readme).toContain("Restoring a Task reloads its route, Workers, retry state, and recorded native session ids");
     expect(readme).toContain("`R` to rename with Unicode-safe cursor editing");
     expect(readme).toContain("`A` to archive or unarchive");
     expect(readme).toContain("`D` twice to confirm deletion");
@@ -464,13 +465,13 @@ describe("package metadata", () => {
     expect(readme).toContain("Archived sessions are hidden by default");
     expect(readme).toContain("Exports are complete file-backed snapshots under `.parallel-codex/exports/<task>-<timestamp>/`");
     expect(readme).toContain("SQLite schema changes run as ordered, transactional migrations");
-    expect(readme).toContain("an integrity failure restores that backup or rebuilds the catalog from authoritative task files");
-    expect(readme).toContain("`Ctrl+N` persists an intentionally empty active-task context");
+    expect(readme).toContain("an integrity failure restores that backup or rebuilds the catalog from authoritative Task files");
+    expect(readme).toContain("`Ctrl+N` persists an intentionally empty active-Task context");
     expect(readme).toContain("`Ctrl+F` searches the final rendered Worker log");
     expect(readme).toContain("Enter moves to the next match and Up/Down moves backward or forward");
     expect(readme).toContain("The current match is marked with `>` without shifting Diff or source line-number columns");
     expect(readme).toContain("press `E` to cycle rendered error lines or `D` to cycle Diff files and hunks");
-    expect(readme).toContain("In worker-log views, scroll with the mouse wheel, Up/Down, or PageUp/PageDown");
+    expect(readme).toContain("In Worker-log views, scroll with the mouse wheel, Up/Down, or PageUp/PageDown");
     expect(readme).toContain("In chat or worker-log views, press `Ctrl+O`");
     expect(readme).toContain("Native attach follows outer terminal resize");
     expect(readme).toContain("recognizes read-only sandbox/add-dir conflicts, untrusted directories");
@@ -532,9 +533,9 @@ describe("package metadata", () => {
     expect(readme).toContain('git tag "v$VERSION"');
     expect(readme).toContain('git push origin "v$VERSION"');
     expect(readme).toContain("The release tag must match `package.json`");
-    expect(readme).toContain("VERSION=0.2.7");
-    expect(readme).toContain("package version `0.2.7` requires tag `v0.2.7`");
-    expect(readme).toContain("Published tags such as `v0.2.6` are immutable");
+    expect(readme).toContain("VERSION=0.2.8");
+    expect(readme).toContain("package version `0.2.8` requires tag `v0.2.8`");
+    expect(readme).toContain("Published tags such as `v0.2.7` are immutable");
   });
 
   it("publishes the CLI bin as an executable file", async () => {
