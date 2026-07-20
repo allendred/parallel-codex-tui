@@ -2,6 +2,7 @@ import React from "react";
 import { basename } from "node:path";
 import { Box, Text, type TextProps } from "ink";
 import type { AppConfig } from "../core/config.js";
+import type { RoleExecutionSelection } from "../core/role-configuration.js";
 import type { WorkerLogRef } from "../orchestrator/orchestrator.js";
 import { compactEndByDisplayWidth, displayWidth, wrapByDisplayWidth } from "./display-width.js";
 import { TUI_THEME } from "./theme.js";
@@ -23,6 +24,7 @@ export interface StatusDetailViewProps {
   routeStatus: string;
   routeReason?: string;
   pairing: AppConfig["pairing"];
+  roleSelection?: RoleExecutionSelection;
   configStatus?: string;
   configRestartRequired?: boolean;
   workers: WorkerLogRef[];
@@ -74,7 +76,7 @@ export function statusDetailDisplayLines(
       tone: "muted"
     },
     {
-      text: fitStatusDetailText(rolePairingDetail(input.pairing), safeWidth),
+      text: fitStatusDetailText(rolePairingDetail(input.pairing, input.roleSelection), safeWidth),
       tone: "text"
     }
   ];
@@ -114,14 +116,21 @@ export function statusDetailDisplayLines(
   return lines.slice(0, maxLines);
 }
 
-function rolePairingDetail(pairing: AppConfig["pairing"]): string {
+function rolePairingDetail(
+  pairing: AppConfig["pairing"],
+  selection?: RoleExecutionSelection
+): string {
   return [
     "active roles",
-    `main/${pairing.main}`,
-    `judge/${pairing.judge}`,
-    `actor/${pairing.actor}`,
-    `critic/${pairing.critic}`
+    rolePairingEntry("main", selection?.main.engine ?? pairing.main, selection?.main.model),
+    rolePairingEntry("judge", selection?.judge.engine ?? pairing.judge, selection?.judge.model),
+    rolePairingEntry("actor", selection?.actor.engine ?? pairing.actor, selection?.actor.model),
+    rolePairingEntry("critic", selection?.critic.engine ?? pairing.critic, selection?.critic.model)
   ].join(" · ");
+}
+
+function rolePairingEntry(role: string, engine: string, model?: string): string {
+  return [role, engine, model?.trim()].filter(Boolean).join("/");
 }
 
 function taskDetail(input: Omit<StatusDetailViewProps, "height" | "terminalWidth">): string {

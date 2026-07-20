@@ -6,7 +6,7 @@ import { StatusBar } from "./StatusBar.js";
 import { compactEndByDisplayWidth, displayWidth } from "./display-width.js";
 import { TUI_THEME } from "./theme.js";
 
-export type AppView = "chat" | "worker" | "workers" | "features" | "collaboration" | "native" | "router" | "sessions" | "status";
+export type AppView = "chat" | "worker" | "workers" | "features" | "collaboration" | "native" | "router" | "sessions" | "status" | "roles";
 type AppShellErrorLineTheme = Pick<TextProps, "backgroundColor" | "color">;
 type AppShellContentGutterTheme = Pick<TextProps, "backgroundColor">;
 const APP_HEADER_ROOMY_SEPARATOR = " · ";
@@ -375,6 +375,9 @@ function viewLabel(view: AppView): string {
 }
 
 function shortcutHint(view: AppView): string {
+  if (view === "roles") {
+    return "^E back";
+  }
   if (view === "status") {
     return "^S back";
   }
@@ -385,6 +388,9 @@ function shortcutHint(view: AppView): string {
 }
 
 function shortViewLabel(view: AppView): string {
+  if (view === "roles") {
+    return "roles";
+  }
   if (view === "status") {
     return "status";
   }
@@ -413,7 +419,7 @@ function shortViewLabel(view: AppView): string {
 }
 
 function shortShortcutHint(view: AppView): string {
-  return view === "native" ? "^]" : view === "status" ? "^S" : "^C";
+  return view === "native" ? "^]" : view === "status" ? "^S" : view === "roles" ? "^E" : "^C";
 }
 
 function compactHeaderProject(cwd: string, maxLength: number): string {

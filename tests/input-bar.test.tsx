@@ -1618,10 +1618,58 @@ describe("InputBar", () => {
       <InputBar mode="status" value="" terminalWidth={12} onChange={() => {}} />
     );
 
-    expect(roomy.lastFrame()).toContain("status · ^X diagnostics · ^S/Esc back · ^C exit");
+    expect(roomy.lastFrame()).toContain("status · ^E roles · ^X diagnostics · ^S/Esc back · ^C exit");
     expect(narrow.lastFrame()).toContain("status");
     expect(displayWidth(narrow.lastFrame() ?? "")).toBeLessThanOrEqual(12);
     roomy.unmount();
     narrow.unmount();
+  });
+
+  it("renders role controls and Unicode model editing on one stable row", () => {
+    const controls = render(
+      <InputBar
+        mode="roles"
+        value=""
+        terminalWidth={100}
+        roleScope="task"
+        roleCanApply
+        roleHasOverride
+        onChange={() => {}}
+      />
+    );
+    const editing = render(
+      <InputBar
+        mode="roles"
+        value=""
+        terminalWidth={36}
+        roleEditingModel={{ role: "critic", value: "模型-sonnet", cursor: 2 }}
+        onChange={() => {}}
+      />
+    );
+
+    expect(controls.lastFrame()).toContain("roles · task");
+    expect(controls.lastFrame()).toContain("M model");
+    expect(controls.lastFrame()).toContain("Enter apply");
+    expect(controls.lastFrame()).toContain("X reset");
+    expect(editing.lastFrame()).toContain("critic model > 模型|-");
+    expect((editing.lastFrame() ?? "").split("\n")).toHaveLength(1);
+    expect(displayWidth(editing.lastFrame() ?? "")).toBeLessThanOrEqual(36);
+    controls.unmount();
+    editing.unmount();
+  });
+
+  it("keeps role configuration guidance inside every supported terminal width", () => {
+    const invalid: string[] = [];
+    for (let width = 8; width <= 100; width += 1) {
+      const view = render(
+        <InputBar mode="roles" value="" terminalWidth={width} roleScope="next" onChange={() => {}} />
+      );
+      const frame = view.lastFrame() ?? "";
+      if (frame.split("\n").length !== 1 || displayWidth(frame) > width) {
+        invalid.push(`${width}:${displayWidth(frame)}:${frame}`);
+      }
+      view.unmount();
+    }
+    expect(invalid).toEqual([]);
   });
 });

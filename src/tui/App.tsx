@@ -8,6 +8,14 @@ import { copyTextToClipboard } from "../core/clipboard.js";
 import { readJson } from "../core/file-store.js";
 import type { RouterAuditRecord } from "../core/router-audit.js";
 import type { RouterExecutionProgress } from "../core/router.js";
+import {
+  CONFIGURABLE_ROLES,
+  configuredRoleSelection,
+  type ConfigurableRole,
+  type RoleConfigurationScope,
+  type RoleConfigurationSnapshot,
+  type RoleExecutionSelection
+} from "../core/role-configuration.js";
 import type { TaskIndexSummary } from "../core/session-index.js";
 import type { MainConversationActivation, MainConversationSummary } from "../core/session-manager.js";
 import type { TaskSessionDetails, TaskSessionWorkerDetail } from "../core/task-session-details.js";
@@ -43,7 +51,7 @@ import { TerminalOutput } from "./TerminalOutput.js";
 import { NativeTerminalScreen } from "./terminal-screen.js";
 import { WorkerOutputView, type WorkerOutputNavigationTargets } from "./WorkerOutputView.js";
 import { compactEndByDisplayWidth, displayWidth, wrapByDisplayWidth } from "./display-width.js";
-import { isAttachShortcut, isCopyShortcut, isDiagnosticsShortcut, isExitShortcut, isLogsShortcut, isNewConversationShortcut, isRouterDiagnosticsShortcut, isStatusDetailsShortcut, isTaskResultShortcut, isTaskSessionsShortcut, isWorkerOverviewShortcut, isWorkerSearchShortcut, isWorkspaceShortcut, mouseScrollDelta, rawChatScrollArrowDelta, rawHistoryDelta, rawPageScrollDelta, rawPlainArrowDelta, scrollDelta, workerLogJumpKind } from "./keyboard.js";
+import { isAttachShortcut, isCopyShortcut, isDiagnosticsShortcut, isExitShortcut, isLogsShortcut, isNewConversationShortcut, isRoleConfigurationShortcut, isRouterDiagnosticsShortcut, isStatusDetailsShortcut, isTaskResultShortcut, isTaskSessionsShortcut, isWorkerOverviewShortcut, isWorkerSearchShortcut, isWorkspaceShortcut, mouseScrollDelta, rawChatScrollArrowDelta, rawHistoryDelta, rawHorizontalArrowDelta, rawPageScrollDelta, rawPlainArrowDelta, scrollDelta, workerLogJumpKind } from "./keyboard.js";
 import { createRawInputDecoder, tokenizeRawInput } from "./raw-input-decoder.js";
 import { decodeHtmlEntities } from "./markdown-text.js";
 import { configureTuiTheme, TUI_THEME } from "./theme.js";
@@ -92,6 +100,16 @@ import {
   workerProviders
 } from "../workers/provider.js";
 import { StatusDetailView } from "./StatusDetailView.js";
+import { RoleConfigurationView } from "./RoleConfigurationView.js";
+import {
+  cycleRoleProvider,
+  moveRoleConfigurationSelection,
+  nextRoleConfigurationScope,
+  roleConfigurationScopeHasOverride,
+  roleConfigurationSelectionForScope,
+  selectedConfigurableRole,
+  updateRoleModel
+} from "./role-configuration-state.js";
 import { runtimeConfigChange, type RuntimeConfigChange } from "./runtime-config-state.js";
 
 export interface AppProps {
@@ -202,6 +220,11 @@ interface FeatureAssignmentPrompt {
   featureId: string;
   title: string;
 }
+interface RoleModelEdit {
+  role: ConfigurableRole;
+  value: string;
+  cursor: number;
+}
 type TaskSessionAction =
   | { type: "rename"; taskId: string; title: string; value: string; cursor: number }
   | { type: "delete"; taskId: string; title: string };
@@ -286,6 +309,15 @@ export function App({
   const [canRetryTask, setCanRetryTask] = useState(initialCanRetryTask);
   const [attachError, setAttachError] = useState<string | null>(null);
   const [configChange, setConfigChange] = useState<RuntimeConfigChange | null>(null);
+  const [roleConfigurationSnapshot, setRoleConfigurationSnapshot] = useState<RoleConfigurationSnapshot | null>(null);
+  const [roleConfigurationDraft, setRoleConfigurationDraft] = useState<RoleExecutionSelection | null>(null);
+  const [roleConfigurationScope, setRoleConfigurationScope] = useState<RoleConfigurationScope>("next");
+  const [roleConfigurationSelectedIndex, setRoleConfigurationSelectedIndex] = useState(0);
+  const [roleConfigurationLoading, setRoleConfigurationLoading] = useState(false);
+  const [roleConfigurationSaving, setRoleConfigurationSaving] = useState(false);
+  const [roleConfigurationNotice, setRoleConfigurationNotice] = useState<string | null>(null);
+  const [roleConfigurationError, setRoleConfigurationError] = useState<string | null>(null);
+  const [roleModelEdit, setRoleModelEdit] = useState<RoleModelEdit | null>(null);
   const [clipboardNotice, setClipboardNotice] = useState<{
     state: "copying" | "copied";
     text: string;
@@ -390,6 +422,13 @@ export function App({
   const featureBoardSelectedIndexRef = useRef(0);
   const featureCancelPromptRef = useRef<FeatureCancelPrompt | null>(null);
   const featureAssignmentPromptRef = useRef<FeatureAssignmentPrompt | null>(null);
+  const roleConfigurationSnapshotRef = useRef<RoleConfigurationSnapshot | null>(null);
+  const roleConfigurationDraftRef = useRef<RoleExecutionSelection | null>(null);
+  const roleConfigurationScopeRef = useRef<RoleConfigurationScope>("next");
+  const roleConfigurationSelectedIndexRef = useRef(0);
+  const roleConfigurationLoadingRef = useRef(false);
+  const roleConfigurationSavingRef = useRef(false);
+  const roleModelEditRef = useRef<RoleModelEdit | null>(null);
   const collaborationFeatureIndexRef = useRef(-1);
   const collaborationSelectedEventIdRef = useRef<string | null>(null);
   const collaborationDetailOpenRef = useRef(false);
@@ -415,6 +454,9 @@ export function App({
     role: "actor" | "critic"
   ) => Promise<void>>(reassignSelectedFeature);
   const openCollaborationTimelineRef = useRef<(featureIndex?: number) => Promise<void>>(openCollaborationTimeline);
+  const openRoleConfigurationRef = useRef<() => Promise<void>>(openRoleConfiguration);
+  const applyRoleConfigurationRef = useRef<() => Promise<void>>(applyRoleConfiguration);
+  const clearRoleConfigurationRef = useRef<() => Promise<void>>(clearRoleConfiguration);
   const refreshCollaborationTimelineRef = useRef<(showLoading?: boolean) => Promise<void>>(refreshCollaborationTimeline);
   const activateSelectedTaskSessionRef = useRef<() => Promise<void>>(activateSelectedTaskSession);
   const refreshTaskSessionsRef = useRef<(preferredTaskId?: string | null) => Promise<void>>(refreshTaskSessions);
@@ -442,6 +484,8 @@ export function App({
   const taskSessionsReturnViewRef = useRef<"chat" | "worker" | "workers" | "router">("chat");
   const collaborationReturnViewRef = useRef<"workers" | "features">("workers");
   const statusReturnViewRef = useRef<Exclude<AppView, "status">>("chat");
+  const roleConfigurationReturnViewRef = useRef<Exclude<AppView, "roles" | "native">>("chat");
+  const roleConfigurationLoadSequenceRef = useRef(0);
   const collaborationLoadSequenceRef = useRef(0);
   const routerLoadSequenceRef = useRef(0);
   const taskSessionsLoadSequenceRef = useRef(0);
@@ -500,6 +544,17 @@ export function App({
     [messages, routeAnnouncement]
   );
   const hasTaskResult = taskResultMessageIndex >= 0;
+  const activeRoleSelection = roleConfigurationSnapshot
+    ? activeTaskId
+      ? roleConfigurationSnapshot.activeTurn
+        ?? roleConfigurationSnapshot.task
+        ?? roleConfigurationSnapshot.future
+      : roleConfigurationSnapshot.future
+    : configuredRoleSelection(config);
+  const roleConfigurationHasOverride = roleConfigurationScopeHasOverride(
+    roleConfigurationSnapshot,
+    roleConfigurationScope
+  );
 
   useEffect(() => {
     inputRef.current = input;
@@ -578,6 +633,62 @@ export function App({
   useEffect(() => {
     canRetryTaskRef.current = canRetryTask;
   }, [canRetryTask]);
+
+  useEffect(() => {
+    roleConfigurationSnapshotRef.current = roleConfigurationSnapshot;
+  }, [roleConfigurationSnapshot]);
+
+  useEffect(() => {
+    roleConfigurationDraftRef.current = roleConfigurationDraft;
+  }, [roleConfigurationDraft]);
+
+  useEffect(() => {
+    roleConfigurationScopeRef.current = roleConfigurationScope;
+  }, [roleConfigurationScope]);
+
+  useEffect(() => {
+    roleConfigurationSelectedIndexRef.current = roleConfigurationSelectedIndex;
+  }, [roleConfigurationSelectedIndex]);
+
+  useEffect(() => {
+    roleConfigurationLoadingRef.current = roleConfigurationLoading;
+  }, [roleConfigurationLoading]);
+
+  useEffect(() => {
+    roleConfigurationSavingRef.current = roleConfigurationSaving;
+  }, [roleConfigurationSaving]);
+
+  useEffect(() => {
+    roleModelEditRef.current = roleModelEdit;
+  }, [roleModelEdit]);
+
+  useEffect(() => {
+    let active = true;
+    const sequence = roleConfigurationLoadSequenceRef.current + 1;
+    roleConfigurationLoadSequenceRef.current = sequence;
+    const snapshotPromise = typeof orchestrator.roleConfigurationSnapshot === "function"
+      ? orchestrator.roleConfigurationSnapshot(activeTaskId)
+      : Promise.resolve(fallbackRoleConfigurationSnapshot(config));
+    void snapshotPromise.then((snapshot) => {
+      if (!active || roleConfigurationLoadSequenceRef.current !== sequence) {
+        return;
+      }
+      roleConfigurationSnapshotRef.current = snapshot;
+      setRoleConfigurationSnapshot(snapshot);
+      if (viewRef.current === "roles") {
+        const draft = roleConfigurationSelectionForScope(snapshot, roleConfigurationScopeRef.current);
+        roleConfigurationDraftRef.current = draft;
+        setRoleConfigurationDraft(draft);
+      }
+    }).catch((error) => {
+      if (active && roleConfigurationLoadSequenceRef.current === sequence) {
+        setRoleConfigurationError(error instanceof Error ? error.message : String(error));
+      }
+    });
+    return () => {
+      active = false;
+    };
+  }, [activeTaskId, orchestrator]);
 
   useEffect(() => {
     taskResultExpandedRef.current = taskResultExpanded;
@@ -714,6 +825,9 @@ export function App({
     openWorkerOverviewRef.current = openWorkerOverview;
     openTaskSessionsRef.current = openTaskSessions;
     openFeatureBoardRef.current = openFeatureBoard;
+    openRoleConfigurationRef.current = openRoleConfiguration;
+    applyRoleConfigurationRef.current = applyRoleConfiguration;
+    clearRoleConfigurationRef.current = clearRoleConfiguration;
     confirmFeatureCancellationRef.current = confirmFeatureCancellation;
     openCollaborationTimelineRef.current = openCollaborationTimeline;
     refreshCollaborationTimelineRef.current = refreshCollaborationTimeline;
@@ -1177,6 +1291,151 @@ export function App({
         return;
       }
       if (currentView === "workspace") {
+        return;
+      }
+      if (
+        currentView !== "native"
+        && tokenizeRawInput(chunk).some((inputChunk) => isRoleConfigurationShortcut(inputChunk, {}))
+        && !busyRef.current
+      ) {
+        if (currentView === "roles") {
+          roleModelEditRef.current = null;
+          setRoleModelEdit(null);
+          viewRef.current = roleConfigurationReturnViewRef.current;
+          setView(roleConfigurationReturnViewRef.current);
+        } else {
+          void openRoleConfigurationRef.current();
+        }
+        return;
+      }
+      if (currentView === "roles") {
+        const roleChunks = tokenizeRawInput(chunk);
+        if (roleChunks.some((roleChunk) => isExitShortcut(roleChunk, {}))) {
+          activeRunControllerRef.current?.abort();
+          exitRef.current();
+          return;
+        }
+        if (roleChunks.some((roleChunk) => isStatusDetailsShortcut(roleChunk, {}))) {
+          statusReturnViewRef.current = "roles";
+          viewRef.current = "status";
+          setView("status");
+          return;
+        }
+        for (const roleChunk of roleChunks) {
+          const edit = roleModelEditRef.current;
+          if (edit) {
+            if (roleChunk === "\x1b") {
+              roleModelEditRef.current = null;
+              setRoleModelEdit(null);
+              continue;
+            }
+            const update = applyChatInputChunk(edit.value, roleChunk, edit.cursor);
+            if (update.submit !== null) {
+              const draft = roleConfigurationDraftRef.current;
+              if (draft) {
+                const nextDraft = updateRoleModel(draft, edit.role, update.submit);
+                roleConfigurationDraftRef.current = nextDraft;
+                setRoleConfigurationDraft(nextDraft);
+              }
+              roleModelEditRef.current = null;
+              setRoleModelEdit(null);
+            } else {
+              const nextEdit = { ...edit, value: update.value, cursor: update.cursor };
+              roleModelEditRef.current = nextEdit;
+              setRoleModelEdit(nextEdit);
+            }
+            continue;
+          }
+          if (roleChunk === "\x1b") {
+            viewRef.current = roleConfigurationReturnViewRef.current;
+            setView(roleConfigurationReturnViewRef.current);
+            return;
+          }
+          if (roleConfigurationLoadingRef.current || roleConfigurationSavingRef.current) {
+            continue;
+          }
+          if (roleChunk === "\t") {
+            const nextScope = nextRoleConfigurationScope(
+              roleConfigurationScopeRef.current,
+              1,
+              Boolean(activeTaskIdRef.current)
+            );
+            roleConfigurationScopeRef.current = nextScope;
+            setRoleConfigurationScope(nextScope);
+            const snapshot = roleConfigurationSnapshotRef.current;
+            if (snapshot) {
+              const draft = roleConfigurationSelectionForScope(snapshot, nextScope);
+              roleConfigurationDraftRef.current = draft;
+              setRoleConfigurationDraft(draft);
+            }
+            setRoleConfigurationNotice(null);
+            setRoleConfigurationError(null);
+            continue;
+          }
+          const selectionDelta = -(
+            rawHistoryDelta(roleChunk)
+            + rawPageScrollDelta(roleChunk, CONFIGURABLE_ROLES.length)
+            + mouseScrollDelta(roleChunk, 1)
+          );
+          if (selectionDelta !== 0) {
+            const nextIndex = moveRoleConfigurationSelection(
+              roleConfigurationSelectedIndexRef.current,
+              selectionDelta
+            );
+            roleConfigurationSelectedIndexRef.current = nextIndex;
+            setRoleConfigurationSelectedIndex(nextIndex);
+            continue;
+          }
+          const providerDelta = rawHorizontalArrowDelta(roleChunk)
+            || (roleChunk === "]" ? 1 : roleChunk === "[" ? -1 : 0);
+          if (providerDelta !== 0) {
+            const snapshot = roleConfigurationSnapshotRef.current;
+            const draft = roleConfigurationDraftRef.current;
+            if (snapshot && draft) {
+              const nextDraft = cycleRoleProvider(
+                draft,
+                selectedConfigurableRole(roleConfigurationSelectedIndexRef.current),
+                snapshot.providers,
+                providerDelta
+              );
+              roleConfigurationDraftRef.current = nextDraft;
+              setRoleConfigurationDraft(nextDraft);
+              setRoleConfigurationNotice(null);
+              setRoleConfigurationError(null);
+            }
+            continue;
+          }
+          if (roleChunk === "m" || roleChunk === "M") {
+            const role = selectedConfigurableRole(roleConfigurationSelectedIndexRef.current);
+            const value = roleConfigurationDraftRef.current?.[role].model ?? "";
+            const editState: RoleModelEdit = {
+              role,
+              value,
+              cursor: Array.from(value).length
+            };
+            roleModelEditRef.current = editState;
+            setRoleModelEdit(editState);
+            continue;
+          }
+          if (roleChunk === "\r" || roleChunk === "\n") {
+            void applyRoleConfigurationRef.current();
+            return;
+          }
+          if (roleChunk === "x" || roleChunk === "X") {
+            void clearRoleConfigurationRef.current();
+            return;
+          }
+          if (roleChunk === "r" || roleChunk === "R") {
+            const snapshot = roleConfigurationSnapshotRef.current;
+            if (snapshot) {
+              const draft = roleConfigurationSelectionForScope(snapshot, roleConfigurationScopeRef.current);
+              roleConfigurationDraftRef.current = draft;
+              setRoleConfigurationDraft(draft);
+              setRoleConfigurationNotice("Draft restored from saved configuration");
+              setRoleConfigurationError(null);
+            }
+          }
+        }
         return;
       }
       if (currentView === "status") {
@@ -2252,6 +2511,15 @@ export function App({
           .join("\n")
       };
     }
+    if (currentView === "roles") {
+      const roles = roleConfigurationDraftRef.current;
+      return {
+        label: "role configuration",
+        text: roles
+          ? CONFIGURABLE_ROLES.map((role) => `${role} · ${roles[role].engine} · ${roles[role].model || "default"}`).join("\n")
+          : ""
+      };
+    }
     if (currentView === "workers") {
       return {
         label: "workers",
@@ -2635,6 +2903,7 @@ export function App({
               cwd,
               taskId: target.taskId,
               route: followUpRoute?.route,
+              roleSelection: followUpRoute?.roleSelection,
               ...callbacks
             })
           : target.kind === "task-question"
@@ -2643,6 +2912,7 @@ export function App({
                 cwd,
                 taskId: target.taskId,
                 route: followUpRoute?.route,
+                roleSelection: followUpRoute?.roleSelection,
                 ...callbacks
               })
           : await orchestrator.handleRequest({
@@ -2662,6 +2932,7 @@ export function App({
       setCanRetryTask(nextMemory.activeTaskId
         ? await orchestrator.canRetryTask(nextMemory.activeTaskId)
         : false);
+      await refreshRoleConfigurationState(nextMemory.activeTaskId);
       setRouteAnnouncement(null);
       await appendVisibleMessage(
         { from: "system", text: result.summary },
@@ -2676,6 +2947,7 @@ export function App({
       if (retryTaskId) {
         setCanRetryTask(await orchestrator.canRetryTask(retryTaskId));
       }
+      await refreshRoleConfigurationState(retryTaskId);
       await appendVisibleMessage({
         from: "system",
         text: isAbortError(error) ? "cancelled · request stopped" : error instanceof Error ? error.message : String(error)
@@ -2725,6 +2997,7 @@ export function App({
       setActiveTaskId(taskId);
       setActiveMode("complex");
       setCanRetryTask(false);
+      await refreshRoleConfigurationState(taskId);
       setRouteAnnouncement(null);
       await appendVisibleMessage({ from: "system", text: result.summary }, taskId);
       if (parseTaskResultSummary(result.summary)) {
@@ -2733,6 +3006,7 @@ export function App({
     } catch (error) {
       setRouteAnnouncement(null);
       setCanRetryTask(await orchestrator.canRetryTask(taskId));
+      await refreshRoleConfigurationState(taskId);
       await appendVisibleMessage({
         from: "system",
         text: isAbortError(error) ? "cancelled · retry stopped" : error instanceof Error ? error.message : String(error)
@@ -2762,6 +3036,7 @@ export function App({
     }
 
     resetActiveTaskUiForMainConversation();
+    await refreshRoleConfigurationState(null);
     await appendVisibleMessage({ from: "system", text: "new conversation · ready" });
   }
 
@@ -3581,6 +3856,154 @@ export function App({
     setView("workers");
   }
 
+  async function refreshRoleConfigurationState(taskId: string | null): Promise<void> {
+    try {
+      const snapshot = typeof orchestrator.roleConfigurationSnapshot === "function"
+        ? await orchestrator.roleConfigurationSnapshot(taskId)
+        : fallbackRoleConfigurationSnapshot(config);
+      roleConfigurationSnapshotRef.current = snapshot;
+      setRoleConfigurationSnapshot(snapshot);
+      if (viewRef.current === "roles") {
+        const draft = roleConfigurationSelectionForScope(snapshot, roleConfigurationScopeRef.current);
+        roleConfigurationDraftRef.current = draft;
+        setRoleConfigurationDraft(draft);
+      }
+    } catch (error) {
+      setRoleConfigurationError(error instanceof Error ? error.message : String(error));
+    }
+  }
+
+  async function openRoleConfiguration(): Promise<void> {
+    const currentView = viewRef.current;
+    if (busyRef.current || currentView === "native" || currentView === "workspace") {
+      return;
+    }
+    const returnView = currentView === "roles" ? roleConfigurationReturnViewRef.current : currentView;
+    roleConfigurationReturnViewRef.current = returnView as Exclude<AppView, "roles" | "native">;
+    const scope = roleConfigurationScopeRef.current === "task" && !activeTaskIdRef.current
+      ? "next"
+      : roleConfigurationScopeRef.current;
+    roleConfigurationScopeRef.current = scope;
+    setRoleConfigurationScope(scope);
+    roleModelEditRef.current = null;
+    setRoleModelEdit(null);
+    setRoleConfigurationNotice(null);
+    setRoleConfigurationError(null);
+    roleConfigurationLoadingRef.current = true;
+    setRoleConfigurationLoading(true);
+    viewRef.current = "roles";
+    setView("roles");
+    const sequence = roleConfigurationLoadSequenceRef.current + 1;
+    roleConfigurationLoadSequenceRef.current = sequence;
+    try {
+      const snapshot = typeof orchestrator.roleConfigurationSnapshot === "function"
+        ? await orchestrator.roleConfigurationSnapshot(activeTaskIdRef.current)
+        : fallbackRoleConfigurationSnapshot(config);
+      if (!mountedRef.current || roleConfigurationLoadSequenceRef.current !== sequence) {
+        return;
+      }
+      roleConfigurationSnapshotRef.current = snapshot;
+      setRoleConfigurationSnapshot(snapshot);
+      const draft = roleConfigurationSelectionForScope(snapshot, scope);
+      roleConfigurationDraftRef.current = draft;
+      setRoleConfigurationDraft(draft);
+    } catch (error) {
+      if (mountedRef.current && roleConfigurationLoadSequenceRef.current === sequence) {
+        setRoleConfigurationError(error instanceof Error ? error.message : String(error));
+      }
+    } finally {
+      if (mountedRef.current && roleConfigurationLoadSequenceRef.current === sequence) {
+        roleConfigurationLoadingRef.current = false;
+        setRoleConfigurationLoading(false);
+      }
+    }
+  }
+
+  async function applyRoleConfiguration(): Promise<void> {
+    const draft = roleConfigurationDraftRef.current;
+    if (!draft || roleConfigurationSavingRef.current || roleConfigurationLoadingRef.current) {
+      return;
+    }
+    const scope = roleConfigurationScopeRef.current;
+    const taskId = activeTaskIdRef.current;
+    if (scope === "task" && !taskId) {
+      setRoleConfigurationError("No active Task · choose next request or future requests");
+      return;
+    }
+    roleConfigurationSavingRef.current = true;
+    setRoleConfigurationSaving(true);
+    setRoleConfigurationNotice(null);
+    setRoleConfigurationError(null);
+    try {
+      if (typeof orchestrator.updateRoleConfiguration !== "function") {
+        throw new Error("Role configuration is unavailable in this runtime");
+      }
+      const snapshot = await orchestrator.updateRoleConfiguration({
+        scope,
+        roles: draft,
+        taskId
+      });
+      roleConfigurationSnapshotRef.current = snapshot;
+      setRoleConfigurationSnapshot(snapshot);
+      const saved = roleConfigurationSelectionForScope(snapshot, scope);
+      roleConfigurationDraftRef.current = saved;
+      setRoleConfigurationDraft(saved);
+      setRoleConfigurationNotice(
+        scope === "next"
+          ? "Saved · the next request will consume this matrix once"
+          : scope === "task"
+            ? "Saved · current Task retries and follow-ups will use this matrix"
+            : "Saved · future requests now use this default matrix"
+      );
+      if (scope === "task" && taskId) {
+        void refreshCollaborationTimelineRef.current(false);
+      }
+    } catch (error) {
+      setRoleConfigurationError(error instanceof Error ? error.message : String(error));
+    } finally {
+      roleConfigurationSavingRef.current = false;
+      setRoleConfigurationSaving(false);
+    }
+  }
+
+  async function clearRoleConfiguration(): Promise<void> {
+    if (roleConfigurationSavingRef.current || roleConfigurationLoadingRef.current) {
+      return;
+    }
+    const scope = roleConfigurationScopeRef.current;
+    const taskId = activeTaskIdRef.current;
+    if (scope === "task" && !taskId) {
+      setRoleConfigurationError("No active Task · choose next request or future requests");
+      return;
+    }
+    roleConfigurationSavingRef.current = true;
+    setRoleConfigurationSaving(true);
+    setRoleConfigurationNotice(null);
+    setRoleConfigurationError(null);
+    try {
+      if (typeof orchestrator.clearRoleConfiguration !== "function") {
+        throw new Error("Role configuration is unavailable in this runtime");
+      }
+      const snapshot = await orchestrator.clearRoleConfiguration(scope, taskId);
+      roleConfigurationSnapshotRef.current = snapshot;
+      setRoleConfigurationSnapshot(snapshot);
+      const inherited = roleConfigurationSelectionForScope(snapshot, scope);
+      roleConfigurationDraftRef.current = inherited;
+      setRoleConfigurationDraft(inherited);
+      setRoleConfigurationNotice(
+        scope === "future" ? "Reset · future requests inherit config.toml" : "Reset · scope now inherits future defaults"
+      );
+      if (scope === "task" && taskId) {
+        void refreshCollaborationTimelineRef.current(false);
+      }
+    } catch (error) {
+      setRoleConfigurationError(error instanceof Error ? error.message : String(error));
+    } finally {
+      roleConfigurationSavingRef.current = false;
+      setRoleConfigurationSaving(false);
+    }
+  }
+
   function openWorkspacePicker(): void {
     const currentView = viewRef.current;
     if (busyRef.current || !switchWorkspace || currentView === "native" || currentView === "workspace") {
@@ -3678,9 +4101,14 @@ export function App({
           searchMatchIndex={workerSearch.matchIndex}
           searchMatchCount={workerNavigationTargets.searchOffsets.length}
           clipboardNotice={clipboardNotice}
+          roleScope={roleConfigurationScope}
+          roleEditingModel={roleModelEdit}
+          roleCanApply={roleConfigurationScope !== "task" || Boolean(activeTaskId)}
+          roleSaving={roleConfigurationSaving}
+          roleHasOverride={roleConfigurationHasOverride}
           value={workerSearch.open && view === "worker"
             ? workerSearch.query
-            : view === "native" || view === "router" || view === "workers" || view === "features" || view === "sessions" || view === "collaboration" || view === "status" ? "" : input}
+            : view === "native" || view === "router" || view === "workers" || view === "features" || view === "sessions" || view === "collaboration" || view === "status" || view === "roles" ? "" : input}
           cursor={workerSearch.open && view === "worker"
             ? workerSearch.cursor
             : view === "chat" ? inputCursor : undefined}
@@ -3691,7 +4119,21 @@ export function App({
       }
       error={attachError}
     >
-        {view === "status" ? (
+        {view === "roles" ? (
+          <RoleConfigurationView
+            snapshot={roleConfigurationSnapshot}
+            draft={roleConfigurationDraft}
+            scope={roleConfigurationScope}
+            selectedRoleIndex={roleConfigurationSelectedIndex}
+            loading={roleConfigurationLoading}
+            saving={roleConfigurationSaving}
+            notice={roleConfigurationNotice}
+            error={roleConfigurationError}
+            hasActiveTask={Boolean(activeTaskId)}
+            height={contentHeight}
+            terminalWidth={terminalWidth}
+          />
+        ) : view === "status" ? (
           <StatusDetailView
             cwd={cwd}
             taskId={activeTaskId}
@@ -3702,6 +4144,7 @@ export function App({
             routeStatus={visibleRouteStatus}
             routeReason={routePending ? undefined : lastRoute?.reason}
             pairing={config.pairing}
+            roleSelection={activeRoleSelection}
             configStatus={configChange?.detail}
             configRestartRequired={configChange?.kind === "restart"}
             workers={workers}
@@ -3859,6 +4302,23 @@ export function App({
         )}
     </AppShell>
   );
+}
+
+function fallbackRoleConfigurationSnapshot(config: AppConfig): RoleConfigurationSnapshot {
+  const roles = configuredRoleSelection(config);
+  return {
+    baseline: roles,
+    future: configuredRoleSelection(config),
+    next: null,
+    task: null,
+    activeTurn: null,
+    providers: workerProviders(config).map(({ id, config: provider }) => ({
+      id,
+      model: provider.model.name,
+      modelProvider: provider.model.provider,
+      assignable: provider.assignable
+    }))
+  };
 }
 
 function readTerminalSize(): { columns: number; rows: number } {

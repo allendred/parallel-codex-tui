@@ -1,6 +1,8 @@
 node_modules/
 dist/
 .parallel-codex/config.toml
+.parallel-codex/role-configuration.json
+.parallel-codex/role-configuration.next.json
 .parallel-codex/last-workspace
 .parallel-codex/router/
 .parallel-codex/session-index.sqlite

@@ -110,6 +110,19 @@ describe("keyboard shortcuts", () => {
     expect(isStatusDetailsShortcut?.("s", { ctrl: false })).toBe(false);
   });
 
+  it("recognizes ctrl-e as the role configuration shortcut", () => {
+    const isRoleConfigurationShortcut = (
+      keyboardModule as typeof keyboardModule & {
+        isRoleConfigurationShortcut?: (input: string, key: { ctrl?: boolean }) => boolean;
+      }
+    ).isRoleConfigurationShortcut;
+
+    expect(isRoleConfigurationShortcut).toBeTypeOf("function");
+    expect(isRoleConfigurationShortcut?.("e", { ctrl: true })).toBe(true);
+    expect(isRoleConfigurationShortcut?.("\u0005", { ctrl: false })).toBe(true);
+    expect(isRoleConfigurationShortcut?.("e", { ctrl: false })).toBe(false);
+  });
+
   it("recognizes worker log search and semantic jump shortcuts", () => {
     const isWorkerSearchShortcut = (
       keyboardModule as typeof keyboardModule & {

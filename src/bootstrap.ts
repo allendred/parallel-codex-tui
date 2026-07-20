@@ -2,6 +2,7 @@ import { prepareAppRoot } from "./core/app-root.js";
 import { configPath, loadConfig, writeDefaultConfig, type AppConfig } from "./core/config.js";
 import { ensureDir, pathExists } from "./core/file-store.js";
 import { routerRuntimeDir } from "./core/paths.js";
+import { RoleConfigurationManager } from "./core/role-configuration.js";
 import { SessionIndex } from "./core/session-index.js";
 import {
   SessionManager,
@@ -24,6 +25,7 @@ export interface AppRuntime {
   sessions: SessionManager;
   workers: WorkerRegistry;
   orchestrator: Orchestrator;
+  roleConfiguration: RoleConfigurationManager;
   pendingTaskCreations: PendingTaskCreationRecovery;
   workspaceCommitRecovery: WorkspaceCommitRecovery;
   recoveredTasks: InterruptedTaskRecovery[];
@@ -46,6 +48,11 @@ export async function createRuntime(appRoot: string, workspaceRoot = appRoot): P
       dataDir: config.dataDir,
       index
     });
+    const roleConfiguration = await RoleConfigurationManager.open({
+      config,
+      appRoot,
+      workspaceRoot: preparedWorkspace
+    });
     const pendingTaskCreations = await sessions.reconcilePendingTaskCreations();
     const workspaceCommitRecovery = await reconcileWorkspaceCommitIntents(preparedWorkspace, config.dataDir);
     await sessions.reconcileInterruptedMainSession();
@@ -58,7 +65,8 @@ export async function createRuntime(appRoot: string, workspaceRoot = appRoot): P
       workers,
       undefined,
       routerCwd,
-      async () => (await loadConfig(appRoot)).router
+      async () => (await loadConfig(appRoot)).router,
+      { roleConfiguration }
     );
 
     return {
@@ -69,6 +77,7 @@ export async function createRuntime(appRoot: string, workspaceRoot = appRoot): P
       sessions,
       workers,
       orchestrator,
+      roleConfiguration,
       pendingTaskCreations,
       workspaceCommitRecovery,
       recoveredTasks

@@ -1,10 +1,11 @@
 import React from "react";
 import { Box, Text } from "ink";
+import type { ConfigurableRole, RoleConfigurationScope } from "../core/role-configuration.js";
 import { compactEndByDisplayWidth, compactTailByDisplayWidth, displayWidth } from "./display-width.js";
 import { TUI_THEME } from "./theme.js";
 
 export interface InputBarProps {
-  mode: "chat" | "worker" | "worker-search" | "workers" | "features" | "collaboration" | "native" | "router" | "sessions" | "status";
+  mode: "chat" | "worker" | "worker-search" | "workers" | "features" | "collaboration" | "native" | "router" | "sessions" | "status" | "roles";
   ready?: boolean;
   busy?: boolean;
   routeFallback?: boolean;
@@ -34,6 +35,11 @@ export interface InputBarProps {
   searchMatchIndex?: number;
   searchMatchCount?: number;
   clipboardNotice?: { state: "copying" | "copied"; text: string } | null;
+  roleScope?: RoleConfigurationScope;
+  roleEditingModel?: { role: ConfigurableRole; value: string; cursor: number } | null;
+  roleCanApply?: boolean;
+  roleSaving?: boolean;
+  roleHasOverride?: boolean;
   value: string;
   cursor?: number;
   terminalWidth?: number;
@@ -76,6 +82,11 @@ export function InputBar({
   searchMatchIndex = 0,
   searchMatchCount = 0,
   clipboardNotice = null,
+  roleScope = "next",
+  roleEditingModel = null,
+  roleCanApply = true,
+  roleSaving = false,
+  roleHasOverride = false,
   value,
   cursor,
   terminalWidth: providedTerminalWidth,
@@ -115,6 +126,36 @@ export function InputBar({
         <Text backgroundColor={TUI_THEME.rail} color={TUI_THEME.accent} bold>|</Text>
         <Text backgroundColor={TUI_THEME.rail} color={TUI_THEME.text}>{display.after}</Text>
         {suffix ? <Text backgroundColor={TUI_THEME.rail} color={TUI_THEME.muted}>{suffix}</Text> : null}
+      </InputRail>
+    );
+  }
+
+  if (mode === "roles") {
+    if (roleEditingModel) {
+      const prefix = `${roleEditingModel.role} model > `;
+      const valueWidth = Math.max(1, terminalWidth - displayWidth(prefix) - 3);
+      const display = chatInputDisplayParts(roleEditingModel.value, roleEditingModel.cursor, valueWidth);
+      const textWidth = displayWidth(`${prefix}${display.before}|${display.after}`);
+      return (
+        <InputRail terminalWidth={terminalWidth} textWidth={textWidth} fill={fillRail}>
+          <Text backgroundColor={TUI_THEME.rail} color={TUI_THEME.accent} bold>{prefix}</Text>
+          <Text backgroundColor={TUI_THEME.rail} color={TUI_THEME.text}>{display.before}</Text>
+          <Text backgroundColor={TUI_THEME.rail} color={TUI_THEME.accent} bold>|</Text>
+          <Text backgroundColor={TUI_THEME.rail} color={TUI_THEME.text}>{display.after}</Text>
+        </InputRail>
+      );
+    }
+    const hints = roleConfigurationInputHints(
+      terminalWidth,
+      roleScope,
+      roleCanApply,
+      roleSaving,
+      roleHasOverride
+    );
+    return (
+      <InputRail terminalWidth={terminalWidth} textWidth={displayWidth(`${hints.label}${hints.detail}`)} fill={fillRail}>
+        <Text backgroundColor={TUI_THEME.rail} color={roleSaving ? TUI_THEME.warning : TUI_THEME.accent} bold>{hints.label}</Text>
+        {hints.detail ? <Text backgroundColor={TUI_THEME.rail} color={TUI_THEME.muted}>{hints.detail}</Text> : null}
       </InputRail>
     );
   }
@@ -728,12 +769,32 @@ function workerInputHints(width: number): { label: string; detail: string } {
 
 function statusDetailInputHints(width: number): { label: string; detail: string } {
   return selectInputHints(width, [
-    { label: "status", detail: " · ^X diagnostics · ^S/Esc back · ^C exit" },
-    { label: "status", detail: " · ^X diag · ^S/Esc back · ^C exit" },
+    { label: "status", detail: " · ^E roles · ^X diagnostics · ^S/Esc back · ^C exit" },
+    { label: "status", detail: " · ^E roles · ^X diag · ^S/Esc back · ^C exit" },
     { label: "status", detail: " · ^S back · ^C exit" },
     { label: "status", detail: " · ^S back" },
     { label: "status", detail: "" },
     { label: "st", detail: "" }
+  ]);
+}
+
+function roleConfigurationInputHints(
+  width: number,
+  scope: RoleConfigurationScope,
+  canApply: boolean,
+  saving: boolean,
+  hasOverride: boolean
+): { label: string; detail: string } {
+  const label = saving ? "roles · saving" : `roles · ${scope}`;
+  const apply = canApply ? "Enter apply" : "task unavailable";
+  const reset = hasOverride ? " · X reset" : "";
+  return selectInputHints(width, [
+    { label, detail: ` · Tab scope · Up/Dn role · Left/Right provider · M model · ${apply}${reset} · ^E/Esc back` },
+    { label, detail: ` · Tab scope · Up/Dn · Left/Right provider · M model · ${apply}${reset} · Esc back` },
+    { label, detail: ` · Tab · Up/Dn · Left/Right · M model · ${apply}${reset}` },
+    { label, detail: ` · Tab · arrows · M · ${canApply ? "Enter" : "no task"}` },
+    { label: "roles", detail: " · Tab · arrows · M · Enter" },
+    { label: "roles", detail: "" }
   ]);
 }
 

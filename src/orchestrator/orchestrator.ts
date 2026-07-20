@@ -6,6 +6,13 @@ import { runWithLeaseFinalization } from "../core/lease-finalization.js";
 import { extractMainResponse } from "../core/main-response.js";
 import { claimTaskRunLease, TaskRunLeaseConflictError, type TaskRunLease } from "../core/process-ownership.js";
 import { routerRuntimeDir } from "../core/paths.js";
+import {
+  RoleConfigurationManager,
+  roleSelectionWithEngines,
+  type RoleConfigurationScope,
+  type RoleConfigurationSnapshot,
+  type RoleExecutionSelection
+} from "../core/role-configuration.js";
 import { classifyRouterFailure, routerFallbackIsTransient } from "../core/router-audit.js";
 import { sanitizeRouterText } from "../core/router-redaction.js";
 import {
@@ -85,6 +92,7 @@ export interface HandleRequestInput {
   onRoute?: (route: RouteDecision) => void;
   onStatus?: (status: WorkerRunStatus) => void;
   onWorker?: (worker: WorkerLogRef) => void;
+  roleSelection?: RoleExecutionSelection;
 }
 
 export interface HandleTaskTurnInput extends HandleRequestInput {
@@ -122,6 +130,13 @@ export interface TaskFollowUpRouteResult {
   taskId: string | null;
   reason: string;
   route: RouteDecision;
+  roleSelection: RoleExecutionSelection;
+}
+
+export interface UpdateRoleConfigurationInput {
+  scope: RoleConfigurationScope;
+  roles: RoleExecutionSelection;
+  taskId?: string | null;
 }
 
 export interface RouteStartInfo {
@@ -200,6 +215,7 @@ export type RouterConfigLoader = () => Promise<AppConfig["router"]>;
 
 export interface OrchestratorDependencies {
   claimTaskRunLease?: (dir: string) => Promise<TaskRunLease>;
+  roleConfiguration?: RoleConfigurationManager;
 }
 
 interface FeatureActorRun {
@@ -246,6 +262,7 @@ class FeatureRunPausedError extends Error {
 
 export class Orchestrator {
   private readonly activeFeatureRuns = new Map<string, ActiveFeatureRun>();
+  private readonly roleConfiguration: RoleConfigurationManager;
 
   constructor(
     private readonly config: AppConfig,
@@ -255,11 +272,13 @@ export class Orchestrator {
     private readonly routerCwd = routerRuntimeDir(config.projectRoot, config.dataDir),
     private readonly routerConfigLoader?: RouterConfigLoader,
     private readonly dependencies: OrchestratorDependencies = {}
-  ) {}
+  ) {
+    this.roleConfiguration = dependencies.roleConfiguration ?? RoleConfigurationManager.transient(config);
+  }
 
   async handleRequest(input: HandleRequestInput): Promise<HandleRequestResult> {
     throwIfCancelled(input.signal);
-    const route = await this.routeRequest(
+    const routed = await this.routeRequest(
       input.request,
       input.cwd,
       input.signal,
@@ -268,14 +287,17 @@ export class Orchestrator {
       input.onRouteFallback,
       input.onRouteProgress
     );
+    const roleSelection = input.roleSelection ?? await this.roleConfiguration.selectionForRequest();
+    const route = routeWithRoleSelection(routed, roleSelection);
     input.onRoute?.(route);
     throwIfCancelled(input.signal);
     const workers: WorkerLogRef[] = [];
+    const executionInput = { ...input, roleSelection };
 
     if (route.mode === "simple") {
       try {
         input.onStatus?.({ taskId: "main", main: "starting" });
-        const output = await this.runMain(input, workers);
+        const output = await this.runMain(executionInput, workers);
         input.onStatus?.({ taskId: "main", main: "done" });
         return {
           mode: "simple",
@@ -302,28 +324,36 @@ export class Orchestrator {
       userPath: join(task.dir, "turns", "0001", "user.md"),
       routePath: join(task.dir, "turns", "0001", "route.json")
     };
+    await this.roleConfiguration.writeTurnSelection(
+      turn.dir,
+      roleSelectionWithEngines(route, roleSelection)
+    );
 
-    return this.withTaskRunLease(task, () => this.runInitialTask(input, task, route, turn, workers));
+    return this.withTaskRunLease(task, () => this.runInitialTask(executionInput, task, route, turn, workers));
   }
 
   async handleTaskTurn(input: HandleTaskTurnInput): Promise<HandleRequestResult> {
     throwIfCancelled(input.signal);
     const task: TaskSession = this.sessions.taskFromId(input.taskId);
-    const route = input.route ?? await this.routeRequest(
-      input.request,
-      input.cwd,
-      input.signal,
-      "follow-up",
-      input.onRouteStart,
-      input.onRouteFallback,
-      input.onRouteProgress
+    const roleSelection = input.roleSelection ?? await this.roleConfiguration.selectionForRequest(task.dir);
+    const route = routeWithRoleSelection(
+      input.route ?? await this.routeRequest(
+        input.request,
+        input.cwd,
+        input.signal,
+        "follow-up",
+        input.onRouteStart,
+        input.onRouteFallback,
+        input.onRouteProgress
+      ),
+      roleSelection
     );
     if (!input.route) {
       input.onRoute?.(route);
     }
     throwIfCancelled(input.signal);
     if (route.mode === "simple") {
-      return this.answerTaskQuestion({ ...input, route });
+      return this.answerTaskQuestion({ ...input, route, roleSelection });
     }
     return this.withTaskRunLease(task, async () => {
       throwIfCancelled(input.signal);
@@ -332,8 +362,12 @@ export class Orchestrator {
         request: input.request,
         route
       });
+      await this.roleConfiguration.writeTurnSelection(
+        turn.dir,
+        roleSelectionWithEngines(route, roleSelection)
+      );
       const workers: WorkerLogRef[] = [];
-      return this.runPairTask(input, task, route, turn, workers);
+      return this.runPairTask({ ...input, roleSelection }, task, route, turn, workers);
     });
   }
 
@@ -411,6 +445,101 @@ export class Orchestrator {
     });
   }
 
+  async roleConfigurationSnapshot(taskId?: string | null): Promise<RoleConfigurationSnapshot> {
+    const task = taskId ? this.sessions.taskFromId(taskId) : null;
+    if (task && !(await pathExists(task.dir))) {
+      throw new Error(`Task session not found: ${taskId}`);
+    }
+    return this.roleConfiguration.snapshot(task?.dir);
+  }
+
+  async updateRoleConfiguration(
+    input: UpdateRoleConfigurationInput
+  ): Promise<RoleConfigurationSnapshot> {
+    if (input.scope !== "task") {
+      await this.roleConfiguration.apply(input.scope, input.roles);
+      return this.roleConfigurationSnapshot(input.taskId);
+    }
+    const taskId = input.taskId;
+    if (!taskId) {
+      throw new Error("No active Task is available for a current-task role configuration.");
+    }
+    const task = this.sessions.taskFromId(taskId);
+    if (!(await pathExists(task.dir))) {
+      throw new Error(`Task session not found: ${taskId}`);
+    }
+    return this.withTaskRunLease(task, async () => {
+      await this.roleConfiguration.apply("task", input.roles, task.dir);
+      await this.synchronizeRetryRoleConfiguration(task, input.roles);
+      await this.sessions.appendEvent(task, "task.role_configuration_changed", "Current Task role configuration updated");
+      return this.roleConfiguration.snapshot(task.dir);
+    });
+  }
+
+  async clearRoleConfiguration(
+    scope: RoleConfigurationScope,
+    taskId?: string | null
+  ): Promise<RoleConfigurationSnapshot> {
+    if (scope !== "task") {
+      await this.roleConfiguration.clear(scope);
+      return this.roleConfigurationSnapshot(taskId);
+    }
+    if (!taskId) {
+      throw new Error("No active Task is available for a current-task role configuration.");
+    }
+    const task = this.sessions.taskFromId(taskId);
+    if (!(await pathExists(task.dir))) {
+      throw new Error(`Task session not found: ${taskId}`);
+    }
+    return this.withTaskRunLease(task, async () => {
+      await this.roleConfiguration.clear("task", task.dir);
+      const roles = await this.roleConfiguration.selectionForTask(task.dir);
+      await this.synchronizeRetryRoleConfiguration(task, roles);
+      await this.sessions.appendEvent(task, "task.role_configuration_cleared", "Current Task role configuration reset");
+      return this.roleConfiguration.snapshot(task.dir);
+    });
+  }
+
+  private async synchronizeRetryRoleConfiguration(
+    task: TaskSession,
+    roles: RoleExecutionSelection
+  ): Promise<void> {
+    const meta = await readTaskMetaIfValid(task.metaPath);
+    if (!meta || !new Set(["failed", "cancelled", "paused"]).has(meta.status)) {
+      return;
+    }
+    const turn = await this.sessions.latestTurn(task);
+    if (!turn) {
+      return;
+    }
+    const route = routeWithRoleSelection(await readJson(turn.routePath, RouteDecisionSchema), roles);
+    const executionRoles = roleSelectionWithEngines(route, roles);
+    await writeJson(turn.routePath, route);
+    await this.sessions.recordLatestRoute(task, route);
+    await this.roleConfiguration.writeTurnSelection(turn.dir, executionRoles);
+
+    const featuresDir = join(task.dir, "features");
+    if (!(await pathExists(featuresDir))) {
+      return;
+    }
+    const entries = await readdir(featuresDir, { withFileTypes: true });
+    for (const entry of entries) {
+      if (!entry.isDirectory()) {
+        continue;
+      }
+      const featureDir = join(featuresDir, entry.name);
+      const status = await readFeatureStatusIfValid(join(featureDir, "status.json"));
+      if (!status || status.task_id !== task.id || status.state === "approved") {
+        continue;
+      }
+      await writeFeatureAssignment(
+        { assignmentPath: join(featureDir, "assignment.json") },
+        executionRoles.actor.engine,
+        executionRoles.critic.engine
+      );
+    }
+  }
+
   private async resumeTaskRun(input: RetryTaskInput, pausedFeatureId?: string): Promise<HandleRequestResult> {
     throwIfCancelled(input.signal);
     const task = this.sessions.taskFromId(input.taskId);
@@ -456,11 +585,18 @@ export class Orchestrator {
         throw new Error(`Task ${input.taskId} turn ${turn.turnId} has no request to retry.`);
       }
       const route = await readJson(turn.routePath, RouteDecisionSchema);
+      const roleSelection = await this.roleConfiguration.readTurnSelection(turn.dir)
+        ?? roleSelectionWithEngines(
+          route,
+          await this.roleConfiguration.selectionForTask(task.dir)
+        );
+      await this.roleConfiguration.writeTurnSelection(turn.dir, roleSelection);
       const executionInput: HandleRequestInput = {
         ...input,
         request,
         cwd: meta.cwd,
-        retry: true
+        retry: true,
+        roleSelection
       };
       const workers: WorkerLogRef[] = [];
       input.onRoute?.(route);
@@ -557,7 +693,7 @@ export class Orchestrator {
 
   async routeTaskFollowUp(input: HandleTaskQuestionInput): Promise<TaskFollowUpRouteResult> {
     throwIfCancelled(input.signal);
-    const route = await this.routeRequest(
+    const routed = await this.routeRequest(
       input.request,
       input.cwd,
       input.signal,
@@ -566,6 +702,9 @@ export class Orchestrator {
       input.onRouteFallback,
       input.onRouteProgress
     );
+    const task = this.sessions.taskFromId(input.taskId);
+    const roleSelection = input.roleSelection ?? await this.roleConfiguration.selectionForRequest(task.dir);
+    const route = routeWithRoleSelection(routed, roleSelection);
     input.onRoute?.(route);
     throwIfCancelled(input.signal);
 
@@ -573,7 +712,8 @@ export class Orchestrator {
       mode: route.mode,
       taskId: route.mode === "complex" ? input.taskId : null,
       reason: route.reason,
-      route
+      route,
+      roleSelection
     };
   }
 
@@ -583,7 +723,11 @@ export class Orchestrator {
     if (!(await pathExists(task.dir))) {
       throw new Error(`Task session not found: ${input.taskId}`);
     }
-    return this.withTaskRunLease(task, () => this.answerTaskQuestionWithLease(input, task));
+    const roleSelection = input.roleSelection ?? await this.roleConfiguration.selectionForRequest(task.dir);
+    return this.withTaskRunLease(task, () => this.answerTaskQuestionWithLease({
+      ...input,
+      roleSelection
+    }, task));
   }
 
   private async answerTaskQuestionWithLease(
@@ -2118,7 +2262,8 @@ export class Orchestrator {
     taskId: string | null = null
   ): Promise<string> {
     throwIfCancelled(input.signal);
-    const engine = this.config.pairing.main;
+    const target = input.roleSelection?.main ?? this.roleConfiguration.futureRoles().main;
+    const engine = target.engine;
     const dir = this.sessions.mainSessionDir();
     let lease;
     try {
@@ -2213,6 +2358,9 @@ export class Orchestrator {
       outputLogPath,
       statusPath,
       prompt,
+      modelConfig: this.roleConfiguration.modelForTarget(
+        input.roleSelection?.main ?? this.roleConfiguration.futureRoles().main
+      ),
       signal: input.signal,
       onStatus: (runtimeStatus) => {
         this.recordWorker(input, workers, { ...worker, runtimeStatus });
@@ -2270,6 +2418,7 @@ export class Orchestrator {
       outputLogPath: judge.outputLogPath,
       statusPath: judge.statusPath,
       prompt: await readTextIfExists(judge.promptPath),
+      modelConfig: await this.roleConfiguration.modelForTurn(turn.dir, "judge", engine),
       signal: input.signal
     }, "task", await this.previousTurnWorker(task, "judge", engine, turn.turnId));
     ensureWorkerSuccess(result);
@@ -2368,6 +2517,7 @@ export class Orchestrator {
       outputLogPath: finalJudge.outputLogPath,
       statusPath: finalJudge.statusPath,
       prompt: await readTextIfExists(finalJudge.promptPath),
+      modelConfig: await this.roleConfiguration.modelForTurn(turn.dir, "judge", engine),
       signal: input.signal
     }, "task", initialJudge);
     ensureWorkerSuccess(result);
@@ -2472,6 +2622,7 @@ export class Orchestrator {
       outputLogPath: actor.outputLogPath,
       statusPath: actor.statusPath,
       prompt: await readTextIfExists(actor.promptPath),
+      modelConfig: await this.roleConfiguration.modelForTurn(turn.dir, "actor", engine),
       signal: input.signal
     }, task, feature, featureScoped
       ? undefined
@@ -2553,6 +2704,7 @@ export class Orchestrator {
       outputLogPath: critic.outputLogPath,
       statusPath: critic.statusPath,
       prompt: await readTextIfExists(critic.promptPath),
+      modelConfig: await this.roleConfiguration.modelForTurn(turn.dir, "critic", engine),
       signal: input.signal
     }, task, feature, featureScoped
       ? undefined
@@ -2630,6 +2782,7 @@ export class Orchestrator {
       outputLogPath: critic.outputLogPath,
       statusPath: critic.statusPath,
       prompt: await readTextIfExists(critic.promptPath),
+      modelConfig: await this.roleConfiguration.modelForTurn(turn.dir, "critic", engine),
       signal: input.signal
     });
     ensureWorkerSuccess(result);
@@ -2695,6 +2848,7 @@ export class Orchestrator {
       outputLogPath: actor.outputLogPath,
       statusPath: actor.statusPath,
       prompt: await readTextIfExists(actor.promptPath),
+      modelConfig: await this.roleConfiguration.modelForTurn(turn.dir, "actor", engine),
       signal: input.signal
     });
     ensureWorkerSuccess(result);
@@ -2813,6 +2967,7 @@ export class Orchestrator {
 
     return adapter.run({
       ...spec,
+      modelConfig: spec.modelConfig ?? workerProvider(this.config, engine).config.model,
       nativeSession: existing,
       nativeSessionConfig: workerProvider(this.config, engine).config.nativeSession,
       onNativeSession: async (sessionId) => {
@@ -3290,6 +3445,14 @@ function throwIfCancelled(signal?: AbortSignal): void {
 async function readWorkerStatusIfValid(statusPath: string): Promise<WorkerStatus | null> {
   try {
     return await readJson(statusPath, WorkerStatusSchema);
+  } catch {
+    return null;
+  }
+}
+
+async function readFeatureStatusIfValid(statusPath: string) {
+  try {
+    return await readJson(statusPath, FeatureStatusSchema);
   } catch {
     return null;
   }
@@ -3836,4 +3999,16 @@ function judgeValidationError(turn: TaskTurn, report: JudgeValidationReport): st
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+function routeWithRoleSelection(
+  route: RouteDecision,
+  roles: RoleExecutionSelection
+): RouteDecision {
+  return RouteDecisionSchema.parse({
+    ...route,
+    judge_engine: roles.judge.engine,
+    actor_engine: roles.actor.engine,
+    critic_engine: roles.critic.engine
+  });
 }

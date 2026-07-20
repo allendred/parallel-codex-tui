@@ -128,6 +128,8 @@ describe("package metadata", () => {
     const gitignore = await readFile(join(process.cwd(), ".gitignore"), "utf8");
 
     expect(gitignore).toContain(".parallel-codex/config.toml");
+    expect(gitignore).toContain(".parallel-codex/role-configuration.json");
+    expect(gitignore).toContain(".parallel-codex/role-configuration.next.json");
     expect(gitignore).toContain(".parallel-codex/last-workspace");
     expect(gitignore).toContain(".parallel-codex/sessions/");
     expect(gitignore).toContain(".parallel-codex/exports/");
@@ -143,6 +145,8 @@ describe("package metadata", () => {
     const trackedFiles = stdout.split("\n").filter(Boolean);
 
     expect(trackedFiles).not.toContain(".parallel-codex/config.toml");
+    expect(trackedFiles).not.toContain(".parallel-codex/role-configuration.json");
+    expect(trackedFiles).not.toContain(".parallel-codex/role-configuration.next.json");
     expect(trackedFiles.some((file) => file.startsWith("docs/superpowers/"))).toBe(false);
   });
 
@@ -188,7 +192,7 @@ describe("package metadata", () => {
 
     expect(readme).toContain("## Requirements");
     expect(readme).toContain("## Current Release");
-    expect(readme).toContain("v0.2.10` is available from [npm]");
+    expect(readme).toContain("v0.3.0` is available from [npm]");
     expect(readme).toContain("`Ctrl+T`, then `C`, opens every persisted Main conversation");
     expect(readme).toContain("`.parallel-codex/sessions/main/conversations/<conversation>/`");
     expect(readme).toContain("restores those exact Main bindings");
@@ -200,7 +204,7 @@ describe("package metadata", () => {
     expect(readme).toContain("keeps terminal scrolling and copying available at the same time");
     expect(readme).toContain("real three-Feature Tetris task");
     expect(readme).toContain("20-turn soak verifies 80 ordered Workers");
-    expect(readme).toContain("1,311 tests across 130 files: 1,310 pass by default");
+    expect(readme).toContain("1,334 tests across 136 files: 1,333 pass by default");
     expect(readme).toContain("same Judge native session for a bounded DAG replan");
     expect(readme).toContain("Real Codex and Claude probes both proved fresh and same-session resume calls");
     expect(readme).toContain("authenticate the Claude CLI");
@@ -538,9 +542,9 @@ describe("package metadata", () => {
     expect(readme).toContain('git tag "v$VERSION"');
     expect(readme).toContain('git push origin "v$VERSION"');
     expect(readme).toContain("The release tag must match `package.json`");
-    expect(readme).toContain("VERSION=0.2.10");
-    expect(readme).toContain("package version `0.2.10` requires tag `v0.2.10`");
-    expect(readme).toContain("Published tags such as `v0.2.9` are immutable");
+    expect(readme).toContain("VERSION=0.3.0");
+    expect(readme).toContain("package version `0.3.0` requires tag `v0.3.0`");
+    expect(readme).toContain("Published tags such as `v0.2.10` are immutable");
   });
 
   it("publishes the CLI bin as an executable file", async () => {

@@ -17,6 +17,7 @@ import { configPath, loadConfig, withUiThemeOverride, writeDefaultConfig } from 
 import { pathExists } from "./core/file-store.js";
 import { exportDiagnostics } from "./core/diagnostics.js";
 import { readRouterAudit } from "./core/router-audit.js";
+import { RoleConfigurationManager } from "./core/role-configuration.js";
 import { inheritMacSystemProxy } from "./core/system-proxy.js";
 import { loadTaskSessionDetails as loadPersistedTaskSessionDetails } from "./core/task-session-details.js";
 import { listWorkspaceChoices } from "./core/workspace.js";
@@ -229,10 +230,15 @@ async function main(): Promise<void> {
           ...message,
           taskId
         })}
-        reloadConfig={async () => withUiThemeOverride(
-          await loadConfig(cliArgs.appRoot),
-          cliArgs.theme
-        )}
+        reloadConfig={async () => {
+          const latest = await loadConfig(cliArgs.appRoot);
+          await RoleConfigurationManager.open({
+            config: latest,
+            appRoot: cliArgs.appRoot,
+            workspaceRoot: state.runtime.workspaceRoot
+          });
+          return withUiThemeOverride(latest, cliArgs.theme);
+        }}
       />
     );
 

@@ -81,4 +81,29 @@ describe("StatusDetailView", () => {
     expect(rows.every((row) => displayWidth(row) <= 46)).toBe(true);
     view.unmount();
   });
+
+  it("shows the actual per-role provider and model matrix when available", () => {
+    const lines = statusDetailDisplayLines({
+      cwd: "/tmp/project",
+      taskId: "task-20260720-models",
+      mode: "complex",
+      busy: false,
+      canRetry: true,
+      taskStatus: "workers 4 | stop 1 | done 3",
+      routeStatus: "route complex",
+      pairing: { main: "codex", judge: "codex", actor: "codex", critic: "claude" },
+      roleSelection: {
+        main: { engine: "claude", model: "haiku" },
+        judge: { engine: "codex", model: "gpt-5.6" },
+        actor: { engine: "codex", model: "gpt-5.6-codex" },
+        critic: { engine: "claude", model: "sonnet" }
+      },
+      workers: [],
+      selectedWorkerIndex: 0
+    }, 180, 12);
+
+    expect(lines.map((line) => line.text).join("\n")).toContain(
+      "active roles · main/claude/haiku · judge/codex/gpt-5.6 · actor/codex/gpt-5.6-codex · critic/claude/sonnet"
+    );
+  });
 });

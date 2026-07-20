@@ -60,6 +60,10 @@ export function isDiagnosticsShortcut(input: string, key: KeyboardKey): boolean 
   return (key.ctrl === true && input.toLowerCase() === "x") || input === "\u0018";
 }
 
+export function isRoleConfigurationShortcut(input: string, key: KeyboardKey): boolean {
+  return (key.ctrl === true && input.toLowerCase() === "e") || input === "\u0005";
+}
+
 export function workerLogJumpKind(input: string): "error" | "diff" | null {
   if (input === "e" || input === "E") {
     return "error";
@@ -103,6 +107,15 @@ export function rawPlainArrowDelta(input: string): number {
   for (const match of input.matchAll(/\x1b(?:O([AB])|\[([AB]))/g)) {
     const direction = match[1] ?? match[2];
     delta += direction === "A" ? 1 : -1;
+  }
+  return delta;
+}
+
+export function rawHorizontalArrowDelta(input: string): number {
+  let delta = 0;
+  for (const match of input.matchAll(/\x1b(?:O([CD])|\[[0-9;?]*([CD]))/g)) {
+    const direction = match[1] ?? match[2];
+    delta += direction === "C" ? 1 : -1;
   }
   return delta;
 }

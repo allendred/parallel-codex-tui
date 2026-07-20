@@ -171,6 +171,63 @@ describe("buildNativeAttachLaunch", () => {
     ]);
   });
 
+  it("continues a historical Worker with its recorded model instead of the current profile default", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pct-native-attach-recorded-model-"));
+    const workerDir = join(root, "task-a", "actor-codex");
+    await writeJson(join(workerDir, "native-session.json"), {
+      engine: "codex",
+      role: "actor",
+      worker_id: "actor-codex",
+      session_id: "native-recorded-model",
+      scope: "task",
+      cwd: root,
+      created_at: "2026-07-20T03:30:00.000Z",
+      last_used_at: "2026-07-20T03:30:00.000Z",
+      source: "manual"
+    });
+    const config = defaultConfig(root);
+    config.workers.codex.interactive.args = ["resume", "{sessionId}"];
+    config.workers.codex.model = {
+      name: "new-profile-default",
+      provider: "new-provider",
+      args: ["--model", "{model}", "--provider", "{provider}"],
+      env: {}
+    };
+
+    const launch = await buildNativeAttachLaunch({
+      config,
+      worker: {
+        id: "actor-codex",
+        role: "actor",
+        engine: "codex",
+        label: "Actor (codex)",
+        logPath: join(workerDir, "output.log"),
+        statusPath: join(workerDir, "status.json"),
+        runtimeStatus: {
+          worker_id: "actor-codex",
+          role: "actor",
+          engine: "codex",
+          model_name: "recorded-turn-model",
+          model_provider: "recorded-provider",
+          state: "done",
+          phase: "complete",
+          last_event_at: "2026-07-20T03:31:00.000Z",
+          summary: "done",
+          native_session_id: "native-recorded-model"
+        }
+      }
+    });
+
+    expect(launch.args).toEqual([
+      "resume",
+      "native-recorded-model",
+      "--model",
+      "recorded-turn-model",
+      "--provider",
+      "recorded-provider"
+    ]);
+  });
+
   it("passes worker model environment into the embedded native session", async () => {
     const root = await mkdtemp(join(tmpdir(), "pct-native-attach-env-"));
     const workerDir = join(root, "task-a", "actor-codex");

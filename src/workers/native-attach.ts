@@ -56,7 +56,11 @@ async function buildNativeSessionLaunch(
 ): Promise<NativeAttachLaunch> {
   const workerConfig = workerProvider(input.config, input.worker.engine).config;
   const nativeSession = await readWorkerNativeSession(input.worker, workerConfig.capabilities.profile);
-  const modelConfig = workerConfig.model;
+  const modelConfig: WorkerModelRunConfig = {
+    ...workerConfig.model,
+    name: input.worker.runtimeStatus?.model_name?.trim() || workerConfig.model.name,
+    provider: input.worker.runtimeStatus?.model_provider?.trim() || workerConfig.model.provider
+  };
   const env = modelEnvironment(modelConfig);
   const interactiveArgs = mode === "fork"
     ? workerConfig.interactive.forkArgs
