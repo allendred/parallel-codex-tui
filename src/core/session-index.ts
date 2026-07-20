@@ -16,6 +16,12 @@ import {
   type WorkerStatus
 } from "../domain/schemas.js";
 import { ensureDir, pathExists, readJson, readTextIfExists } from "./file-store.js";
+import {
+  matchTaskSearchDocument,
+  parseTaskSearchQuery,
+  type TaskSearchDocument,
+  type TaskSearchMatch
+} from "./task-search.js";
 
 export interface WorkerIndexPaths {
   dir: string;
@@ -33,12 +39,16 @@ export interface ListTaskOptions {
   includeArchived?: boolean;
 }
 
+export interface TaskIndexSearchResult extends TaskIndexSummary {
+  searchMatch: TaskSearchMatch;
+}
+
 export interface SessionIndexRecovery {
   source: "backup" | "empty";
   quarantinedPath: string;
 }
 
-const SESSION_INDEX_SCHEMA_VERSION = 2;
+const SESSION_INDEX_SCHEMA_VERSION = 3;
 const SESSION_INDEX_FILENAME = "session-index.sqlite";
 
 export class SessionIndex {
@@ -128,28 +138,37 @@ export class SessionIndex {
       .run(task.id, task.title, task.created_at, task.cwd, task.mode, task.status, task.archived_at ?? null);
   }
 
-  async upsertTurn(taskId: string, turn: TurnMeta): Promise<void> {
+  async upsertTurn(taskId: string, turn: TurnMeta, request = ""): Promise<void> {
     this.db
       .prepare(
-        `INSERT INTO turns (task_id, turn_id, created_at, request_path)
-         VALUES (?, ?, ?, ?)
+        `INSERT INTO turns (task_id, turn_id, created_at, request_path, request_text)
+         VALUES (?, ?, ?, ?, ?)
          ON CONFLICT(task_id, turn_id) DO UPDATE SET
            created_at=excluded.created_at,
-           request_path=excluded.request_path`
+           request_path=excluded.request_path,
+           request_text=CASE
+             WHEN excluded.request_text <> '' THEN excluded.request_text
+             ELSE turns.request_text
+           END`
       )
-      .run(taskId, turn.turn_id, turn.created_at, turn.request_path);
+      .run(taskId, turn.turn_id, turn.created_at, turn.request_path, indexedRequestText(request));
   }
 
   async upsertWorker(taskId: string, status: WorkerStatus, paths: WorkerIndexPaths): Promise<void> {
     this.db
       .prepare(
         `INSERT INTO workers (
-          task_id, worker_id, role, engine, state, phase, summary, status_path, output_log_path, dir, native_session_id
+          task_id, worker_id, feature_id, feature_title, role, engine, model_name, model_provider,
+          state, phase, summary, status_path, output_log_path, dir, native_session_id
         )
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(task_id, worker_id) DO UPDATE SET
+           feature_id=excluded.feature_id,
+           feature_title=excluded.feature_title,
            role=excluded.role,
            engine=excluded.engine,
+           model_name=excluded.model_name,
+           model_provider=excluded.model_provider,
            state=excluded.state,
            phase=excluded.phase,
            summary=excluded.summary,
@@ -161,8 +180,12 @@ export class SessionIndex {
       .run(
         taskId,
         status.worker_id,
+        status.feature_id ?? null,
+        status.feature_title ?? null,
         status.role,
         status.engine,
+        status.model_name ?? null,
+        status.model_provider ?? null,
         status.state,
         status.phase,
         status.summary,
@@ -279,6 +302,117 @@ export class SessionIndex {
     });
   }
 
+  async searchTasks(
+    query: string,
+    limit = 100,
+    options: ListTaskOptions = {}
+  ): Promise<TaskIndexSearchResult[]> {
+    const boundedLimit = Number.isFinite(limit)
+      ? Math.min(500, Math.max(0, Math.trunc(limit)))
+      : 100;
+    if (boundedLimit === 0) {
+      return [];
+    }
+    const terms = parseTaskSearchQuery(query);
+    const tasks = await this.listTasks(500, options);
+    if (terms.length === 0) {
+      return tasks.slice(0, boundedLimit).map((task) => ({
+        ...task,
+        searchMatch: { fields: [], summary: "" }
+      }));
+    }
+
+    const documents = new Map<string, TaskSearchDocument>(tasks.map((task) => [task.id, {
+      task: {
+        id: task.id,
+        title: task.title,
+        cwd: task.cwd,
+        mode: task.mode,
+        state: task.status
+      },
+      turns: [],
+      workers: [],
+      nativeSessions: []
+    }]));
+    const archivedFilter = options.includeArchived ? "" : "WHERE tasks.archived_at IS NULL";
+
+    const turns = this.db.prepare(
+      `SELECT turns.task_id, turns.turn_id, turns.request_text
+       FROM turns
+       INNER JOIN tasks ON tasks.id = turns.task_id
+       ${archivedFilter}`
+    ).all() as Array<{ task_id: string; turn_id: string; request_text: string }>;
+    for (const turn of turns) {
+      documents.get(turn.task_id)?.turns.push({
+        turnId: turn.turn_id,
+        request: turn.request_text
+      });
+    }
+
+    const workers = this.db.prepare(
+      `SELECT
+         workers.task_id,
+         workers.worker_id,
+         workers.feature_id,
+         workers.feature_title,
+         workers.role,
+         workers.engine,
+         workers.model_name,
+         workers.model_provider,
+         workers.state,
+         workers.phase,
+         workers.summary
+       FROM workers
+       INNER JOIN tasks ON tasks.id = workers.task_id
+       ${archivedFilter}`
+    ).all() as Array<{
+      task_id: string;
+      worker_id: string;
+      feature_id: string | null;
+      feature_title: string | null;
+      role: string;
+      engine: string;
+      model_name: string | null;
+      model_provider: string | null;
+      state: string;
+      phase: string;
+      summary: string;
+    }>;
+    for (const worker of workers) {
+      documents.get(worker.task_id)?.workers.push({
+        id: worker.worker_id,
+        featureId: worker.feature_id ?? "",
+        featureTitle: worker.feature_title ?? "",
+        role: worker.role,
+        provider: worker.engine,
+        model: worker.model_name ?? "",
+        modelProvider: worker.model_provider ?? "",
+        state: worker.state,
+        phase: worker.phase,
+        summary: worker.summary
+      });
+    }
+
+    const nativeSessions = this.db.prepare(
+      `SELECT native_sessions.task_id, native_sessions.session_id, native_sessions.engine
+       FROM native_sessions
+       INNER JOIN tasks ON tasks.id = native_sessions.task_id
+       ${archivedFilter}`
+    ).all() as Array<{ task_id: string; session_id: string; engine: string }>;
+    for (const session of nativeSessions) {
+      documents.get(session.task_id)?.nativeSessions.push({
+        sessionId: session.session_id,
+        provider: session.engine
+      });
+    }
+
+    return tasks.flatMap((task): TaskIndexSearchResult[] => {
+      const document = documents.get(task.id);
+      const searchMatch = document ? matchTaskSearchDocument(terms, document) : null;
+      return searchMatch ? [{ ...task, searchMatch }] : [];
+    }).slice(0, boundedLimit);
+  }
+
   async activeTaskId(): Promise<string | null | undefined> {
     const row = this.db
       .prepare("SELECT value FROM workspace_state WHERE key = 'active_task_id'")
@@ -379,14 +513,19 @@ export class SessionIndex {
           turn_id TEXT NOT NULL,
           created_at TEXT NOT NULL,
           request_path TEXT NOT NULL,
+          request_text TEXT NOT NULL DEFAULT '',
           PRIMARY KEY (task_id, turn_id)
         );
 
         CREATE TABLE IF NOT EXISTS workers (
           task_id TEXT NOT NULL,
           worker_id TEXT NOT NULL,
+          feature_id TEXT,
+          feature_title TEXT,
           role TEXT NOT NULL,
           engine TEXT NOT NULL,
+          model_name TEXT,
+          model_provider TEXT,
           state TEXT NOT NULL,
           phase TEXT NOT NULL,
           summary TEXT NOT NULL,
@@ -419,6 +558,14 @@ export class SessionIndex {
     }
     if (targetVersion === 2) {
       this.ensureColumn("tasks", "archived_at", "TEXT");
+      return;
+    }
+    if (targetVersion === 3) {
+      this.ensureColumn("turns", "request_text", "TEXT NOT NULL DEFAULT ''");
+      this.ensureColumn("workers", "feature_id", "TEXT");
+      this.ensureColumn("workers", "feature_title", "TEXT");
+      this.ensureColumn("workers", "model_name", "TEXT");
+      this.ensureColumn("workers", "model_provider", "TEXT");
       return;
     }
     throw new Error(`Missing session index migration for schema v${targetVersion}`);
@@ -471,7 +618,7 @@ export class SessionIndex {
           && turn.turn_id === turnEntry.name
           && turn.request_path === `turns/${turnEntry.name}/user.md`
         ) {
-          await this.upsertTurn(taskId, turn);
+          await this.upsertTurn(taskId, turn, request);
         }
       }
     }
@@ -644,6 +791,14 @@ async function replaceFile(source: string, target: string): Promise<void> {
     await rm(target, { force: true });
     await rename(source, target);
   }
+}
+
+function indexedRequestText(request: string): string {
+  const clean = request
+    .replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g, "")
+    .trim();
+  const points = Array.from(clean);
+  return points.length > 32768 ? points.slice(0, 32768).join("") : clean;
 }
 
 async function readJsonIfValid<TSchema extends ZodTypeAny>(

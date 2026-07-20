@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { spawn } from "node-pty";
 import { pathExists, readJson, writeJson, writeText } from "../src/core/file-store.js";
-import { RouteDecisionSchema, TaskMetaSchema, TurnMetaSchema } from "../src/domain/schemas.js";
+import { RouteDecisionSchema, TaskMetaSchema, TurnMetaSchema, WorkerStatusSchema } from "../src/domain/schemas.js";
 import { NativeTerminalScreen } from "../src/tui/terminal-screen.js";
 
 describe("CLI Task session management smoke", () => {
@@ -29,8 +29,30 @@ describe("CLI Task session management smoke", () => {
     );
     const managedId = "task-20260715-083100-managed";
     const keepId = "task-20260715-083000-keep";
-    await writeTerminalTask(workspace, managedId, "Managed session", "2026-07-15T08:31:00.000Z");
+    await writeTerminalTask(
+      workspace,
+      managedId,
+      "Managed session",
+      "2026-07-15T08:31:00.000Z",
+      "修复中文输入并增加回归测试"
+    );
     await writeTerminalTask(workspace, keepId, "Keep session", "2026-07-15T08:30:00.000Z");
+    await writeJson(
+      join(workspace, ".parallel-codex", "sessions", managedId, "actor-codex-0001-input", "status.json"),
+      WorkerStatusSchema.parse({
+        worker_id: "actor-codex-0001-input",
+        feature_id: "0001-input",
+        feature_title: "中文输入",
+        role: "actor",
+        engine: "codex",
+        model_name: "gpt-5.6-codex",
+        model_provider: "openai",
+        state: "done",
+        phase: "implementation",
+        last_event_at: "2026-07-15T08:32:00.000Z",
+        summary: "中文输入回归测试已通过"
+      })
+    );
 
     const run = startCli(appRoot, workspace);
     try {
@@ -40,6 +62,18 @@ describe("CLI Task session management smoke", () => {
       run.child.write("\x14");
       await waitForScreenText(run, "Task sessions");
       await waitForScreenText(run, ">   Managed session");
+
+      run.child.write("\x06");
+      await waitForScreenText(run, "find > |");
+      run.child.write("turn:中文 role:actor provider:codex state:done");
+      await waitForScreenText(run, "1 match · 1 done");
+      await waitForScreenText(run, "match · turn 1 修复中文输入并增加回归测试");
+      expect(run.screen.snapshot()).not.toContain("Keep session");
+      run.child.write("\r");
+      await waitForScreenText(run, "Task sessions · active · find turn:中文 role:actor provider:codex state:done");
+      run.child.write("x");
+      await waitForScreenText(run, "Task search cleared");
+      await waitForScreenText(run, "2 tasks · 2 done");
 
       run.child.write("r");
       await waitForScreenText(run, "rename > Managed session|");
@@ -69,6 +103,8 @@ describe("CLI Task session management smoke", () => {
       const exportNames = await waitForDirectoryEntries(exportsRoot, 1);
       const exportDir = join(exportsRoot, exportNames[0] ?? "missing");
       expect(await pathExists(join(exportDir, "manifest.json"))).toBe(true);
+      expect(await pathExists(join(exportDir, "report.md"))).toBe(true);
+      expect(await pathExists(join(exportDir, "report.json"))).toBe(true);
       expect(await pathExists(join(exportDir, "session", "meta.json"))).toBe(true);
 
       run.child.write("d");
@@ -92,7 +128,8 @@ async function writeTerminalTask(
   workspace: string,
   taskId: string,
   title: string,
-  createdAt: string
+  createdAt: string,
+  request = title
 ): Promise<void> {
   const sessionDir = join(workspace, ".parallel-codex", "sessions", taskId);
   const route = RouteDecisionSchema.parse({
@@ -113,7 +150,7 @@ async function writeTerminalTask(
     status: "done"
   }));
   await writeJson(join(sessionDir, "route.json"), route);
-  await writeText(join(sessionDir, "user-request.md"), `${title}\n`);
+  await writeText(join(sessionDir, "user-request.md"), `${request}\n`);
   await writeJson(join(sessionDir, "turns", "0001", "turn.json"), TurnMetaSchema.parse({
     task_id: taskId,
     turn_id: "0001",
@@ -121,7 +158,7 @@ async function writeTerminalTask(
     request_path: "turns/0001/user.md"
   }));
   await writeJson(join(sessionDir, "turns", "0001", "route.json"), route);
-  await writeText(join(sessionDir, "turns", "0001", "user.md"), `${title}\n`);
+  await writeText(join(sessionDir, "turns", "0001", "user.md"), `${request}\n`);
 }
 
 function startCli(appRoot: string, workspace: string) {

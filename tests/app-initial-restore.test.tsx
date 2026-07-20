@@ -6,6 +6,7 @@ import { defaultConfig } from "../src/core/config.js";
 import type { MainConversationSummary } from "../src/core/session-manager.js";
 import type { Orchestrator, WorkerLogRef } from "../src/orchestrator/orchestrator.js";
 import { App } from "../src/tui/App.js";
+import type { TaskSessionListItem } from "../src/tui/TaskSessionsView.js";
 
 describe("App initial task restore", () => {
   it("opens preloaded worker logs before the asynchronous restore fallback resolves", async () => {
@@ -234,6 +235,78 @@ describe("App initial task restore", () => {
         undefined
       );
       expect((view.lastFrame() ?? "").split("\n")[0]).toContain("· chat ·");
+    } finally {
+      view.unmount();
+      testInput.restore();
+    }
+  });
+
+  it("searches Task sessions without dropping Unicode input or accepting stale results", async () => {
+    const testInput = installTestInputStream();
+    const stale = deferred<TaskSessionListItem[]>();
+    const task = (id: string, title: string, summary?: string): TaskSessionListItem => ({
+      id,
+      title,
+      created_at: "2026-07-20T08:00:00.000Z",
+      cwd: "/tmp/pct-workspace",
+      mode: "complex",
+      status: "done",
+      turnCount: 2,
+      workerCount: 3,
+      nativeSessionCount: 1,
+      ...(summary ? { searchMatch: { fields: ["turn", "role"], summary } } : {})
+    });
+    const loadTaskSessions = vi.fn(async (options?: { includeArchived?: boolean; query?: string }) => {
+      const query = options?.query ?? "";
+      if (!query) {
+        return [task("task-all", "全部任务")];
+      }
+      if (query === "中") {
+        return stale.promise;
+      }
+      return [task(`task-${query}`, `结果 ${query}`, `match · turn 2 ${query} · role actor`)];
+    });
+    const view = render(
+      <App
+        config={defaultConfig("/tmp/pct-app-task-search")}
+        orchestrator={{} as Orchestrator}
+        cwd="/tmp/pct-workspace"
+        loadTaskSessions={loadTaskSessions}
+      />
+    );
+
+    try {
+      await settleEffects();
+      testInput.send(view.stdin, "\x14");
+      await waitForFrame(view.lastFrame, "全部任务");
+      testInput.send(view.stdin, "\x06");
+      await waitForFrame(view.lastFrame, "find > |");
+      testInput.send(view.stdin, "中");
+      testInput.send(view.stdin, "文");
+      await waitForFrame(view.lastFrame, "结果 中文");
+      expect(view.lastFrame()).toContain("find > 中文|");
+
+      stale.resolve([task("task-stale", "过期结果", "match · stale")]);
+      await settleEffects();
+      expect(view.lastFrame()).toContain("结果 中文");
+      expect(view.lastFrame()).not.toContain("过期结果");
+
+      testInput.send(view.stdin, "\r");
+      await waitForFrame(view.lastFrame, "Task sessions · active · find 中文");
+      expect(view.lastFrame()).not.toContain("find > 中文|");
+
+      testInput.send(view.stdin, "\x06");
+      testInput.send(view.stdin, "改");
+      await waitForFrame(view.lastFrame, "结果 中文改");
+      testInput.send(view.stdin, "\x1b");
+      await waitForFrame(view.lastFrame, "结果 中文");
+      expect(view.lastFrame()).toContain("Task sessions · active · find 中文");
+
+      testInput.send(view.stdin, "x");
+      await waitForFrame(view.lastFrame, "全部任务");
+      expect(view.lastFrame()).not.toContain("· find 中文");
+      expect(loadTaskSessions).toHaveBeenCalledWith({ includeArchived: false, query: "中文" });
+      expect(loadTaskSessions).toHaveBeenLastCalledWith({ includeArchived: false });
     } finally {
       view.unmount();
       testInput.restore();

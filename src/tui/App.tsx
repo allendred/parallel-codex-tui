@@ -75,7 +75,11 @@ import {
   moveCollaborationEventSelection,
   nextCollaborationFeatureIndex
 } from "./CollaborationTimelineView.js";
-import { moveTaskSessionSelection, TaskSessionsView } from "./TaskSessionsView.js";
+import {
+  moveTaskSessionSelection,
+  TaskSessionsView,
+  type TaskSessionListItem
+} from "./TaskSessionsView.js";
 import { MainConversationsView, moveMainConversationSelection } from "./MainConversationsView.js";
 import {
   moveTaskSessionDetailSelection,
@@ -129,7 +133,7 @@ export interface AppProps {
     records: RouterAuditRecord[];
     policy: RouterDiagnosticsPolicy;
   }>;
-  loadTaskSessions?: (options?: { includeArchived?: boolean }) => Promise<TaskIndexSummary[]>;
+  loadTaskSessions?: (options?: { includeArchived?: boolean; query?: string }) => Promise<TaskSessionListItem[]>;
   loadMainConversations?: (options?: { includeArchived?: boolean }) => Promise<MainConversationSummary[]>;
   activateMainConversation?: (conversationId: string | null) => Promise<MainConversationActivation>;
   renameMainConversation?: (conversationId: string | null, title: string) => Promise<void>;
@@ -232,7 +236,8 @@ interface RoleModelEdit {
 }
 type TaskSessionAction =
   | { type: "rename"; taskId: string; title: string; value: string; cursor: number }
-  | { type: "delete"; taskId: string; title: string };
+  | { type: "delete"; taskId: string; title: string }
+  | { type: "search"; value: string; cursor: number; previousQuery: string };
 type MainConversationAction =
   | { type: "rename"; conversationId: string | null; title: string; value: string; cursor: number }
   | { type: "delete"; conversationId: string | null; title: string };
@@ -347,7 +352,7 @@ export function App({
   const [routerScope, setRouterScope] = useState<RouterDiagnosticsScope>("all");
   const [routerScrollOffset, setRouterScrollOffset] = useState(0);
   const [routerMaxScrollOffset, setRouterMaxScrollOffset] = useState(0);
-  const [taskSessions, setTaskSessions] = useState<TaskIndexSummary[]>([]);
+  const [taskSessions, setTaskSessions] = useState<TaskSessionListItem[]>([]);
   const [selectedTaskSessionIndex, setSelectedTaskSessionIndex] = useState(0);
   const [sessionCenterMode, setSessionCenterMode] = useState<"tasks" | "conversations">("tasks");
   const [mainConversations, setMainConversations] = useState<MainConversationSummary[]>([]);
@@ -358,6 +363,7 @@ export function App({
   const [taskSessionsError, setTaskSessionsError] = useState<string | null>(null);
   const [taskSessionsNotice, setTaskSessionsNotice] = useState<string | null>(null);
   const [taskSessionsIncludeArchived, setTaskSessionsIncludeArchived] = useState(false);
+  const [taskSessionQuery, setTaskSessionQuery] = useState("");
   const [taskSessionAction, setTaskSessionAction] = useState<TaskSessionAction | null>(null);
   const [taskSessionDetails, setTaskSessionDetails] = useState<TaskSessionDetails | null>(null);
   const [taskSessionDetailSelectedWorkerIndex, setTaskSessionDetailSelectedWorkerIndex] = useState(0);
@@ -420,6 +426,7 @@ export function App({
   const mainConversationActionRef = useRef<MainConversationAction | null>(mainConversationAction);
   const taskSessionsLoadingRef = useRef(taskSessionsLoading);
   const taskSessionsIncludeArchivedRef = useRef(taskSessionsIncludeArchived);
+  const taskSessionQueryRef = useRef("");
   const taskSessionActionRef = useRef<TaskSessionAction | null>(taskSessionAction);
   const taskSessionDetailsRef = useRef<TaskSessionDetails | null>(null);
   const taskSessionDetailSelectedWorkerIndexRef = useRef(0);
@@ -465,7 +472,10 @@ export function App({
   const clearRoleConfigurationRef = useRef<() => Promise<void>>(clearRoleConfiguration);
   const refreshCollaborationTimelineRef = useRef<(showLoading?: boolean) => Promise<void>>(refreshCollaborationTimeline);
   const activateSelectedTaskSessionRef = useRef<() => Promise<void>>(activateSelectedTaskSession);
-  const refreshTaskSessionsRef = useRef<(preferredTaskId?: string | null) => Promise<void>>(refreshTaskSessions);
+  const refreshTaskSessionsRef = useRef<(
+    preferredTaskId?: string | null,
+    query?: string
+  ) => Promise<void>>(refreshTaskSessions);
   const openMainConversationsRef = useRef<() => Promise<void>>(openMainConversations);
   const refreshMainConversationsRef = useRef<(preferredConversationId?: string | null) => Promise<void>>(refreshMainConversations);
   const restoreSelectedMainConversationRef = useRef<() => Promise<void>>(restoreSelectedMainConversation);
@@ -759,6 +769,10 @@ export function App({
   useEffect(() => {
     taskSessionsIncludeArchivedRef.current = taskSessionsIncludeArchived;
   }, [taskSessionsIncludeArchived]);
+
+  useEffect(() => {
+    taskSessionQueryRef.current = taskSessionQuery;
+  }, [taskSessionQuery]);
 
   useEffect(() => {
     taskSessionActionRef.current = taskSessionAction;
@@ -1656,8 +1670,35 @@ export function App({
         const sessionAction = taskSessionActionRef.current;
         if (sessionAction) {
           if (chunk === "\x1b") {
+            if (sessionAction.type === "search") {
+              const preferred = taskSessionsRef.current[selectedTaskSessionIndexRef.current]?.id ?? null;
+              updateTaskSessionAction(null);
+              setTaskSessionsError(null);
+              void refreshTaskSessionsRef.current(preferred, sessionAction.previousQuery);
+              return;
+            }
             updateTaskSessionAction(null);
             setTaskSessionsError(null);
+            return;
+          }
+          if (sessionAction.type === "search") {
+            const update = applyChatInputChunk(sessionAction.value, chunk, sessionAction.cursor);
+            const preferred = taskSessionsRef.current[selectedTaskSessionIndexRef.current]?.id ?? null;
+            if (update.submit !== null) {
+              updateTaskSessionAction(null);
+              setTaskSessionsError(null);
+              void refreshTaskSessionsRef.current(preferred, update.submit);
+            } else {
+              updateTaskSessionAction({
+                ...sessionAction,
+                value: update.value,
+                cursor: update.cursor
+              });
+              if (update.value !== sessionAction.value) {
+                setTaskSessionsError(null);
+                void refreshTaskSessionsRef.current(preferred, update.value);
+              }
+            }
             return;
           }
           if (taskSessionsLoadingRef.current) {
@@ -1695,6 +1736,17 @@ export function App({
         if (taskSessionsLoadingRef.current) {
           return;
         }
+        if (isWorkerSearchShortcut(chunk, {})) {
+          updateTaskSessionAction({
+            type: "search",
+            value: taskSessionQueryRef.current,
+            cursor: Array.from(taskSessionQueryRef.current).length,
+            previousQuery: taskSessionQueryRef.current
+          });
+          setTaskSessionsError(null);
+          setTaskSessionsNotice(null);
+          return;
+        }
         if (isRouterDiagnosticsShortcut(chunk, {})) {
           void openRouterDiagnosticsRef.current();
           return;
@@ -1712,6 +1764,11 @@ export function App({
           return;
         }
         const selectedSession = taskSessionsRef.current[selectedTaskSessionIndexRef.current];
+        if ((chunk === "x" || chunk === "X") && taskSessionQueryRef.current.trim()) {
+          void refreshTaskSessionsRef.current(selectedSession?.id ?? null, "");
+          setTaskSessionsNotice("Task search cleared");
+          return;
+        }
         if (chunk === "r" || chunk === "R") {
           if (selectedSession) {
             updateTaskSessionAction({
@@ -3170,12 +3227,20 @@ export function App({
     setTaskSessionDetailNotice(null);
     updateTaskSessionAction(null);
     updateMainConversationAction(null);
+    taskSessionQueryRef.current = "";
+    setTaskSessionQuery("");
     sessionCenterModeRef.current = "tasks";
     setSessionCenterMode("tasks");
     await refreshTaskSessions(activeTaskIdRef.current);
   }
 
-  async function refreshTaskSessions(preferredTaskId: string | null = null): Promise<void> {
+  async function refreshTaskSessions(
+    preferredTaskId: string | null = null,
+    query = taskSessionQueryRef.current
+  ): Promise<void> {
+    const normalizedQuery = query.replace(/[\u0000-\u001f\u007f]/g, " ").slice(0, 1000);
+    taskSessionQueryRef.current = normalizedQuery;
+    setTaskSessionQuery(normalizedQuery);
     taskSessionsLoadingRef.current = true;
     setTaskSessionsLoading(true);
     const sequence = taskSessionsLoadSequenceRef.current + 1;
@@ -3185,7 +3250,8 @@ export function App({
         throw new Error("Task sessions are unavailable");
       }
       const tasks = await loadTaskSessions({
-        includeArchived: taskSessionsIncludeArchivedRef.current
+        includeArchived: taskSessionsIncludeArchivedRef.current,
+        ...(normalizedQuery.trim() ? { query: normalizedQuery } : {})
       });
       if (taskSessionsLoadSequenceRef.current !== sequence) {
         return;
@@ -4132,10 +4198,13 @@ export function App({
               ? { type: "rename", value: taskSessionAction.value, cursor: taskSessionAction.cursor }
               : taskSessionAction?.type === "delete"
                 ? { type: "delete", title: taskSessionAction.title }
+                : taskSessionAction?.type === "search"
+                  ? { type: "search", value: taskSessionAction.value, cursor: taskSessionAction.cursor }
                 : null}
           taskSessionsIncludeArchived={sessionCenterMode === "conversations"
             ? mainConversationsIncludeArchived
             : taskSessionsIncludeArchived}
+          taskSessionQuery={taskSessionQuery}
           mainConversationSessions={sessionCenterMode === "conversations" && !taskSessionDetails}
           taskSessionDetail={Boolean(taskSessionDetails)}
           taskSessionDetailHasNative={taskSessionDetailHasNative}
@@ -4238,6 +4307,7 @@ export function App({
               activeTaskId={activeTaskId}
               selectedIndex={selectedTaskSessionIndex}
               includeArchived={taskSessionsIncludeArchived}
+              query={taskSessionQuery}
               notice={taskSessionsNotice}
               action={taskSessionAction?.type === "rename"
                 ? { type: "rename", title: taskSessionAction.title }

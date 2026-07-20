@@ -192,7 +192,7 @@ describe("package metadata", () => {
 
     expect(readme).toContain("## Requirements");
     expect(readme).toContain("## Current Release");
-    expect(readme).toContain("v0.3.1` is available from [npm]");
+    expect(readme).toContain("v0.3.2` is available from [npm]");
     expect(readme).toContain("`Ctrl+T`, then `C`, opens every persisted Main conversation");
     expect(readme).toContain("`.parallel-codex/sessions/main/conversations/<conversation>/`");
     expect(readme).toContain("restores those exact Main bindings");
@@ -204,7 +204,7 @@ describe("package metadata", () => {
     expect(readme).toContain("keeps terminal scrolling and copying available at the same time");
     expect(readme).toContain("real three-Feature Tetris task");
     expect(readme).toContain("20-turn soak verifies 80 ordered Workers");
-    expect(readme).toContain("1,338 tests across 136 files: 1,337 pass by default");
+    expect(readme).toContain("1,349 tests across 138 files: 1,348 pass by default");
     expect(readme).toContain("same Judge native session for a bounded DAG replan");
     expect(readme).toContain("Real Codex and Claude probes both proved fresh and same-session resume calls");
     expect(readme).toContain("authenticate the Claude CLI");
@@ -453,6 +453,9 @@ describe("package metadata", () => {
     expect(readme).toContain("Up/Down, PageUp/PageDown, the mouse wheel, or `Tab` changes the selected worker");
     expect(readme).toContain("Enter or `Ctrl+W` opens its rendered log");
     expect(readme).toContain("`Ctrl+T` opens the workspace's persisted Task sessions");
+    expect(readme).toContain("`Ctrl+F` to search");
+    expect(readme).toContain("`task:`, `turn:`, `feature:`, `role:`, `provider:`, `model:`, and `state:` filters");
+    expect(readme).toContain("Search is an AND across terms");
     expect(readme).toContain("turn and Worker counts, plus the number of distinct native sessions");
     expect(readme).toContain("`I` to inspect the complete session hierarchy");
     expect(readme).toContain("`Project -> Task -> Turn -> Worker -> Native session`");
@@ -469,6 +472,11 @@ describe("package metadata", () => {
     expect(readme).toContain("`H` to show or hide archived sessions");
     expect(readme).toContain("Archived sessions are hidden by default");
     expect(readme).toContain("Exports are complete file-backed snapshots under `.parallel-codex/exports/<task>-<timestamp>/`");
+    expect(readme).toContain("`report.md`, `report.json`, the raw `session/`");
+    expect(readme).toContain("Judge requirements/plans/acceptance criteria");
+    expect(readme).toContain("Wave verification results");
+    expect(readme).toContain("blocking relative-path escape and parent-symlink traversal");
+    expect(readme).toContain("bounded Turn request text and each Worker's Feature, role, Provider, model, state, and native session binding");
     expect(readme).toContain("Archived conversations are hidden by default and cannot be restored until unarchived");
     expect(readme).toContain("the current Main conversation cannot be archived or deleted");
     expect(readme).toContain("`.parallel-codex/exports/<conversation>-<timestamp>/`");
@@ -542,8 +550,8 @@ describe("package metadata", () => {
     expect(readme).toContain('git tag "v$VERSION"');
     expect(readme).toContain('git push origin "v$VERSION"');
     expect(readme).toContain("The release tag must match `package.json`");
-    expect(readme).toContain("VERSION=0.3.1");
-    expect(readme).toContain("package version `0.3.1` requires tag `v0.3.1`");
+    expect(readme).toContain("VERSION=0.3.2");
+    expect(readme).toContain("package version `0.3.2` requires tag `v0.3.2`");
     expect(readme).toContain("Published tags such as `v0.2.10` are immutable");
   });
 

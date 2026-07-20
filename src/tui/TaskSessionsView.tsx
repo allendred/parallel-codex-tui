@@ -1,6 +1,7 @@
 import React from "react";
 import { Box, Text, type TextProps } from "ink";
 import type { TaskIndexSummary } from "../core/session-index.js";
+import type { TaskSearchMatch } from "../core/task-search.js";
 import type { TaskState } from "../domain/schemas.js";
 import { compactEndByDisplayWidth, displayWidth } from "./display-width.js";
 import { TUI_THEME } from "./theme.js";
@@ -13,11 +14,16 @@ export interface TaskSessionDisplayLine {
   taskIndex?: number;
 }
 
+export interface TaskSessionListItem extends TaskIndexSummary {
+  searchMatch?: TaskSearchMatch;
+}
+
 export interface TaskSessionsViewProps {
-  tasks: TaskIndexSummary[];
+  tasks: TaskSessionListItem[];
   activeTaskId: string | null;
   selectedIndex: number;
   includeArchived?: boolean;
+  query?: string;
   notice?: string | null;
   action?: TaskSessionViewAction | null;
   loading?: boolean;
@@ -35,6 +41,7 @@ export function TaskSessionsView({
   activeTaskId,
   selectedIndex,
   includeArchived = false,
+  query = "",
   notice = null,
   action = null,
   loading = false,
@@ -48,6 +55,7 @@ export function TaskSessionsView({
     loading,
     error,
     includeArchived,
+    query,
     notice,
     action
   });
@@ -68,7 +76,7 @@ export function TaskSessionsView({
 }
 
 export function taskSessionsDisplayLines(
-  tasks: TaskIndexSummary[],
+  tasks: TaskSessionListItem[],
   activeTaskId: string | null,
   selectedIndex: number,
   height: number,
@@ -77,6 +85,7 @@ export function taskSessionsDisplayLines(
     loading?: boolean;
     error?: string | null;
     includeArchived?: boolean;
+    query?: string;
     notice?: string | null;
     action?: TaskSessionViewAction | null;
   } = {}
@@ -86,7 +95,10 @@ export function taskSessionsDisplayLines(
   const lines: TaskSessionDisplayLine[] = [
     {
       text: fitTaskSessionCandidates([
-        state.includeArchived ? "Task sessions · archived shown" : "Task sessions",
+        taskSessionsHeading(Boolean(state.includeArchived), state.query ?? ""),
+        ...((state.query ?? "").trim()
+          ? [`Find · ${safeTaskSessionText(state.query ?? "")}`, `/ ${safeTaskSessionText(state.query ?? "")}`]
+          : []),
         state.includeArchived ? "Sessions · all" : "Sessions",
         "Tasks",
         "T"
@@ -96,7 +108,7 @@ export function taskSessionsDisplayLines(
   ];
 
   if (viewportHeight >= 3) {
-    lines.push({ text: taskSessionSummary(tasks, width), tone: "muted" });
+    lines.push({ text: taskSessionSummary(tasks, width, state.query ?? ""), tone: "muted" });
   }
 
   if (viewportHeight >= 4 && state.action) {
@@ -128,7 +140,10 @@ export function taskSessionsDisplayLines(
   }
   if (tasks.length === 0) {
     if (slots > 0) {
-      lines.push({ text: fitTaskSessionText("No saved task sessions", width), tone: "muted" });
+      lines.push({
+        text: fitTaskSessionText(state.query?.trim() ? "No matching task sessions" : "No saved task sessions", width),
+        tone: "muted"
+      });
     }
     return lines;
   }
@@ -173,7 +188,7 @@ function TaskSessionRow({ line, width }: { line: TaskSessionDisplayLine; width: 
   );
 }
 
-function taskSessionSummary(tasks: TaskIndexSummary[], width: number): string {
+function taskSessionSummary(tasks: TaskSessionListItem[], width: number, query: string): string {
   const counts = new Map<"running" | "paused" | "done" | "failed" | "cancelled", number>();
   let archived = 0;
   for (const task of tasks) {
@@ -191,15 +206,20 @@ function taskSessionSummary(tasks: TaskIndexSummary[], width: number): string {
   if (archived > 0) {
     parts.push(`${archived} archived`);
   }
+  const searching = Boolean(query.trim());
+  const prefix = searching
+    ? `${tasks.length} ${tasks.length === 1 ? "match" : "matches"}`
+    : `${tasks.length} ${tasks.length === 1 ? "task" : "tasks"}`;
+  const compactPrefix = searching ? `${tasks.length} matches` : `${tasks.length} tasks`;
   return fitTaskSessionCandidates([
-    [`${tasks.length} ${tasks.length === 1 ? "task" : "tasks"}`, ...parts].join(" · "),
-    `${tasks.length} tasks · ${counts.get("running") ?? 0} active · ${counts.get("failed") ?? 0} failed`,
-    `${tasks.length} tasks`,
-    `${tasks.length}t`
+    [prefix, ...parts].join(" · "),
+    `${compactPrefix} · ${counts.get("running") ?? 0} active · ${counts.get("failed") ?? 0} failed`,
+    compactPrefix,
+    `${tasks.length}${searching ? "m" : "t"}`
   ], width);
 }
 
-function taskSessionRowText(task: TaskIndexSummary, selected: boolean, active: boolean, width: number): string {
+function taskSessionRowText(task: TaskSessionListItem, selected: boolean, active: boolean, width: number): string {
   const marker = `${selected ? ">" : " "} ${active ? "*" : " "} `;
   const title = safeTaskSessionText(task.title);
   const status = task.archived_at
@@ -210,7 +230,9 @@ function taskSessionRowText(task: TaskIndexSummary, selected: boolean, active: b
   const workers = `${task.workerCount} ${task.workerCount === 1 ? "worker" : "workers"}`;
   const native = `${task.nativeSessionCount} native`;
   const compactId = task.id.replace(/^task-/, "#");
+  const match = safeTaskSessionText(task.searchMatch?.summary ?? "");
   return fitTaskSessionCandidates([
+    ...(match ? [[marker + title, status, match].join(" · ")] : []),
     [marker + title, status, turns, workers, native, date].join(" · "),
     [marker + title, status, turns, workers, native].join(" · "),
     [marker + title, status, turns, workers].join(" · "),
@@ -218,6 +240,14 @@ function taskSessionRowText(task: TaskIndexSummary, selected: boolean, active: b
     [marker + compactId, status].join(" · "),
     marker.trimEnd()
   ], width);
+}
+
+function taskSessionsHeading(includeArchived: boolean, query: string): string {
+  const scope = includeArchived ? "archived shown" : "active";
+  const cleanQuery = safeTaskSessionText(query);
+  return cleanQuery
+    ? `Task sessions · ${scope} · find ${cleanQuery}`
+    : includeArchived ? "Task sessions · archived shown" : "Task sessions";
 }
 
 function taskSessionWindowStart(selected: number, count: number, visibleCount: number): number {

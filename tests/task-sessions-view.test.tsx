@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 import type { TaskIndexSummary } from "../src/core/session-index.js";
 import { displayWidth } from "../src/tui/display-width.js";
 import * as sessionsModule from "../src/tui/TaskSessionsView.js";
+import type { TaskSessionListItem } from "../src/tui/TaskSessionsView.js";
 
 describe("TaskSessionsView", () => {
   it("summarizes persisted tasks and distinguishes selection from the active task", () => {
@@ -98,6 +99,43 @@ describe("TaskSessionsView", () => {
       tone: "muted"
     });
     expect(lines.find((line) => line.taskIndex === 0)?.text).toContain("archived · done");
+  });
+
+  it("renders structured search evidence and a query-aware empty state", () => {
+    const matched: TaskSessionListItem = {
+      ...task({
+        id: "task-input",
+        title: "中文输入可靠性",
+        status: "done",
+        createdAt: "2026-07-20T01:00:00.000Z"
+      }),
+      searchMatch: {
+        fields: ["turn", "role"],
+        summary: "match · turn 2 增加中文回归测试 · role actor"
+      }
+    };
+    const lines = sessionsModule.taskSessionsDisplayLines(
+      [matched],
+      null,
+      0,
+      6,
+      120,
+      { query: "turn:中文 role:actor" }
+    );
+
+    expect(lines[0]?.text).toContain("find turn:中文 role:actor");
+    expect(lines[1]?.text).toContain("1 match");
+    expect(lines.find((line) => line.taskIndex === 0)?.text).toContain(
+      "match · turn 2 增加中文回归测试 · role actor"
+    );
+    expect(sessionsModule.taskSessionsDisplayLines(
+      [],
+      null,
+      0,
+      5,
+      60,
+      { query: "state:failed" }
+    ).some((line) => line.text === "No matching task sessions")).toBe(true);
   });
 });
 

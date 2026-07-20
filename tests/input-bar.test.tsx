@@ -1119,6 +1119,39 @@ describe("InputBar", () => {
     narrow.unmount();
   });
 
+  it("renders Unicode Task session search with a stable cursor", () => {
+    const view = render(
+      <InputBar
+        mode="sessions"
+        value=""
+        terminalWidth={80}
+        taskSessionAction={{ type: "search", value: "task:俄罗斯 role:actor", cursor: 7 }}
+        onChange={() => {}}
+      />
+    );
+
+    const frame = view.lastFrame() ?? "";
+    expect(frame).toContain("find > task:俄罗|斯 role:actor");
+    expect(frame.split("\n")).toHaveLength(1);
+    expect(displayWidth(frame)).toBeLessThanOrEqual(80);
+    view.unmount();
+  });
+
+  it("shows Task session search and clear controls when space permits", () => {
+    const view = render(
+      <InputBar
+        mode="sessions"
+        value=""
+        terminalWidth={180}
+        taskSessionQuery="provider:claude"
+        onChange={() => {}}
+      />
+    );
+
+    expect(view.lastFrame()).toContain("Esc back · ^F edit · X clear");
+    view.unmount();
+  });
+
   it("keeps Task session actions semantic across every terminal width", () => {
     const overflow: string[] = [];
     const bareActions: string[] = [];

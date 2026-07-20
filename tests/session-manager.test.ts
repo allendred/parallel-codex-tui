@@ -59,9 +59,21 @@ describe("SessionManager", () => {
     const exported = await manager.exportTask(task.id);
     expect(exported.path).toContain(join(root, ".parallel-codex", "exports", task.id));
     expect(await pathExists(join(exported.path, "manifest.json"))).toBe(true);
+    expect(await pathExists(join(exported.path, "report.md"))).toBe(true);
+    expect(await pathExists(join(exported.path, "report.json"))).toBe(true);
     expect(await pathExists(join(exported.path, "session", "meta.json"))).toBe(true);
     expect(await pathExists(join(exported.path, "session", "run-owner.json"))).toBe(false);
     expect(await readTextIfExists(join(exported.path, "session", "events.jsonl"))).toContain("task.exported");
+    expect(JSON.parse(await readTextIfExists(join(exported.path, "manifest.json")))).toMatchObject({
+      report_path: "report.md",
+      report_json_path: "report.json"
+    });
+    expect(JSON.parse(await readTextIfExists(join(exported.path, "report.json")))).toMatchObject({
+      format: "parallel-codex-task-report-v1",
+      task: { id: task.id, title: "中文 会话 名称" },
+      workspace: { reconciliation: { state: "no-integrations" } }
+    });
+    expect(await readTextIfExists(join(exported.path, "report.md"))).toContain("# Task Report: 中文 会话 名称");
 
     const unarchived = await manager.setTaskArchived(task.id, false);
     expect(unarchived.archived_at).toBeUndefined();

@@ -23,6 +23,7 @@ import { sessionsRoot } from "./paths.js";
 import type { SessionIndex } from "./session-index.js";
 import { loadCollaborationTimeline, type CollaborationTimeline } from "./collaboration-timeline.js";
 import { taskStateTransitionAllowed } from "./task-state-machine.js";
+import { buildTaskReport } from "./task-report.js";
 import { processIsAlive, readProcessStartToken } from "./process-identity.js";
 import {
   claimTaskRunLease,
@@ -316,7 +317,11 @@ export class SessionManager {
       await rename(stagingDir, finalDir);
       published = true;
       await this.updateTaskStatus(task, "routed");
-      await this.index?.upsertTurn(task.id, await readJson(join(task.dir, "turns", turn.turnId, "turn.json"), TurnMetaSchema));
+      await this.index?.upsertTurn(
+        task.id,
+        await readJson(join(task.dir, "turns", turn.turnId, "turn.json"), TurnMetaSchema),
+        input.request
+      );
       await this.index?.setActiveTaskId(id);
       if (!options.retainCreationClaim) {
         await removeIfExists(creation.claimPath);
@@ -961,11 +966,21 @@ export class SessionManager {
       const destination = join(exportsRoot, `${taskId}-${stamp}-${suffix}`);
       try {
         await this.appendEvent(task, "task.exported", "Task session exported");
+        const taskReport = await buildTaskReport({
+          task: meta,
+          taskDir: task.dir,
+          workspaceRoot: this.projectRoot,
+          generatedAt: createdAt
+        });
+        await writeJson(join(staging, "report.json"), taskReport.report);
+        await writeText(join(staging, "report.md"), taskReport.markdown);
         await writeJson(join(staging, "manifest.json"), {
           format: "parallel-codex-task-export-v1",
           exported_at: createdAt,
           source_workspace: this.projectRoot,
           session_path: "session",
+          report_path: "report.md",
+          report_json_path: "report.json",
           task: await this.readMeta(task)
         });
         await cp(task.dir, join(staging, "session"), {
@@ -2040,7 +2055,11 @@ export class SessionManager {
     await this.index.upsertTask(meta);
     const snapshot = await this.readCompleteTaskCreation(this.taskFromId(taskId).dir, taskId);
     if (snapshot) {
-      await this.index.upsertTurn(taskId, snapshot.turn);
+      await this.index.upsertTurn(
+        taskId,
+        snapshot.turn,
+        await readTextIfExists(join(this.taskFromId(taskId).dir, snapshot.turn.request_path))
+      );
     }
   }
 
@@ -2106,7 +2125,7 @@ export class SessionManager {
 
       if (request && pendingRoute && pendingMeta && metaMatches) {
         await rename(pending.dir, files.dir);
-        await this.index?.upsertTurn(task.id, pendingMeta);
+        await this.index?.upsertTurn(task.id, pendingMeta, request);
         await this.appendEvent(
           task,
           "turn.recovered_after_restart",
@@ -2216,7 +2235,7 @@ export class SessionManager {
       }
     }
     if (projectIndex) {
-      await this.index?.upsertTurn(task.id, turnMeta);
+      await this.index?.upsertTurn(task.id, turnMeta, request);
     }
     return files;
   }

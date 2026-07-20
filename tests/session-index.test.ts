@@ -57,7 +57,7 @@ describe("SessionIndex", () => {
     legacy.close();
 
     const index = await SessionIndex.open(root, dataDir);
-    expect(index.schemaVersion()).toBe(2);
+    expect(index.schemaVersion()).toBe(3);
     expect(await pathExists(`${databasePath}.pre-migration-v0.backup`)).toBe(true);
     await index.upsertTask({
       id: "task-archived",
@@ -95,8 +95,90 @@ describe("SessionIndex", () => {
     migrationBackup.close();
 
     const recoveryBackup = new DatabaseSync(`${databasePath}.backup`);
-    expect((recoveryBackup.prepare("PRAGMA user_version").get() as { user_version: number }).user_version).toBe(2);
+    expect((recoveryBackup.prepare("PRAGMA user_version").get() as { user_version: number }).user_version).toBe(3);
+    expect(
+      (recoveryBackup.prepare("PRAGMA table_info(turns)").all() as Array<{ name: string }>)
+        .some((column) => column.name === "request_text")
+    ).toBe(true);
+    expect(
+      (recoveryBackup.prepare("PRAGMA table_info(workers)").all() as Array<{ name: string }>)
+        .map((column) => column.name)
+    ).toEqual(expect.arrayContaining(["feature_id", "feature_title", "model_name", "model_provider"]));
     recoveryBackup.close();
+  });
+
+  it("searches indexed task, turn, feature, role, provider, model, and state evidence", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pct-index-search-"));
+    const index = await SessionIndex.open(root, ".parallel-codex");
+    await index.upsertTask({
+      id: "task-input",
+      title: "中文输入可靠性",
+      created_at: "2026-07-20T01:00:00.000Z",
+      cwd: root,
+      mode: "complex",
+      status: "done"
+    });
+    await index.upsertTask({
+      id: "task-review",
+      title: "Review rendering",
+      created_at: "2026-07-19T01:00:00.000Z",
+      cwd: root,
+      mode: "complex",
+      status: "failed",
+      archived_at: "2026-07-20T02:00:00.000Z"
+    });
+    await index.upsertTurn("task-input", {
+      task_id: "task-input",
+      turn_id: "0002",
+      created_at: "2026-07-20T01:01:00.000Z",
+      request_path: "turns/0002/user.md"
+    }, "增加输入回归测试");
+    await index.upsertWorker("task-input", {
+      worker_id: "actor-codex-0002-input",
+      feature_id: "0002-input-reliability",
+      feature_title: "Keyboard Input",
+      role: "actor",
+      engine: "codex",
+      model_name: "gpt-5.6-codex",
+      model_provider: "openai",
+      state: "done",
+      phase: "implementation",
+      last_event_at: "2026-07-20T01:02:00.000Z",
+      summary: "Chinese input preserved"
+    }, {
+      dir: join(root, "actor"),
+      statusPath: join(root, "actor", "status.json"),
+      outputLogPath: join(root, "actor", "output.log")
+    });
+    await index.upsertWorker("task-review", {
+      worker_id: "critic-claude",
+      role: "critic",
+      engine: "claude",
+      state: "failed",
+      phase: "review",
+      last_event_at: "2026-07-19T01:02:00.000Z",
+      summary: "Rendering review"
+    }, {
+      dir: join(root, "critic"),
+      statusPath: join(root, "critic", "status.json"),
+      outputLogPath: join(root, "critic", "output.log")
+    });
+
+    await expect(index.searchTasks(
+      'turn:2 feature:"Keyboard Input" role:actor provider:codex model:5.6 state:done 输入'
+    )).resolves.toEqual([
+      expect.objectContaining({
+        id: "task-input",
+        searchMatch: expect.objectContaining({
+          fields: expect.arrayContaining(["turn", "feature", "role", "provider", "model", "state"])
+        })
+      })
+    ]);
+    await expect(index.searchTasks("provider:claude")).resolves.toEqual([]);
+    await expect(index.searchTasks("provider:claude", 100, { includeArchived: true })).resolves.toEqual([
+      expect.objectContaining({ id: "task-review" })
+    ]);
+    index.close();
   });
 
   it("restores a corrupt catalog from the last healthy backup", async () => {

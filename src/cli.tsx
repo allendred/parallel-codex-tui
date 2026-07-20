@@ -140,7 +140,9 @@ async function main(): Promise<void> {
             policy: routerDiagnosticsPolicy(latestConfig.router)
           };
         }}
-        loadTaskSessions={(options) => state.runtime.index.listTasks(100, options)}
+        loadTaskSessions={(options) => options?.query?.trim()
+          ? state.runtime.index.searchTasks(options.query, 100, options)
+          : state.runtime.index.listTasks(100, options)}
         loadMainConversations={(options) => state.runtime.sessions.listMainConversations(100, options)}
         activateMainConversation={async (conversationId) => {
           const restored = await state.runtime.sessions.activateMainConversation(conversationId);

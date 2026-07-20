@@ -21,6 +21,7 @@ export interface InputBarProps {
   featureEditingModel?: { role: "actor" | "critic"; value: string; cursor: number } | null;
   taskSessionAction?: TaskSessionInputAction | null;
   taskSessionsIncludeArchived?: boolean;
+  taskSessionQuery?: string;
   mainConversationSessions?: boolean;
   taskSessionDetail?: boolean;
   taskSessionDetailHasNative?: boolean;
@@ -50,7 +51,8 @@ export interface InputBarProps {
 
 export type TaskSessionInputAction =
   | { type: "rename"; value: string; cursor: number }
-  | { type: "delete"; title: string };
+  | { type: "delete"; title: string }
+  | { type: "search"; value: string; cursor: number };
 
 export function InputBar({
   mode,
@@ -69,6 +71,7 @@ export function InputBar({
   featureEditingModel = null,
   taskSessionAction = null,
   taskSessionsIncludeArchived = false,
+  taskSessionQuery = "",
   mainConversationSessions = false,
   taskSessionDetail = false,
   taskSessionDetailHasNative = false,
@@ -188,6 +191,20 @@ export function InputBar({
   }
 
   if (mode === "sessions") {
+    if (taskSessionAction?.type === "search") {
+      const prefix = terminalWidth < 12 ? "/ " : "find > ";
+      const valueWidth = Math.max(1, terminalWidth - displayWidth(prefix) - 3);
+      const display = chatInputDisplayParts(taskSessionAction.value, taskSessionAction.cursor, valueWidth);
+      const textWidth = displayWidth(`${prefix}${display.before}|${display.after}`);
+      return (
+        <InputRail terminalWidth={terminalWidth} textWidth={textWidth} fill={fillRail}>
+          <Text backgroundColor={TUI_THEME.rail} color={TUI_THEME.accent} bold>{prefix}</Text>
+          <Text backgroundColor={TUI_THEME.rail} color={TUI_THEME.text}>{display.before}</Text>
+          <Text backgroundColor={TUI_THEME.rail} color={TUI_THEME.accent} bold>|</Text>
+          <Text backgroundColor={TUI_THEME.rail} color={TUI_THEME.text}>{display.after}</Text>
+        </InputRail>
+      );
+    }
     if (taskSessionAction?.type === "rename") {
       const prefix = terminalWidth < 12 ? "> " : "rename > ";
       const valueWidth = Math.max(1, terminalWidth - displayWidth(prefix) - 3);
@@ -233,7 +250,7 @@ export function InputBar({
         </InputRail>
       );
     }
-    const hints = taskSessionsInputHints(terminalWidth, taskSessionsIncludeArchived);
+    const hints = taskSessionsInputHints(terminalWidth, taskSessionsIncludeArchived, Boolean(taskSessionQuery.trim()));
     return (
       <InputRail terminalWidth={terminalWidth} textWidth={displayWidth(`${hints.label}${hints.detail}`)} fill={fillRail}>
         <Text backgroundColor={TUI_THEME.rail} color={TUI_THEME.accent} bold>{hints.label}</Text>
@@ -969,10 +986,15 @@ function collaborationDetailInputHints(width: number): { label: string; detail: 
   ]);
 }
 
-function taskSessionsInputHints(width: number, includeArchived: boolean): { label: string; detail: string } {
+function taskSessionsInputHints(
+  width: number,
+  includeArchived: boolean,
+  hasQuery: boolean
+): { label: string; detail: string } {
   const archivedAction = includeArchived ? "H hide archived" : "H archived";
+  const searchAction = hasQuery ? "^F edit · X clear" : "^F find";
   return selectInputHints(width, [
-    { label: "sessions", detail: ` · Up/Dn select · Enter restore · C conversations · I inspect · R rename · A archive · D delete · E export · ${archivedAction} · Esc back` },
+    { label: "sessions", detail: ` · Up/Dn select · Enter restore · C conversations · I inspect · R rename · A archive · D delete · E export · ${archivedAction} · Esc back · ${searchAction}` },
     { label: "sessions", detail: " · Up/Dn select · Enter restore · C conversations · I inspect · R rename · A archive · D delete · E export · Esc back" },
     { label: "sessions", detail: " · Up/Dn select · Enter restore · C chats · I inspect · R rename · A archive · D delete · Esc back" },
     { label: "sessions", detail: " · Up/Dn select · Enter restore · C chats · I inspect · R rename · A archive · Esc back" },
