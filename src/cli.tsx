@@ -140,12 +140,24 @@ async function main(): Promise<void> {
           };
         }}
         loadTaskSessions={(options) => state.runtime.index.listTasks(100, options)}
-        loadMainConversations={() => state.runtime.sessions.listMainConversations(100)}
+        loadMainConversations={(options) => state.runtime.sessions.listMainConversations(100, options)}
         activateMainConversation={async (conversationId) => {
           const restored = await state.runtime.sessions.activateMainConversation(conversationId);
           await state.runtime.index.setActiveTaskId(null);
           return restored;
         }}
+        renameMainConversation={async (conversationId, title) => {
+          await state.runtime.sessions.renameMainConversation(conversationId, title);
+        }}
+        setMainConversationArchived={async (conversationId, archived) => {
+          await state.runtime.sessions.setMainConversationArchived(conversationId, archived);
+        }}
+        deleteMainConversation={async (conversationId) => {
+          await state.runtime.sessions.deleteMainConversation(conversationId);
+        }}
+        exportMainConversation={async (conversationId) => (
+          await state.runtime.sessions.exportMainConversation(conversationId)
+        ).path}
         loadTaskSessionDetails={(task) => loadPersistedTaskSessionDetails({
           task,
           taskDir: state.runtime.sessions.taskFromId(task.id).dir,

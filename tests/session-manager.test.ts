@@ -14,6 +14,7 @@ import {
   writeWorkerProcessRecord
 } from "../src/core/process-ownership.js";
 import {
+  MainConversationArchiveSchema,
   NativeSessionSchema,
   RetiredNativeSessionSchema,
   RouteDecisionSchema,
@@ -358,6 +359,128 @@ describe("SessionManager", () => {
       "legacy",
       "meta.json"
     ))).resolves.toBe(false);
+  });
+
+  it("renames, archives, exports, and atomically deletes a noncurrent Main conversation", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pct-main-conversation-management-"));
+    const randomIds = ["first", "second"];
+    const manager = new SessionManager({
+      projectRoot: root,
+      dataDir: ".parallel-codex",
+      now: () => new Date("2026-07-10T12:00:00.000Z"),
+      randomId: () => randomIds.shift() ?? "later"
+    });
+    const first = await manager.startNewMainConversation();
+    await manager.appendChatMessage({ from: "user", text: "first private message" });
+    await manager.appendChatMessage({ from: "system", text: "first answer" });
+    const workerDir = join(manager.mainSessionDir(), "main-codex");
+    await manager.writeNativeSession({ dir: workerDir }, NativeSessionSchema.parse({
+      engine: "codex",
+      role: "main",
+      worker_id: "main-codex",
+      session_id: "native-first",
+      scope: "main",
+      cwd: root,
+      created_at: "2026-07-10T12:00:00.000Z",
+      last_used_at: "2026-07-10T12:00:00.000Z",
+      source: "output-detected"
+    }));
+
+    const second = await manager.startNewMainConversation();
+    await manager.appendChatMessage({ from: "user", text: "second retained message" });
+    await manager.appendChatMessage({ from: "user", text: "task retained message", taskId: "task-retained" });
+    const chatPath = join(manager.mainSessionDir(), "chat.jsonl");
+    await appendText(chatPath, "{broken-chat-evidence\n");
+
+    const renamed = await manager.renameMainConversation(first.id, "  第一段\n会话  ");
+    expect(renamed.title).toBe("第一段 会话");
+    await expect(readJson(
+      join(manager.mainSessionDir(), "conversations", first.id, "meta.json"),
+      MainConversationArchiveSchema
+    )).resolves.toMatchObject({ title: "第一段 会话" });
+
+    const archived = await manager.setMainConversationArchived(first.id, true);
+    expect(archived.archivedAt).toBe("2026-07-10T12:00:00.000Z");
+    expect((await manager.listMainConversations()).map((conversation) => conversation.id)).toEqual([second.id]);
+    expect(await manager.listMainConversations(100, { includeArchived: true })).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: first.id, title: "第一段 会话", archivedAt: archived.archivedAt }),
+      expect.objectContaining({ id: second.id, current: true })
+    ]));
+    await expect(manager.activateMainConversation(first.id)).rejects.toThrow("Unarchive it first");
+
+    const unarchived = await manager.setMainConversationArchived(first.id, false);
+    expect(unarchived.archivedAt).toBeUndefined();
+    const exported = await manager.exportMainConversation(first.id);
+    const manifest = JSON.parse(await readTextIfExists(join(exported.path, "manifest.json"))) as {
+      format: string;
+      message_count: number;
+      native_session_count: number;
+      conversation: { id: string | null; title: string };
+    };
+    expect(manifest).toMatchObject({
+      format: "parallel-codex-main-conversation-export-v1",
+      message_count: 2,
+      native_session_count: 1,
+      conversation: { id: first.id, title: "第一段 会话" }
+    });
+    expect(await readTextIfExists(join(exported.path, "chat.jsonl"))).toContain("first private message");
+    expect(await readTextIfExists(join(exported.path, "chat.jsonl"))).not.toContain("second retained message");
+    expect(await pathExists(join(exported.path, "native-sessions", "main-codex.json"))).toBe(true);
+
+    await expect(manager.setMainConversationArchived(second.id, true)).rejects.toThrow("current Main conversation");
+    await expect(manager.deleteMainConversation(second.id)).rejects.toThrow("current Main conversation");
+    await manager.deleteMainConversation(first.id);
+
+    expect((await manager.listMainConversations(100, { includeArchived: true }))
+      .some((conversation) => conversation.id === first.id)).toBe(false);
+    const retainedChat = await readTextIfExists(chatPath);
+    expect(retainedChat).not.toContain("first private message");
+    expect(retainedChat).not.toContain("first answer");
+    expect(retainedChat).toContain("second retained message");
+    expect(retainedChat).toContain("task retained message");
+    expect(retainedChat).toContain("{broken-chat-evidence");
+    expect(await pathExists(join(manager.mainSessionDir(), "conversations", first.id))).toBe(false);
+  });
+
+  it("rolls back every Main conversation file when deletion event persistence fails", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pct-main-conversation-delete-rollback-"));
+    const randomIds = ["rollback-target", "rollback-current"];
+    const manager = new SessionManager({
+      projectRoot: root,
+      dataDir: ".parallel-codex",
+      now: () => new Date("2026-07-20T09:15:00.000Z"),
+      randomId: () => randomIds.shift() ?? "later"
+    });
+    const target = await manager.startNewMainConversation();
+    await manager.appendChatMessage({ from: "user", text: "must survive failed deletion" });
+    await manager.startNewMainConversation();
+    await manager.appendChatMessage({ from: "user", text: "current conversation remains" });
+
+    if (!target.id) {
+      throw new Error("Expected a named Main conversation id");
+    }
+    const chatPath = join(manager.mainSessionDir(), "chat.jsonl");
+    const archivePath = join(manager.mainSessionDir(), "conversations", target.id);
+    const before = await readTextIfExists(chatPath);
+    const appendEvent = vi.spyOn(
+      manager as unknown as { appendEvent: (...args: unknown[]) => Promise<void> },
+      "appendEvent"
+    );
+    appendEvent.mockRejectedValueOnce(new Error("event storage unavailable"));
+
+    await expect(manager.deleteMainConversation(target.id)).rejects.toThrow("event storage unavailable");
+
+    expect(await readTextIfExists(chatPath)).toBe(before);
+    expect(await pathExists(archivePath)).toBe(true);
+    expect((await manager.listMainConversations(100, { includeArchived: true })))
+      .toEqual(expect.arrayContaining([
+        expect.objectContaining({ id: target.id, title: "must survive failed deletion" })
+      ]));
+    expect((await readdir(manager.mainSessionDir())).some((entry) => entry.startsWith(".conversation-delete-")))
+      .toBe(false);
+
+    await expect(manager.renameMainConversation(target.id, "Recovered conversation"))
+      .resolves.toMatchObject({ title: "Recovered conversation" });
   });
 
   it("restores legacy Codex chat transcripts as final answers without rewriting evidence", async () => {

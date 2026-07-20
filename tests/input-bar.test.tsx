@@ -1,7 +1,7 @@
 import React from "react";
 import { render } from "ink-testing-library";
 import { describe, expect, it } from "vitest";
-import { chatBusyDisplayValue, chatInputDisplayValue, chatPlaceholderDisplayValue, InputBar, inputRailLayout } from "../src/tui/InputBar.js";
+import { chatBusyDisplayValue, chatInputDisplayValue, chatPlaceholderDisplayValue, InputBar, inputRailLayout, mainConversationSessionsInputHints } from "../src/tui/InputBar.js";
 import { displayWidth } from "../src/tui/display-width.js";
 
 describe("InputBar", () => {
@@ -1175,7 +1175,7 @@ describe("InputBar", () => {
     [30, "conversations · Esc back"],
     [52, "conversations · Up/Dn select · Esc back"],
     [70, "conversations · Up/Dn select · Enter restore · T tasks · Esc back"],
-    [90, "conversations · Up/Dn select · Enter restore · N new · T tasks · Esc back"]
+    [90, "conversations · Up/Dn select · Enter restore · R rename · N new · T tasks · Esc back"]
   ])("uses semantic Main conversation guidance at the %i-column boundary", (width, expected) => {
     const view = render(
       <InputBar
@@ -1190,6 +1190,50 @@ describe("InputBar", () => {
     expect(view.lastFrame()).toContain(expected);
     expect(displayWidth(view.lastFrame() ?? "")).toBeLessThanOrEqual(width);
     view.unmount();
+  });
+
+  it("keeps Main conversation management actions semantic across terminal widths", () => {
+    const overflow: string[] = [];
+    const bareActions: string[] = [];
+    const semanticLoss: string[] = [];
+    const seenSemantics = new Set<string>();
+    const semantics = [
+      ["select", /Up\/Dn select/],
+      ["restore", /Enter restore/],
+      ["rename", /R rename/],
+      ["archive", /A archive/],
+      ["delete", /D delete/],
+      ["export", /E export/],
+      ["archived", /H (?:archived|hide archived)/],
+      ["new", /N new/],
+      ["tasks", /T tasks/],
+      ["back", /Esc back/]
+    ] as const;
+
+    for (let width = 8; width <= 180; width += 1) {
+      const hints = mainConversationSessionsInputHints(width, false);
+      const guidance = `${hints.label}${hints.detail}`;
+      const contentWidth = Math.max(1, width - 2);
+      if (displayWidth(guidance) > contentWidth) {
+        overflow.push(`${width}:${displayWidth(guidance)}:${guidance}`);
+      }
+      if (/(?:^| · )(?:Up\/Dn|Esc|Enter|R|A|D|E|H|N|T)(?= ·|$)/.test(guidance)) {
+        bareActions.push(`${width}:${guidance}`);
+      }
+      for (const [name, pattern] of semantics) {
+        if (pattern.test(guidance)) {
+          seenSemantics.add(name);
+        } else if (seenSemantics.has(name)) {
+          semanticLoss.push(`${width}:${name}:${guidance}`);
+        }
+      }
+    }
+
+    expect(overflow).toEqual([]);
+    expect(bareActions).toEqual([]);
+    expect(semanticLoss).toEqual([]);
+    expect(seenSemantics).toEqual(new Set(semantics.map(([name]) => name)));
+    expect(mainConversationSessionsInputHints(180, true).detail).toContain("H hide archived");
   });
 
   it("shows native continuation and branch controls in Task session detail", () => {

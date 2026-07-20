@@ -1,6 +1,8 @@
 import { randomUUID } from "node:crypto";
-import { cp, mkdir, mkdtemp, readdir, rename, rm, writeFile } from "node:fs/promises";
+import { createReadStream } from "node:fs";
+import { cp, mkdir, mkdtemp, open, readdir, rename, rm, writeFile } from "node:fs/promises";
 import { basename, dirname, join } from "node:path";
+import { createInterface } from "node:readline";
 import { z } from "zod";
 import {
   appendJsonLine,
@@ -160,12 +162,23 @@ export interface MainConversationSummary {
   userMessageCount: number;
   nativeSessionCount: number;
   current: boolean;
+  archivedAt?: string;
 }
 
 export interface MainConversationActivation {
   conversation: MainConversationSummary;
   restoredNativeSessions: number;
   changed: boolean;
+}
+
+export interface MainConversationExport {
+  conversationId: string | null;
+  path: string;
+  createdAt: string;
+}
+
+export interface ListMainConversationsOptions {
+  includeArchived?: boolean;
 }
 
 type BlockingProcessTermination = Extract<WorkerProcessTermination, "unverifiable" | "still-running">;
@@ -378,7 +391,10 @@ export class SessionManager {
     return readJson(path, MainConversationStateSchema);
   }
 
-  async listMainConversations(limit = 100): Promise<MainConversationSummary[]> {
+  async listMainConversations(
+    limit = 100,
+    options: ListMainConversationsOptions = {}
+  ): Promise<MainConversationSummary[]> {
     const boundedLimit = Number.isFinite(limit)
       ? Math.min(500, Math.max(0, Math.trunc(limit)))
       : 100;
@@ -430,7 +446,13 @@ export class SessionManager {
     };
 
     for (const archive of archives) {
-      ensureConversation(archive.id, archive.created_at, archive.last_activated_at);
+      const conversation = ensureConversation(archive.id, archive.created_at, archive.last_activated_at);
+      if (archive.title) {
+        conversation.title = archive.title;
+      }
+      if (archive.archived_at) {
+        conversation.archivedAt = archive.archived_at;
+      }
     }
     for (const record of records) {
       const id = record.conversation_id ?? null;
@@ -463,8 +485,10 @@ export class SessionManager {
     }));
 
     return [...conversations.values()]
+      .filter((conversation) => options.includeArchived || !conversation.archivedAt || conversation.current)
       .sort((left, right) => (
         Number(right.current) - Number(left.current)
+        || Number(Boolean(left.archivedAt)) - Number(Boolean(right.archivedAt))
         || right.lastActivityAt.localeCompare(left.lastActivityAt)
         || mainConversationScopeKey(right.id).localeCompare(mainConversationScopeKey(left.id))
       ))
@@ -513,10 +537,13 @@ export class SessionManager {
     const lease = await this.claimTaskRunLease(main.dir);
 
     return runWithLeaseFinalization("Main conversation restore", lease, async () => {
-      const conversations = await this.listMainConversations(500);
+      const conversations = await this.listMainConversations(500, { includeArchived: true });
       const target = conversations.find((conversation) => conversation.id === id);
       if (!target) {
         throw new Error(`Main conversation not found: ${id ?? "legacy"}`);
+      }
+      if (target.archivedAt) {
+        throw new Error(`Cannot restore archived Main conversation ${id ?? "legacy"}. Unarchive it first.`);
       }
       const current = await this.readMainConversationState();
       const currentId = current?.id ?? null;
@@ -562,6 +589,189 @@ export class SessionManager {
       }
       return { conversation: restored, restoredNativeSessions, changed: true };
     });
+  }
+
+  async renameMainConversation(
+    conversationId: string | null,
+    title: string
+  ): Promise<MainConversationSummary> {
+    const normalizedTitle = normalizeMainConversationTitle(title);
+    return this.withMainConversationManagementLease(
+      conversationId,
+      "rename",
+      async (main, conversation) => {
+        const metadata = await this.mainConversationArchiveMetadata(conversation);
+        await this.writeMainConversationArchive({ ...metadata, title: normalizedTitle });
+        await this.appendEvent(
+          main,
+          "main.conversation_renamed",
+          `Renamed ${conversation.id ?? "legacy conversation"} to ${normalizedTitle}`
+        );
+        return this.requireMainConversationSummary(conversation.id);
+      }
+    );
+  }
+
+  async setMainConversationArchived(
+    conversationId: string | null,
+    archived: boolean
+  ): Promise<MainConversationSummary> {
+    return this.withMainConversationManagementLease(
+      conversationId,
+      archived ? "archive" : "unarchive",
+      async (main, conversation) => {
+        if (archived && conversation.current) {
+          throw new Error("Cannot archive the current Main conversation. Restore another conversation first.");
+        }
+        if (Boolean(conversation.archivedAt) === archived) {
+          return conversation;
+        }
+        const metadata = await this.mainConversationArchiveMetadata(conversation);
+        const next = archived
+          ? MainConversationArchiveSchema.parse({
+              ...metadata,
+              archived_at: this.now().toISOString()
+            })
+          : withoutMainConversationArchiveTime(metadata);
+        await writeJson(join(this.mainConversationArchiveDir(conversation.id), "meta.json"), next);
+        await this.appendEvent(
+          main,
+          archived ? "main.conversation_archived" : "main.conversation_unarchived",
+          archived
+            ? `Archived ${conversation.id ?? "legacy conversation"}`
+            : `Unarchived ${conversation.id ?? "legacy conversation"}`
+        );
+        return this.requireMainConversationSummary(conversation.id);
+      }
+    );
+  }
+
+  async deleteMainConversation(conversationId: string | null): Promise<void> {
+    await this.withMainConversationManagementLease(
+      conversationId,
+      "delete",
+      async (main, conversation) => {
+        if (conversation.current) {
+          throw new Error("Cannot delete the current Main conversation. Restore another conversation first.");
+        }
+        const staging = await mkdtemp(join(main.dir, ".conversation-delete-"));
+        const chatPath = join(main.dir, "chat.jsonl");
+        const replacementPath = join(staging, "chat.next.jsonl");
+        const originalPath = join(staging, "chat.original.jsonl");
+        const archivePath = this.mainConversationArchiveDir(conversation.id);
+        const stagedArchivePath = join(staging, "archive");
+        let archiveMoved = false;
+        let originalMoved = false;
+        let replacementInstalled = false;
+
+        try {
+          await writeConversationChatFile(chatPath, replacementPath, conversation.id, "exclude");
+          if (await pathExists(archivePath)) {
+            await rename(archivePath, stagedArchivePath);
+            archiveMoved = true;
+          }
+          if (await pathExists(chatPath)) {
+            await rename(chatPath, originalPath);
+            originalMoved = true;
+          }
+          await rename(replacementPath, chatPath);
+          replacementInstalled = true;
+          await this.appendEvent(
+            main,
+            "main.conversation_deleted",
+            `Deleted ${conversation.id ?? "legacy conversation"}`
+          );
+        } catch (error) {
+          const rollbackErrors: unknown[] = [];
+          if (replacementInstalled) {
+            try {
+              await removeIfExists(chatPath);
+            } catch (rollbackError) {
+              rollbackErrors.push(rollbackError);
+            }
+          }
+          if (originalMoved) {
+            try {
+              await rename(originalPath, chatPath);
+            } catch (rollbackError) {
+              rollbackErrors.push(rollbackError);
+            }
+          }
+          if (archiveMoved) {
+            try {
+              await rename(stagedArchivePath, archivePath);
+            } catch (rollbackError) {
+              rollbackErrors.push(rollbackError);
+            }
+          }
+          await rm(staging, { force: true, recursive: true }).catch(() => undefined);
+          if (rollbackErrors.length > 0) {
+            throw new Error(
+              `Main conversation deletion failed and rollback also failed: ${errorMessage(error)}`,
+              { cause: new AggregateError([error, ...rollbackErrors]) }
+            );
+          }
+          throw error;
+        }
+        await rm(staging, { force: true, recursive: true }).catch(() => undefined);
+      }
+    );
+  }
+
+  async exportMainConversation(conversationId: string | null): Promise<MainConversationExport> {
+    return this.withMainConversationManagementLease(
+      conversationId,
+      "export",
+      async (main, conversation) => {
+        const createdAt = this.now().toISOString();
+        const exportsRoot = join(this.projectRoot, this.dataDir, "exports");
+        await ensureDir(exportsRoot);
+        const scope = conversation.id ?? "main-legacy";
+        const staging = await mkdtemp(join(exportsRoot, `.${scope}-`));
+        const suffix = basename(staging).slice(-6);
+        const stamp = createdAt.replace(/[^0-9]/g, "").slice(0, 14);
+        const destination = join(exportsRoot, `${scope}-${stamp}-${suffix}`);
+        try {
+          const messageCount = await writeConversationChatFile(
+            join(main.dir, "chat.jsonl"),
+            join(staging, "chat.jsonl"),
+            conversation.id,
+            "include"
+          );
+          const nativeSessions = await this.mainConversationNativeSessions(
+            conversation.id,
+            conversation.current
+          );
+          for (const session of nativeSessions) {
+            await writeJson(join(staging, "native-sessions", `${session.worker_id}.json`), session);
+          }
+          await writeJson(join(staging, "manifest.json"), {
+            format: "parallel-codex-main-conversation-export-v1",
+            exported_at: createdAt,
+            source_workspace: this.projectRoot,
+            conversation: {
+              id: conversation.id,
+              title: conversation.title,
+              created_at: conversation.createdAt,
+              last_activity_at: conversation.lastActivityAt,
+              ...(conversation.archivedAt ? { archived_at: conversation.archivedAt } : {})
+            },
+            message_count: messageCount,
+            native_session_count: nativeSessions.length
+          });
+          await this.appendEvent(
+            main,
+            "main.conversation_exported",
+            `Exported ${conversation.id ?? "legacy conversation"}`
+          );
+          await rename(staging, destination);
+        } catch (error) {
+          await rm(staging, { force: true, recursive: true });
+          throw error;
+        }
+        return { conversationId: conversation.id, path: destination, createdAt };
+      }
+    );
   }
 
   async reconcileInterruptedMainSession(): Promise<InterruptedMainSessionRecovery | null> {
@@ -1230,6 +1440,32 @@ export class SessionManager {
     await this.index?.deleteNativeSession(this.taskIdFromWorkerDir(worker.dir), record.worker_id);
   }
 
+  private async mainConversationArchiveMetadata(
+    conversation: MainConversationSummary
+  ): Promise<MainConversationArchive> {
+    const existing = await readMainConversationArchiveIfValid(
+      join(this.mainConversationArchiveDir(conversation.id), "meta.json")
+    );
+    return MainConversationArchiveSchema.parse({
+      ...existing,
+      version: 1,
+      id: conversation.id,
+      created_at: existing?.created_at ?? conversation.createdAt,
+      last_activated_at: existing?.last_activated_at ?? conversation.lastActivityAt
+    });
+  }
+
+  private async requireMainConversationSummary(
+    conversationId: string | null
+  ): Promise<MainConversationSummary> {
+    const conversation = (await this.listMainConversations(500, { includeArchived: true }))
+      .find((entry) => entry.id === conversationId);
+    if (!conversation) {
+      throw new Error(`Main conversation disappeared from its catalog: ${conversationId ?? "legacy"}`);
+    }
+    return conversation;
+  }
+
   private mainConversationArchiveDir(conversationId: string | null): string {
     return join(
       this.mainSessionDir(),
@@ -1261,6 +1497,7 @@ export class SessionManager {
     const path = join(this.mainConversationArchiveDir(parsed.id), "meta.json");
     const existing = await readMainConversationArchiveIfValid(path);
     await writeJson(path, MainConversationArchiveSchema.parse({
+      ...existing,
       ...parsed,
       created_at: existing && existing.created_at < parsed.created_at
         ? existing.created_at
@@ -1375,6 +1612,47 @@ export class SessionManager {
     return ids;
   }
 
+  private async mainConversationNativeSessions(
+    conversationId: string | null,
+    includeActive: boolean
+  ): Promise<NativeSession[]> {
+    const sessions = new Map<string, NativeSession>();
+    const archiveDir = join(this.mainConversationArchiveDir(conversationId), "native-sessions");
+    if (await pathExists(archiveDir)) {
+      for (const entry of await readdir(archiveDir, { withFileTypes: true })) {
+        if (!entry.isFile() || !entry.name.endsWith(".json")) {
+          continue;
+        }
+        const record = await readNativeSessionIfValid(join(archiveDir, entry.name));
+        if (
+          record?.scope === "main"
+          && record.role === "main"
+          && safeMainWorkerId(record.worker_id)
+          && entry.name === `${record.worker_id}.json`
+        ) {
+          sessions.set(record.worker_id, record);
+        }
+      }
+    }
+    if (includeActive) {
+      const mainDir = this.mainSessionDir();
+      for (const entry of await readdir(mainDir, { withFileTypes: true })) {
+        if (!entry.isDirectory() || entry.name === MAIN_CONVERSATION_ARCHIVE_DIRECTORY) {
+          continue;
+        }
+        const record = await this.readNativeSession({ dir: join(mainDir, entry.name) });
+        if (
+          record?.scope === "main"
+          && record.role === "main"
+          && safeMainWorkerId(record.worker_id)
+        ) {
+          sessions.set(record.worker_id, record);
+        }
+      }
+    }
+    return [...sessions.values()].sort((left, right) => left.worker_id.localeCompare(right.worker_id));
+  }
+
   async appendEvent(task: Pick<TaskSession, "id" | "dir">, type: string, message: string): Promise<void> {
     const event: EventRecord = {
       time: this.now().toISOString(),
@@ -1403,6 +1681,25 @@ export class SessionManager {
         throw new Error(`Task session metadata does not match ${id}.`);
       }
       return run(task, meta);
+    });
+  }
+
+  private async withMainConversationManagementLease<Result>(
+    conversationId: string | null,
+    operation: string,
+    run: (main: TaskSession, conversation: MainConversationSummary) => Promise<Result>
+  ): Promise<Result> {
+    const id = conversationId === null ? null : ConversationIdSchema.parse(conversationId);
+    const main = this.taskFromId("main");
+    await ensureDir(main.dir);
+    const lease = await this.claimTaskRunLease(main.dir);
+    return runWithLeaseFinalization(`Main conversation ${operation}`, lease, async () => {
+      const conversation = (await this.listMainConversations(500, { includeArchived: true }))
+        .find((entry) => entry.id === id);
+      if (!conversation) {
+        throw new Error(`Main conversation not found: ${id ?? "legacy"}`);
+      }
+      return run(main, conversation);
     });
   }
 
@@ -2066,6 +2363,13 @@ function mainConversationScopeKey(conversationId: string | null): string {
   return conversationId ?? LEGACY_MAIN_CONVERSATION_DIRECTORY;
 }
 
+function withoutMainConversationArchiveTime(
+  metadata: MainConversationArchive
+): MainConversationArchive {
+  const { archived_at: _archivedAt, ...active } = metadata;
+  return MainConversationArchiveSchema.parse(active);
+}
+
 function mainConversationTitle(text: string, conversationId: string | null): string {
   const sanitized = sanitizePersistedMainMessage("user", text)
     .replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, "")
@@ -2081,8 +2385,80 @@ function mainConversationTitle(text: string, conversationId: string | null): str
     : sanitized;
 }
 
+function normalizeMainConversationTitle(title: string): string {
+  const normalized = title
+    .replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, "")
+    .replace(/[\u0000-\u001f\u007f]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!normalized) {
+    throw new Error("Main conversation title cannot be empty.");
+  }
+  if (Array.from(normalized).length > 160) {
+    throw new Error("Main conversation title cannot exceed 160 characters.");
+  }
+  return normalized;
+}
+
 function safeMainWorkerId(workerId: string): boolean {
   return SAFE_MAIN_WORKER_ID.test(workerId) && workerId !== "." && workerId !== "..";
+}
+
+async function writeConversationChatFile(
+  sourcePath: string,
+  destinationPath: string,
+  conversationId: string | null,
+  mode: "include" | "exclude"
+): Promise<number> {
+  await ensureDir(dirname(destinationPath));
+  const output = await open(destinationPath, "wx");
+  let matched = 0;
+  let buffer = "";
+  try {
+    if (!(await pathExists(sourcePath))) {
+      await output.close();
+      return 0;
+    }
+    const input = createReadStream(sourcePath, { encoding: "utf8" });
+    const lines = createInterface({ input, crlfDelay: Infinity });
+    for await (const line of lines) {
+      const belongs = chatLineBelongsToMainConversation(line, conversationId);
+      if (belongs) {
+        matched += 1;
+      }
+      if ((mode === "include") !== belongs) {
+        continue;
+      }
+      buffer += `${line}\n`;
+      if (Buffer.byteLength(buffer, "utf8") >= 64 * 1024) {
+        await output.write(buffer);
+        buffer = "";
+      }
+    }
+    if (buffer) {
+      await output.write(buffer);
+    }
+    await output.close();
+    return matched;
+  } catch (error) {
+    await output.close().catch(() => undefined);
+    await removeIfExists(destinationPath).catch(() => undefined);
+    throw error;
+  }
+}
+
+function chatLineBelongsToMainConversation(line: string, conversationId: string | null): boolean {
+  try {
+    const parsed = ChatRecordSchema.safeParse(JSON.parse(line));
+    if (!parsed.success || parsed.data.task_id) {
+      return false;
+    }
+    return conversationId
+      ? parsed.data.conversation_id === conversationId
+      : !parsed.data.conversation_id;
+  } catch {
+    return false;
+  }
 }
 
 function normalizeTaskTitle(title: string): string {

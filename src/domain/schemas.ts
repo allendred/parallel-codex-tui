@@ -225,7 +225,9 @@ export const MainConversationArchiveSchema = z.object({
   version: z.literal(1),
   id: ConversationIdSchema.nullable(),
   created_at: z.string().datetime(),
-  last_activated_at: z.string().datetime()
+  last_activated_at: z.string().datetime(),
+  title: z.string().min(1).max(160).optional(),
+  archived_at: z.string().datetime().optional()
 });
 
 export const ChatRecordSchema = z.object({

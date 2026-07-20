@@ -188,8 +188,8 @@ describe("package metadata", () => {
 
     expect(readme).toContain("## Requirements");
     expect(readme).toContain("## Current Release");
-    expect(readme).toContain("v0.2.9` is available from [npm]");
-    expect(readme).toContain("`Ctrl+T`, then `C`, now opens every persisted Main conversation");
+    expect(readme).toContain("v0.2.10` is available from [npm]");
+    expect(readme).toContain("`Ctrl+T`, then `C`, opens every persisted Main conversation");
     expect(readme).toContain("`.parallel-codex/sessions/main/conversations/<conversation>/`");
     expect(readme).toContain("restores those exact Main bindings");
     expect(readme).toContain("A brand-new empty legacy scope is not added to the catalog");
@@ -200,7 +200,7 @@ describe("package metadata", () => {
     expect(readme).toContain("keeps terminal scrolling and copying available at the same time");
     expect(readme).toContain("real three-Feature Tetris task");
     expect(readme).toContain("20-turn soak verifies 80 ordered Workers");
-    expect(readme).toContain("1,305 tests across 129 files: 1,304 pass by default");
+    expect(readme).toContain("1,311 tests across 130 files: 1,310 pass by default");
     expect(readme).toContain("same Judge native session for a bounded DAG replan");
     expect(readme).toContain("Real Codex and Claude probes both proved fresh and same-session resume calls");
     expect(readme).toContain("authenticate the Claude CLI");
@@ -465,6 +465,10 @@ describe("package metadata", () => {
     expect(readme).toContain("`H` to show or hide archived sessions");
     expect(readme).toContain("Archived sessions are hidden by default");
     expect(readme).toContain("Exports are complete file-backed snapshots under `.parallel-codex/exports/<task>-<timestamp>/`");
+    expect(readme).toContain("Archived conversations are hidden by default and cannot be restored until unarchived");
+    expect(readme).toContain("the current Main conversation cannot be archived or deleted");
+    expect(readme).toContain("`.parallel-codex/exports/<conversation>-<timestamp>/`");
+    expect(readme).toContain("preserves Task chat and malformed evidence");
     expect(readme).toContain("SQLite schema changes run as ordered, transactional migrations");
     expect(readme).toContain("an integrity failure restores that backup or rebuilds the catalog from authoritative Task files");
     expect(readme).toContain("`Ctrl+N` persists an intentionally empty active-Task context");
@@ -534,9 +538,9 @@ describe("package metadata", () => {
     expect(readme).toContain('git tag "v$VERSION"');
     expect(readme).toContain('git push origin "v$VERSION"');
     expect(readme).toContain("The release tag must match `package.json`");
-    expect(readme).toContain("VERSION=0.2.9");
-    expect(readme).toContain("package version `0.2.9` requires tag `v0.2.9`");
-    expect(readme).toContain("Published tags such as `v0.2.8` are immutable");
+    expect(readme).toContain("VERSION=0.2.10");
+    expect(readme).toContain("package version `0.2.10` requires tag `v0.2.10`");
+    expect(readme).toContain("Published tags such as `v0.2.9` are immutable");
   });
 
   it("publishes the CLI bin as an executable file", async () => {

@@ -15,17 +15,25 @@ export interface MainConversationDisplayLine {
 export interface MainConversationsViewProps {
   conversations: MainConversationSummary[];
   selectedIndex: number;
+  includeArchived?: boolean;
   notice?: string | null;
+  action?: MainConversationViewAction | null;
   loading?: boolean;
   error?: string | null;
   height?: number;
   terminalWidth?: number;
 }
 
+export type MainConversationViewAction =
+  | { type: "rename"; title: string }
+  | { type: "delete"; title: string };
+
 export function MainConversationsView({
   conversations,
   selectedIndex,
+  includeArchived = false,
   notice = null,
+  action = null,
   loading = false,
   error = null,
   height = 20,
@@ -38,7 +46,7 @@ export function MainConversationsView({
     selectedIndex,
     viewportHeight,
     terminalWidth,
-    { notice, loading, error }
+    { includeArchived, notice, action, loading, error }
   );
   const blankRows = Math.max(0, viewportHeight - lines.length);
 
@@ -63,6 +71,8 @@ export function mainConversationsDisplayLines(
   terminalWidth: number,
   state: {
     notice?: string | null;
+    action?: MainConversationViewAction | null;
+    includeArchived?: boolean;
     loading?: boolean;
     error?: string | null;
   } = {}
@@ -70,16 +80,27 @@ export function mainConversationsDisplayLines(
   const viewportHeight = Math.max(1, Math.trunc(height));
   const width = mainConversationsContentWidth(terminalWidth);
   const lines: MainConversationDisplayLine[] = [{
-    text: fitMainConversationCandidates(["Main conversations", "Conversations", "Chats", "C"], width),
+    text: fitMainConversationCandidates([
+      state.includeArchived ? "Main conversations · archived shown" : "Main conversations",
+      state.includeArchived ? "Conversations · all" : "Conversations",
+      "Chats",
+      "C"
+    ], width),
     tone: "heading"
   }];
 
   if (viewportHeight >= 3) {
     const messages = conversations.reduce((sum, conversation) => sum + conversation.messageCount, 0);
     const nativeSessions = conversations.reduce((sum, conversation) => sum + conversation.nativeSessionCount, 0);
+    const archived = conversations.filter((conversation) => conversation.archivedAt).length;
     lines.push({
       text: fitMainConversationCandidates([
-        `${conversations.length} ${conversations.length === 1 ? "conversation" : "conversations"} · ${messages} messages · ${nativeSessions} native`,
+        [
+          `${conversations.length} ${conversations.length === 1 ? "conversation" : "conversations"}`,
+          `${messages} messages`,
+          `${nativeSessions} native`,
+          ...(archived > 0 ? [`${archived} archived`] : [])
+        ].join(" · "),
         `${conversations.length} conversations · ${messages} messages`,
         `${conversations.length} conversations`,
         `${conversations.length} chats`
@@ -88,7 +109,17 @@ export function mainConversationsDisplayLines(
     });
   }
 
-  if (viewportHeight >= 4 && state.notice) {
+  if (viewportHeight >= 4 && state.action) {
+    lines.push({
+      text: fitMainConversationText(
+        state.action.type === "rename"
+          ? `rename · ${safeMainConversationText(state.action.title)} · Enter save · Esc cancel`
+          : `delete · ${safeMainConversationText(state.action.title)} · press D again · Esc cancel`,
+        width
+      ),
+      tone: state.action.type === "delete" ? "danger" : "active"
+    });
+  } else if (viewportHeight >= 4 && state.notice) {
     lines.push({ text: fitMainConversationText(state.notice, width), tone: "success" });
   }
   const slots = Math.max(0, viewportHeight - lines.length);
@@ -165,14 +196,15 @@ function mainConversationRowText(
   const title = safeMainConversationText(conversation.title);
   const messages = `${conversation.messageCount} ${conversation.messageCount === 1 ? "message" : "messages"}`;
   const native = `${conversation.nativeSessionCount} native`;
+  const status = conversation.archivedAt ? "archived" : null;
   const date = conversation.lastActivityAt.slice(5, 16).replace("T", " ");
   const scope = conversation.id
     ? `#${conversation.id.replace(/^conversation-/, "")}`
     : "legacy";
   return fitMainConversationCandidates([
-    [marker + title, messages, native, date].join(" · "),
-    [marker + title, messages, native].join(" · "),
-    [marker + title, messages].join(" · "),
+    [marker + title, status, messages, native, date].filter(Boolean).join(" · "),
+    [marker + title, status, messages, native].filter(Boolean).join(" · "),
+    [marker + title, status, messages].filter(Boolean).join(" · "),
     [marker + title, date].join(" · "),
     [marker + scope, messages].join(" · "),
     marker.trimEnd()

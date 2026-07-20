@@ -3,6 +3,7 @@ import { EventEmitter } from "node:events";
 import { render } from "ink-testing-library";
 import { describe, expect, it, vi } from "vitest";
 import { defaultConfig } from "../src/core/config.js";
+import type { MainConversationSummary } from "../src/core/session-manager.js";
 import type { Orchestrator, WorkerLogRef } from "../src/orchestrator/orchestrator.js";
 import { App } from "../src/tui/App.js";
 
@@ -233,6 +234,118 @@ describe("App initial task restore", () => {
         undefined
       );
       expect((view.lastFrame() ?? "").split("\n")[0]).toContain("· chat ·");
+    } finally {
+      view.unmount();
+      testInput.restore();
+    }
+  });
+
+  it("manages a historical Main conversation without allowing current deletion", async () => {
+    const testInput = installTestInputStream();
+    const previousId = "conversation-20260718-100000-managed";
+    let conversations: MainConversationSummary[] = [
+      {
+        id: "conversation-20260719-120000-current",
+        title: "Current conversation",
+        createdAt: "2026-07-19T12:00:00.000Z",
+        lastActivityAt: "2026-07-19T12:01:00.000Z",
+        messageCount: 2,
+        userMessageCount: 1,
+        nativeSessionCount: 1,
+        current: true
+      },
+      {
+        id: previousId,
+        title: "Previous conversation",
+        createdAt: "2026-07-18T10:00:00.000Z",
+        lastActivityAt: "2026-07-18T10:02:00.000Z",
+        messageCount: 4,
+        userMessageCount: 2,
+        nativeSessionCount: 1,
+        current: false
+      }
+    ];
+    const loadMainConversations = vi.fn(async (options?: { includeArchived?: boolean }) => (
+      conversations.filter((conversation) => options?.includeArchived || !conversation.archivedAt)
+    ));
+    const renameMainConversation = vi.fn(async (id: string | null, title: string) => {
+      conversations = conversations.map((conversation) => conversation.id === id
+        ? { ...conversation, title }
+        : conversation);
+    });
+    const setMainConversationArchived = vi.fn(async (id: string | null, archived: boolean) => {
+      conversations = conversations.map((conversation) => {
+        if (conversation.id !== id) {
+          return conversation;
+        }
+        if (archived) {
+          return { ...conversation, archivedAt: "2026-07-19T13:00:00.000Z" };
+        }
+        const { archivedAt: _archivedAt, ...active } = conversation;
+        return active;
+      });
+    });
+    const deleteMainConversation = vi.fn(async (id: string | null) => {
+      conversations = conversations.filter((conversation) => conversation.id !== id);
+    });
+    const exportMainConversation = vi.fn(async () => "/tmp/main-conversation-export");
+    const view = render(
+      <App
+        config={defaultConfig("/tmp/pct-app-conversation-management")}
+        orchestrator={{} as Orchestrator}
+        cwd="/tmp/pct-workspace"
+        loadTaskSessions={async () => []}
+        loadMainConversations={loadMainConversations}
+        renameMainConversation={renameMainConversation}
+        setMainConversationArchived={setMainConversationArchived}
+        deleteMainConversation={deleteMainConversation}
+        exportMainConversation={exportMainConversation}
+      />
+    );
+
+    try {
+      await settleEffects();
+      testInput.send(view.stdin, "\x14");
+      await waitForFrame(view.lastFrame, "Task sessions");
+      testInput.send(view.stdin, "c");
+      await waitForFrame(view.lastFrame, "Main conversations");
+      testInput.send(view.stdin, "\x1b[B");
+      await waitForFrame(view.lastFrame, ">   Previous conversation");
+
+      testInput.send(view.stdin, "r");
+      await waitForFrame(view.lastFrame, "rename · Previous conversation · Enter save · Esc cancel");
+      testInput.send(
+        view.stdin,
+        `\x01${"\x1b[3~".repeat(Array.from("Previous conversation").length)}整理后的对话\r`
+      );
+      await waitForFrame(view.lastFrame, "Renamed · 整理后的对话");
+      expect(renameMainConversation).toHaveBeenCalledWith(previousId, "整理后的对话");
+
+      testInput.send(view.stdin, "a");
+      await waitForFrame(view.lastFrame, "Archived · 整理后的对话");
+      expect(setMainConversationArchived).toHaveBeenCalledWith(previousId, true);
+      testInput.send(view.stdin, "h");
+      await waitForFrame(view.lastFrame, "Main conversations · archived shown");
+      await waitForFrame(view.lastFrame, "Archived conversations shown");
+      testInput.send(view.stdin, "\x1b[B");
+      await waitForFrame(view.lastFrame, ">   整理后的对话 · archived");
+      testInput.send(view.stdin, "a");
+      await waitForFrame(view.lastFrame, "Unarchived · 整理后的对话");
+      expect(setMainConversationArchived).toHaveBeenLastCalledWith(previousId, false);
+
+      testInput.send(view.stdin, "e");
+      await waitForFrame(view.lastFrame, "Exported · /tmp/main-conversation-export");
+      expect(exportMainConversation).toHaveBeenCalledWith(previousId);
+      testInput.send(view.stdin, "d");
+      await waitForFrame(view.lastFrame, "press D again · Esc cancel");
+      testInput.send(view.stdin, "d");
+      await waitForFrame(view.lastFrame, "Deleted · 整理后的对话");
+      expect(deleteMainConversation).toHaveBeenCalledWith(previousId);
+
+      testInput.send(view.stdin, "d");
+      await waitForFrame(view.lastFrame, "Restore another Main conversation before deleting the current one");
+      expect(deleteMainConversation).toHaveBeenCalledTimes(1);
+      expect(loadMainConversations).toHaveBeenCalledWith({ includeArchived: true });
     } finally {
       view.unmount();
       testInput.restore();

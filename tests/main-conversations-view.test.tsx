@@ -35,6 +35,32 @@ describe("MainConversationsView", () => {
     }
   });
 
+  it("renders archived state and destructive confirmation without shifting rows", () => {
+    const items = conversations();
+    const previous = items[1];
+    if (previous) {
+      previous.archivedAt = "2026-07-19T13:00:00.000Z";
+    }
+    const view = render(
+      <MainConversationsView
+        conversations={items}
+        selectedIndex={1}
+        includeArchived
+        action={{ type: "delete", title: "Previous design" }}
+        height={8}
+        terminalWidth={100}
+      />
+    );
+    const frame = view.lastFrame() ?? "";
+
+    expect(frame).toContain("Main conversations · archived shown");
+    expect(frame).toContain("3 conversations · 8 messages · 2 native · 1 archived");
+    expect(frame).toContain("delete · Previous design · press D again · Esc cancel");
+    expect(frame).toContain(">   Previous design · archived · 5 messages");
+    expect(frame.split("\n")).toHaveLength(8);
+    view.unmount();
+  });
+
   it("moves and wraps selection without leaving the list", () => {
     expect(moveMainConversationSelection(0, -1, 3)).toBe(0);
     expect(moveMainConversationSelection(2, 1, 3)).toBe(2);

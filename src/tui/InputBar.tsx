@@ -167,7 +167,7 @@ export function InputBar({
       );
     }
     if (mainConversationSessions) {
-      const hints = mainConversationSessionsInputHints(terminalWidth);
+      const hints = mainConversationSessionsInputHints(terminalWidth, taskSessionsIncludeArchived);
       return (
         <InputRail terminalWidth={terminalWidth} textWidth={displayWidth(`${hints.label}${hints.detail}`)} fill={fillRail}>
           <Text backgroundColor={TUI_THEME.rail} color={TUI_THEME.accent} bold>{hints.label}</Text>
@@ -915,8 +915,17 @@ function taskSessionsInputHints(width: number, includeArchived: boolean): { labe
   ]);
 }
 
-function mainConversationSessionsInputHints(width: number): { label: string; detail: string } {
+export function mainConversationSessionsInputHints(
+  width: number,
+  includeArchived: boolean
+): { label: string; detail: string } {
+  const archivedAction = includeArchived ? "H hide archived" : "H archived";
   return selectInputHints(width, [
+    { label: "conversations", detail: ` · Up/Dn select · Enter restore · R rename · A archive · D delete · E export · ${archivedAction} · N new · T tasks · Esc back` },
+    { label: "conversations", detail: " · Up/Dn select · Enter restore · R rename · A archive · D delete · E export · N new · T tasks · Esc back" },
+    { label: "conversations", detail: " · Up/Dn select · Enter restore · R rename · A archive · D delete · N new · T tasks · Esc back" },
+    { label: "conversations", detail: " · Up/Dn select · Enter restore · R rename · A archive · N new · T tasks · Esc back" },
+    { label: "conversations", detail: " · Up/Dn select · Enter restore · R rename · N new · T tasks · Esc back" },
     { label: "conversations", detail: " · Up/Dn select · Enter restore · N new · T tasks · Esc back" },
     { label: "conversations", detail: " · Up/Dn select · Enter restore · T tasks · Esc back" },
     { label: "conversations", detail: " · Up/Dn select · Enter restore · Esc back" },
