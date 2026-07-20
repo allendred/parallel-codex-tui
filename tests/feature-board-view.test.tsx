@@ -113,7 +113,7 @@ describe("FeatureBoardView", () => {
 
     const text = (displayLines?.(timeline, 1, 10, 120) ?? []).map((line) => line.text).join("\n");
 
-    expect(text).toContain("actor codex · critic claude");
+    expect(text).toContain("actor codex/default · critic claude/default");
   });
 
   it("keeps every rendered row inside narrow terminal widths", () => {

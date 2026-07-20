@@ -180,10 +180,20 @@ export const FeatureStatusSchema = z.object({
   updated_at: z.string().datetime()
 });
 
+export const WorkerModelNameSchema = z.string()
+  .max(200)
+  .refine((value) => !/[\u0000-\u001f\u007f]/.test(value), {
+    message: "Model name cannot contain control characters"
+  });
+
 export const FeatureAssignmentSchema = z.object({
   version: z.literal(1),
   actor_engine: EngineNameSchema,
   critic_engine: EngineNameSchema,
+  actor_model: WorkerModelNameSchema.default(""),
+  critic_model: WorkerModelNameSchema.default(""),
+  actor_override: z.boolean().default(false),
+  critic_override: z.boolean().default(false),
   updated_at: z.string().datetime()
 });
 

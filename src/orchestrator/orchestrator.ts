@@ -1,6 +1,8 @@
+import { createHash } from "node:crypto";
 import { cp, readdir } from "node:fs/promises";
 import { join } from "node:path";
 import type { AppConfig } from "../core/config.js";
+import { runRuntimePreflight, type RuntimePreflightResult } from "../doctor.js";
 import { appendJsonLine, ensureDir, pathExists, readJson, readTextIfExists, removeIfExists, writeJson, writeText } from "../core/file-store.js";
 import { runWithLeaseFinalization } from "../core/lease-finalization.js";
 import { extractMainResponse } from "../core/main-response.js";
@@ -27,7 +29,7 @@ import type { SessionManager, TaskSession, TaskTurn, WorkerFiles } from "../core
 import { FeatureStatusSchema, RouteDecisionSchema, TaskMetaSchema, WorkerStatusSchema, type ChatRecord, type EngineName, type FeatureAssignment, type NativeSession, type RouteDecision, type RouterFallbackResolution, type WorkerRole, type WorkerStatus } from "../domain/schemas.js";
 import { getAdapter, type WorkerRegistry } from "../workers/registry.js";
 import { workerProvider } from "../workers/provider.js";
-import type { WorkerResult, WorkerRunSpec } from "../workers/types.js";
+import type { WorkerModelRunConfig, WorkerResult, WorkerRunSpec } from "../workers/types.js";
 import {
   appendFeatureDialogue,
   createFeatureChannel,
@@ -118,6 +120,7 @@ export interface ReassignFeatureInput {
   featureId: string;
   role: "actor" | "critic";
   engine: EngineName;
+  model?: string;
 }
 
 export interface ReassignFeatureResult {
@@ -138,6 +141,8 @@ export interface UpdateRoleConfigurationInput {
   roles: RoleExecutionSelection;
   taskId?: string | null;
 }
+
+export interface ValidateRoleConfigurationResult extends RuntimePreflightResult {}
 
 export interface RouteStartInfo {
   scope: "initial" | "follow-up";
@@ -216,6 +221,10 @@ export type RouterConfigLoader = () => Promise<AppConfig["router"]>;
 export interface OrchestratorDependencies {
   claimTaskRunLease?: (dir: string) => Promise<TaskRunLease>;
   roleConfiguration?: RoleConfigurationManager;
+  roleConfigurationPreflight?: (
+    config: AppConfig,
+    workspaceRoot: string
+  ) => Promise<RuntimePreflightResult>;
 }
 
 interface FeatureActorRun {
@@ -422,10 +431,21 @@ export class Orchestrator {
       };
       const assignmentPath = join(featureDir, "assignment.json");
       const current = await readFeatureAssignment({ assignmentPath }, fallback);
+      const nextModel = input.model === undefined
+        ? input.role === "actor"
+          ? current.actor_engine === input.engine ? current.actor_model : ""
+          : current.critic_engine === input.engine ? current.critic_model : ""
+        : input.model;
       const assignment = await writeFeatureAssignment(
         { assignmentPath },
         input.role === "actor" ? input.engine : current.actor_engine,
-        input.role === "critic" ? input.engine : current.critic_engine
+        input.role === "critic" ? input.engine : current.critic_engine,
+        input.role === "actor" ? nextModel : current.actor_model,
+        input.role === "critic" ? nextModel : current.critic_model,
+        {
+          actorOverride: input.role === "actor" ? true : current.actor_override,
+          criticOverride: input.role === "critic" ? true : current.critic_override
+        }
       );
       await appendJsonLine(join(task.dir, "dialogue", "actor-critic.jsonl"), {
         time: new Date().toISOString(),
@@ -433,13 +453,13 @@ export class Orchestrator {
         turn_id: status.turn_id,
         type: "feature.assignment_changed",
         role: input.role,
-        message: `${capitalize(input.role)} reassigned to ${input.engine}.`,
+        message: `${capitalize(input.role)} reassigned to ${input.engine}/${nextModel.trim() || "default"}.`,
         paths: { assignment: assignmentPath }
       });
       await this.sessions.appendEvent(
         task,
         "feature.assignment_changed",
-        `${input.featureId} ${input.role} reassigned to ${input.engine}`
+        `${input.featureId} ${input.role} reassigned to ${input.engine}/${nextModel.trim() || "default"}`
       );
       return { featureId: input.featureId, assignment };
     });
@@ -451,6 +471,26 @@ export class Orchestrator {
       throw new Error(`Task session not found: ${taskId}`);
     }
     return this.roleConfiguration.snapshot(task?.dir);
+  }
+
+  async validateRoleConfiguration(
+    roles: RoleExecutionSelection
+  ): Promise<ValidateRoleConfigurationResult> {
+    const parsed = this.roleConfiguration.validate(roles);
+    const candidate = structuredClone(this.config);
+    candidate.router.defaultMode = "auto";
+    candidate.pairing.main = parsed.main.engine;
+    candidate.pairing.judge = parsed.judge.engine;
+    candidate.pairing.actor = parsed.actor.engine;
+    candidate.pairing.critic = parsed.critic.engine;
+    const preflight = this.dependencies.roleConfigurationPreflight
+      ?? ((config: AppConfig, workspaceRoot: string) => runRuntimePreflight(
+        config,
+        workspaceRoot,
+        process.env,
+        { includeRouter: false }
+      ));
+    return preflight(candidate, this.roleConfiguration.workspaceRootPath());
   }
 
   async updateRoleConfiguration(
@@ -532,10 +572,21 @@ export class Orchestrator {
       if (!status || status.task_id !== task.id || status.state === "approved") {
         continue;
       }
+      const assignmentPath = join(featureDir, "assignment.json");
+      const current = await readFeatureAssignment({ assignmentPath }, {
+        actor: executionRoles.actor.engine,
+        critic: executionRoles.critic.engine
+      });
       await writeFeatureAssignment(
-        { assignmentPath: join(featureDir, "assignment.json") },
-        executionRoles.actor.engine,
-        executionRoles.critic.engine
+        { assignmentPath },
+        current.actor_override ? current.actor_engine : executionRoles.actor.engine,
+        current.critic_override ? current.critic_engine : executionRoles.critic.engine,
+        current.actor_override ? current.actor_model : executionRoles.actor.model,
+        current.critic_override ? current.critic_model : executionRoles.critic.model,
+        {
+          actorOverride: current.actor_override,
+          criticOverride: current.critic_override
+        }
       );
     }
   }
@@ -860,6 +911,8 @@ export class Orchestrator {
           feature,
           actorEngine: route.actor_engine,
           criticEngine: route.critic_engine,
+          actorModel: selectedRoleModel(input.roleSelection, "actor", route.actor_engine),
+          criticModel: selectedRoleModel(input.roleSelection, "critic", route.critic_engine),
           resume: input.retry
         })));
         return await this.runFeaturePlanWithConflictReplan(
@@ -881,6 +934,8 @@ export class Orchestrator {
         judgeDir: judge.dir,
         actorEngine: route.actor_engine,
         criticEngine: route.critic_engine,
+        actorModel: selectedRoleModel(input.roleSelection, "actor", route.actor_engine),
+        criticModel: selectedRoleModel(input.roleSelection, "critic", route.critic_engine),
         resume: input.retry
       });
       features = [feature];
@@ -922,6 +977,8 @@ export class Orchestrator {
           feature,
           actorEngine: route.actor_engine,
           criticEngine: route.critic_engine,
+          actorModel: selectedRoleModel(input.roleSelection, "actor", route.actor_engine),
+          criticModel: selectedRoleModel(input.roleSelection, "critic", route.critic_engine),
           resume: input.retry
         })));
         return await this.runFeaturePlanWithConflictReplan(
@@ -943,6 +1000,8 @@ export class Orchestrator {
         judgeDir: judge.dir,
         actorEngine: route.actor_engine,
         criticEngine: route.critic_engine,
+        actorModel: selectedRoleModel(input.roleSelection, "actor", route.actor_engine),
+        criticModel: selectedRoleModel(input.roleSelection, "critic", route.critic_engine),
         resume: input.retry
       });
       features = [feature];
@@ -1172,6 +1231,8 @@ export class Orchestrator {
           feature,
           actorEngine: route.actor_engine,
           criticEngine: route.critic_engine,
+          actorModel: selectedRoleModel(currentInput.roleSelection, "actor", route.actor_engine),
+          criticModel: selectedRoleModel(currentInput.roleSelection, "critic", route.critic_engine),
           resume: true,
           refreshDefinition: true
         })));
@@ -1295,12 +1356,17 @@ export class Orchestrator {
       await this.sessions.updateTaskStatus(task, "actor_running");
       const actorRunById = new Map<string, FeatureActorRun>();
       if (restoredWave) {
-        const restoredActors = await Promise.all(wave.map((definition) => this.loadCompletedFeatureActor(
-          task,
-          requiredFeatureAssignment(assignments, requiredChannel(channels, definition)).actor_engine,
-          definition,
-          requiredChannel(channels, definition)
-        )));
+        const restoredActors = await Promise.all(wave.map((definition) => {
+          const channel = requiredChannel(channels, definition);
+          const assignment = requiredFeatureAssignment(assignments, channel);
+          return this.loadCompletedFeatureActor(
+            task,
+            assignment.actor_engine,
+            assignment.actor_model,
+            definition,
+            channel
+          );
+        }));
         for (const actorRun of restoredActors) {
           if (actorRun) {
             actorRunById.set(actorRun.definition.id, actorRun);
@@ -1324,17 +1390,20 @@ export class Orchestrator {
 
       const freshActorRuns = await mapWithConcurrency(pendingActors, concurrency, async (definition): Promise<FeatureActorRun> => {
         const channel = requiredChannel(channels, definition);
+        const assignment = requiredFeatureAssignment(assignments, channel);
         const actor = await this.runActor(
           input,
           task,
-          requiredFeatureAssignment(assignments, channel).actor_engine,
+          assignment.actor_engine,
           judge.dir,
           workers,
           turn,
           channel,
+          assignment.actor_model,
           undefined,
           true,
-          requiredFeatureWorkspace(workspaceWave.featureDirs, channel)
+          requiredFeatureWorkspace(workspaceWave.featureDirs, channel),
+          true
         );
         actorCompleted += 1;
         reportProgress("actor", actorCompleted, wave.length, actorCompleted === wave.length ? "done" : "running", "waiting");
@@ -1355,11 +1424,15 @@ export class Orchestrator {
       await this.sessions.updateTaskStatus(task, "critic_running");
       const pairRunById = new Map<string, FeaturePairRun>();
       if (restoredWave) {
-        const restoredPairs = await Promise.all(actorRuns.map((actorRun) => this.loadCompletedFeaturePair(
-          task,
-          requiredFeatureAssignment(assignments, actorRun.channel).critic_engine,
-          actorRun
-        )));
+        const restoredPairs = await Promise.all(actorRuns.map((actorRun) => {
+          const assignment = requiredFeatureAssignment(assignments, actorRun.channel);
+          return this.loadCompletedFeaturePair(
+            task,
+            assignment.critic_engine,
+            assignment.critic_model,
+            actorRun
+          );
+        }));
         for (const pairRun of restoredPairs) {
           if (pairRun) {
             pairRunById.set(pairRun.definition.id, pairRun);
@@ -1380,6 +1453,7 @@ export class Orchestrator {
         );
       }
       const freshPairRuns = await mapWithConcurrency(pendingCritics, concurrency, async (actorRun): Promise<FeaturePairRun> => {
+        const assignment = requiredFeatureAssignment(assignments, actorRun.channel);
         const reviewWorkspace = await workspaceManager.prepareFeatureReviewWorkspace(
           workspaceWave,
           actorRun.channel.id
@@ -1387,12 +1461,13 @@ export class Orchestrator {
         const critic = await this.runCritic(
           input,
           task,
-          requiredFeatureAssignment(assignments, actorRun.channel).critic_engine,
+          assignment.critic_engine,
           judge.dir,
           actorRun.actor.dir,
           workers,
           turn,
           actorRun.channel,
+          assignment.critic_model,
           true,
           reviewWorkspace
         );
@@ -1464,14 +1539,16 @@ export class Orchestrator {
         reportProgress("revision", revisionCompleted, revisionRuns.length, "revision", "done");
 
         const revisedActors = await mapWithConcurrency(revisionRuns, concurrency, async (pair) => {
+          const assignment = requiredFeatureAssignment(assignments, pair.channel);
           const actor = await this.runActor(
             input,
             task,
-            requiredFeatureAssignment(assignments, pair.channel).actor_engine,
+            assignment.actor_engine,
             judge.dir,
             workers,
             turn,
             pair.channel,
+            assignment.actor_model,
             buildRevisionRequest(
               pair.review,
               pair.channel,
@@ -1495,6 +1572,7 @@ export class Orchestrator {
         let recheckCompleted = 0;
         reportProgress("critic", recheckCompleted, revisedActors.length, "done", "rerunning");
         const revisedPairs = await mapWithConcurrency(revisedActors, concurrency, async (pair): Promise<FeaturePairRun> => {
+          const assignment = requiredFeatureAssignment(assignments, pair.channel);
           const reviewWorkspace = await workspaceManager.prepareFeatureReviewWorkspace(
             workspaceWave,
             pair.channel.id
@@ -1502,12 +1580,13 @@ export class Orchestrator {
           const critic = await this.runCritic(
             input,
             task,
-            requiredFeatureAssignment(assignments, pair.channel).critic_engine,
+            assignment.critic_engine,
             judge.dir,
             pair.actor.dir,
             workers,
             turn,
             pair.channel,
+            assignment.critic_model,
             true,
             reviewWorkspace
           );
@@ -1730,6 +1809,10 @@ export class Orchestrator {
       1,
       [feature.id]
     );
+    const [actorExecution, criticExecution] = await Promise.all([
+      this.featureWorkerExecution(turn, "actor", assignment.actor_engine, assignment.actor_model),
+      this.featureWorkerExecution(turn, "critic", assignment.critic_engine, assignment.critic_model)
+    ]);
     if (integratedCheckpoint) {
       const recovered = !(await featureIsApproved(feature));
       await this.sessions.appendEvent(
@@ -1748,8 +1831,20 @@ export class Orchestrator {
         task,
         turn,
         judge,
-        this.workerFiles(task, taskWorkerId("actor", assignment.actor_engine, turn.turnId)),
-        this.workerFiles(task, taskWorkerId("critic", assignment.critic_engine, turn.turnId)),
+        this.workerFiles(task, taskWorkerId(
+          "actor",
+          assignment.actor_engine,
+          turn.turnId,
+          undefined,
+          actorExecution.modelKey
+        )),
+        this.workerFiles(task, taskWorkerId(
+          "critic",
+          assignment.critic_engine,
+          turn.turnId,
+          undefined,
+          criticExecution.modelKey
+        )),
         feature,
         input,
         workers,
@@ -1771,7 +1866,7 @@ export class Orchestrator {
     throwIfCancelled(input.signal);
     await this.sessions.updateTaskStatus(task, "actor_running");
     const restoredActor = restoredWave
-      ? await this.loadCompletedActor(task, assignment.actor_engine, feature, false)
+      ? await this.loadCompletedActor(task, assignment.actor_engine, assignment.actor_model, feature, false)
       : null;
     if (restoredActor) {
       await this.sessions.appendEvent(
@@ -1796,6 +1891,7 @@ export class Orchestrator {
         workers,
         turn,
         feature,
+        assignment.actor_model,
         undefined,
         false,
         workspaceDir,
@@ -1807,7 +1903,7 @@ export class Orchestrator {
 
     await this.sessions.updateTaskStatus(task, "critic_running");
     const restoredCritic = restoredActor
-      ? await this.loadCompletedCritic(task, assignment.critic_engine, feature, false)
+      ? await this.loadCompletedCritic(task, assignment.critic_engine, assignment.critic_model, feature, false)
       : null;
     if (restoredCritic) {
       await this.sessions.appendEvent(
@@ -1835,6 +1931,7 @@ export class Orchestrator {
         workers,
         turn,
         feature,
+        assignment.critic_model,
         false,
         reviewWorkspace,
         true
@@ -1886,6 +1983,7 @@ export class Orchestrator {
         workers,
         turn,
         feature,
+        assignment.actor_model,
         buildRevisionRequest(
           review,
           feature,
@@ -1911,6 +2009,7 @@ export class Orchestrator {
         workers,
         turn,
         feature,
+        assignment.critic_model,
         false,
         reviewWorkspace,
         true
@@ -2564,16 +2663,19 @@ export class Orchestrator {
     workers: WorkerLogRef[],
     turn: TaskTurn,
     feature: FeatureChannel,
+    modelName = "",
     revision?: string,
     featureScoped = false,
     workspaceDir = input.cwd,
     isolatedWorkspace = featureScoped
   ): Promise<WorkerFiles> {
+    const execution = await this.featureWorkerExecution(turn, "actor", engine, modelName);
     const workerId = taskWorkerId(
       "actor",
       engine,
       turn.turnId,
-      featureScoped ? feature.id : undefined
+      featureScoped ? feature.id : undefined,
+      execution.modelKey
     );
     const workerFiles = this.workerFiles(task, workerId);
     const actor = await this.sessions.initializeWorker(task, {
@@ -2622,7 +2724,7 @@ export class Orchestrator {
       outputLogPath: actor.outputLogPath,
       statusPath: actor.statusPath,
       prompt: await readTextIfExists(actor.promptPath),
-      modelConfig: await this.roleConfiguration.modelForTurn(turn.dir, "actor", engine),
+      modelConfig: execution.modelConfig,
       signal: input.signal
     }, task, feature, featureScoped
       ? undefined
@@ -2647,15 +2749,18 @@ export class Orchestrator {
     workers: WorkerLogRef[],
     turn: TaskTurn,
     feature: FeatureChannel,
+    modelName = "",
     featureScoped = false,
     workspaceDir = input.cwd,
     isolatedWorkspace = featureScoped
   ): Promise<WorkerFiles> {
+    const execution = await this.featureWorkerExecution(turn, "critic", engine, modelName);
     const workerId = taskWorkerId(
       "critic",
       engine,
       turn.turnId,
-      featureScoped ? feature.id : undefined
+      featureScoped ? feature.id : undefined,
+      execution.modelKey
     );
     const workerFiles = this.workerFiles(task, workerId);
     const critic = await this.sessions.initializeWorker(task, {
@@ -2704,7 +2809,7 @@ export class Orchestrator {
       outputLogPath: critic.outputLogPath,
       statusPath: critic.statusPath,
       prompt: await readTextIfExists(critic.promptPath),
-      modelConfig: await this.roleConfiguration.modelForTurn(turn.dir, "critic", engine),
+      modelConfig: execution.modelConfig,
       signal: input.signal
     }, task, feature, featureScoped
       ? undefined
@@ -3034,10 +3139,11 @@ export class Orchestrator {
   private async loadCompletedFeatureActor(
     task: TaskSession,
     engine: EngineName,
+    modelName: string,
     definition: FeatureDefinition,
     channel: FeatureChannel
   ): Promise<FeatureActorRun | null> {
-    const actor = await this.loadCompletedActor(task, engine, channel, true);
+    const actor = await this.loadCompletedActor(task, engine, modelName, channel, true);
     if (!actor) {
       return null;
     }
@@ -3047,29 +3153,39 @@ export class Orchestrator {
   private async loadCompletedFeaturePair(
     task: TaskSession,
     engine: EngineName,
+    modelName: string,
     actorRun: FeatureActorRun
   ): Promise<FeaturePairRun | null> {
-    const critic = await this.loadCompletedCritic(task, engine, actorRun.channel, true);
+    const critic = await this.loadCompletedCritic(task, engine, modelName, actorRun.channel, true);
     return critic ? { ...actorRun, critic } : null;
   }
 
   private async loadCompletedActor(
     task: TaskSession,
     engine: EngineName,
+    modelName: string,
     channel: FeatureChannel,
     featureScoped: boolean
   ): Promise<WorkerFiles | null> {
+    const execution = await this.featureWorkerExecution(
+      { dir: join(task.dir, "turns", channel.turnId) },
+      "actor",
+      engine,
+      modelName
+    );
     const actor = this.workerFiles(task, taskWorkerId(
       "actor",
       engine,
       channel.turnId,
-      featureScoped ? channel.id : undefined
+      featureScoped ? channel.id : undefined,
+      execution.modelKey
     ));
     const status = await readWorkerStatusIfValid(actor.statusPath);
     if (
       status?.state !== "done"
       || status.role !== "actor"
       || status.engine !== engine
+      || (execution.modelKey && status.model_name !== execution.modelConfig.name)
       || (featureScoped ? status.feature_id !== channel.id : Boolean(status.feature_id))
     ) {
       return null;
@@ -3081,20 +3197,29 @@ export class Orchestrator {
   private async loadCompletedCritic(
     task: TaskSession,
     engine: EngineName,
+    modelName: string,
     channel: FeatureChannel,
     featureScoped: boolean
   ): Promise<WorkerFiles | null> {
+    const execution = await this.featureWorkerExecution(
+      { dir: join(task.dir, "turns", channel.turnId) },
+      "critic",
+      engine,
+      modelName
+    );
     const critic = this.workerFiles(task, taskWorkerId(
       "critic",
       engine,
       channel.turnId,
-      featureScoped ? channel.id : undefined
+      featureScoped ? channel.id : undefined,
+      execution.modelKey
     ));
     const status = await readWorkerStatusIfValid(critic.statusPath);
     if (
       status?.state !== "done"
       || status.role !== "critic"
       || status.engine !== engine
+      || (execution.modelKey && status.model_name !== execution.modelConfig.name)
       || (featureScoped ? status.feature_id !== channel.id : Boolean(status.feature_id))
     ) {
       return null;
@@ -3104,6 +3229,23 @@ export class Orchestrator {
       return null;
     }
     return await featureCriticCheckpointIsReusable(channel, decision) ? critic : null;
+  }
+
+  private async featureWorkerExecution(
+    turn: Pick<TaskTurn, "dir">,
+    role: "actor" | "critic",
+    engine: EngineName,
+    assignedModel: string
+  ): Promise<{ modelConfig: WorkerModelRunConfig; modelKey: string }> {
+    const inherited = await this.roleConfiguration.modelForTurn(turn.dir, role, engine);
+    const requested = assignedModel.trim();
+    const modelConfig = requested
+      ? this.roleConfiguration.modelForTarget({ engine, model: requested })
+      : inherited;
+    return {
+      modelConfig,
+      modelKey: requested && requested !== inherited.name ? requested : ""
+    };
   }
 
   private async promptTurnContext(task: TaskSession, turn: TaskTurn) {
@@ -3585,7 +3727,7 @@ function workerLabelForStatus(status: WorkerStatus): string {
     return workerLabel(status.role, status.engine);
   }
   const base = `${status.role}-${status.engine}`;
-  const turnId = status.worker_id.match(new RegExp(`^${base}-(\\d{4,})$`))?.[1];
+  const turnId = status.worker_id.match(new RegExp(`^${base}-(\\d{4,})(?:-model-[a-f0-9]{8})?$`))?.[1];
   return taskWorkerLabel(status.role, status.engine, turnId ?? "0001");
 }
 
@@ -3593,13 +3735,27 @@ function taskWorkerId(
   role: Exclude<WorkerRole, "main">,
   engine: EngineName,
   turnId: string,
-  featureId?: string
+  featureId?: string,
+  modelKey = ""
 ): string {
   const base = `${role}-${engine}`;
-  if (featureId) {
-    return `${base}-${featureId}`;
-  }
-  return turnId === "0001" ? base : `${base}-${turnId}`;
+  const scoped = featureId
+    ? `${base}-${featureId}`
+    : turnId === "0001" ? base : `${base}-${turnId}`;
+  return modelKey ? `${scoped}-model-${workerModelKey(modelKey)}` : scoped;
+}
+
+function workerModelKey(model: string): string {
+  return createHash("sha256").update(model).digest("hex").slice(0, 8);
+}
+
+function selectedRoleModel(
+  selection: RoleExecutionSelection | undefined,
+  role: "actor" | "critic",
+  engine: EngineName
+): string {
+  const target = selection?.[role];
+  return target?.engine === engine ? target.model : "";
 }
 
 function capitalize(value: string): string {
@@ -3619,7 +3775,7 @@ function workerStageOrder(worker: WorkerLogRef): number {
 function workerTurnOrder(worker: WorkerLogRef): number {
   const featureTurn = worker.featureId?.match(/^(\d{4,})(?:-|$)/)?.[1];
   const waveTurn = worker.id.match(/-wave-(\d{4,})-/)?.[1];
-  const taskTurn = worker.id.match(/-(\d{4,})$/)?.[1];
+  const taskTurn = worker.id.match(/-(\d{4,})(?:-model-[a-f0-9]{8})?$/)?.[1];
   const parsed = Number(featureTurn ?? waveTurn ?? taskTurn ?? "1");
   return Number.isInteger(parsed) && parsed > 0 ? parsed : 1;
 }

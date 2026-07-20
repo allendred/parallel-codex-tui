@@ -3,7 +3,17 @@ import { join } from "node:path";
 import { z } from "zod";
 import type { AppConfig } from "./config.js";
 import { pathExists, readJson, removeIfExists, writeJson } from "./file-store.js";
-import { EngineNameSchema, type EngineName, type WorkerRole } from "../domain/schemas.js";
+import {
+  claimTaskRunLease,
+  TaskRunLeaseConflictError,
+  type TaskRunLease
+} from "./process-ownership.js";
+import {
+  EngineNameSchema,
+  WorkerModelNameSchema,
+  type EngineName,
+  type WorkerRole
+} from "../domain/schemas.js";
 import type { WorkerModelRunConfig } from "../workers/types.js";
 
 export const CONFIGURABLE_ROLES = ["main", "judge", "actor", "critic"] as const satisfies readonly WorkerRole[];
@@ -12,7 +22,7 @@ export type RoleConfigurationScope = "next" | "task" | "future";
 
 const RoleExecutionTargetSchema = z.object({
   engine: EngineNameSchema,
-  model: z.string().max(200)
+  model: WorkerModelNameSchema
 }).strict();
 
 const RoleExecutionSelectionSchema = z.object({
@@ -124,7 +134,7 @@ export class RoleConfigurationManager {
       return;
     }
     if (scope === "next") {
-      await writeRoleConfiguration(this.nextPath(), parsed);
+      await this.withNextConfigurationLease(() => writeRoleConfiguration(this.nextPath(), parsed));
       return;
     }
     if (!taskDir) {
@@ -141,7 +151,7 @@ export class RoleConfigurationManager {
       return;
     }
     if (scope === "next") {
-      await removeIfExists(this.nextPath());
+      await this.withNextConfigurationLease(() => removeIfExists(this.nextPath()));
       return;
     }
     if (!taskDir) {
@@ -152,12 +162,14 @@ export class RoleConfigurationManager {
 
   async selectionForRequest(taskDir?: string | null): Promise<RoleExecutionSelection> {
     const taskSelection = await this.selectionForTask(taskDir);
-    const next = await readRoleConfigurationIfValid(this.nextPath(), this.config);
-    if (next) {
+    return this.withNextConfigurationLease(async () => {
+      const next = await readRoleConfigurationIfValid(this.nextPath(), this.config);
+      if (!next) {
+        return taskSelection;
+      }
       await removeIfExists(this.nextPath());
       return next;
-    }
-    return taskSelection;
+    });
   }
 
   async selectionForTask(taskDir?: string | null): Promise<RoleExecutionSelection> {
@@ -197,12 +209,47 @@ export class RoleConfigurationManager {
     return cloneRoleSelection(this.baselineSelection);
   }
 
+  validate(roles: RoleExecutionSelection): RoleExecutionSelection {
+    return parseRoleSelection(roles, this.config);
+  }
+
+  workspaceRootPath(): string {
+    return this.workspaceRoot;
+  }
+
   private futurePath(): string {
     return roleFutureConfigurationPath(this.appRoot, this.config.dataDir);
   }
 
   private nextPath(): string {
     return roleNextConfigurationPath(this.workspaceRoot, this.config.dataDir);
+  }
+
+  private nextLeaseDir(): string {
+    return join(this.workspaceRoot, this.config.dataDir, ".role-configuration-next-lock");
+  }
+
+  private async withNextConfigurationLease<T>(run: () => Promise<T>): Promise<T> {
+    let lease: TaskRunLease | null = null;
+    for (let attempt = 0; attempt < 80; attempt += 1) {
+      try {
+        lease = await claimTaskRunLease(this.nextLeaseDir());
+        break;
+      } catch (error) {
+        if (!(error instanceof TaskRunLeaseConflictError) || attempt === 79) {
+          throw error;
+        }
+        await delay(25);
+      }
+    }
+    if (!lease) {
+      throw new Error("Timed out waiting to update the next-request role configuration.");
+    }
+    try {
+      return await run();
+    } finally {
+      await lease.release();
+    }
   }
 
   private async readLatestTurnSelection(taskDir: string): Promise<RoleExecutionSelection | null> {
@@ -328,4 +375,8 @@ function applyRoleEngines(config: AppConfig, roles: RoleExecutionSelection): voi
   for (const role of CONFIGURABLE_ROLES) {
     config.pairing[role] = roles[role].engine;
   }
+}
+
+function delay(milliseconds: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, milliseconds));
 }

@@ -1,13 +1,14 @@
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
-import { defaultConfig } from "../src/core/config.js";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { defaultConfig, type AppConfig } from "../src/core/config.js";
 import { readJson, writeText } from "../src/core/file-store.js";
 import { RoleConfigurationManager } from "../src/core/role-configuration.js";
 import { SessionManager } from "../src/core/session-manager.js";
 import { RouteDecisionSchema } from "../src/domain/schemas.js";
 import { Orchestrator } from "../src/orchestrator/orchestrator.js";
+import type { WorkerRegistry } from "../src/workers/registry.js";
 import type { WorkerAdapter, WorkerResult, WorkerRunSpec } from "../src/workers/types.js";
 
 const roots: string[] = [];
@@ -102,6 +103,49 @@ describe("Orchestrator role configuration", () => {
     expect(turnRoles?.actor.model).toBe("sonnet-actor");
     expect(turnRoles?.critic.model).toBe("gpt-critic");
     expect(await sessions.readMeta(task)).toMatchObject({ id: task.id, status: "failed" });
+  });
+
+  it("checks every provider selected by the draft before it is saved", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pct-role-preflight-"));
+    roots.push(root);
+    const workspace = join(root, "workspace");
+    const config = defaultConfig(root);
+    const roleConfiguration = await RoleConfigurationManager.open({
+      config,
+      appRoot: root,
+      workspaceRoot: workspace
+    });
+    const preflight = vi.fn(async (_config: AppConfig, _workspaceRoot: string) => ({
+      ok: false,
+      lines: ["claude: missing"]
+    }));
+    const orchestrator = new Orchestrator(
+      config,
+      {} as SessionManager,
+      new Map() as WorkerRegistry,
+      undefined,
+      undefined,
+      undefined,
+      { roleConfiguration, roleConfigurationPreflight: preflight }
+    );
+    const roles = roleConfiguration.futureRoles();
+    roles.main = { engine: "claude", model: "claude-opus" };
+    roles.actor = { engine: "claude", model: "claude-sonnet" };
+
+    await expect(orchestrator.validateRoleConfiguration(roles)).resolves.toEqual({
+      ok: false,
+      lines: ["claude: missing"]
+    });
+    expect(preflight).toHaveBeenCalledOnce();
+    const [candidate, checkedWorkspace] = preflight.mock.calls[0] ?? [];
+    expect(candidate?.router.defaultMode).toBe("auto");
+    expect(candidate?.pairing).toMatchObject({
+      main: "claude",
+      actor: "claude",
+      judge: "codex",
+      critic: "claude"
+    });
+    expect(checkedWorkspace).toBe(workspace);
   });
 });
 

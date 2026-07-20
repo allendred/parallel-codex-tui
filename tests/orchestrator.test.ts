@@ -3406,29 +3406,40 @@ describe("Orchestrator", () => {
       taskId,
       featureId,
       role: "critic",
-      engine: "claude"
+      engine: "claude",
+      model: "claude-review-v2"
     });
     expect(reassigned.assignment).toMatchObject({
       actor_engine: "mock",
-      critic_engine: "claude"
+      critic_engine: "claude",
+      critic_model: "claude-review-v2",
+      critic_override: true
     });
+
+    const taskRoles = (await orchestrator.roleConfigurationSnapshot(taskId)).future;
+    taskRoles.critic = { engine: "mock", model: "mock-task-default" };
+    await orchestrator.updateRoleConfiguration({ scope: "task", taskId, roles: taskRoles });
 
     const result = await orchestrator.retryTask({ taskId, cwd: root });
     const taskDir = join(root, ".parallel-codex", "sessions", taskId);
     expect(result.mode).toBe("complex");
     expect(adapter.actorRuns).toBe(1);
     expect(adapter.criticEngines).toEqual(["mock", "claude"]);
+    expect(adapter.criticModels).toEqual([config.workers.mock.model.name, "claude-review-v2"]);
     expect(await readTextIfExists(join(root, "reassigned.txt"))).toBe("actor checkpoint\n");
     expect(JSON.parse(await readTextIfExists(join(taskDir, "features", featureId, "assignment.json")))).toMatchObject({
       actor_engine: "mock",
-      critic_engine: "claude"
+      critic_engine: "claude",
+      critic_model: "claude-review-v2",
+      critic_override: true
     });
-    expect((await orchestrator.listTaskWorkers(taskId)).map((worker) => worker.id)).toEqual(expect.arrayContaining([
+    const workerIds = (await orchestrator.listTaskWorkers(taskId)).map((worker) => worker.id);
+    expect(workerIds).toEqual(expect.arrayContaining([
       "actor-mock",
       "critic-mock",
-      "critic-claude",
       "judge-mock-final-0001"
     ]));
+    expect(workerIds.some((id) => /^critic-claude-model-[a-f0-9]{8}$/.test(id))).toBe(true);
     const events = await readTextIfExists(join(taskDir, "events.jsonl"));
     expect(events).toContain("feature.assignment_changed");
     await expect(orchestrator.reassignFeature({
@@ -4263,6 +4274,7 @@ class RetryOnceCriticAdapter extends MockWorkerAdapter {
 class ReassignedCriticAdapter extends MockWorkerAdapter {
   actorRuns = 0;
   readonly criticEngines: EngineName[] = [];
+  readonly criticModels: string[] = [];
 
   override async run(spec: WorkerRunSpec): Promise<WorkerResult> {
     if (spec.role === "actor") {
@@ -4275,6 +4287,7 @@ class ReassignedCriticAdapter extends MockWorkerAdapter {
     }
 
     this.criticEngines.push(spec.engine);
+    this.criticModels.push(spec.modelConfig?.name ?? "");
     if (spec.engine !== "mock") {
       return super.run(spec);
     }

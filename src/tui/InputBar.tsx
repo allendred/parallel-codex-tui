@@ -18,6 +18,7 @@ export interface InputBarProps {
   featureCancelConfirm?: boolean;
   featurePauseConfirm?: boolean;
   featureAssignment?: boolean;
+  featureEditingModel?: { role: "actor" | "critic"; value: string; cursor: number } | null;
   taskSessionAction?: TaskSessionInputAction | null;
   taskSessionsIncludeArchived?: boolean;
   mainConversationSessions?: boolean;
@@ -65,6 +66,7 @@ export function InputBar({
   featureCancelConfirm = false,
   featurePauseConfirm = false,
   featureAssignment = false,
+  featureEditingModel = null,
   taskSessionAction = null,
   taskSessionsIncludeArchived = false,
   mainConversationSessions = false,
@@ -156,6 +158,21 @@ export function InputBar({
       <InputRail terminalWidth={terminalWidth} textWidth={displayWidth(`${hints.label}${hints.detail}`)} fill={fillRail}>
         <Text backgroundColor={TUI_THEME.rail} color={roleSaving ? TUI_THEME.warning : TUI_THEME.accent} bold>{hints.label}</Text>
         {hints.detail ? <Text backgroundColor={TUI_THEME.rail} color={TUI_THEME.muted}>{hints.detail}</Text> : null}
+      </InputRail>
+    );
+  }
+
+  if (mode === "features" && featureEditingModel) {
+    const prefix = `${featureEditingModel.role} model > `;
+    const valueWidth = Math.max(1, terminalWidth - displayWidth(prefix) - 3);
+    const display = chatInputDisplayParts(featureEditingModel.value, featureEditingModel.cursor, valueWidth);
+    const textWidth = displayWidth(`${prefix}${display.before}|${display.after}`);
+    return (
+      <InputRail terminalWidth={terminalWidth} textWidth={textWidth} fill={fillRail}>
+        <Text backgroundColor={TUI_THEME.rail} color={TUI_THEME.accent} bold>{prefix}</Text>
+        <Text backgroundColor={TUI_THEME.rail} color={TUI_THEME.text}>{display.before}</Text>
+        <Text backgroundColor={TUI_THEME.rail} color={TUI_THEME.accent} bold>|</Text>
+        <Text backgroundColor={TUI_THEME.rail} color={TUI_THEME.text}>{display.after}</Text>
       </InputRail>
     );
   }
@@ -837,9 +854,9 @@ function featureBoardInputHints(
 ): { label: string; detail: string } {
   if (options.assignment) {
     return selectInputHints(width, [
-      { label: "assign provider", detail: " · A Actor · C Critic · M/Esc done" },
-      { label: "assign", detail: " · A Actor · C Critic · Esc done" },
-      { label: "assign", detail: " · A actor · C critic" },
+      { label: "assign", detail: " · A/C provider · 1/2 model · M/Esc done" },
+      { label: "assign", detail: " · A/C provider · 1/2 model · Esc done" },
+      { label: "assign", detail: " · A/C provider · 1/2 model" },
       { label: "provider", detail: " · A · C · Esc" },
       { label: "provider", detail: "" },
       { label: "M", detail: "" }

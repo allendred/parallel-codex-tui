@@ -2,7 +2,10 @@ import React from "react";
 import { basename } from "node:path";
 import { Box, Text, type TextProps } from "ink";
 import type { AppConfig } from "../core/config.js";
-import type { RoleExecutionSelection } from "../core/role-configuration.js";
+import type {
+  RoleConfigurationSnapshot,
+  RoleExecutionSelection
+} from "../core/role-configuration.js";
 import type { WorkerLogRef } from "../orchestrator/orchestrator.js";
 import { compactEndByDisplayWidth, displayWidth, wrapByDisplayWidth } from "./display-width.js";
 import { TUI_THEME } from "./theme.js";
@@ -25,6 +28,7 @@ export interface StatusDetailViewProps {
   routeReason?: string;
   pairing: AppConfig["pairing"];
   roleSelection?: RoleExecutionSelection;
+  roleConfigurationSnapshot?: RoleConfigurationSnapshot | null;
   configStatus?: string;
   configRestartRequired?: boolean;
   workers: WorkerLogRef[];
@@ -75,10 +79,10 @@ export function statusDetailDisplayLines(
       text: fitStatusDetailText(`workspace · ${basename(input.cwd) || input.cwd} · ${input.cwd}`, safeWidth),
       tone: "muted"
     },
-    {
-      text: fitStatusDetailText(rolePairingDetail(input.pairing, input.roleSelection), safeWidth),
-      tone: "text"
-    }
+    ...roleMatrixDetailLines(input).map((line) => ({
+      text: fitStatusDetailText(line.text, safeWidth),
+      tone: line.tone
+    }))
   ];
 
   if (input.configStatus?.trim()) {
@@ -116,17 +120,42 @@ export function statusDetailDisplayLines(
   return lines.slice(0, maxLines);
 }
 
-function rolePairingDetail(
+function roleMatrixDetail(
+  label: string,
   pairing: AppConfig["pairing"],
   selection?: RoleExecutionSelection
 ): string {
   return [
-    "active roles",
+    label,
     rolePairingEntry("main", selection?.main.engine ?? pairing.main, selection?.main.model),
     rolePairingEntry("judge", selection?.judge.engine ?? pairing.judge, selection?.judge.model),
     rolePairingEntry("actor", selection?.actor.engine ?? pairing.actor, selection?.actor.model),
     rolePairingEntry("critic", selection?.critic.engine ?? pairing.critic, selection?.critic.model)
   ].join(" · ");
+}
+
+function roleMatrixDetailLines(
+  input: Omit<StatusDetailViewProps, "height" | "terminalWidth">
+): Array<{ text: string; tone: StatusDetailTone }> {
+  const snapshot = input.roleConfigurationSnapshot;
+  const lines: Array<{ text: string; tone: StatusDetailTone }> = [{
+    text: roleMatrixDetail("actual roles", input.pairing, input.roleSelection),
+    tone: "text"
+  }];
+  if (!snapshot) {
+    return lines;
+  }
+  const next = snapshot.next ?? snapshot.task ?? snapshot.future;
+  const source = snapshot.next ? "one shot" : snapshot.task ? "task default" : "future default";
+  lines.push({
+    text: roleMatrixDetail(`next roles (${source})`, input.pairing, next),
+    tone: snapshot.next ? "active" : "muted"
+  });
+  lines.push({
+    text: roleMatrixDetail("future roles", input.pairing, snapshot.future),
+    tone: "muted"
+  });
+  return lines;
 }
 
 function rolePairingEntry(role: string, engine: string, model?: string): string {

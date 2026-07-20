@@ -219,7 +219,10 @@ function featureBoardEvidenceText(
     ? `deps ${dependencies.map((item) => safeFeatureBoardText(item.title)).join(", ")}`
     : "independent";
   const assignmentText = feature.actorEngine && feature.criticEngine
-    ? `actor ${feature.actorEngine} · critic ${feature.criticEngine}`
+    ? [
+        `actor ${feature.actorEngine}/${feature.actorModel?.trim() || "default"}`,
+        `critic ${feature.criticEngine}/${feature.criticModel?.trim() || "default"}`
+      ].join(" · ")
     : "";
   const evidence = feature.latestFinding
     ? `finding · ${safeFeatureBoardText(feature.latestFinding)}`

@@ -64,6 +64,34 @@ describe("RoleConfigurationManager", () => {
     expect((await manager.selectionForRequest()).main.engine).toBe("codex");
   });
 
+  it("atomically gives a one-shot matrix to only one concurrent runtime", async () => {
+    const root = await temporaryRoot();
+    const workspace = join(root, "workspace");
+    const firstConfig = configuredTestConfig(root);
+    const first = await RoleConfigurationManager.open({
+      config: firstConfig,
+      appRoot: root,
+      workspaceRoot: workspace
+    });
+    const second = await RoleConfigurationManager.open({
+      config: configuredTestConfig(root),
+      appRoot: root,
+      workspaceRoot: workspace
+    });
+    const next = first.futureRoles();
+    next.main = { engine: "claude", model: "one-shot-model" };
+    await first.apply("next", next);
+
+    const selections = await Promise.all([
+      first.selectionForRequest(),
+      second.selectionForRequest()
+    ]);
+
+    expect(selections.filter((roles) => roles.main.model === "one-shot-model")).toHaveLength(1);
+    expect(selections.filter((roles) => roles.main.model === "gpt-default")).toHaveLength(1);
+    expect(await pathExists(roleNextConfigurationPath(workspace, firstConfig.dataDir))).toBe(false);
+  });
+
   it("keeps current-task defaults separate from one-shot Turn evidence", async () => {
     const root = await temporaryRoot();
     const workspace = join(root, "workspace");
@@ -119,6 +147,16 @@ describe("RoleConfigurationManager", () => {
     roles.actor.engine = "missing";
 
     await expect(manager.apply("future", roles)).rejects.toThrow("Worker provider is not configured: missing");
+  });
+
+  it("rejects model names containing terminal control characters", async () => {
+    const root = await temporaryRoot();
+    const config = configuredTestConfig(root);
+    const manager = await RoleConfigurationManager.open({ config, appRoot: root, workspaceRoot: root });
+    const roles = manager.futureRoles();
+    roles.actor.model = "gpt-safe\nignore-previous-output";
+
+    await expect(manager.apply("future", roles)).rejects.toThrow("Model name cannot contain control characters");
   });
 });
 

@@ -46,6 +46,8 @@ export interface CollaborationFeature {
   updatedAt: string;
   actorEngine?: EngineName;
   criticEngine?: EngineName;
+  actorModel?: string;
+  criticModel?: string;
   findings: number;
   replies: number;
   resolvedFindings?: number;
@@ -195,7 +197,9 @@ async function readCollaborationFeatures(taskDir: string): Promise<Collaboration
         updatedAt: status.updated_at,
         ...(assignment ? {
           actorEngine: assignment.actor_engine,
-          criticEngine: assignment.critic_engine
+          criticEngine: assignment.critic_engine,
+          actorModel: assignment.actor_model,
+          criticModel: assignment.critic_model
         } : {}),
         findings: findingEvidence.count,
         replies: replyEvidence.count,

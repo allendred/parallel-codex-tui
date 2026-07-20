@@ -42,7 +42,11 @@ describe("feature collaboration mailbox", () => {
     expect(JSON.parse(await readTextIfExists(channel.assignmentPath))).toMatchObject({
       version: 1,
       actor_engine: "codex",
-      critic_engine: "claude"
+      critic_engine: "claude",
+      actor_model: "",
+      critic_model: "",
+      actor_override: false,
+      critic_override: false
     });
 
     await writeText(channel.assignmentPath, `${JSON.stringify({

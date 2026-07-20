@@ -57,6 +57,8 @@ export interface CreateFeatureChannelInput {
   refreshDefinition?: boolean;
   actorEngine?: EngineName;
   criticEngine?: EngineName;
+  actorModel?: string;
+  criticModel?: string;
 }
 
 export interface CriticFindingRecord {
@@ -149,7 +151,13 @@ export async function createFeatureChannel(input: CreateFeatureChannelInput): Pr
   await writeText(channel.actorRepliesPath, "");
   await writeText(channel.criticFindingsPath, "");
   if (input.actorEngine && input.criticEngine) {
-    await writeFeatureAssignment(channel, input.actorEngine, input.criticEngine);
+    await writeFeatureAssignment(
+      channel,
+      input.actorEngine,
+      input.criticEngine,
+      input.actorModel,
+      input.criticModel
+    );
   }
   await updateFeatureStatus(channel, "created");
   await appendFeatureDialogue(channel, "feature.created", "actor", "Feature mailbox created for the current turn.");
@@ -174,7 +182,13 @@ async function ensureFeatureChannelFiles(
     }
   }
   if (!(await pathExists(channel.assignmentPath)) && input.actorEngine && input.criticEngine) {
-    await writeFeatureAssignment(channel, input.actorEngine, input.criticEngine);
+    await writeFeatureAssignment(
+      channel,
+      input.actorEngine,
+      input.criticEngine,
+      input.actorModel,
+      input.criticModel
+    );
   }
 }
 
@@ -189,6 +203,10 @@ export async function readFeatureAssignment(
       version: 1,
       actor_engine: fallback.actor,
       critic_engine: fallback.critic,
+      actor_model: "",
+      critic_model: "",
+      actor_override: false,
+      critic_override: false,
       updated_at: new Date(0).toISOString()
     });
   }
@@ -197,12 +215,19 @@ export async function readFeatureAssignment(
 export async function writeFeatureAssignment(
   channel: Pick<FeatureChannel, "assignmentPath">,
   actorEngine: EngineName,
-  criticEngine: EngineName
+  criticEngine: EngineName,
+  actorModel = "",
+  criticModel = "",
+  options: { actorOverride?: boolean; criticOverride?: boolean } = {}
 ): Promise<FeatureAssignment> {
   const assignment = FeatureAssignmentSchema.parse({
     version: 1,
     actor_engine: actorEngine,
     critic_engine: criticEngine,
+    actor_model: actorModel,
+    critic_model: criticModel,
+    actor_override: options.actorOverride ?? false,
+    critic_override: options.criticOverride ?? false,
     updated_at: new Date().toISOString()
   });
   await writeJson(channel.assignmentPath, assignment);

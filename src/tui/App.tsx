@@ -219,6 +219,11 @@ interface FeatureAssignmentPrompt {
   taskId: string;
   featureId: string;
   title: string;
+  modelEdit?: {
+    role: "actor" | "critic";
+    value: string;
+    cursor: number;
+  };
 }
 interface RoleModelEdit {
   role: ConfigurableRole;
@@ -451,7 +456,8 @@ export function App({
   const confirmFeatureCancellationRef = useRef<(prompt: FeatureCancelPrompt) => Promise<void>>(confirmFeatureCancellation);
   const reassignSelectedFeatureRef = useRef<(
     prompt: FeatureAssignmentPrompt,
-    role: "actor" | "critic"
+    role: "actor" | "critic",
+    model?: string
   ) => Promise<void>>(reassignSelectedFeature);
   const openCollaborationTimelineRef = useRef<(featureIndex?: number) => Promise<void>>(openCollaborationTimeline);
   const openRoleConfigurationRef = useRef<() => Promise<void>>(openRoleConfiguration);
@@ -522,7 +528,7 @@ export function App({
     selectedBoardFeature?.state === "actor_running"
     || selectedBoardFeature?.state === "critic_running"
   );
-  const featureCanReassign = assignableProviderIds.length > 1
+  const featureCanReassign = assignableProviderIds.length > 0
     && !busy
     && canRetryTask
     && selectedBoardFeature?.state !== "approved";
@@ -1802,6 +1808,23 @@ export function App({
         const pendingAssignment = featureAssignmentPromptRef.current;
         if (pendingAssignment) {
           for (const featureChunk of featureChunks) {
+            const modelEdit = featureAssignmentPromptRef.current?.modelEdit;
+            if (modelEdit) {
+              if (featureChunk === "\x1b") {
+                updateFeatureAssignmentPrompt({ ...pendingAssignment, modelEdit: undefined });
+                continue;
+              }
+              const update = applyChatInputChunk(modelEdit.value, featureChunk, modelEdit.cursor);
+              if (update.submit !== null) {
+                void reassignSelectedFeatureRef.current(pendingAssignment, modelEdit.role, update.submit);
+              } else {
+                updateFeatureAssignmentPrompt({
+                  ...pendingAssignment,
+                  modelEdit: { ...modelEdit, value: update.value, cursor: update.cursor }
+                });
+              }
+              continue;
+            }
             if (featureChunk === "\x1b" || featureChunk === "m" || featureChunk === "M") {
               updateFeatureAssignmentPrompt(null);
               setFeatureBoardNotice(null);
@@ -1813,6 +1836,18 @@ export function App({
             }
             if (featureChunk === "c" || featureChunk === "C") {
               void reassignSelectedFeatureRef.current(pendingAssignment, "critic");
+              return;
+            }
+            if (featureChunk === "1" || featureChunk === "2") {
+              const feature = collaborationTimelineRef.current?.features.find(
+                (item) => item.id === pendingAssignment.featureId
+              );
+              const role = featureChunk === "1" ? "actor" : "critic";
+              const value = role === "actor" ? feature?.actorModel ?? "" : feature?.criticModel ?? "";
+              updateFeatureAssignmentPrompt({
+                ...pendingAssignment,
+                modelEdit: { role, value, cursor: Array.from(value).length }
+              });
               return;
             }
           }
@@ -1875,7 +1910,7 @@ export function App({
               title: feature.title
             });
             setFeatureBoardNotice(
-              `Reassign ${feature.title} · A Actor (${feature.actorEngine ?? config.pairing.actor}) · C Critic (${feature.criticEngine ?? config.pairing.critic})`
+              `Reassign ${feature.title} · A Actor (${featureTargetDisplay(config, feature.actorEngine ?? config.pairing.actor, feature.actorModel)}) · C Critic (${featureTargetDisplay(config, feature.criticEngine ?? config.pairing.critic, feature.criticModel)})`
             );
             return;
           }
@@ -3627,7 +3662,8 @@ export function App({
 
   async function reassignSelectedFeature(
     prompt: FeatureAssignmentPrompt,
-    role: "actor" | "critic"
+    role: "actor" | "critic",
+    model?: string
   ): Promise<void> {
     const feature = collaborationTimelineRef.current?.features.find((item) => item.id === prompt.featureId);
     if (!feature) {
@@ -3638,16 +3674,23 @@ export function App({
     const current = role === "actor"
       ? feature.actorEngine ?? config.pairing.actor
       : feature.criticEngine ?? config.pairing.critic;
-    const engine = nextAssignableFeatureEngine(current, assignableProviderIds);
+    const engine = model === undefined
+      ? nextAssignableFeatureEngine(current, assignableProviderIds)
+      : current;
     try {
-      await orchestrator.reassignFeature({
+      const result = await orchestrator.reassignFeature({
         taskId: prompt.taskId,
         featureId: prompt.featureId,
         role,
-        engine
+        engine,
+        ...(model === undefined ? {} : { model })
       });
+      updateFeatureAssignmentPrompt({ ...prompt, modelEdit: undefined });
+      const assignedModel = role === "actor"
+        ? result.assignment.actor_model
+        : result.assignment.critic_model;
       setFeatureBoardNotice(
-        `${role === "actor" ? "Actor" : "Critic"} reassigned to ${featureEngineDisplay(config, engine)} · Ctrl+R resumes the task.`
+        `${role === "actor" ? "Actor" : "Critic"} reassigned to ${featureTargetDisplay(config, engine, assignedModel)} · Ctrl+R resumes the task.`
       );
       await refreshCollaborationTimeline(false);
     } catch (error) {
@@ -3938,6 +3981,12 @@ export function App({
       if (typeof orchestrator.updateRoleConfiguration !== "function") {
         throw new Error("Role configuration is unavailable in this runtime");
       }
+      if (typeof orchestrator.validateRoleConfiguration === "function") {
+        const validation = await orchestrator.validateRoleConfiguration(draft);
+        if (!validation.ok) {
+          throw new Error(formatRoleConfigurationPreflightFailure(validation.lines));
+        }
+      }
       const snapshot = await orchestrator.updateRoleConfiguration({
         scope,
         roles: draft,
@@ -4072,6 +4121,7 @@ export function App({
           featureCancelConfirm={featureCancelPrompt?.action === "cancel"}
           featurePauseConfirm={featureCancelPrompt?.action === "pause"}
           featureAssignment={Boolean(featureAssignmentPrompt)}
+          featureEditingModel={featureAssignmentPrompt?.modelEdit ?? null}
           taskSessionAction={sessionCenterMode === "conversations"
             ? mainConversationAction?.type === "rename"
               ? { type: "rename", value: mainConversationAction.value, cursor: mainConversationAction.cursor }
@@ -4145,6 +4195,7 @@ export function App({
             routeReason={routePending ? undefined : lastRoute?.reason}
             pairing={config.pairing}
             roleSelection={activeRoleSelection}
+            roleConfigurationSnapshot={roleConfigurationSnapshot}
             configStatus={configChange?.detail}
             configRestartRequired={configChange?.kind === "restart"}
             workers={workers}
@@ -5379,6 +5430,11 @@ function featureEngineDisplay(config: AppConfig, engine: EngineName): string {
   return workerProviderLabel(config, engine);
 }
 
+function featureTargetDisplay(config: AppConfig, engine: EngineName, model?: string): string {
+  const effectiveModel = model?.trim() || config.workers[engine]?.model.name || "default";
+  return `${featureEngineDisplay(config, engine)}/${effectiveModel}`;
+}
+
 function compactChatText(text: string, maxLength: number): string {
   if (maxLength <= 5) {
     return takeChatTextStartByDisplayWidth(text, maxLength);
@@ -5905,6 +5961,18 @@ function compactNativeAttachRole(label: string): string {
 
 function compactNativeSessionForTitle(sessionId: string, maxLength: number): string {
   return compactEndByDisplayWidth(sessionId, Math.min(maxLength, 16));
+}
+
+export function formatRoleConfigurationPreflightFailure(lines: string[]): string {
+  const clean = lines
+    .map((line) => line.replace(/[\u0000-\u001f\u007f]/g, " ").replace(/\s+/g, " ").trim())
+    .filter(Boolean);
+  const actionable = clean.filter((line) => (
+    /\b(?:denied|error|failed|invalid|missing|unavailable|unsupported)\b/i.test(line)
+    || /\bnot (?:found|supported|available)\b/i.test(line)
+  ));
+  const detail = (actionable.length > 0 ? actionable : clean).slice(0, 4);
+  return ["Provider preflight failed", ...detail].join(" · ");
 }
 
 function isAbortError(error: unknown): boolean {

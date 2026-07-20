@@ -924,8 +924,21 @@ describe("InputBar", () => {
         onChange={() => {}}
       />
     );
-    expect(assignment.lastFrame()).toContain("assign provider · A Actor · C Critic · M/Esc done");
+    expect(assignment.lastFrame()).toContain("assign · A/C provider · 1/2 model · M/Esc done");
     assignment.unmount();
+
+    const model = render(
+      <InputBar
+        mode="features"
+        value=""
+        terminalWidth={100}
+        featureAssignment
+        featureEditingModel={{ role: "critic", value: "claude-opus", cursor: 6 }}
+        onChange={() => {}}
+      />
+    );
+    expect(model.lastFrame()).toContain("critic model > claude|-opus");
+    model.unmount();
 
     const overflow: string[] = [];
     for (const props of [

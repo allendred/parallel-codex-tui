@@ -186,10 +186,15 @@ describe("CLI Feature control smoke", () => {
       expect(await pathExists(join(workspace, "beta.txt"))).toBe(false);
 
       child.write("m");
-      await waitForScreenText(() => screenWrites, screen, "assign provider · A Actor · C Critic");
+      await waitForScreenText(() => screenWrites, screen, "assign · A/C provider · 1/2 model");
       child.write("c");
       await waitForScreenText(() => screenWrites, screen, "Critic reassigned to claude");
       await waitForFileText(join(taskDir, "features", "0001-alpha", "assignment.json"), '"critic_engine": "claude"');
+      child.write("2");
+      await waitForScreenText(() => screenWrites, screen, "critic model > |");
+      child.write("review-v2\r");
+      await waitForScreenText(() => screenWrites, screen, "Critic reassigned to claude/review-v2");
+      await waitForFileText(join(taskDir, "features", "0001-alpha", "assignment.json"), '"critic_model": "review-v2"');
       const assignmentRevision = outputRevision;
       child.write("m");
       await waitForFreshScreenText(
@@ -207,7 +212,7 @@ describe("CLI Feature control smoke", () => {
       expect(await readTextIfExists(join(taskDir, "actor-codex-0001-beta", "run-count.txt"))).toBe("1");
       expect(await readTextIfExists(join(workspace, "alpha.txt"))).toBe("alpha\n");
       expect(await readTextIfExists(join(workspace, "beta.txt"))).toBe("beta\n");
-      expect(await pathExists(join(taskDir, "critic-claude-0001-alpha"))).toBe(true);
+      expect((await readdir(taskDir)).some((entry) => /^critic-claude-0001-alpha-model-[a-f0-9]{8}$/.test(entry))).toBe(true);
       expect(await pathExists(join(taskDir, "critic-codex-0001-beta"))).toBe(true);
       expect(resumedEvents).toContain("feature.wave_checkpoint_loaded");
       expect(resumedEvents).toContain("feature.wave_actor_checkpoints_reused");

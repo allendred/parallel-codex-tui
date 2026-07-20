@@ -49,7 +49,7 @@ describe("StatusDetailView", () => {
 
     expect(text).toContain("task · 070751-5bb0 · complex · running");
     expect(text).toContain("route complex · via 127.0.0.1:7890 · 15s");
-    expect(text).toContain("active roles · main/codex · judge/codex · actor/codex · critic/claude");
+    expect(text).toContain("actual roles · main/codex · judge/codex · actor/codex · critic/claude");
     expect(text).toContain("config · roles/workers changed · restart required");
     expect(text).toContain("selected · actor/openai_compat · running · Input reliability");
     expect(text).toContain("model · acme/vendor-coder-v2");
@@ -103,7 +103,47 @@ describe("StatusDetailView", () => {
     }, 180, 12);
 
     expect(lines.map((line) => line.text).join("\n")).toContain(
-      "active roles · main/claude/haiku · judge/codex/gpt-5.6 · actor/codex/gpt-5.6-codex · critic/claude/sonnet"
+      "actual roles · main/claude/haiku · judge/codex/gpt-5.6 · actor/codex/gpt-5.6-codex · critic/claude/sonnet"
     );
+  });
+
+  it("separates actual, one-shot next, and future role matrices", () => {
+    const future = {
+      main: { engine: "codex", model: "gpt-future" },
+      judge: { engine: "codex", model: "gpt-future" },
+      actor: { engine: "codex", model: "gpt-future" },
+      critic: { engine: "claude", model: "sonnet-future" }
+    } as const;
+    const next = {
+      ...future,
+      actor: { engine: "claude", model: "opus-next" }
+    } as const;
+    const lines = statusDetailDisplayLines({
+      cwd: "/tmp/project",
+      taskId: null,
+      mode: null,
+      busy: false,
+      canRetry: false,
+      taskStatus: "",
+      routeStatus: "",
+      pairing: { main: "codex", judge: "codex", actor: "codex", critic: "claude" },
+      roleSelection: future,
+      roleConfigurationSnapshot: {
+        baseline: future,
+        future,
+        next,
+        task: null,
+        activeTurn: null,
+        providers: []
+      },
+      workers: [],
+      selectedWorkerIndex: 0
+    }, 180, 12);
+    const text = lines.map((line) => line.text).join("\n");
+
+    expect(text).toContain("actual roles · main/codex/gpt-future");
+    expect(text).toContain("next roles (one shot) · main/codex/gpt-future");
+    expect(text).toContain("actor/claude/opus-next");
+    expect(text).toContain("future roles · main/codex/gpt-future");
   });
 });
