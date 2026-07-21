@@ -29,6 +29,12 @@ import { configureTuiTheme } from "./tui/theme.js";
 import { routerDiagnosticsPolicy } from "./tui/RouterDiagnosticsView.js";
 import { version } from "./version.js";
 import { SupervisorOrchestrator } from "./supervisor/client.js";
+import {
+  formatSupervisorCancellation,
+  formatSupervisorRuns,
+  inspectSupervisorRuns,
+  requestSupervisorRunCancellation
+} from "./supervisor/operations.js";
 import { runSupervisorJob } from "./supervisor/runner.js";
 
 main().catch((error) => {
@@ -97,6 +103,31 @@ async function main(): Promise<void> {
       console.log(`Diagnostics exported: ${result.path}`);
     } finally {
       runtime.index.close();
+    }
+  } else if (cliArgs.runs || cliArgs.cancelRun) {
+    const workspaceRoot = await selectWorkspaceForCli({
+      appRoot: cliArgs.appRoot,
+      cwd: process.cwd(),
+      explicitWorkspace: cliArgs.explicitWorkspace,
+      interactive: false
+    });
+    const config = await loadConfig(cliArgs.appRoot);
+    try {
+      if (cliArgs.runs) {
+        const report = await inspectSupervisorRuns(workspaceRoot, config.dataDir);
+        console.log(cliArgs.json ? JSON.stringify(report, null, 2) : formatSupervisorRuns(report));
+      } else {
+        const result = await requestSupervisorRunCancellation(
+          workspaceRoot,
+          config.dataDir,
+          cliArgs.cancelRunId
+        );
+        console.log(cliArgs.json ? JSON.stringify(result, null, 2) : formatSupervisorCancellation(result));
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      process.stderr.write(`Supervisor error: ${message}\n`);
+      process.exitCode = 1;
     }
   } else if (cliArgs.init) {
     if (await pathExists(localConfigPath)) {

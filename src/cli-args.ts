@@ -5,14 +5,18 @@ import { TaskIdSchema } from "./domain/schemas.js";
 
 export interface CliArgs {
   appRoot: string;
+  cancelRun: boolean;
+  cancelRunId: string | null;
   diagnostics: boolean;
   diagnosticsPath: string | null;
   doctor: boolean;
   explicitWorkspace: string | null;
   help: boolean;
   init: boolean;
+  json: boolean;
   probeAgents: boolean;
   probeRouter: boolean;
+  runs: boolean;
   workspaceRoot: string;
   taskId: string | null;
   theme: TuiThemeName | null;
@@ -20,8 +24,29 @@ export interface CliArgs {
   version: boolean;
 }
 
-const allowedValueOptions = new Set(["--app-root", "--workspace", "-w", "--task", "-t", "--theme", "--diagnostics"]);
-const allowedBooleanOptions = new Set(["--doctor", "--help", "-h", "--init", "--probe-agents", "--probe-router", "--themes", "--version", "-v"]);
+const allowedValueOptions = new Set([
+  "--app-root",
+  "--workspace",
+  "-w",
+  "--task",
+  "-t",
+  "--theme",
+  "--diagnostics",
+  "--cancel-run"
+]);
+const allowedBooleanOptions = new Set([
+  "--doctor",
+  "--help",
+  "-h",
+  "--init",
+  "--json",
+  "--probe-agents",
+  "--probe-router",
+  "--runs",
+  "--themes",
+  "--version",
+  "-v"
+]);
 
 export function parseCliArgs(args: string[], cwd: string): CliArgs {
   const optionArgs = argsBeforeTerminator(args);
@@ -42,12 +67,20 @@ export function parseCliArgs(args: string[], cwd: string): CliArgs {
     optionArgs,
     (arg) => arg === "--diagnostics" || arg.startsWith("--diagnostics=")
   );
+  const cancelRunFlagIndex = lastFlagIndex(
+    optionArgs,
+    (arg) => arg === "--cancel-run" || arg.startsWith("--cancel-run=")
+  );
+  const cancelRun = cancelRunFlagIndex >= 0;
+  const cancelRunId = flagValue(optionArgs, cancelRunFlagIndex);
   const diagnostics = diagnosticsFlagIndex >= 0;
   const doctor = optionArgs.includes("--doctor");
   const help = optionArgs.includes("--help") || optionArgs.includes("-h");
   const init = optionArgs.includes("--init");
+  const json = optionArgs.includes("--json");
   const probeAgents = optionArgs.includes("--probe-agents");
   const probeRouter = optionArgs.includes("--probe-router");
+  const runs = optionArgs.includes("--runs");
   const themes = optionArgs.includes("--themes");
   const version = optionArgs.includes("--version") || optionArgs.includes("-v");
   const appRootValue = flagValue(optionArgs, appRootFlagIndex);
@@ -61,14 +94,18 @@ export function parseCliArgs(args: string[], cwd: string): CliArgs {
 
   return {
     appRoot,
+    cancelRun,
+    cancelRunId,
     diagnostics,
     diagnosticsPath,
     doctor,
     explicitWorkspace,
     help,
     init,
+    json,
     probeAgents,
     probeRouter,
+    runs,
     workspaceRoot,
     taskId,
     theme,
@@ -128,6 +165,22 @@ export function validateCliArgs(args: string[]): string[] {
   }
   if (optionArgs.includes("--probe-agents") && !optionArgs.includes("--doctor")) {
     errors.push("--probe-agents requires --doctor");
+  }
+  const runs = optionArgs.includes("--runs");
+  const cancelRunFlagIndex = lastFlagIndex(
+    optionArgs,
+    (arg) => arg === "--cancel-run" || arg.startsWith("--cancel-run=")
+  );
+  const cancelRun = cancelRunFlagIndex >= 0;
+  const cancelRunId = flagValue(optionArgs, cancelRunFlagIndex);
+  if (runs && cancelRun) {
+    errors.push("--runs and --cancel-run cannot be used together");
+  }
+  if (optionArgs.includes("--json") && !runs && !cancelRun) {
+    errors.push("--json requires --runs or --cancel-run");
+  }
+  if (cancelRunId && !/^run-[A-Za-z0-9._-]+$/.test(cancelRunId)) {
+    errors.push("Invalid --cancel-run: expected run- followed by letters, numbers, dot, underscore, or hyphen");
   }
   return errors;
 }

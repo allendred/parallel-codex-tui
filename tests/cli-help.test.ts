@@ -13,6 +13,9 @@ describe("buildCliHelpText", () => {
     expect(help).toContain("fresh + resume probes");
     expect(help).toContain("--probe-router");
     expect(help).toContain("live Codex Router request");
+    expect(help).toContain("--runs");
+    expect(help).toContain("--cancel-run [id]");
+    expect(help).toContain("--json");
     expect(help).not.toContain("codex, graphite, paper");
   });
 });

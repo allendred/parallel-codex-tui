@@ -12,6 +12,9 @@ Options:
       --init              Write .parallel-codex/config.toml if missing
       --doctor            Check config, agent commands, and theme palette preview
       --diagnostics [dir] Export a sanitized support bundle; defaults inside the workspace
+      --runs              List persisted Supervisor runs without opening the TUI
+      --cancel-run [id]   Cancel a run by id, or the latest active run when omitted
+      --json              Emit machine-readable output with --runs or --cancel-run
       --probe-agents      With --doctor, run fresh + resume probes (uses model quota)
       --probe-router      With --doctor, run one live Codex Router request
   -v, --version           Print the current version

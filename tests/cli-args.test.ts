@@ -6,6 +6,8 @@ describe("parseCliArgs", () => {
     const parsed = parseCliArgs([], "/app");
 
     expect(parsed.appRoot).toBe("/app");
+    expect(parsed.cancelRun).toBe(false);
+    expect(parsed.cancelRunId).toBeNull();
     expect(parsed.diagnostics).toBe(false);
     expect(parsed.diagnosticsPath).toBeNull();
     expect(parsed.doctor).toBe(false);
@@ -13,8 +15,10 @@ describe("parseCliArgs", () => {
     expect(parsed.explicitWorkspace).toBeNull();
     expect(parsed.help).toBe(false);
     expect(parsed.init).toBe(false);
+    expect(parsed.json).toBe(false);
     expect(parsed.probeAgents).toBe(false);
     expect(parsed.probeRouter).toBe(false);
+    expect(parsed.runs).toBe(false);
     expect(parsed.taskId).toBeNull();
     expect(parsed.theme).toBeNull();
     expect(parsed.themes).toBe(false);
@@ -96,6 +100,19 @@ describe("parseCliArgs", () => {
     expect(automatic.diagnosticsPath).toBeNull();
     expect(explicit.diagnostics).toBe(true);
     expect(explicit.diagnosticsPath).toBe("/app/support-bundle");
+  });
+
+  it("accepts Supervisor status and cancellation command options", () => {
+    const runs = parseCliArgs(["--runs", "--json", "--workspace", "game"], "/app");
+    const latest = parseCliArgs(["--cancel-run", "--workspace", "game"], "/app");
+    const selected = parseCliArgs(["--cancel-run=run-20260721T000000Z-deadbeef"], "/app");
+
+    expect(runs.runs).toBe(true);
+    expect(runs.json).toBe(true);
+    expect(latest.cancelRun).toBe(true);
+    expect(latest.cancelRunId).toBeNull();
+    expect(selected.cancelRun).toBe(true);
+    expect(selected.cancelRunId).toBe("run-20260721T000000Z-deadbeef");
   });
 
   it("accepts themes without changing workspace parsing", () => {
@@ -234,6 +251,22 @@ describe("validateCliArgs", () => {
   it("accepts diagnostics as a standalone or value option", () => {
     expect(validateCliArgs(["--diagnostics"])).toEqual([]);
     expect(validateCliArgs(["--diagnostics=/tmp/support"])).toEqual([]);
+  });
+
+  it("validates Supervisor status and cancellation options", () => {
+    expect(validateCliArgs(["--runs"])).toEqual([]);
+    expect(validateCliArgs(["--runs", "--json"])).toEqual([]);
+    expect(validateCliArgs(["--cancel-run"])).toEqual([]);
+    expect(validateCliArgs(["--cancel-run=run-safe_01", "--json"])).toEqual([]);
+    expect(validateCliArgs(["--runs", "--cancel-run"])).toEqual([
+      "--runs and --cancel-run cannot be used together"
+    ]);
+    expect(validateCliArgs(["--json"])).toEqual([
+      "--json requires --runs or --cancel-run"
+    ]);
+    expect(validateCliArgs(["--cancel-run=../../outside"])).toEqual([
+      "Invalid --cancel-run: expected run- followed by letters, numbers, dot, underscore, or hyphen"
+    ]);
   });
 
   it("requires doctor mode for a live Router probe", () => {

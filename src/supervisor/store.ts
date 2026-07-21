@@ -162,6 +162,12 @@ export async function supervisorRunIsAcknowledged(files: SupervisorRunFiles): Pr
   return pathExists(files.acknowledgedPath);
 }
 
+export async function readSupervisorController(
+  files: SupervisorRunFiles
+): Promise<SupervisorController | null> {
+  return readValidJson(files.controllerPath, SupervisorControllerSchema);
+}
+
 export async function listSupervisorRuns(
   workspaceRoot: string,
   dataDir: string
@@ -242,7 +248,7 @@ async function removeControllerIfOwned(path: string, controllerId?: string): Pro
   await removeIfExists(path);
 }
 
-async function supervisorControllerIsActive(controller: SupervisorController): Promise<boolean> {
+export async function supervisorControllerIsActive(controller: SupervisorController): Promise<boolean> {
   if (!processIsAlive(controller.pid)) {
     return false;
   }

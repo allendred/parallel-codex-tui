@@ -192,7 +192,7 @@ describe("package metadata", () => {
 
     expect(readme).toContain("## Requirements");
     expect(readme).toContain("## Current Release");
-    expect(readme).toContain("v0.4.0` is available from [npm]");
+    expect(readme).toContain("v0.4.1` is available from [npm]");
     expect(readme).toContain("`Ctrl+T`, then `C`, opens every persisted Main conversation");
     expect(readme).toContain("`.parallel-codex/sessions/main/conversations/<conversation>/`");
     expect(readme).toContain("restores those exact Main bindings");
@@ -204,7 +204,7 @@ describe("package metadata", () => {
     expect(readme).toContain("keeps terminal scrolling and copying available at the same time");
     expect(readme).toContain("real three-Feature Tetris task");
     expect(readme).toContain("20-turn soak verifies 80 ordered Workers");
-    expect(readme).toContain("1,357 tests across 141 files: 1,356 pass by default");
+    expect(readme).toContain("1,363 tests across 143 files: 1,362 pass by default");
     expect(readme).toContain("same Judge native session for a bounded DAG replan");
     expect(readme).toContain("Real Codex and Claude probes both proved fresh and same-session resume calls");
     expect(readme).toContain("authenticate the Claude CLI");
@@ -215,6 +215,8 @@ describe("package metadata", () => {
     expect(readme).toContain("npm install -g parallel-codex-tui");
     expect(readme).toContain("parallel-codex-tui --init");
     expect(readme).toContain("parallel-codex-tui --doctor");
+    expect(readme).toContain("parallel-codex-tui --workspace /path/to/project --runs --json");
+    expect(readme).toContain("parallel-codex-tui --workspace /path/to/project --cancel-run");
     expect(readme).toContain("parallel-codex-tui --workspace /path/to/project");
     expect(readme).toContain("parallel-codex-tui --theme aurora --workspace /path/to/project");
     expect(readme).toContain("parallel-codex-tui --theme studio --workspace /path/to/project");
@@ -550,8 +552,8 @@ describe("package metadata", () => {
     expect(readme).toContain('git tag "v$VERSION"');
     expect(readme).toContain('git push origin "v$VERSION"');
     expect(readme).toContain("The release tag must match `package.json`");
-    expect(readme).toContain("VERSION=0.4.0");
-    expect(readme).toContain("package version `0.4.0` requires tag `v0.4.0`");
+    expect(readme).toContain("VERSION=0.4.1");
+    expect(readme).toContain("package version `0.4.1` requires tag `v0.4.1`");
     expect(readme).toContain("Published tags such as `v0.2.10` are immutable");
   });
 
