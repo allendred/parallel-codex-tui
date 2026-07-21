@@ -192,7 +192,7 @@ describe("package metadata", () => {
 
     expect(readme).toContain("## Requirements");
     expect(readme).toContain("## Current Release");
-    expect(readme).toContain("v0.3.2` is available from [npm]");
+    expect(readme).toContain("v0.4.0` is available from [npm]");
     expect(readme).toContain("`Ctrl+T`, then `C`, opens every persisted Main conversation");
     expect(readme).toContain("`.parallel-codex/sessions/main/conversations/<conversation>/`");
     expect(readme).toContain("restores those exact Main bindings");
@@ -204,7 +204,7 @@ describe("package metadata", () => {
     expect(readme).toContain("keeps terminal scrolling and copying available at the same time");
     expect(readme).toContain("real three-Feature Tetris task");
     expect(readme).toContain("20-turn soak verifies 80 ordered Workers");
-    expect(readme).toContain("1,349 tests across 138 files: 1,348 pass by default");
+    expect(readme).toContain("1,357 tests across 141 files: 1,356 pass by default");
     expect(readme).toContain("same Judge native session for a bounded DAG replan");
     expect(readme).toContain("Real Codex and Claude probes both proved fresh and same-session resume calls");
     expect(readme).toContain("authenticate the Claude CLI");
@@ -495,8 +495,8 @@ describe("package metadata", () => {
     expect(readme).toContain("Overlapping attach preparations keep only the latest request");
     expect(readme).toContain("this and closing the outer App terminate the active PTY");
     expect(readme).toContain("An attach preparation that finishes after App shutdown is discarded");
-    expect(readme).toContain("An operating-system SIGINT first asks the App to abort its Router or Worker and clean up any PTY");
-    expect(readme).toContain("a second SIGINT restores terminal modes and forces exit");
+    expect(readme).toContain("Ctrl+C` detaches an active Supervisor run and exits the outer TUI");
+    expect(readme).toContain("A second operating-system SIGINT restores terminal modes and forces exit");
     expect(readme).toContain("Press `Ctrl+]` to return to worker logs");
     expect(readme).not.toContain("Press `Ctrl+]` to detach and return to worker logs");
     expect(readme).toContain("parallel-codex-tui --help");
@@ -550,8 +550,8 @@ describe("package metadata", () => {
     expect(readme).toContain('git tag "v$VERSION"');
     expect(readme).toContain('git push origin "v$VERSION"');
     expect(readme).toContain("The release tag must match `package.json`");
-    expect(readme).toContain("VERSION=0.3.2");
-    expect(readme).toContain("package version `0.3.2` requires tag `v0.3.2`");
+    expect(readme).toContain("VERSION=0.4.0");
+    expect(readme).toContain("package version `0.4.0` requires tag `v0.4.0`");
     expect(readme).toContain("Published tags such as `v0.2.10` are immutable");
   });
 

@@ -22,6 +22,8 @@ import type { TaskSessionDetails, TaskSessionWorkerDetail } from "../core/task-s
 import type { WorkspaceChoice } from "../core/workspace.js";
 import { WorkerStatusSchema, type EngineName, type RouteDecision, type WorkerStatus } from "../domain/schemas.js";
 import type {
+  HandleRequestInput,
+  HandleRequestResult,
   Orchestrator,
   RouteFallbackChoice,
   RouteFallbackInfo,
@@ -29,6 +31,7 @@ import type {
   WorkerLogRef,
   WorkerRunStatus
 } from "../orchestrator/orchestrator.js";
+import { isSupervisorDetachedError } from "../supervisor/client.js";
 import {
   effectiveWorkerWatchdog,
   formatRoutePendingStatus,
@@ -118,7 +121,7 @@ import { runtimeConfigChange, type RuntimeConfigChange } from "./runtime-config-
 
 export interface AppProps {
   config: AppConfig;
-  orchestrator: Orchestrator;
+  orchestrator: AppOrchestrator;
   cwd: string;
   initialTaskId?: string | null;
   initialRoute?: RouteDecision | null;
@@ -162,6 +165,32 @@ export interface AppProps {
   copyToClipboard?: (text: string) => Promise<unknown>;
   shutdownSignal?: AbortSignal;
 }
+
+export type AppOrchestrator = Pick<Orchestrator,
+  | "answerTaskQuestion"
+  | "canRetryTask"
+  | "cancelFeature"
+  | "clearRoleConfiguration"
+  | "handleRequest"
+  | "handleTaskTurn"
+  | "listTaskWorkers"
+  | "pauseFeature"
+  | "reassignFeature"
+  | "resumeFeature"
+  | "retryTask"
+  | "roleConfigurationSnapshot"
+  | "routeTaskFollowUp"
+  | "updateRoleConfiguration"
+  | "validateRoleConfiguration"
+> & {
+  persistsRunResults?: boolean;
+  restorePendingRun?: (input: Omit<HandleRequestInput, "request">) => Promise<HandleRequestResult | null>;
+  detachBackgroundRuns?: () => void;
+  backgroundRunAttached?: () => boolean;
+  backgroundRunControllable?: () => boolean;
+  subscribeBackgroundRunState?: (listener: () => void) => () => void;
+  acknowledgeBackgroundRun?: () => Promise<void>;
+};
 
 export interface ActivatedTaskSession {
   taskId: string;
@@ -299,6 +328,7 @@ export function App({
   const [inputCursor, setInputCursor] = useState(0);
   const [inputReady, setInputReady] = useState(false);
   const [terminalSize, setTerminalSize] = useState(readTerminalSize);
+  const [, setBackgroundRunRevision] = useState(0);
   const [messages, setMessages] = useState<Message[]>(() => [...initialMessages]);
   const [taskResultExpanded, setTaskResultExpanded] = useState(() => (
     Boolean(initialTaskId) && latestTaskResultMessageIndex(initialMessages, initialTaskId) >= 0
@@ -399,6 +429,7 @@ export function App({
   const copyTextByViewRef = useRef<{ chat: string; worker: string }>({ chat: "", worker: "" });
   const messagesRef = useRef<Message[]>([...initialMessages]);
   const activeRunControllerRef = useRef<AbortController | null>(null);
+  const backgroundRestoreStartedRef = useRef(false);
   const activeTaskIdRef = useRef<string | null>(initialTaskId);
   const nativeInputRef = useRef(nativeInput);
   const inputRef = useRef(input);
@@ -542,6 +573,8 @@ export function App({
     && !busy
     && canRetryTask
     && selectedBoardFeature?.state !== "approved";
+  const backgroundRunAttached = orchestrator.backgroundRunAttached?.() ?? false;
+  const backgroundRunControllable = orchestrator.backgroundRunControllable?.() ?? backgroundRunAttached;
   const visibleStatus = statusLineWithWorkerRefs(status, workers);
   const visibleRouteStatus = routePending
     ? formatRoutePendingStatus(routePending, routeElapsedMs)
@@ -571,6 +604,10 @@ export function App({
     roleConfigurationSnapshot,
     roleConfigurationScope
   );
+
+  useEffect(() => orchestrator.subscribeBackgroundRunState?.(() => {
+    setBackgroundRunRevision((current) => current + 1);
+  }), [orchestrator]);
 
   useEffect(() => {
     inputRef.current = input;
@@ -977,6 +1014,75 @@ export function App({
   }, [activeTaskId, initialTaskId, initialWorkers, orchestrator]);
 
   useEffect(() => {
+    if (!orchestrator.restorePendingRun || backgroundRestoreStartedRef.current) {
+      return;
+    }
+    backgroundRestoreStartedRef.current = true;
+    const controller = new AbortController();
+    activeRunControllerRef.current = controller;
+    let active = true;
+
+    async function restoreBackgroundRun(): Promise<void> {
+      busyRef.current = true;
+      setBusy(true);
+      try {
+        const result = await orchestrator.restorePendingRun?.({
+          cwd,
+          ...createRunCallbacks(controller, { announceRoute: false })
+        });
+        if (!active || !result) {
+          return;
+        }
+        const taskId = result.taskId ?? activeTaskIdRef.current;
+        activeTaskIdRef.current = taskId;
+        setActiveTaskId(taskId);
+        setActiveMode(taskId ? "complex" : result.mode);
+        setCanRetryTask(taskId ? await orchestrator.canRetryTask(taskId) : false);
+        await refreshRoleConfigurationState(taskId);
+        if (!messagesRef.current.some((message) => message.from === "system" && message.text === result.summary && message.taskId === (taskId ?? undefined))) {
+          await appendVisibleMessage(
+            { from: "system", text: result.summary },
+            taskId ?? undefined,
+            { persist: false }
+          );
+        }
+        if (result.mode === "complex" && parseTaskResultSummary(result.summary)) {
+          setTaskResultExpanded(true);
+        }
+        await orchestrator.acknowledgeBackgroundRun?.();
+      } catch (error) {
+        if (!active || isSupervisorDetachedError(error)) {
+          return;
+        }
+        const taskId = activeTaskIdRef.current;
+        const text = isAbortError(error)
+          ? "cancelled · request stopped"
+          : error instanceof Error ? error.message : String(error);
+        if (!messagesRef.current.some((message) => message.from === "system" && message.text === text && message.taskId === (taskId ?? undefined))) {
+          await appendVisibleMessage({ from: "system", text }, taskId ?? undefined, { persist: false });
+        }
+        await orchestrator.acknowledgeBackgroundRun?.();
+        setCanRetryTask(taskId ? await orchestrator.canRetryTask(taskId) : false);
+      } finally {
+        if (activeRunControllerRef.current === controller) {
+          activeRunControllerRef.current = null;
+        }
+        if (active) {
+          setRoutePending(null);
+          setRouteAnnouncement(null);
+          busyRef.current = false;
+          setBusy(false);
+        }
+      }
+    }
+
+    void restoreBackgroundRun();
+    return () => {
+      active = false;
+    };
+  }, [cwd, orchestrator]);
+
+  useEffect(() => {
     if (workers.length === 0 || !status) {
       return;
     }
@@ -1136,8 +1242,7 @@ export function App({
       previousCursor: number
     ): boolean => {
       if (update.exit) {
-        activeRunControllerRef.current?.abort();
-        exitRef.current();
+        requestAppExit();
         return false;
       }
       if (busyRef.current) {
@@ -1279,8 +1384,7 @@ export function App({
       if (currentView === "chat" && routeFallbackPromptRef.current) {
         const fallbackChunks = tokenizeRawInput(chunk);
         if (fallbackChunks.some((fallbackChunk) => isExitShortcut(fallbackChunk, {}))) {
-          activeRunControllerRef.current?.abort();
-          exitRef.current();
+          requestAppExit();
           return;
         }
         if (fallbackChunks.some((fallbackChunk) => isStatusDetailsShortcut(fallbackChunk, {}))) {
@@ -1331,8 +1435,7 @@ export function App({
       if (currentView === "roles") {
         const roleChunks = tokenizeRawInput(chunk);
         if (roleChunks.some((roleChunk) => isExitShortcut(roleChunk, {}))) {
-          activeRunControllerRef.current?.abort();
-          exitRef.current();
+          requestAppExit();
           return;
         }
         if (roleChunks.some((roleChunk) => isStatusDetailsShortcut(roleChunk, {}))) {
@@ -1460,8 +1563,7 @@ export function App({
       }
       if (currentView === "status") {
         if (isExitShortcut(chunk, {})) {
-          activeRunControllerRef.current?.abort();
-          exitRef.current();
+          requestAppExit();
           return;
         }
         if (isStatusDetailsShortcut(chunk, {}) || chunk === "\x1b") {
@@ -1479,8 +1581,7 @@ export function App({
       }
       if (currentView === "sessions") {
         if (isExitShortcut(chunk, {})) {
-          activeRunControllerRef.current?.abort();
-          exitRef.current();
+          requestAppExit();
           return;
         }
         if (taskSessionDetailsRef.current) {
@@ -1840,8 +1941,7 @@ export function App({
       if (currentView === "features") {
         const featureChunks = tokenizeRawInput(chunk);
         if (featureChunks.some((featureChunk) => isExitShortcut(featureChunk, {}))) {
-          activeRunControllerRef.current?.abort();
-          exitRef.current();
+          requestAppExit();
           return;
         }
         const pendingCancel = featureCancelPromptRef.current;
@@ -2000,8 +2100,7 @@ export function App({
       if (currentView === "collaboration") {
         const timelineChunks = tokenizeRawInput(chunk);
         if (timelineChunks.some((timelineChunk) => isExitShortcut(timelineChunk, {}))) {
-          activeRunControllerRef.current?.abort();
-          exitRef.current();
+          requestAppExit();
           return;
         }
         for (const timelineChunk of timelineChunks) {
@@ -2109,8 +2208,7 @@ export function App({
       }
       if (currentView === "workers") {
         if (isExitShortcut(chunk, {})) {
-          activeRunControllerRef.current?.abort();
-          exitRef.current();
+          requestAppExit();
           return;
         }
         if (isWorkerOverviewShortcut(chunk, {}) || chunk === "\x1b") {
@@ -2175,8 +2273,7 @@ export function App({
       if (currentView === "router") {
         const routerChunks = tokenizeRawInput(chunk);
         if (routerChunks.some((routerChunk) => isExitShortcut(routerChunk, {}))) {
-          activeRunControllerRef.current?.abort();
-          exitRef.current();
+          requestAppExit();
           return;
         }
         for (const routerChunk of routerChunks) {
@@ -2215,8 +2312,7 @@ export function App({
       if (currentView === "worker") {
         for (const workerChunk of tokenizeRawInput(chunk)) {
           if (isExitShortcut(workerChunk, {})) {
-            activeRunControllerRef.current?.abort();
-            exitRef.current();
+            requestAppExit();
             return;
           }
           if (workerSearchRef.current.open) {
@@ -2494,6 +2590,7 @@ export function App({
       nativeAttachRequestSequenceRef.current += 1;
       nativeAttachRef.current?.process.kill();
       nativeAttachRef.current = null;
+      orchestrator.detachBackgroundRuns?.();
       activeRunControllerRef.current?.abort();
       collaborationLoadSequenceRef.current += 1;
       routerLoadSequenceRef.current += 1;
@@ -2510,8 +2607,7 @@ export function App({
       return;
     }
     const shutdown = () => {
-      activeRunControllerRef.current?.abort();
-      exitRef.current();
+      requestAppExit();
     };
     if (shutdownSignal.aborted) {
       shutdown();
@@ -2520,6 +2616,12 @@ export function App({
     shutdownSignal.addEventListener("abort", shutdown, { once: true });
     return () => shutdownSignal.removeEventListener("abort", shutdown);
   }, [shutdownSignal]);
+
+  function requestAppExit(): void {
+    orchestrator.detachBackgroundRuns?.();
+    activeRunControllerRef.current?.abort();
+    exitRef.current();
+  }
 
   async function copyVisibleView(): Promise<void> {
     const payload = visibleClipboardPayload(viewRef.current);
@@ -2672,8 +2774,7 @@ export function App({
   useInput((inputKey, key) => {
     if (view === "worker") {
       if (isExitShortcut(inputKey, key)) {
-        activeRunControllerRef.current?.abort();
-        exitRef.current();
+        requestAppExit();
         return;
       }
       if (isNewConversationShortcut(inputKey, key) && !busy) {
@@ -2920,14 +3021,18 @@ export function App({
     routeFallbackResolverRef.current?.(choice);
   }
 
-  async function appendVisibleMessage(message: Message, taskId?: string): Promise<void> {
+  async function appendVisibleMessage(
+    message: Message,
+    taskId?: string,
+    options: { persist?: boolean } = {}
+  ): Promise<void> {
     const visibleMessage = taskId ? { ...message, taskId } : message;
     setMessages((current) => {
       const next = [...current, visibleMessage];
       messagesRef.current = next;
       return next;
     });
-    if (!persistChatMessage) {
+    if (!persistChatMessage || options.persist === false) {
       return;
     }
     try {
@@ -3028,13 +3133,18 @@ export function App({
       setRouteAnnouncement(null);
       await appendVisibleMessage(
         { from: "system", text: result.summary },
-        nextMemory.activeTaskId ?? undefined
+        nextMemory.activeTaskId ?? undefined,
+        { persist: !orchestrator.persistsRunResults }
       );
+      await orchestrator.acknowledgeBackgroundRun?.();
       if (result.mode === "complex" && parseTaskResultSummary(result.summary)) {
         setTaskResultExpanded(true);
       }
     } catch (error) {
       setRouteAnnouncement(null);
+      if (isSupervisorDetachedError(error)) {
+        return;
+      }
       const retryTaskId = activeTaskIdRef.current;
       if (retryTaskId) {
         setCanRetryTask(await orchestrator.canRetryTask(retryTaskId));
@@ -3043,7 +3153,8 @@ export function App({
       await appendVisibleMessage({
         from: "system",
         text: isAbortError(error) ? "cancelled · request stopped" : error instanceof Error ? error.message : String(error)
-      }, retryTaskId ?? undefined);
+      }, retryTaskId ?? undefined, { persist: !orchestrator.persistsRunResults });
+      await orchestrator.acknowledgeBackgroundRun?.();
     } finally {
       if (activeRunControllerRef.current === controller) {
         activeRunControllerRef.current = null;
@@ -3091,18 +3202,27 @@ export function App({
       setCanRetryTask(false);
       await refreshRoleConfigurationState(taskId);
       setRouteAnnouncement(null);
-      await appendVisibleMessage({ from: "system", text: result.summary }, taskId);
+      await appendVisibleMessage(
+        { from: "system", text: result.summary },
+        taskId,
+        { persist: !orchestrator.persistsRunResults }
+      );
+      await orchestrator.acknowledgeBackgroundRun?.();
       if (parseTaskResultSummary(result.summary)) {
         setTaskResultExpanded(true);
       }
     } catch (error) {
       setRouteAnnouncement(null);
+      if (isSupervisorDetachedError(error)) {
+        return;
+      }
       setCanRetryTask(await orchestrator.canRetryTask(taskId));
       await refreshRoleConfigurationState(taskId);
       await appendVisibleMessage({
         from: "system",
         text: isAbortError(error) ? "cancelled · retry stopped" : error instanceof Error ? error.message : String(error)
-      }, taskId);
+      }, taskId, { persist: !orchestrator.persistsRunResults });
+      await orchestrator.acknowledgeBackgroundRun?.();
     } finally {
       if (activeRunControllerRef.current === controller) {
         activeRunControllerRef.current = null;
@@ -4169,6 +4289,9 @@ export function App({
       view={view}
       cwd={cwd}
       taskId={activeTaskId}
+      busy={busy}
+      detachable={backgroundRunAttached}
+      controllable={backgroundRunControllable}
       statusText={[visibleTaskStatus, visibleRouteSummary, configChange?.compact].filter(Boolean).join(" | ")}
       contentHeight={contentHeight}
       showStatusBar={config.ui.showStatusBar}
@@ -4177,6 +4300,8 @@ export function App({
           mode={view === "worker" && workerSearch.open ? "worker-search" : view}
           ready={inputReady}
           busy={busy}
+          busyDetachable={backgroundRunAttached}
+          busyControllable={backgroundRunControllable}
           routeFallback={Boolean(routeFallbackPrompt)}
           collaborationDetail={collaborationDetailOpen}
           collaborationUnresolved={collaborationUnresolvedOnly}

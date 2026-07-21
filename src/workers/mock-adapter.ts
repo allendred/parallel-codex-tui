@@ -14,6 +14,7 @@ export class MockWorkerAdapter implements WorkerAdapter {
     await spec.onNativeSession?.(nativeSessionId);
     await setStatus(spec, "running", "mock-running", `${spec.role} mock worker running`, nativeSessionId);
     await appendText(spec.outputLogPath, `[mock:${spec.role}] started\n`);
+    await waitForConfiguredMockDelay(spec);
 
     if (spec.role === "judge") {
       if (spec.prompt.includes("# Role:") && spec.prompt.includes("· Final acceptance")) {
@@ -76,6 +77,24 @@ export class MockWorkerAdapter implements WorkerAdapter {
       signal: null
     };
   }
+}
+
+async function waitForConfiguredMockDelay(spec: WorkerRunSpec): Promise<void> {
+  const configured = Number(spec.modelConfig?.env?.PCT_MOCK_DELAY_MS ?? 0);
+  const delayMs = Number.isFinite(configured) ? Math.min(10000, Math.max(0, Math.trunc(configured))) : 0;
+  if (delayMs === 0 || spec.signal?.aborted) {
+    return;
+  }
+  await new Promise<void>((resolve) => {
+    const timer = setTimeout(finish, delayMs);
+    const signal = spec.signal;
+    function finish(): void {
+      clearTimeout(timer);
+      signal?.removeEventListener("abort", finish);
+      resolve();
+    }
+    signal?.addEventListener("abort", finish, { once: true });
+  });
 }
 
 async function cancelMockWorker(spec: WorkerRunSpec, nativeSessionId?: string): Promise<WorkerResult> {

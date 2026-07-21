@@ -86,6 +86,7 @@ const COMPLETION_CONTRACT_FILE = "completion-contract.json";
 export interface HandleRequestInput {
   request: string;
   cwd: string;
+  route?: RouteDecision;
   signal?: AbortSignal;
   retry?: boolean;
   onRouteStart?: (state: RouteStartInfo) => void;
@@ -287,18 +288,16 @@ export class Orchestrator {
 
   async handleRequest(input: HandleRequestInput): Promise<HandleRequestResult> {
     throwIfCancelled(input.signal);
-    const routed = await this.routeRequest(
-      input.request,
-      input.cwd,
-      input.signal,
-      "initial",
-      input.onRouteStart,
-      input.onRouteFallback,
-      input.onRouteProgress
-    );
-    const roleSelection = input.roleSelection ?? await this.roleConfiguration.selectionForRequest();
-    const route = routeWithRoleSelection(routed, roleSelection);
-    input.onRoute?.(route);
+    let roleSelection: RoleExecutionSelection;
+    let route: RouteDecision;
+    if (input.route) {
+      roleSelection = input.roleSelection ?? await this.roleConfiguration.selectionForRequest();
+      route = routeWithRoleSelection(input.route, roleSelection);
+    } else {
+      const routed = await this.routeInitialRequest(input);
+      roleSelection = routed.roleSelection;
+      route = routed.route;
+    }
     throwIfCancelled(input.signal);
     const workers: WorkerLogRef[] = [];
     const executionInput = { ...input, roleSelection };
@@ -339,6 +338,30 @@ export class Orchestrator {
     );
 
     return this.withTaskRunLease(task, () => this.runInitialTask(executionInput, task, route, turn, workers));
+  }
+
+  async routeInitialRequest(input: HandleRequestInput): Promise<TaskFollowUpRouteResult> {
+    throwIfCancelled(input.signal);
+    const routed = await this.routeRequest(
+      input.request,
+      input.cwd,
+      input.signal,
+      "initial",
+      input.onRouteStart,
+      input.onRouteFallback,
+      input.onRouteProgress
+    );
+    const roleSelection = input.roleSelection ?? await this.roleConfiguration.selectionForRequest();
+    const route = routeWithRoleSelection(routed, roleSelection);
+    input.onRoute?.(route);
+    throwIfCancelled(input.signal);
+    return {
+      mode: route.mode,
+      taskId: null,
+      reason: route.reason,
+      route,
+      roleSelection
+    };
   }
 
   async handleTaskTurn(input: HandleTaskTurnInput): Promise<HandleRequestResult> {

@@ -11,6 +11,7 @@ import {
   writeWorkerProcessRecord
 } from "../src/core/process-ownership.js";
 import { TaskMetaSchema, WorkerStatusSchema } from "../src/domain/schemas.js";
+import { listSupervisorRuns } from "../src/supervisor/store.js";
 import { NativeTerminalScreen } from "../src/tui/terminal-screen.js";
 
 describe("CLI orphan process recovery smoke", () => {
@@ -68,9 +69,12 @@ describe("CLI orphan process recovery smoke", () => {
       workerPid = processRecord.pid;
       expect(processRecord.process_start_token).toEqual(expect.any(String));
       expect(processIsAlive(workerPid)).toBe(true);
+      const supervisorPid = await waitForSupervisorPid(workspace);
 
       process.kill(first.pid, "SIGKILL");
       await waitForExit(firstExits);
+      process.kill(supervisorPid, "SIGKILL");
+      await waitForProcessState(supervisorPid, false);
       if (processIsAlive(workerPid)) {
         process.kill(-workerPid, "SIGKILL");
         await waitForProcessState(workerPid, false);
@@ -196,6 +200,17 @@ async function waitForTaskDir(workspace: string): Promise<string> {
     await new Promise((resolve) => setTimeout(resolve, 50));
   }
   throw new Error("Timed out waiting for task directory");
+}
+
+async function waitForSupervisorPid(workspace: string): Promise<number> {
+  for (let attempt = 0; attempt < 200; attempt += 1) {
+    const run = (await listSupervisorRuns(workspace, ".parallel-codex")).at(-1);
+    if (run?.state.pid && processIsAlive(run.state.pid)) {
+      return run.state.pid;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+  throw new Error("Timed out waiting for Supervisor process");
 }
 
 async function waitForWorkerPhase(statusPath: string, phase: string): Promise<void> {

@@ -500,6 +500,9 @@ describe("InputBar", () => {
     expect(chatBusyDisplayValue(16)).toBe("busy");
     expect(chatBusyDisplayValue(24)).toBe("working");
     expect(chatBusyDisplayValue(40)).toBe("working · Esc stop");
+    expect(chatBusyDisplayValue(80, true)).toBe("working · Esc stop · ^C detach");
+    expect(chatBusyDisplayValue(80, true, false)).toBe("observing · ^C detach");
+    expect(chatBusyDisplayValue(28, true, false)).toBe("^C detach");
 
     const { lastFrame } = render(
       <InputBar mode="chat" busy value="" terminalWidth={10} onChange={() => {}} />

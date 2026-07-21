@@ -20,6 +20,9 @@ export interface AppShellProps {
   contentHeight?: number;
   terminalWidth?: number;
   showStatusBar?: boolean;
+  busy?: boolean;
+  detachable?: boolean;
+  controllable?: boolean;
   children: React.ReactNode;
   input: React.ReactNode;
   error?: string | null;
@@ -33,11 +36,14 @@ export function AppShell({
   contentHeight = 20,
   terminalWidth = process.stdout.columns || 120,
   showStatusBar = true,
+  busy = false,
+  detachable = false,
+  controllable = true,
   children,
   input,
   error = null
 }: AppShellProps) {
-  const header = headerParts({ view, cwd, taskId, terminalWidth });
+  const header = headerParts({ view, cwd, taskId, terminalWidth, busy, detachable, controllable });
   const headerSegments = headerDisplaySegments(header);
   const headerSeparatorText = headerSeparator(terminalWidth);
   const headerLeadingWidth = terminalWidth > 1 ? 1 : 0;
@@ -286,7 +292,15 @@ function headerDisplaySegments(parts: { brand: string; view: string; task: strin
     .map(([kind, text]) => ({ kind, text }));
 }
 
-function headerParts(input: { view: AppView; cwd: string; taskId: string | null; terminalWidth: number }): {
+function headerParts(input: {
+  view: AppView;
+  cwd: string;
+  taskId: string | null;
+  terminalWidth: number;
+  busy: boolean;
+  detachable: boolean;
+  controllable: boolean;
+}): {
   brand: string;
   view: string;
   task: string;
@@ -308,7 +322,11 @@ function headerParts(input: { view: AppView; cwd: string; taskId: string | null;
     view: nano ? "" : input.terminalWidth <= 24 && input.view === "native" ? "nat" : narrow ? shortViewLabel(input.view) : viewLabel(input.view),
     task: showTask ? ultraNarrow ? ultraCompactTaskId(task) : narrow ? task : `#${task}` : "",
     project: tiny || ultraNarrow ? "" : compactHeaderProject(input.cwd, veryNarrow ? 10 : narrow ? 16 : 40),
-    shortcut: narrow ? shortShortcutHint(input.view) : shortcutHint(input.view)
+    shortcut: input.busy && input.detachable
+      ? input.controllable
+        ? narrow ? "^C detach" : "Esc stop · ^C detach"
+        : narrow ? "^C detach" : "observe · ^C detach"
+      : narrow ? shortShortcutHint(input.view) : shortcutHint(input.view)
   }, contentWidth, separator);
 }
 

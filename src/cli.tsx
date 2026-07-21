@@ -28,6 +28,8 @@ import { formatTuiThemeCatalog } from "./tui/theme-preview.js";
 import { configureTuiTheme } from "./tui/theme.js";
 import { routerDiagnosticsPolicy } from "./tui/RouterDiagnosticsView.js";
 import { version } from "./version.js";
+import { SupervisorOrchestrator } from "./supervisor/client.js";
+import { runSupervisorJob } from "./supervisor/runner.js";
 
 main().catch((error) => {
   if (error instanceof WorkspaceSelectionCancelledError) {
@@ -38,6 +40,12 @@ main().catch((error) => {
 });
 
 async function main(): Promise<void> {
+  const supervisorRunDir = process.env.PCT_SUPERVISOR_RUN_DIR;
+  if (supervisorRunDir) {
+    delete process.env.PCT_SUPERVISOR_RUN_DIR;
+    await runSupervisorJob(supervisorRunDir);
+    return;
+  }
   const rawArgs = process.argv.slice(2);
   const cliArgErrors = validateCliArgs(rawArgs);
   if (cliArgErrors.length > 0) {
@@ -121,7 +129,7 @@ async function main(): Promise<void> {
       <App
         key={state.runtime.workspaceRoot}
         config={withUiThemeOverride(state.runtime.config, cliArgs.theme)}
-        orchestrator={state.runtime.orchestrator}
+        orchestrator={state.supervisor}
         cwd={state.runtime.workspaceRoot}
         initialTaskId={state.initialTaskId}
         initialRoute={state.initialRoute}
@@ -252,6 +260,7 @@ async function main(): Promise<void> {
     } finally {
       removeSigintHandler();
       restoreInteractiveTerminal();
+      closeInteractiveWorkspace(current);
       retryDeferredWorkspaceClosures(deferredWorkspaceClosures);
     }
   }
@@ -259,6 +268,7 @@ async function main(): Promise<void> {
 
 interface InteractiveWorkspaceState {
   runtime: AppRuntime;
+  supervisor: SupervisorOrchestrator;
   initialTaskId: string | null;
   initialRoute: Awaited<ReturnType<AppRuntime["sessions"]["readLatestRoute"]>>;
   initialWorkers: Awaited<ReturnType<AppRuntime["orchestrator"]["listTaskWorkers"]>>;
@@ -274,6 +284,13 @@ async function loadInteractiveWorkspace(
 ): Promise<InteractiveWorkspaceState> {
   const runtime = await createRuntime(appRoot, workspaceRoot);
   try {
+    const supervisor = await SupervisorOrchestrator.open({
+      delegate: runtime.orchestrator,
+      sessions: runtime.sessions,
+      appRoot,
+      workspaceRoot: runtime.workspaceRoot,
+      dataDir: runtime.config.dataDir
+    });
     const preflightPromise = runRuntimePreflight(
       runtime.config,
       runtime.workspaceRoot,
@@ -332,6 +349,7 @@ async function loadInteractiveWorkspace(
 
     return {
       runtime,
+      supervisor,
       initialTaskId,
       initialRoute,
       initialWorkers,
@@ -354,6 +372,7 @@ async function loadInteractiveWorkspace(
 }
 
 function closeInteractiveWorkspace(state: InteractiveWorkspaceState): void {
+  state.supervisor.detachBackgroundRuns();
   state.runtime.index.close();
 }
 

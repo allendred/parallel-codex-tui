@@ -8,6 +8,8 @@ export interface InputBarProps {
   mode: "chat" | "worker" | "worker-search" | "workers" | "features" | "collaboration" | "native" | "router" | "sessions" | "status" | "roles";
   ready?: boolean;
   busy?: boolean;
+  busyDetachable?: boolean;
+  busyControllable?: boolean;
   routeFallback?: boolean;
   collaborationDetail?: boolean;
   collaborationUnresolved?: boolean;
@@ -58,6 +60,8 @@ export function InputBar({
   mode,
   ready = true,
   busy = false,
+  busyDetachable = false,
+  busyControllable = true,
   routeFallback = false,
   collaborationDetail = false,
   collaborationUnresolved = false,
@@ -348,7 +352,7 @@ export function InputBar({
     );
   }
 
-  const busyText = chatBusyDisplayValue(terminalWidth);
+  const busyText = chatBusyDisplayValue(terminalWidth, busyDetachable, busyControllable);
   const prompt = busy ? "run" : ">";
 
   if (busy) {
@@ -722,12 +726,22 @@ function chatPlaceholderValueWidth(terminalWidth: number): number {
   return Math.max(1, terminalWidth - (terminalWidth >= 10 ? 6 : 4));
 }
 
-export function chatBusyDisplayValue(terminalWidth: number): string {
+export function chatBusyDisplayValue(
+  terminalWidth: number,
+  detachable = false,
+  controllable = true
+): string {
   if (terminalWidth < 14) {
     return "";
   }
   if (terminalWidth < 22) {
     return "busy";
+  }
+  if (detachable && !controllable) {
+    return terminalWidth >= 34 ? "observing · ^C detach" : "^C detach";
+  }
+  if (terminalWidth >= 48 && detachable) {
+    return "working · Esc stop · ^C detach";
   }
   if (terminalWidth >= 34) {
     return "working · Esc stop";

@@ -8,7 +8,7 @@ import { TaskMetaSchema, WorkerStatusSchema } from "../src/domain/schemas.js";
 import { NativeTerminalScreen } from "../src/tui/terminal-screen.js";
 
 describe("CLI exit shortcuts", () => {
-  it("gracefully terminates an active worker before exiting on SIGINT", async () => {
+  it("detaches an active worker before exiting on SIGINT", async () => {
     if (process.platform === "win32") {
       return;
     }
@@ -27,7 +27,7 @@ describe("CLI exit shortcuts", () => {
       "const { writeFileSync } = require('node:fs');",
       `writeFileSync(${JSON.stringify(workerPidPath)}, String(process.pid));`,
       `process.on('SIGTERM', () => { writeFileSync(${JSON.stringify(terminatedPath)}, 'terminated'); process.exit(0); });`,
-      `setTimeout(() => writeFileSync(${JSON.stringify(survivedPath)}, 'survived'), 1200);`,
+      `setTimeout(() => { writeFileSync(${JSON.stringify(survivedPath)}, 'survived'); process.exit(1); }, 1200);`,
       "setInterval(() => {}, 1000);"
     ].join(""));
     await writeFile(
@@ -75,16 +75,16 @@ describe("CLI exit shortcuts", () => {
       const taskDir = await waitForTaskDir(workspace);
       child.kill("SIGINT");
       await waitForExit(exits);
-      await waitForPath(terminatedPath);
-      await new Promise((resolve) => setTimeout(resolve, 1300));
+      await waitForPath(survivedPath);
+      await waitForTaskStatus(taskDir, "failed");
 
       expect(exits[0]).toBe(0);
-      expect(await pathExists(survivedPath)).toBe(false);
+      expect(await pathExists(terminatedPath)).toBe(false);
       await expect(readJson(join(taskDir, "meta.json"), TaskMetaSchema)).resolves.toMatchObject({
-        status: "cancelled"
+        status: "failed"
       });
       await expect(readJson(join(taskDir, "judge-codex", "status.json"), WorkerStatusSchema)).resolves.toMatchObject({
-        state: "cancelled"
+        state: "failed"
       });
       expect(await pathExists(join(taskDir, "run-owner.json"))).toBe(false);
       expect(await pathExists(join(taskDir, "judge-codex", "process.json"))).toBe(false);
@@ -260,6 +260,20 @@ async function waitForTaskDir(workspace: string): Promise<string> {
     await new Promise((resolve) => setTimeout(resolve, 50));
   }
   throw new Error("Timed out waiting for task session");
+}
+
+async function waitForTaskStatus(taskDir: string, status: string): Promise<void> {
+  for (let attempt = 0; attempt < 160; attempt += 1) {
+    try {
+      if ((await readJson(join(taskDir, "meta.json"), TaskMetaSchema)).status === status) {
+        return;
+      }
+    } catch {
+      // The background Supervisor may still be publishing the terminal task state.
+    }
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+  throw new Error(`Timed out waiting for task status ${status}`);
 }
 
 function escapeToml(value: string): string {
