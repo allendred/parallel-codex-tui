@@ -17,6 +17,9 @@ export interface CliArgs {
   probeAgents: boolean;
   probeRouter: boolean;
   runs: boolean;
+  waitRun: boolean;
+  waitRunId: string | null;
+  waitTimeoutMs: number | null;
   workspaceRoot: string;
   taskId: string | null;
   theme: TuiThemeName | null;
@@ -32,7 +35,9 @@ const allowedValueOptions = new Set([
   "-t",
   "--theme",
   "--diagnostics",
-  "--cancel-run"
+  "--cancel-run",
+  "--wait-run",
+  "--wait-timeout"
 ]);
 const allowedBooleanOptions = new Set([
   "--doctor",
@@ -73,6 +78,20 @@ export function parseCliArgs(args: string[], cwd: string): CliArgs {
   );
   const cancelRun = cancelRunFlagIndex >= 0;
   const cancelRunId = flagValue(optionArgs, cancelRunFlagIndex);
+  const waitRunFlagIndex = lastFlagIndex(
+    optionArgs,
+    (arg) => arg === "--wait-run" || arg.startsWith("--wait-run=")
+  );
+  const waitTimeoutFlagIndex = lastFlagIndex(
+    optionArgs,
+    (arg) => arg === "--wait-timeout" || arg.startsWith("--wait-timeout=")
+  );
+  const waitRun = waitRunFlagIndex >= 0;
+  const waitRunId = flagValue(optionArgs, waitRunFlagIndex);
+  const waitTimeoutSeconds = Number(flagValue(optionArgs, waitTimeoutFlagIndex));
+  const waitTimeoutMs = waitTimeoutFlagIndex >= 0 && Number.isFinite(waitTimeoutSeconds)
+    ? waitTimeoutSeconds * 1000
+    : null;
   const diagnostics = diagnosticsFlagIndex >= 0;
   const doctor = optionArgs.includes("--doctor");
   const help = optionArgs.includes("--help") || optionArgs.includes("-h");
@@ -106,6 +125,9 @@ export function parseCliArgs(args: string[], cwd: string): CliArgs {
     probeAgents,
     probeRouter,
     runs,
+    waitRun,
+    waitRunId,
+    waitTimeoutMs,
     workspaceRoot,
     taskId,
     theme,
@@ -173,14 +195,38 @@ export function validateCliArgs(args: string[]): string[] {
   );
   const cancelRun = cancelRunFlagIndex >= 0;
   const cancelRunId = flagValue(optionArgs, cancelRunFlagIndex);
-  if (runs && cancelRun) {
-    errors.push("--runs and --cancel-run cannot be used together");
+  const waitRunFlagIndex = lastFlagIndex(
+    optionArgs,
+    (arg) => arg === "--wait-run" || arg.startsWith("--wait-run=")
+  );
+  const waitRun = waitRunFlagIndex >= 0;
+  const waitRunId = flagValue(optionArgs, waitRunFlagIndex);
+  const supervisorCommandCount = [runs, cancelRun, waitRun].filter(Boolean).length;
+  if (supervisorCommandCount > 1) {
+    errors.push("Only one of --runs, --cancel-run, or --wait-run may be used");
   }
-  if (optionArgs.includes("--json") && !runs && !cancelRun) {
-    errors.push("--json requires --runs or --cancel-run");
+  if (optionArgs.includes("--json") && supervisorCommandCount === 0) {
+    errors.push("--json requires --runs, --cancel-run, or --wait-run");
   }
   if (cancelRunId && !/^run-[A-Za-z0-9._-]+$/.test(cancelRunId)) {
     errors.push("Invalid --cancel-run: expected run- followed by letters, numbers, dot, underscore, or hyphen");
+  }
+  if (waitRunId && !/^run-[A-Za-z0-9._-]+$/.test(waitRunId)) {
+    errors.push("Invalid --wait-run: expected run- followed by letters, numbers, dot, underscore, or hyphen");
+  }
+  const waitTimeoutFlagIndex = lastFlagIndex(
+    optionArgs,
+    (arg) => arg === "--wait-timeout" || arg.startsWith("--wait-timeout=")
+  );
+  if (waitTimeoutFlagIndex >= 0) {
+    const rawWaitTimeout = flagValue(optionArgs, waitTimeoutFlagIndex);
+    const waitTimeoutSeconds = Number(rawWaitTimeout);
+    if (!rawWaitTimeout || !Number.isFinite(waitTimeoutSeconds) || waitTimeoutSeconds <= 0) {
+      errors.push("Invalid --wait-timeout: expected a positive number of seconds");
+    }
+    if (!waitRun) {
+      errors.push("--wait-timeout requires --wait-run");
+    }
   }
   return errors;
 }

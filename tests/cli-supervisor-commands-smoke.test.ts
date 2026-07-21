@@ -1,15 +1,22 @@
 import { execFile } from "node:child_process";
-import { mkdir, mkdtemp, readdir, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { describe, expect, it } from "vitest";
 import { spawn } from "node-pty";
+import { readProcessStartToken } from "../src/core/process-identity.js";
 import type {
   SupervisorCancellationResult,
   SupervisorRunsReport
 } from "../src/supervisor/operations.js";
-import { readSupervisorRunState, supervisorRunFiles } from "../src/supervisor/store.js";
+import {
+  readSupervisorCommands,
+  readSupervisorRunState,
+  createSupervisorRun,
+  supervisorRunFiles,
+  writeSupervisorRunState
+} from "../src/supervisor/store.js";
 import { NativeTerminalScreen } from "../src/tui/terminal-screen.js";
 
 const execFileAsync = promisify(execFile);
@@ -92,6 +99,127 @@ describe("CLI Supervisor commands smoke", () => {
       await rm(workspace, { recursive: true, force: true });
     }
   }, 45000);
+
+  it("waits for a detached run to complete without taking control or cancelling it", async () => {
+    const appRoot = await mkdtemp(join(tmpdir(), "pct-cli-supervisor-wait-app-"));
+    const workspace = await mkdtemp(join(tmpdir(), "pct-cli-supervisor-wait-workspace-"));
+    await mkdir(join(appRoot, ".parallel-codex"), { recursive: true });
+    await writeFile(
+      join(appRoot, ".parallel-codex", "config.toml"),
+      [
+        "[router]",
+        'defaultMode = "simple"',
+        "",
+        "[pairing]",
+        'main = "mock"',
+        'judge = "mock"',
+        'actor = "mock"',
+        'critic = "mock"',
+        "",
+        "[workers.mock.model.env]",
+        'PCT_MOCK_DELAY_MS = "1200"',
+        ""
+      ].join("\n"),
+      "utf8"
+    );
+
+    const tui = startCli(appRoot, workspace);
+    let runDir: string | null = null;
+    try {
+      await waitForScreenText(tui, "> | message");
+      tui.child.write("private detached wait request\r");
+      await waitForScreenText(tui, "working");
+      runDir = await latestRunDir(workspace);
+      const runId = runDir.split("/").at(-1)!;
+
+      tui.child.write("\x03");
+      await waitForExit(tui.exits);
+      expect(tui.exits[0]).toBe(0);
+
+      const waited = await runCliCommand(appRoot, workspace, [
+        "--wait-run",
+        runId,
+        "--wait-timeout",
+        "10",
+        "--json"
+      ]);
+      expect(waited.stderr).toBe("");
+      const result = JSON.parse(waited.stdout) as {
+        outcome: string;
+        run: { run_id: string; status: string; control: string; controller_active: boolean };
+      };
+      expect(result).toMatchObject({
+        outcome: "completed",
+        run: {
+          run_id: runId,
+          status: "completed",
+          control: "settled",
+          controller_active: false
+        }
+      });
+      expect(waited.stdout).not.toContain("private detached wait request");
+      expect(await readSupervisorCommands(supervisorRunFiles(runDir))).toEqual([]);
+      await expect(readFile(join(runDir, "acknowledged.json"), "utf8"))
+        .rejects.toMatchObject({ code: "ENOENT" });
+
+      const immediate = await runCliCommand(appRoot, workspace, [`--wait-run=${runId}`]);
+      expect(immediate.stdout).toContain(`Run completed · ${runId}`);
+    } finally {
+      stopCli(tui);
+      if (runDir) {
+        await stopSupervisor(runDir);
+      }
+      await rm(appRoot, { recursive: true, force: true });
+      await rm(workspace, { recursive: true, force: true });
+    }
+  }, 30000);
+
+  it("times out through the real CLI without changing a live run", async () => {
+    const appRoot = await mkdtemp(join(tmpdir(), "pct-cli-supervisor-timeout-app-"));
+    const workspace = await mkdtemp(join(tmpdir(), "pct-cli-supervisor-timeout-workspace-"));
+    const runId = "run-cli-timeout";
+    try {
+      const files = await createSupervisorRun(workspace, ".parallel-codex", {
+        version: 1,
+        run_id: runId,
+        kind: "handle-request",
+        app_root: appRoot,
+        workspace_root: workspace,
+        data_dir: ".parallel-codex",
+        created_at: new Date().toISOString(),
+        request: "private timeout request",
+        cwd: workspace
+      });
+      const initial = await readSupervisorRunState(files);
+      const processStartToken = await readProcessStartToken(process.pid);
+      await writeSupervisorRunState(files, {
+        ...initial,
+        status: "running",
+        updated_at: new Date().toISOString(),
+        pid: process.pid,
+        ...(processStartToken ? { process_start_token: processStartToken } : {})
+      });
+
+      await expect(runCliCommand(appRoot, workspace, [
+        "--wait-run",
+        runId,
+        "--wait-timeout",
+        "0.05",
+        "--json"
+      ])).rejects.toMatchObject({
+        code: 4,
+        stderr: "",
+        stdout: expect.stringContaining('"outcome": "timeout"')
+      });
+      expect(await readSupervisorCommands(files)).toEqual([]);
+      expect((await readSupervisorRunState(files)).status).toBe("running");
+      await expect(readFile(files.controllerPath, "utf8"))
+        .rejects.toMatchObject({ code: "ENOENT" });
+    } finally {
+      await rm(appRoot, { recursive: true, force: true });
+      await rm(workspace, { recursive: true, force: true });
+    }
+  }, 15000);
 });
 
 function startCli(appRoot: string, workspace: string) {

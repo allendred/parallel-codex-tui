@@ -19,6 +19,9 @@ describe("parseCliArgs", () => {
     expect(parsed.probeAgents).toBe(false);
     expect(parsed.probeRouter).toBe(false);
     expect(parsed.runs).toBe(false);
+    expect(parsed.waitRun).toBe(false);
+    expect(parsed.waitRunId).toBeNull();
+    expect(parsed.waitTimeoutMs).toBeNull();
     expect(parsed.taskId).toBeNull();
     expect(parsed.theme).toBeNull();
     expect(parsed.themes).toBe(false);
@@ -102,10 +105,12 @@ describe("parseCliArgs", () => {
     expect(explicit.diagnosticsPath).toBe("/app/support-bundle");
   });
 
-  it("accepts Supervisor status and cancellation command options", () => {
+  it("accepts Supervisor status, cancellation, and wait command options", () => {
     const runs = parseCliArgs(["--runs", "--json", "--workspace", "game"], "/app");
     const latest = parseCliArgs(["--cancel-run", "--workspace", "game"], "/app");
     const selected = parseCliArgs(["--cancel-run=run-20260721T000000Z-deadbeef"], "/app");
+    const waitLatest = parseCliArgs(["--wait-run", "--wait-timeout", "1.5"], "/app");
+    const waitSelected = parseCliArgs(["--wait-run=run-20260721T000000Z-deadbeef", "--json"], "/app");
 
     expect(runs.runs).toBe(true);
     expect(runs.json).toBe(true);
@@ -113,6 +118,12 @@ describe("parseCliArgs", () => {
     expect(latest.cancelRunId).toBeNull();
     expect(selected.cancelRun).toBe(true);
     expect(selected.cancelRunId).toBe("run-20260721T000000Z-deadbeef");
+    expect(waitLatest.waitRun).toBe(true);
+    expect(waitLatest.waitRunId).toBeNull();
+    expect(waitLatest.waitTimeoutMs).toBe(1500);
+    expect(waitSelected.waitRun).toBe(true);
+    expect(waitSelected.waitRunId).toBe("run-20260721T000000Z-deadbeef");
+    expect(waitSelected.json).toBe(true);
   });
 
   it("accepts themes without changing workspace parsing", () => {
@@ -253,19 +264,36 @@ describe("validateCliArgs", () => {
     expect(validateCliArgs(["--diagnostics=/tmp/support"])).toEqual([]);
   });
 
-  it("validates Supervisor status and cancellation options", () => {
+  it("validates Supervisor status, cancellation, and wait options", () => {
     expect(validateCliArgs(["--runs"])).toEqual([]);
     expect(validateCliArgs(["--runs", "--json"])).toEqual([]);
     expect(validateCliArgs(["--cancel-run"])).toEqual([]);
     expect(validateCliArgs(["--cancel-run=run-safe_01", "--json"])).toEqual([]);
+    expect(validateCliArgs(["--wait-run"])).toEqual([]);
+    expect(validateCliArgs(["--wait-run=run-safe_01", "--wait-timeout", "2.5", "--json"])).toEqual([]);
     expect(validateCliArgs(["--runs", "--cancel-run"])).toEqual([
-      "--runs and --cancel-run cannot be used together"
+      "Only one of --runs, --cancel-run, or --wait-run may be used"
+    ]);
+    expect(validateCliArgs(["--cancel-run", "--wait-run"])).toEqual([
+      "Only one of --runs, --cancel-run, or --wait-run may be used"
     ]);
     expect(validateCliArgs(["--json"])).toEqual([
-      "--json requires --runs or --cancel-run"
+      "--json requires --runs, --cancel-run, or --wait-run"
     ]);
     expect(validateCliArgs(["--cancel-run=../../outside"])).toEqual([
       "Invalid --cancel-run: expected run- followed by letters, numbers, dot, underscore, or hyphen"
+    ]);
+    expect(validateCliArgs(["--wait-run=../../outside"])).toEqual([
+      "Invalid --wait-run: expected run- followed by letters, numbers, dot, underscore, or hyphen"
+    ]);
+    expect(validateCliArgs(["--wait-run", "--wait-timeout", "0"])).toEqual([
+      "Invalid --wait-timeout: expected a positive number of seconds"
+    ]);
+    expect(validateCliArgs(["--wait-timeout", "5"])).toEqual([
+      "--wait-timeout requires --wait-run"
+    ]);
+    expect(validateCliArgs(["--wait-run", "--wait-timeout"])).toEqual([
+      "Invalid --wait-timeout: expected a positive number of seconds"
     ]);
   });
 

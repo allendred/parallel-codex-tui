@@ -15,6 +15,9 @@ describe("buildCliHelpText", () => {
     expect(help).toContain("live Codex Router request");
     expect(help).toContain("--runs");
     expect(help).toContain("--cancel-run [id]");
+    expect(help).toContain("--wait-run [id]");
+    expect(help).toContain("--wait-timeout <s>");
+    expect(help).toContain("never cancels the run");
     expect(help).toContain("--json");
     expect(help).not.toContain("codex, graphite, paper");
   });

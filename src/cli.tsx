@@ -32,8 +32,11 @@ import { SupervisorOrchestrator } from "./supervisor/client.js";
 import {
   formatSupervisorCancellation,
   formatSupervisorRuns,
+  formatSupervisorWait,
   inspectSupervisorRuns,
-  requestSupervisorRunCancellation
+  requestSupervisorRunCancellation,
+  supervisorWaitExitCode,
+  waitForSupervisorRun
 } from "./supervisor/operations.js";
 import { runSupervisorJob } from "./supervisor/runner.js";
 
@@ -104,7 +107,7 @@ async function main(): Promise<void> {
     } finally {
       runtime.index.close();
     }
-  } else if (cliArgs.runs || cliArgs.cancelRun) {
+  } else if (cliArgs.runs || cliArgs.cancelRun || cliArgs.waitRun) {
     const workspaceRoot = await selectWorkspaceForCli({
       appRoot: cliArgs.appRoot,
       cwd: process.cwd(),
@@ -116,13 +119,22 @@ async function main(): Promise<void> {
       if (cliArgs.runs) {
         const report = await inspectSupervisorRuns(workspaceRoot, config.dataDir);
         console.log(cliArgs.json ? JSON.stringify(report, null, 2) : formatSupervisorRuns(report));
-      } else {
+      } else if (cliArgs.cancelRun) {
         const result = await requestSupervisorRunCancellation(
           workspaceRoot,
           config.dataDir,
           cliArgs.cancelRunId
         );
         console.log(cliArgs.json ? JSON.stringify(result, null, 2) : formatSupervisorCancellation(result));
+      } else {
+        const result = await waitForSupervisorRun(
+          workspaceRoot,
+          config.dataDir,
+          cliArgs.waitRunId,
+          { timeoutMs: cliArgs.waitTimeoutMs }
+        );
+        console.log(cliArgs.json ? JSON.stringify(result, null, 2) : formatSupervisorWait(result));
+        process.exitCode = supervisorWaitExitCode(result.outcome);
       }
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);

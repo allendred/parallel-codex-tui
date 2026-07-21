@@ -7,8 +7,11 @@ import type { SupervisorRunRequest } from "../src/supervisor/protocol.js";
 import {
   formatSupervisorCancellation,
   formatSupervisorRuns,
+  formatSupervisorWait,
   inspectSupervisorRuns,
-  requestSupervisorRunCancellation
+  requestSupervisorRunCancellation,
+  supervisorWaitExitCode,
+  waitForSupervisorRun
 } from "../src/supervisor/operations.js";
 import {
   acknowledgeSupervisorRun,
@@ -133,6 +136,95 @@ describe("Supervisor operations", () => {
     await expect(requestSupervisorRunCancellation(root, ".parallel-codex", "run-stale"))
       .rejects.toThrow("Supervisor run is already cancelled: run-stale");
   });
+
+  it("waits for a live run to finish without reading its private request or writing commands", async () => {
+    const files = await createSupervisorRun(root, ".parallel-codex", request(root, "run-wait-complete"));
+    const initial = await readSupervisorRunState(files);
+    const processStartToken = await readProcessStartToken(process.pid);
+    await writeSupervisorRunState(files, {
+      ...initial,
+      status: "running",
+      updated_at: "2026-07-21T00:00:01.000Z",
+      pid: process.pid,
+      ...(processStartToken ? { process_start_token: processStartToken } : {})
+    });
+    const completion = delay(30).then(() => writeSupervisorRunState(files, {
+      ...initial,
+      status: "completed",
+      updated_at: "2026-07-21T00:00:02.000Z",
+      finished_at: "2026-07-21T00:00:02.000Z"
+    }));
+
+    const result = await waitForSupervisorRun(root, ".parallel-codex", "run-wait-complete", {
+      timeoutMs: 1000,
+      pollIntervalMs: 10
+    });
+    await completion;
+
+    expect(result).toMatchObject({
+      version: 1,
+      outcome: "completed",
+      run: { run_id: "run-wait-complete", status: "completed", control: "settled" }
+    });
+    expect(result.waited_ms).toBeGreaterThanOrEqual(20);
+    expect(supervisorWaitExitCode(result.outcome)).toBe(0);
+    expect(formatSupervisorWait(result)).toContain("Run completed · run-wait-complete");
+    expect(JSON.stringify(result)).not.toContain("private request text");
+    expect(await readSupervisorCommands(files)).toEqual([]);
+  });
+
+  it("times out without cancelling a live run", async () => {
+    const files = await createSupervisorRun(root, ".parallel-codex", request(root, "run-wait-timeout"));
+    const initial = await readSupervisorRunState(files);
+    const processStartToken = await readProcessStartToken(process.pid);
+    await writeSupervisorRunState(files, {
+      ...initial,
+      status: "running",
+      updated_at: "2026-07-21T00:00:01.000Z",
+      pid: process.pid,
+      ...(processStartToken ? { process_start_token: processStartToken } : {})
+    });
+
+    const result = await waitForSupervisorRun(root, ".parallel-codex", null, {
+      timeoutMs: 30,
+      pollIntervalMs: 10
+    });
+
+    expect(result).toMatchObject({
+      outcome: "timeout",
+      run: { run_id: "run-wait-timeout", status: "running" }
+    });
+    expect(supervisorWaitExitCode(result.outcome)).toBe(4);
+    expect(await readSupervisorCommands(files)).toEqual([]);
+  });
+
+  it("reports stale and cancelled wait outcomes with distinct exit codes", async () => {
+    await expect(waitForSupervisorRun(root, ".parallel-codex", "run-missing"))
+      .rejects.toThrow("Supervisor run not found: run-missing");
+
+    const files = await createSupervisorRun(root, ".parallel-codex", request(root, "run-wait-stale"));
+    const initial = await readSupervisorRunState(files);
+    await writeSupervisorRunState(files, {
+      ...initial,
+      status: "running",
+      updated_at: "2026-07-20T00:00:00.000Z",
+      pid: 2147483647
+    });
+    const stale = await waitForSupervisorRun(root, ".parallel-codex", "run-wait-stale");
+    expect(stale.outcome).toBe("stale");
+    expect(supervisorWaitExitCode(stale.outcome)).toBe(3);
+
+    await writeSupervisorRunState(files, {
+      ...initial,
+      status: "cancelled",
+      updated_at: "2026-07-21T00:00:01.000Z",
+      finished_at: "2026-07-21T00:00:01.000Z"
+    });
+    const cancelled = await waitForSupervisorRun(root, ".parallel-codex", "run-wait-stale");
+    expect(cancelled.outcome).toBe("cancelled");
+    expect(supervisorWaitExitCode(cancelled.outcome)).toBe(2);
+    expect(supervisorWaitExitCode("failed")).toBe(1);
+  });
 });
 
 function request(root: string, runId: string): SupervisorRunRequest {
@@ -147,4 +239,8 @@ function request(root: string, runId: string): SupervisorRunRequest {
     request: "private request text",
     cwd: root
   };
+}
+
+function delay(milliseconds: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, milliseconds));
 }

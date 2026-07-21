@@ -4,6 +4,7 @@ import {
   appendSupervisorCommand,
   listSupervisorRuns,
   readSupervisorController,
+  readSupervisorRunState,
   supervisorControllerIsActive,
   supervisorRunIsAcknowledged,
   supervisorRunIsTerminal,
@@ -48,6 +49,25 @@ export interface SupervisorCancellationResult {
   command_id: string;
   requested_at: string;
   run: SupervisorRunView;
+}
+
+export type SupervisorWaitOutcome = "cancelled" | "completed" | "failed" | "stale" | "timeout";
+type SupervisorTerminalStatus = Extract<
+  SupervisorRunStatus,
+  "cancelled" | "completed" | "failed"
+>;
+
+export interface SupervisorWaitResult {
+  version: 1;
+  outcome: SupervisorWaitOutcome;
+  waited_ms: number;
+  run: SupervisorRunView;
+}
+
+export interface SupervisorWaitOptions {
+  timeoutMs?: number | null;
+  pollIntervalMs?: number;
+  now?: () => Date;
 }
 
 export async function inspectSupervisorRuns(
@@ -114,6 +134,73 @@ export async function requestSupervisorRunCancellation(
   };
 }
 
+export async function waitForSupervisorRun(
+  workspaceRoot: string,
+  dataDir: string,
+  runId?: string | null,
+  options: SupervisorWaitOptions = {}
+): Promise<SupervisorWaitResult> {
+  const startedAt = Date.now();
+  const now = options.now ?? (() => new Date());
+  const requestedPollIntervalMs = options.pollIntervalMs ?? 100;
+  if (!Number.isFinite(requestedPollIntervalMs) || requestedPollIntervalMs <= 0) {
+    throw new Error("Supervisor wait poll interval must be a positive number of milliseconds");
+  }
+  const pollIntervalMs = Math.max(10, requestedPollIntervalMs);
+  const timeoutMs = options.timeoutMs ?? null;
+  if (timeoutMs !== null && (!Number.isFinite(timeoutMs) || timeoutMs <= 0)) {
+    throw new Error("Supervisor wait timeout must be a positive number of milliseconds");
+  }
+  const records = await listSupervisorRuns(workspaceRoot, dataDir);
+  const inspected = await Promise.all(records.map(async (record) => ({
+    record,
+    view: await inspectSupervisorRun(record, now())
+  })));
+  const newestFirst = inspected.reverse();
+  const selected = runId
+    ? newestFirst.find(({ view }) => view.run_id === runId)
+    : newestFirst.find(({ view }) => !isTerminalStatus(view.status)) ?? newestFirst[0];
+
+  if (!selected) {
+    throw new Error(runId
+      ? `Supervisor run not found: ${runId}`
+      : `No Supervisor runs in workspace ${workspaceRoot}`);
+  }
+
+  while (true) {
+    const view = await inspectSupervisorRun(selected.record, now());
+    const waitedMs = Math.max(0, Date.now() - startedAt);
+    if (isTerminalStatus(view.status)) {
+      return {
+        version: 1,
+        outcome: view.status,
+        waited_ms: waitedMs,
+        run: view
+      };
+    }
+    if (view.control === "stale") {
+      return {
+        version: 1,
+        outcome: "stale",
+        waited_ms: waitedMs,
+        run: view
+      };
+    }
+    if (timeoutMs !== null && waitedMs >= timeoutMs) {
+      return {
+        version: 1,
+        outcome: "timeout",
+        waited_ms: waitedMs,
+        run: view
+      };
+    }
+
+    const remainingTimeoutMs = timeoutMs === null ? pollIntervalMs : Math.max(1, timeoutMs - waitedMs);
+    await delay(Math.min(pollIntervalMs, remainingTimeoutMs));
+    selected.record.state = await readSupervisorRunState(selected.record.files);
+  }
+}
+
 export function formatSupervisorRuns(report: SupervisorRunsReport): string {
   if (report.runs.length === 0) {
     return `No Supervisor runs in ${report.workspace_root}.`;
@@ -134,6 +221,26 @@ export function formatSupervisorRuns(report: SupervisorRunsReport): string {
 export function formatSupervisorCancellation(result: SupervisorCancellationResult): string {
   const target = result.run.task_id ? `task ${result.run.task_id}` : result.run.kind;
   return `Cancellation requested · ${result.run.run_id} · ${target}`;
+}
+
+export function formatSupervisorWait(result: SupervisorWaitResult): string {
+  const target = result.run.task_id ? `task ${result.run.task_id}` : result.run.kind;
+  return `Run ${result.outcome} · ${result.run.run_id} · ${target} · waited ${formatDuration(result.waited_ms)}`;
+}
+
+export function supervisorWaitExitCode(outcome: SupervisorWaitOutcome): number {
+  switch (outcome) {
+    case "completed":
+      return 0;
+    case "failed":
+      return 1;
+    case "cancelled":
+      return 2;
+    case "stale":
+      return 3;
+    case "timeout":
+      return 4;
+  }
 }
 
 async function inspectSupervisorRun(
@@ -187,6 +294,17 @@ function controlState(
   return "stale";
 }
 
-function isTerminalStatus(status: SupervisorRunStatus): boolean {
+function isTerminalStatus(status: SupervisorRunStatus): status is SupervisorTerminalStatus {
   return status === "completed" || status === "failed" || status === "cancelled";
+}
+
+function formatDuration(milliseconds: number): string {
+  if (milliseconds < 1000) {
+    return `${milliseconds}ms`;
+  }
+  return `${(milliseconds / 1000).toFixed(milliseconds < 10000 ? 1 : 0)}s`;
+}
+
+function delay(milliseconds: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, milliseconds));
 }
