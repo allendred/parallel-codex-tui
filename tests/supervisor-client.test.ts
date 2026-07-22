@@ -11,6 +11,7 @@ import {
 } from "../src/supervisor/client.js";
 import type { SupervisorSubmissionTurnAcquirer } from "../src/supervisor/launcher.js";
 import type { SupervisorRunRequest } from "../src/supervisor/protocol.js";
+import * as supervisorStore from "../src/supervisor/store.js";
 import {
   appendSupervisorEvent,
   createSupervisorRun,
@@ -84,6 +85,50 @@ describe("SupervisorOrchestrator", () => {
     await client.acknowledgeBackgroundRun();
     const runs = await listSupervisorRuns(root, ".parallel-codex");
     expect(await supervisorRunIsAcknowledged(runs[0]!.files)).toBe(true);
+  });
+
+  it("drains events again after observing terminal state", async () => {
+    const statuses: string[] = [];
+    const readEvents = supervisorStore.readSupervisorEvents;
+    let eventReads = 0;
+    vi.spyOn(supervisorStore, "readSupervisorEvents").mockImplementation(async (files) => {
+      const events = await readEvents(files);
+      eventReads += 1;
+      return eventReads === 1 ? events.slice(0, 1) : events;
+    });
+    const client = await createClient(async (files) => {
+      const state = await readSupervisorRunState(files);
+      await appendSupervisorEvent(files, {
+        version: 1,
+        sequence: 0,
+        at: "2026-07-21T00:00:02.000Z",
+        type: "status",
+        payload: { taskId: "main", main: "running" }
+      });
+      await appendSupervisorEvent(files, {
+        version: 1,
+        sequence: 1,
+        at: "2026-07-21T00:00:03.000Z",
+        type: "status",
+        payload: { taskId: "main", main: "done" }
+      });
+      await writeSupervisorRunState(files, {
+        ...state,
+        status: "completed",
+        updated_at: "2026-07-21T00:00:04.000Z",
+        finished_at: "2026-07-21T00:00:04.000Z",
+        result: { mode: "simple", taskId: null, summary: "ready", workers: [] }
+      });
+    });
+
+    await expect(client.handleRequest({
+      request: "hello",
+      cwd: root,
+      onStatus: (status) => statuses.push(status.main ?? "")
+    })).resolves.toMatchObject({ summary: "ready" });
+
+    expect(eventReads).toBeGreaterThanOrEqual(2);
+    expect(statuses).toEqual(["running", "done"]);
   });
 
   it("restores an unacknowledged completed run after reopening", async () => {

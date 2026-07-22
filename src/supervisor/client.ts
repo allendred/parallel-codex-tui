@@ -393,17 +393,22 @@ export class SupervisorOrchestrator {
             this.notifyBackgroundRunState();
           }
         }
-        const events = await readSupervisorEvents(watched.files);
-        for (const event of events) {
-          if (event.sequence < nextEventSequence) {
-            continue;
-          }
-          nextEventSequence = event.sequence + 1;
-          dispatchSupervisorEvent(event, callbacks);
-        }
+        nextEventSequence = await dispatchUnreadSupervisorEvents(
+          watched.files,
+          callbacks,
+          nextEventSequence
+        );
 
         const state = await readSupervisorRunState(watched.files);
         if (supervisorRunIsTerminal(state)) {
+          // The first read can observe a partial final JSONL record immediately
+          // before the runner publishes terminal state. Once terminal is visible,
+          // the runner has flushed its event queue, so drain once more.
+          nextEventSequence = await dispatchUnreadSupervisorEvents(
+            watched.files,
+            callbacks,
+            nextEventSequence
+          );
           this.settledRun = watched.files;
           if (state.status === "completed" && state.result) {
             return asSupervisorRunResult(state.result);
@@ -509,6 +514,23 @@ export class SupervisorOrchestrator {
     }
     return runs;
   }
+}
+
+async function dispatchUnreadSupervisorEvents(
+  files: SupervisorRunFiles,
+  callbacks: SupervisorRunCallbacks,
+  nextEventSequence: number
+): Promise<number> {
+  const events = await readSupervisorEvents(files);
+  let nextSequence = nextEventSequence;
+  for (const event of events) {
+    if (event.sequence < nextSequence) {
+      continue;
+    }
+    nextSequence = event.sequence + 1;
+    dispatchSupervisorEvent(event, callbacks);
+  }
+  return nextSequence;
 }
 
 function dispatchSupervisorEvent(
