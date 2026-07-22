@@ -1834,7 +1834,10 @@ export function App({
           setView(taskSessionsReturnViewRef.current);
           return;
         }
-        if ((chunk === "x" || chunk === "X") && taskSessionQueryRef.current.trim()) {
+        if (
+          tokenizeRawInput(chunk).some((sessionChunk) => sessionChunk === "x" || sessionChunk === "X")
+          && taskSessionQueryRef.current.trim()
+        ) {
           const selectedSession = taskSessionsRef.current[selectedTaskSessionIndexRef.current];
           void refreshTaskSessionsRef.current(selectedSession?.id ?? null, "");
           setTaskSessionsNotice("Task search cleared");

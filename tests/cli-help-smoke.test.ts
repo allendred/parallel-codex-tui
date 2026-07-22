@@ -30,6 +30,11 @@ describe("CLI help and version", () => {
     expect(stdout).toContain("--wait");
     expect(stdout).toContain("--cancel-run [id]");
     expect(stdout).toContain("--wait-run [id]");
+    expect(stdout).toContain("--watch-run [id]");
+    expect(stdout).toContain("--pause-feature <id>");
+    expect(stdout).toContain("--cancel-feature <id>");
+    expect(stdout).toContain("--resume-feature <id>");
+    expect(stdout).toContain("--retry-task");
     expect(stdout).toContain("--wait-timeout <s>");
     expect(stdout).toContain("--probe-agents");
     expect(stdout).toContain("fresh + resume probes");
@@ -51,7 +56,7 @@ describe("CLI help and version", () => {
     );
 
     expect(stderr).toBe("");
-    expect(stdout.trim()).toBe("parallel-codex-tui 0.4.3");
+    expect(stdout.trim()).toBe("parallel-codex-tui 0.4.4");
   });
 
   it("prints the built-in theme catalog and exits without starting the TUI", async () => {

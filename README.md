@@ -6,7 +6,7 @@ Built with Codex-assisted development.
 
 ## Current Release
 
-`v0.4.3` is available from [npm](https://www.npmjs.com/package/parallel-codex-tui/v/0.4.3) and as a [GitHub Release](https://github.com/allendred/parallel-codex-tui/releases/tag/v0.4.3). It adds headless `--submit` execution for scripts and CI, piped stdin, optional waiting, automation-safe idempotency keys, and `--task` continuation of an existing multi-turn Task. Routing and execution happen inside the detached Supervisor, so automation receives the persisted run id immediately and can leave the task running after its own process exits.
+`v0.4.4` is available from [npm](https://www.npmjs.com/package/parallel-codex-tui/v/0.4.4) and as a [GitHub Release](https://github.com/allendred/parallel-codex-tui/releases/tag/v0.4.4). It adds read-only `--watch-run` streaming for persisted Supervisor events, Worker output, and terminal answers; external Feature pause/cancel commands; and detached Task retry/Feature resume commands with optional waiting and automation-safe idempotency. A terminal can now submit work, leave, watch it from another process, and recover individual Features without opening or taking control of the TUI.
 
 Interactive Main and parallel executions run in a detached, per-request Supervisor after the Router resolves in the foreground; headless submissions route inside that Supervisor. `Ctrl+C` closes the outer TUI without stopping an attached run, reopening the same workspace restores its live events or terminal result, and `Esc` remains the explicit cancellation command. One TUI owns the control lease while additional TUIs observe the same run; an observer takes control automatically after the prior controller detaches or exits.
 
@@ -35,11 +35,13 @@ Highlights:
 - Tasks retain every Turn, historical Worker log, native session binding, model snapshot, and collaboration artifact across follow-ups and restarts. A 20-turn soak verifies 80 ordered Workers before and after restart.
 - Main responses, raw process evidence, active role configuration, and historical Worker identity now have separate display and persistence paths.
 - `--diagnostics` and `Ctrl+X` export bounded, redacted support evidence without prompts, role instructions, command arguments, source files, or environment-variable values.
+- `--watch-run` follows durable events and incremental Worker logs without claiming the TUI controller or acknowledging the result; JSON mode emits one versioned record per line.
+- `--pause-feature`, `--cancel-feature`, `--resume-feature`, and `--retry-task` expose the same Supervisor-owned recovery lifecycle to scripts and CI.
 - Runtime preflight checks Codex, Claude, named third-party Providers, proxy reachability, workspace access, CLI capabilities, and native attach policy before work starts.
 - Named Worker Providers support Codex-compatible, Claude-compatible, OpenAI-compatible, Anthropic-compatible, and custom generic commands with independent role, model, environment, permission, resume, and interactive settings.
 - Worker overview, Feature board, collaboration timeline, Task and Main conversation centers, status details, rendered Markdown/Diff/error logs, Unicode search, keyboard navigation, mouse scrolling, and configurable themes share one terminal UI system.
 
-Release acceptance includes a real three-Feature Tetris task with parallel Actor/Critic waves and final integration review. A clean `v0.2.5` task also ran Codex Judge and Actor, a buffered Claude Critic that independently executed `node --test` and `npm test`, atomic integration, and a resumed Codex Judge that independently passed all seven acceptance criteria. Real Codex and Claude probes both proved fresh and same-session resume calls; Codex fresh and resume runs executed workspace writes with root-level `-a never`, and Claude automated sessions executed safe Bash tools with `auto` permissions. The semantic Router completed a live classification, and one TUI completed Main calls in two workspaces before restoring the first workspace without leaking chat state. PTY coverage runs in Apple Terminal, tmux, and Zellij profiles at narrow and wide sizes, including status/log equivalence, preserving the native output tail across status-detail round trips, and proving both inline and on-demand file memory after native-session rollover. Supervisor PTY coverage proves detached Main and complex execution, restart recovery, controller/observer takeover, explicit cancellation, process-owner crash recovery, out-of-process status/cancellation, detached wait/timeout commands, headless submission, idempotent concurrent retries, missing-Workspace bootstrap, and same-Task continuation. The deterministic repository suite contains 1,381 tests across 144 files: 1,380 pass by default, while one quota-consuming real-Agent test is skipped and passes through `npm run test:real-agents`.
+Release acceptance includes a real three-Feature Tetris task with parallel Actor/Critic waves and final integration review. A clean `v0.2.5` task also ran Codex Judge and Actor, a buffered Claude Critic that independently executed `node --test` and `npm test`, atomic integration, and a resumed Codex Judge that independently passed all seven acceptance criteria. Real Codex and Claude probes both proved fresh and same-session resume calls; Codex fresh and resume runs executed workspace writes with root-level `-a never`, and Claude automated sessions executed safe Bash tools with `auto` permissions. The semantic Router completed a live classification, and one TUI completed Main calls in two workspaces before restoring the first workspace without leaking chat state. PTY coverage runs in Apple Terminal, tmux, and Zellij profiles at narrow and wide sizes, including status/log equivalence, preserving the native output tail across status-detail round trips, and proving both inline and on-demand file memory after native-session rollover. Supervisor PTY coverage proves detached Main and complex execution, restart recovery, controller/observer takeover, explicit cancellation, process-owner crash recovery, out-of-process status/cancellation, detached wait/timeout commands, headless submission, idempotent concurrent retries, missing-Workspace bootstrap, same-Task continuation, read-only event and Worker-output streaming, and external Feature recovery controls. The deterministic repository suite contains 1,390 tests across 145 files: 1,389 pass by default, while one quota-consuming real-Agent test is skipped and passes through `npm run test:real-agents`.
 
 Real Provider probes depend on valid local CLI credentials. In particular, authenticate the Claude CLI before selecting a Claude-compatible Worker, then run `parallel-codex-tui --doctor --probe-agents` to prove fresh and resumed calls on that machine.
 
@@ -106,7 +108,7 @@ For development without linking, run:
 npm run dev -- --workspace /path/to/project
 ```
 
-CLI options with values can also be passed as `--workspace=/path/to/project`, `--app-root=/path/to/app`, `--task=task-id`, `--theme=paper`, `--submit=request`, `--idempotency-key=ci:build-1`, `-w=/path/to/project`, and `-t=task-id`.
+CLI options with values can also be passed as `--workspace=/path/to/project`, `--app-root=/path/to/app`, `--task=task-id`, `--theme=paper`, `--submit=request`, `--watch-run=run-id`, `--resume-feature=feature-id`, `--idempotency-key=ci:build-1`, `-w=/path/to/project`, and `-t=task-id`.
 
 Check available flags or the installed version without starting the TUI:
 
@@ -126,6 +128,12 @@ parallel-codex-tui --workspace /path/to/project --cancel-run
 parallel-codex-tui --workspace /path/to/project --cancel-run run-20260721T000000Z-deadbeef
 parallel-codex-tui --workspace /path/to/project --wait-run
 parallel-codex-tui --workspace /path/to/project --wait-run run-20260721T000000Z-deadbeef --wait-timeout 600 --json
+parallel-codex-tui --workspace /path/to/project --watch-run
+parallel-codex-tui --workspace /path/to/project --watch-run run-20260721T000000Z-deadbeef --json
+parallel-codex-tui --workspace /path/to/project --task task-20260721-example --pause-feature 0001-ui
+parallel-codex-tui --workspace /path/to/project --task task-20260721-example --cancel-feature 0001-ui
+parallel-codex-tui --workspace /path/to/project --task task-20260721-example --resume-feature 0001-ui --wait
+parallel-codex-tui --workspace /path/to/project --task task-20260721-example --retry-task --wait
 parallel-codex-tui --version
 ```
 
@@ -191,6 +199,29 @@ parallel-codex-tui --workspace /path/to/project --wait-run run-20260721T000000Z-
 ```
 
 When no unfinished run exists, `--wait-run` returns the newest persisted terminal run immediately. The waiter is read-only: it does not claim `controller.json`, append to `commands.jsonl`, acknowledge the result, read the original request, or inspect Worker output. `--wait-timeout` accepts positive decimal seconds and stops only the waiting CLI; the Supervisor and Workers continue normally. `Ctrl+C` likewise exits the waiter without cancelling the run.
+
+Watch the latest unfinished run, or select one explicitly:
+
+```bash
+parallel-codex-tui --workspace /path/to/project --watch-run
+parallel-codex-tui --workspace /path/to/project --watch-run run-20260721T000000Z-deadbeef
+parallel-codex-tui --workspace /path/to/project --watch-run run-20260721T000000Z-deadbeef --wait-timeout 600 --json
+```
+
+`--watch-run` first replays persisted Supervisor events and complete known Worker logs, then follows only newly appended output until the run settles. Text mode labels Router, status, Worker, and log records; `--json` emits one compact, versioned JSON Lines record for each snapshot, event, Worker-output chunk, and finish result. The finish record includes the terminal Main/Task summary or failure text. Unlike `--wait-run`, watch output intentionally contains Agent and project content, so review it before forwarding it to another system.
+
+The watcher remains an observer: it never creates `controller.json`, acknowledges the result, or writes a command. A local `--wait-timeout` exits with code `4` while the Supervisor continues, and starting after completion still replays the persisted evidence before returning. Without an id, watch selects the newest unfinished run and otherwise the newest terminal run.
+
+Control an active Feature, or start a detached recovery run:
+
+```bash
+parallel-codex-tui --workspace /path/to/project --task task-20260721-example --pause-feature 0001-ui
+parallel-codex-tui --workspace /path/to/project --task task-20260721-example --cancel-feature 0001-ui --json
+parallel-codex-tui --workspace /path/to/project --task task-20260721-example --resume-feature 0001-ui --wait
+parallel-codex-tui --workspace /path/to/project --task task-20260721-example --retry-task --idempotency-key ci:retry-1 --wait --json
+```
+
+Pause and Feature cancellation append checked commands to the active run that owns the specified Task; they do not signal Worker PIDs directly and their response means “requested,” not “already settled.” Resume requires a paused Feature, while Task retry accepts failed, cancelled, or paused Task state. Both recovery commands create a new detached Supervisor run, preserve prior Worker logs and native session evidence, and support the same `--wait`, `--wait-timeout`, and hashed idempotency behavior as `--submit`. A Workspace still permits only one active Supervisor run at a time.
 
 Wait results use exit code `0` for `completed`, `1` for `failed`, `2` for `cancelled`, `3` for `stale`, and `4` for `timeout`. Text and JSON results contain only the same bounded lifecycle metadata as `--runs`; JSON uses schema version `1`. This makes shell automation able to distinguish task outcomes while keeping requests, prompts, logs, command arguments, and environment values out of its output.
 
@@ -618,12 +649,12 @@ The release job installs npm `^11.5.1`, runs on Node `24.15.x`, publishes the pr
 To publish a release, update `package.json` and `src/version.ts` to the same version, then push a matching tag:
 
 ```bash
-VERSION=0.4.3
+VERSION=0.4.4
 git tag "v$VERSION"
 git push origin "v$VERSION"
 ```
 
-You can also run the Release workflow manually and enter the same tag value. The release tag must match `package.json`; for example, package version `0.4.3` requires tag `v0.4.3`. Published tags such as `v0.2.10` are immutable and must not be moved or reused.
+You can also run the Release workflow manually and enter the same tag value. The release tag must match `package.json`; for example, package version `0.4.4` requires tag `v0.4.4`. Published tags such as `v0.2.10` are immutable and must not be moved or reused.
 
 ## Publishing Hygiene
 

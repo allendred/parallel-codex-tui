@@ -24,8 +24,9 @@ vi.mock("../src/core/file-store.js", async () => {
         failures.finalStatus
         && value !== null
         && typeof value === "object"
-        && (value as Record<string, unknown>).state === "done"
+        && ["done", "failed", "cancelled"].includes(String((value as Record<string, unknown>).state))
       ) {
+        failures.finalStatus = false;
         throw new Error("final status disk unavailable");
       }
       await actual.writeJson(path, value);
@@ -81,7 +82,7 @@ describe("ProcessWorkerAdapter finalization failures", () => {
 
   it("rejects when the terminal Worker status cannot be persisted", async () => {
     failures.finalStatus = true;
-    const fixture = await createFixture("status", "process.exit(0)");
+    const fixture = await createFixture("status", "setInterval(() => {}, 1000)", 100);
 
     await expect(fixture.run()).rejects.toThrow("final status disk unavailable");
     expect(await pathExists(workerProcessRecordPath(fixture.filesDir))).toBe(true);

@@ -6,6 +6,8 @@ describe("parseCliArgs", () => {
     const parsed = parseCliArgs([], "/app");
 
     expect(parsed.appRoot).toBe("/app");
+    expect(parsed.cancelFeature).toBe(false);
+    expect(parsed.cancelFeatureId).toBeNull();
     expect(parsed.cancelRun).toBe(false);
     expect(parsed.cancelRunId).toBeNull();
     expect(parsed.diagnostics).toBe(false);
@@ -18,11 +20,18 @@ describe("parseCliArgs", () => {
     expect(parsed.json).toBe(false);
     expect(parsed.probeAgents).toBe(false);
     expect(parsed.probeRouter).toBe(false);
+    expect(parsed.pauseFeature).toBe(false);
+    expect(parsed.pauseFeatureId).toBeNull();
+    expect(parsed.resumeFeature).toBe(false);
+    expect(parsed.resumeFeatureId).toBeNull();
+    expect(parsed.retryTask).toBe(false);
     expect(parsed.runs).toBe(false);
     expect(parsed.submit).toBe(false);
     expect(parsed.submitRequest).toBeNull();
     expect(parsed.idempotencyKey).toBeNull();
     expect(parsed.wait).toBe(false);
+    expect(parsed.watchRun).toBe(false);
+    expect(parsed.watchRunId).toBeNull();
     expect(parsed.waitRun).toBe(false);
     expect(parsed.waitRunId).toBeNull();
     expect(parsed.waitTimeoutMs).toBeNull();
@@ -109,12 +118,14 @@ describe("parseCliArgs", () => {
     expect(explicit.diagnosticsPath).toBe("/app/support-bundle");
   });
 
-  it("accepts Supervisor status, cancellation, and wait command options", () => {
+  it("accepts Supervisor status, cancellation, wait, and watch command options", () => {
     const runs = parseCliArgs(["--runs", "--json", "--workspace", "game"], "/app");
     const latest = parseCliArgs(["--cancel-run", "--workspace", "game"], "/app");
     const selected = parseCliArgs(["--cancel-run=run-20260721T000000Z-deadbeef"], "/app");
     const waitLatest = parseCliArgs(["--wait-run", "--wait-timeout", "1.5"], "/app");
     const waitSelected = parseCliArgs(["--wait-run=run-20260721T000000Z-deadbeef", "--json"], "/app");
+    const watchLatest = parseCliArgs(["--watch-run", "--wait-timeout", "3"], "/app");
+    const watchSelected = parseCliArgs(["--watch-run=run-20260721T000000Z-deadbeef", "--json"], "/app");
 
     expect(runs.runs).toBe(true);
     expect(runs.json).toBe(true);
@@ -128,6 +139,12 @@ describe("parseCliArgs", () => {
     expect(waitSelected.waitRun).toBe(true);
     expect(waitSelected.waitRunId).toBe("run-20260721T000000Z-deadbeef");
     expect(waitSelected.json).toBe(true);
+    expect(watchLatest.watchRun).toBe(true);
+    expect(watchLatest.watchRunId).toBeNull();
+    expect(watchLatest.waitTimeoutMs).toBe(3000);
+    expect(watchSelected.watchRun).toBe(true);
+    expect(watchSelected.watchRunId).toBe("run-20260721T000000Z-deadbeef");
+    expect(watchSelected.json).toBe(true);
   });
 
   it("accepts detached submissions, stdin, waiting, and idempotency", () => {
@@ -148,6 +165,31 @@ describe("parseCliArgs", () => {
     expect(stdin.submitRequest).toBe("-");
     expect(stdin.wait).toBe(true);
     expect(stdin.waitTimeoutMs).toBe(2500);
+  });
+
+  it("accepts Task and Feature Supervisor controls", () => {
+    const paused = parseCliArgs(["--task", "task-123", "--pause-feature", "0001-ui", "--json"], "/app");
+    const cancelled = parseCliArgs(["--task", "task-123", "--cancel-feature=0001-ui"], "/app");
+    const resumed = parseCliArgs([
+      "--task",
+      "task-123",
+      "--resume-feature",
+      "0001-ui",
+      "--idempotency-key",
+      "ci:resume-1",
+      "--wait"
+    ], "/app");
+    const retried = parseCliArgs(["--task=task-123", "--retry-task", "--wait-timeout=3"], "/app");
+
+    expect(paused).toMatchObject({ pauseFeature: true, pauseFeatureId: "0001-ui", json: true });
+    expect(cancelled).toMatchObject({ cancelFeature: true, cancelFeatureId: "0001-ui" });
+    expect(resumed).toMatchObject({
+      resumeFeature: true,
+      resumeFeatureId: "0001-ui",
+      idempotencyKey: "ci:resume-1",
+      wait: true
+    });
+    expect(retried).toMatchObject({ retryTask: true, waitTimeoutMs: 3000 });
   });
 
   it("accepts themes without changing workspace parsing", () => {
@@ -288,21 +330,26 @@ describe("validateCliArgs", () => {
     expect(validateCliArgs(["--diagnostics=/tmp/support"])).toEqual([]);
   });
 
-  it("validates Supervisor status, cancellation, and wait options", () => {
+  it("validates Supervisor status, cancellation, wait, and watch options", () => {
     expect(validateCliArgs(["--runs"])).toEqual([]);
     expect(validateCliArgs(["--runs", "--json"])).toEqual([]);
     expect(validateCliArgs(["--cancel-run"])).toEqual([]);
     expect(validateCliArgs(["--cancel-run=run-safe_01", "--json"])).toEqual([]);
     expect(validateCliArgs(["--wait-run"])).toEqual([]);
     expect(validateCliArgs(["--wait-run=run-safe_01", "--wait-timeout", "2.5", "--json"])).toEqual([]);
+    expect(validateCliArgs(["--watch-run"])).toEqual([]);
+    expect(validateCliArgs(["--watch-run=run-safe_01", "--wait-timeout", "2.5", "--json"])).toEqual([]);
     expect(validateCliArgs(["--runs", "--cancel-run"])).toEqual([
-      "Only one of --runs, --cancel-run, --wait-run, or --submit may be used"
+      "Only one Supervisor command may be used at a time"
     ]);
     expect(validateCliArgs(["--cancel-run", "--wait-run"])).toEqual([
-      "Only one of --runs, --cancel-run, --wait-run, or --submit may be used"
+      "Only one Supervisor command may be used at a time"
+    ]);
+    expect(validateCliArgs(["--watch-run", "--wait-run"])).toEqual([
+      "Only one Supervisor command may be used at a time"
     ]);
     expect(validateCliArgs(["--json"])).toEqual([
-      "--json requires --runs, --cancel-run, --wait-run, or --submit"
+      "--json requires a Supervisor command"
     ]);
     expect(validateCliArgs(["--cancel-run=../../outside"])).toEqual([
       "Invalid --cancel-run: expected run- followed by letters, numbers, dot, underscore, or hyphen"
@@ -310,11 +357,14 @@ describe("validateCliArgs", () => {
     expect(validateCliArgs(["--wait-run=../../outside"])).toEqual([
       "Invalid --wait-run: expected run- followed by letters, numbers, dot, underscore, or hyphen"
     ]);
+    expect(validateCliArgs(["--watch-run=../../outside"])).toEqual([
+      "Invalid --watch-run: expected run- followed by letters, numbers, dot, underscore, or hyphen"
+    ]);
     expect(validateCliArgs(["--wait-run", "--wait-timeout", "0"])).toEqual([
       "Invalid --wait-timeout: expected a positive number of seconds"
     ]);
     expect(validateCliArgs(["--wait-timeout", "5"])).toEqual([
-      "--wait-timeout requires --wait-run or --submit"
+      "--wait-timeout requires --wait-run, --watch-run, --submit, --retry-task, or --resume-feature"
     ]);
     expect(validateCliArgs(["--wait-run", "--wait-timeout"])).toEqual([
       "Invalid --wait-timeout: expected a positive number of seconds"
@@ -330,14 +380,43 @@ describe("validateCliArgs", () => {
       "Invalid --submit: expected request text or - for piped stdin"
     ]);
     expect(validateCliArgs(["--submit", "build", "--runs"])).toEqual([
-      "Only one of --runs, --cancel-run, --wait-run, or --submit may be used"
+      "Only one Supervisor command may be used at a time"
     ]);
-    expect(validateCliArgs(["--wait"])).toEqual(["--wait requires --submit"]);
+    expect(validateCliArgs(["--wait"])).toEqual([
+      "--wait requires --submit, --retry-task, or --resume-feature"
+    ]);
     expect(validateCliArgs(["--idempotency-key", "ci-1"])).toEqual([
-      "--idempotency-key requires --submit"
+      "--idempotency-key requires --submit, --retry-task, or --resume-feature"
     ]);
     expect(validateCliArgs(["--submit", "build", "--idempotency-key", "bad/key"])).toEqual([
       "Invalid --idempotency-key: expected 1-128 letters, numbers, dot, underscore, colon, or hyphen"
+    ]);
+  });
+
+  it("validates Task and Feature Supervisor controls", () => {
+    expect(validateCliArgs(["--task", "task-safe", "--pause-feature", "0001-ui"])).toEqual([]);
+    expect(validateCliArgs(["--task", "task-safe", "--cancel-feature=0001-ui", "--json"])).toEqual([]);
+    expect(validateCliArgs([
+      "--task",
+      "task-safe",
+      "--resume-feature",
+      "0001-ui",
+      "--wait",
+      "--idempotency-key",
+      "ci:resume"
+    ])).toEqual([]);
+    expect(validateCliArgs(["--task", "task-safe", "--retry-task", "--wait-timeout", "5"])).toEqual([]);
+    expect(validateCliArgs(["--pause-feature", "0001-ui"])).toEqual([
+      "Task and Feature controls require --task <id>"
+    ]);
+    expect(validateCliArgs(["--task", "task-safe", "--pause-feature"])).toEqual([
+      "Invalid --pause-feature: expected a Feature id"
+    ]);
+    expect(validateCliArgs(["--task", "task-safe", "--resume-feature", "../outside"])).toEqual([
+      "Invalid --resume-feature: expected a lowercase Feature id"
+    ]);
+    expect(validateCliArgs(["--task", "task-safe", "--retry-task", "--cancel-run"])).toEqual([
+      "Only one Supervisor command may be used at a time"
     ]);
   });
 

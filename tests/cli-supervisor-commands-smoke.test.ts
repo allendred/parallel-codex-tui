@@ -1,5 +1,5 @@
 import { execFile, spawn as spawnChild } from "node:child_process";
-import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { appendFile, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
@@ -8,6 +8,7 @@ import { spawn } from "node-pty";
 import { processIsAlive, readProcessStartToken } from "../src/core/process-identity.js";
 import type {
   SupervisorCancellationResult,
+  SupervisorFeatureCommandResult,
   SupervisorRunsReport,
   SupervisorSubmissionResult,
   SupervisorSubmitAndWaitResult
@@ -15,6 +16,8 @@ import type {
 import {
   readSupervisorCommands,
   readSupervisorRunState,
+  readSupervisorRunRequest,
+  appendSupervisorEvent,
   createSupervisorRun,
   supervisorRunFiles,
   writeSupervisorRunState
@@ -476,6 +479,209 @@ describe("CLI Supervisor commands smoke", () => {
       await rm(workspace, { recursive: true, force: true });
     }
   }, 30000);
+
+  it("streams persisted events and incremental Worker output through --watch-run JSON Lines", async () => {
+    const appRoot = await mkdtemp(join(tmpdir(), "pct-cli-supervisor-watch-app-"));
+    const workspace = await mkdtemp(join(tmpdir(), "pct-cli-supervisor-watch-workspace-"));
+    const runId = "run-cli-watch";
+    try {
+      const files = await createSupervisorRun(workspace, ".parallel-codex", {
+        version: 1,
+        run_id: runId,
+        kind: "handle-request",
+        app_root: appRoot,
+        workspace_root: workspace,
+        data_dir: ".parallel-codex",
+        created_at: new Date().toISOString(),
+        request: "private watch request",
+        cwd: workspace
+      });
+      const logPath = join(workspace, "actor.log");
+      const worker = {
+        id: "actor-codex-0001-watch",
+        featureId: "0001-watch",
+        role: "actor" as const,
+        engine: "codex" as const,
+        label: "CLI watch",
+        logPath,
+        statusPath: join(workspace, "actor-status.json")
+      };
+      await writeFile(logPath, "first line\n", "utf8");
+      const initial = await readSupervisorRunState(files);
+      const processStartToken = await readProcessStartToken(process.pid);
+      await writeSupervisorRunState(files, {
+        ...initial,
+        status: "running",
+        task_id: "task-cli-watch",
+        updated_at: new Date().toISOString(),
+        pid: process.pid,
+        ...(processStartToken ? { process_start_token: processStartToken } : {})
+      });
+      await appendSupervisorEvent(files, {
+        version: 1,
+        sequence: 0,
+        at: new Date().toISOString(),
+        type: "worker",
+        payload: worker
+      });
+
+      const watching = runCliCommand(appRoot, workspace, [
+        "--watch-run",
+        runId,
+        "--wait-timeout",
+        "5",
+        "--json"
+      ]);
+      await delay(100);
+      await appendFile(logPath, "second 你好\n", "utf8");
+      await appendSupervisorEvent(files, {
+        version: 1,
+        sequence: 1,
+        at: new Date().toISOString(),
+        type: "status",
+        payload: { taskId: "task-cli-watch", actor: "done" }
+      });
+      const running = await readSupervisorRunState(files);
+      await writeSupervisorRunState(files, {
+        ...running,
+        status: "completed",
+        updated_at: new Date().toISOString(),
+        finished_at: new Date().toISOString(),
+        result: {
+          mode: "complex",
+          taskId: "task-cli-watch",
+          summary: "private watch summary",
+          workers: [worker]
+        }
+      });
+
+      const watched = await watching;
+      expect(watched.stderr).toBe("");
+      const records = watched.stdout.trim().split("\n").map((line) => JSON.parse(line)) as Array<{
+        type: string;
+        text?: string;
+        result?: { outcome: string };
+      }>;
+      expect(records[0]?.type).toBe("snapshot");
+      expect(records.at(-1)).toMatchObject({ type: "finish", result: { outcome: "completed" } });
+      expect(records.filter(({ type }) => type === "event")).toHaveLength(2);
+      expect(records.filter(({ type }) => type === "worker-output").map(({ text }) => text).join(""))
+        .toBe("first line\nsecond 你好\n");
+      expect(watched.stdout).not.toContain("private watch request");
+      expect(watched.stdout).toContain("private watch summary");
+      expect(await readSupervisorCommands(files)).toEqual([]);
+      await expect(readFile(files.controllerPath, "utf8")).rejects.toMatchObject({ code: "ENOENT" });
+      await expect(readFile(files.acknowledgedPath, "utf8")).rejects.toMatchObject({ code: "ENOENT" });
+    } finally {
+      await rm(appRoot, { recursive: true, force: true });
+      await rm(workspace, { recursive: true, force: true });
+    }
+  }, 15000);
+
+  it("routes external Feature controls and Task recovery into persisted Supervisor commands", async () => {
+    const appRoot = await mkdtemp(join(tmpdir(), "pct-cli-supervisor-feature-app-"));
+    const workspace = await mkdtemp(join(tmpdir(), "pct-cli-supervisor-feature-workspace-"));
+    const taskId = "task-feature-cli";
+    const launchedRunDirs: string[] = [];
+    try {
+      const files = await createSupervisorRun(workspace, ".parallel-codex", {
+        version: 1,
+        run_id: "run-feature-cli-active",
+        kind: "retry-task",
+        app_root: appRoot,
+        workspace_root: workspace,
+        data_dir: ".parallel-codex",
+        created_at: new Date().toISOString(),
+        cwd: workspace,
+        task_id: taskId
+      });
+      const initial = await readSupervisorRunState(files);
+      const processStartToken = await readProcessStartToken(process.pid);
+      await writeSupervisorRunState(files, {
+        ...initial,
+        status: "running",
+        updated_at: new Date().toISOString(),
+        pid: process.pid,
+        ...(processStartToken ? { process_start_token: processStartToken } : {})
+      });
+
+      const pause = await runCliCommand(appRoot, workspace, [
+        "--task",
+        taskId,
+        "--pause-feature",
+        "0001-ui",
+        "--json"
+      ]);
+      expect(JSON.parse(pause.stdout) as SupervisorFeatureCommandResult).toMatchObject({
+        action: "pause",
+        task_id: taskId,
+        feature_id: "0001-ui",
+        run: { run_id: "run-feature-cli-active" }
+      });
+      const cancellation = await runCliCommand(appRoot, workspace, [
+        "--task",
+        taskId,
+        "--cancel-feature=0002-engine",
+        "--json"
+      ]);
+      expect(JSON.parse(cancellation.stdout) as SupervisorFeatureCommandResult).toMatchObject({
+        action: "cancel",
+        feature_id: "0002-engine"
+      });
+      expect(await readSupervisorCommands(files)).toEqual([
+        expect.objectContaining({ type: "pause-feature", feature_id: "0001-ui" }),
+        expect.objectContaining({ type: "cancel-feature", feature_id: "0002-engine" })
+      ]);
+
+      await writeSupervisorRunState(files, {
+        ...await readSupervisorRunState(files),
+        status: "cancelled",
+        updated_at: new Date().toISOString(),
+        finished_at: new Date().toISOString(),
+        error: "cancelled for recovery smoke"
+      });
+      const retry = await runCliCommand(appRoot, workspace, [
+        "--task",
+        taskId,
+        "--retry-task",
+        "--idempotency-key",
+        "ci:retry-feature-cli",
+        "--json"
+      ]);
+      const retryResult = JSON.parse(retry.stdout) as SupervisorSubmissionResult;
+      const retryDir = join(workspace, ".parallel-codex", "supervisor", "runs", retryResult.run.run_id);
+      launchedRunDirs.push(retryDir);
+      expect(await readSupervisorRunRequest(supervisorRunFiles(retryDir))).toMatchObject({
+        kind: "retry-task",
+        task_id: taskId
+      });
+      expect(await readFile(join(retryDir, "request.json"), "utf8")).not.toContain("ci:retry-feature-cli");
+      await waitForSupervisorStatus(retryDir, "failed");
+
+      const resume = await runCliCommand(appRoot, workspace, [
+        "--task",
+        taskId,
+        "--resume-feature",
+        "0001-ui",
+        "--json"
+      ]);
+      const resumeResult = JSON.parse(resume.stdout) as SupervisorSubmissionResult;
+      const resumeDir = join(workspace, ".parallel-codex", "supervisor", "runs", resumeResult.run.run_id);
+      launchedRunDirs.push(resumeDir);
+      expect(await readSupervisorRunRequest(supervisorRunFiles(resumeDir))).toMatchObject({
+        kind: "resume-feature",
+        task_id: taskId,
+        feature_id: "0001-ui"
+      });
+      await waitForSupervisorStatus(resumeDir, "failed");
+    } finally {
+      for (const runDir of launchedRunDirs) {
+        await stopSupervisor(runDir);
+      }
+      await rm(appRoot, { recursive: true, force: true });
+      await rm(workspace, { recursive: true, force: true });
+    }
+  }, 20000);
 });
 
 function startCli(appRoot: string, workspace: string) {

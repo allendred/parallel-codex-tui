@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
 import type { RoleExecutionSelection } from "../core/role-configuration.js";
+import { TaskIdSchema } from "../domain/schemas.js";
 import type {
   SupervisorRunKind,
   SupervisorRunRequest,
@@ -104,6 +105,35 @@ export interface SupervisorSubmissionOptions {
   now?: () => Date;
 }
 
+export interface SupervisorTaskOperationInput {
+  appRoot: string;
+  workspaceRoot: string;
+  dataDir: string;
+  cwd: string;
+  kind: "retry-task" | "resume-feature";
+  taskId: string;
+  featureId?: string | null;
+  idempotencyKey?: string | null;
+}
+
+export type SupervisorFeatureCommandAction = "cancel" | "pause";
+
+export interface SupervisorFeatureCommandInput {
+  action: SupervisorFeatureCommandAction;
+  taskId: string;
+  featureId: string;
+}
+
+export interface SupervisorFeatureCommandResult {
+  version: 1;
+  command_id: string;
+  requested_at: string;
+  action: SupervisorFeatureCommandAction;
+  task_id: string;
+  feature_id: string;
+  run: SupervisorRunView;
+}
+
 export interface SupervisorSubmissionResult {
   version: 1;
   reused: boolean;
@@ -125,18 +155,47 @@ export async function submitSupervisorRun(
   if (!requestText) {
     throw new Error("Supervisor submission request cannot be empty");
   }
-  const idempotencyKey = input.idempotencyKey?.trim() || null;
-  if (idempotencyKey && !/^[A-Za-z0-9._:-]{1,128}$/.test(idempotencyKey)) {
-    throw new Error("Invalid idempotency key: expected 1-128 letters, numbers, dot, underscore, colon, or hyphen");
-  }
+  return submitPreparedSupervisorRun(
+    input,
+    (runId, createdAt) => submissionRequest(input, requestText, runId, createdAt),
+    options
+  );
+}
 
+export async function submitSupervisorTaskOperation(
+  input: SupervisorTaskOperationInput,
+  options: SupervisorSubmissionOptions = {}
+): Promise<SupervisorSubmissionResult> {
+  if (!TaskIdSchema.safeParse(input.taskId).success) {
+    throw new Error("Invalid task id for Supervisor operation");
+  }
+  const featureId = input.featureId?.trim() || null;
+  if (input.kind === "resume-feature" && !featureId) {
+    throw new Error("Supervisor resume-feature requires a feature id");
+  }
+  if (featureId && !featureIdIsSafe(featureId)) {
+    throw new Error(`Unsafe feature id: ${featureId}`);
+  }
+  return submitPreparedSupervisorRun(
+    input,
+    (runId, createdAt) => taskOperationRequest(input, featureId, runId, createdAt),
+    options
+  );
+}
+
+async function submitPreparedSupervisorRun(
+  input: Pick<SupervisorSubmissionInput, "workspaceRoot" | "dataDir" | "idempotencyKey">,
+  createRequest: (runId: string, createdAt: string) => SupervisorRunRequest,
+  options: SupervisorSubmissionOptions
+): Promise<SupervisorSubmissionResult> {
+  const idempotencyKey = normalizedIdempotencyKey(input.idempotencyKey);
   const now = options.now ?? (() => new Date());
   const launch = options.launch ?? launchSupervisorProcess;
   const createdAt = now().toISOString();
   const runId = idempotencyKey
     ? idempotentRunId(input.workspaceRoot, idempotencyKey)
     : createSupervisorRunId(now());
-  const request = submissionRequest(input, requestText, runId, createdAt);
+  const request = createRequest(runId, createdAt);
   const completed = await runWithSupervisorSubmissionTurn(
     input.workspaceRoot,
     input.dataDir,
@@ -155,7 +214,7 @@ export async function submitSupervisorRun(
         return {
           version: 1,
           reused: true,
-          run: await inspectSupervisorRun(existing, now())
+          run: await inspectSupervisorRunRecord(existing, now())
         } satisfies SupervisorSubmissionResult;
       }
 
@@ -171,7 +230,7 @@ export async function submitSupervisorRun(
       return {
         version: 1,
         reused: false,
-        run: await inspectSupervisorRun({ files, state }, now())
+        run: await inspectSupervisorRunRecord({ files, state }, now())
       } satisfies SupervisorSubmissionResult;
     },
     options.acquireSubmissionTurn
@@ -191,7 +250,7 @@ export async function inspectSupervisorRuns(
   now = new Date()
 ): Promise<SupervisorRunsReport> {
   const records = await listSupervisorRuns(workspaceRoot, dataDir);
-  const runs = await Promise.all(records.map((record) => inspectSupervisorRun(record, now)));
+  const runs = await Promise.all(records.map((record) => inspectSupervisorRunRecord(record, now)));
   return {
     version: 1,
     workspace_root: workspaceRoot,
@@ -209,7 +268,7 @@ export async function requestSupervisorRunCancellation(
   const records = await listSupervisorRuns(workspaceRoot, dataDir);
   const inspected = await Promise.all(records.map(async (record) => ({
     record,
-    view: await inspectSupervisorRun(record, now)
+    view: await inspectSupervisorRunRecord(record, now)
   })));
   const newestFirst = inspected.reverse();
   const selected = runId
@@ -249,6 +308,60 @@ export async function requestSupervisorRunCancellation(
   };
 }
 
+export async function requestSupervisorFeatureCommand(
+  workspaceRoot: string,
+  dataDir: string,
+  input: SupervisorFeatureCommandInput,
+  now = new Date()
+): Promise<SupervisorFeatureCommandResult> {
+  if (!TaskIdSchema.safeParse(input.taskId).success) {
+    throw new Error("Invalid task id for Supervisor feature command");
+  }
+  if (!featureIdIsSafe(input.featureId)) {
+    throw new Error(`Unsafe feature id: ${input.featureId}`);
+  }
+  const records = await listSupervisorRuns(workspaceRoot, dataDir);
+  const inspected = await Promise.all(records.map(async (record) => ({
+    record,
+    view: await inspectSupervisorRunRecord(record, now)
+  })));
+  const newestFirst = inspected.reverse();
+  const selected = newestFirst.find(({ view }) => (
+    view.task_id === input.taskId
+    && !isTerminalStatus(view.status)
+    && view.control !== "stale"
+  ));
+  if (!selected) {
+    const matching = newestFirst.find(({ view }) => view.task_id === input.taskId);
+    if (matching) {
+      throw new Error(
+        `No active Supervisor run for task ${input.taskId}: ${matching.view.run_id} is ${matching.view.status}`
+      );
+    }
+    throw new Error(`No Supervisor run found for task ${input.taskId}`);
+  }
+
+  const requestedAt = now.toISOString();
+  const commandId = randomUUID();
+  await appendSupervisorCommand(selected.record.files, {
+    version: 1,
+    id: commandId,
+    at: requestedAt,
+    type: input.action === "pause" ? "pause-feature" : "cancel-feature",
+    task_id: input.taskId,
+    feature_id: input.featureId
+  });
+  return {
+    version: 1,
+    command_id: commandId,
+    requested_at: requestedAt,
+    action: input.action,
+    task_id: input.taskId,
+    feature_id: input.featureId,
+    run: selected.view
+  };
+}
+
 export async function waitForSupervisorRun(
   workspaceRoot: string,
   dataDir: string,
@@ -269,7 +382,7 @@ export async function waitForSupervisorRun(
   const records = await listSupervisorRuns(workspaceRoot, dataDir);
   const inspected = await Promise.all(records.map(async (record) => ({
     record,
-    view: await inspectSupervisorRun(record, now())
+    view: await inspectSupervisorRunRecord(record, now())
   })));
   const newestFirst = inspected.reverse();
   const selected = runId
@@ -283,7 +396,7 @@ export async function waitForSupervisorRun(
   }
 
   while (true) {
-    const view = await inspectSupervisorRun(selected.record, now());
+    const view = await inspectSupervisorRunRecord(selected.record, now());
     const waitedMs = Math.max(0, Date.now() - startedAt);
     if (isTerminalStatus(view.status)) {
       return {
@@ -347,6 +460,11 @@ export function formatSupervisorCancellation(result: SupervisorCancellationResul
   return `Cancellation requested · ${result.run.run_id} · ${target}`;
 }
 
+export function formatSupervisorFeatureCommand(result: SupervisorFeatureCommandResult): string {
+  const action = result.action === "pause" ? "Pause" : "Cancellation";
+  return `${action} requested · ${result.feature_id} · task ${result.task_id} · ${result.run.run_id}`;
+}
+
 export function formatSupervisorWait(result: SupervisorWaitResult): string {
   const target = result.run.task_id ? `task ${result.run.task_id}` : result.run.kind;
   return `Run ${result.outcome} · ${result.run.run_id} · ${target} · waited ${formatDuration(result.waited_ms)}`;
@@ -367,7 +485,7 @@ export function supervisorWaitExitCode(outcome: SupervisorWaitOutcome): number {
   }
 }
 
-async function inspectSupervisorRun(
+export async function inspectSupervisorRunRecord(
   record: SupervisorRunRecord,
   now: Date
 ): Promise<SupervisorRunView> {
@@ -444,6 +562,35 @@ function submissionRequest(
     : { ...base, kind: "handle-request" };
 }
 
+function taskOperationRequest(
+  input: SupervisorTaskOperationInput,
+  featureId: string | null,
+  runId: string,
+  createdAt: string
+): SupervisorRunRequest {
+  const base = {
+    version: 1 as const,
+    run_id: runId,
+    app_root: input.appRoot,
+    workspace_root: input.workspaceRoot,
+    data_dir: input.dataDir,
+    created_at: createdAt,
+    cwd: input.cwd,
+    task_id: input.taskId
+  };
+  return input.kind === "resume-feature"
+    ? { ...base, kind: "resume-feature", feature_id: featureId! }
+    : { ...base, kind: "retry-task" };
+}
+
+function normalizedIdempotencyKey(value: string | null | undefined): string | null {
+  const key = value?.trim() || null;
+  if (key && !/^[A-Za-z0-9._:-]{1,128}$/.test(key)) {
+    throw new Error("Invalid idempotency key: expected 1-128 letters, numbers, dot, underscore, colon, or hyphen");
+  }
+  return key;
+}
+
 function idempotentRunId(workspaceRoot: string, key: string): string {
   const digest = createHash("sha256")
     .update(workspaceRoot)
@@ -452,6 +599,10 @@ function idempotentRunId(workspaceRoot: string, key: string): string {
     .digest("hex")
     .slice(0, 24);
   return `run-idem-${digest}`;
+}
+
+function featureIdIsSafe(featureId: string): boolean {
+  return /^[a-z0-9][a-z0-9-]{0,95}$/.test(featureId);
 }
 
 function sameSubmission(left: SupervisorRunRequest, right: SupervisorRunRequest): boolean {

@@ -1,6 +1,6 @@
 {
   "name": "parallel-codex-tui",
-  "version": "0.4.3",
+  "version": "0.4.4",
   "description": "A TypeScript TUI wrapper for routed parallel coding with Codex and Claude workers.",
   "license": "MIT",
   "type": "module",

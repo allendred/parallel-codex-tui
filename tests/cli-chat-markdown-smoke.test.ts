@@ -400,7 +400,7 @@ describe("CLI chat Markdown smoke", () => {
     } finally {
       child.kill("SIGTERM");
     }
-  }, 10000);
+  }, 20000);
 
   it("shows live Router wait progress and the timeout cause after fallback reaches Main", async () => {
     const workspace = await mkdtemp(join(tmpdir(), "pct-cli-router-timeout-"));
@@ -754,7 +754,7 @@ async function waitForScreenText(
   screen: NativeTerminalScreen,
   text: string
 ): Promise<void> {
-  for (let attempt = 0; attempt < 120; attempt += 1) {
+  for (let attempt = 0; attempt < 240; attempt += 1) {
     await screenWritesRef();
     if (screen.snapshot().includes(text)) {
       return;

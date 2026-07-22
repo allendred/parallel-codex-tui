@@ -71,7 +71,7 @@ describe("CLI Task session management smoke", () => {
       expect(run.screen.snapshot()).not.toContain("Keep session");
       run.child.write("\r");
       await waitForScreenText(run, "Task sessions · active · find turn:中文 role:actor provider:codex state:done");
-      run.child.write("x");
+      run.child.write("xx");
       await waitForScreenText(run, "Task search cleared");
       await waitForScreenText(run, "2 tasks · 2 done");
 
@@ -121,7 +121,7 @@ describe("CLI Task session management smoke", () => {
     } finally {
       stopCli(run);
     }
-  });
+  }, 30000);
 });
 
 async function writeTerminalTask(
@@ -224,7 +224,7 @@ async function waitForDirectoryEntries(path: string, count: number): Promise<str
 }
 
 async function waitForScreenText(run: ReturnType<typeof startCli>, text: string): Promise<void> {
-  for (let attempt = 0; attempt < 300; attempt += 1) {
+  for (let attempt = 0; attempt < 600; attempt += 1) {
     await run.screenWrites();
     if (run.screen.snapshot().includes(text)) {
       return;

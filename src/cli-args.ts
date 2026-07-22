@@ -5,6 +5,8 @@ import { TaskIdSchema } from "./domain/schemas.js";
 
 export interface CliArgs {
   appRoot: string;
+  cancelFeature: boolean;
+  cancelFeatureId: string | null;
   cancelRun: boolean;
   cancelRunId: string | null;
   diagnostics: boolean;
@@ -16,11 +18,18 @@ export interface CliArgs {
   json: boolean;
   probeAgents: boolean;
   probeRouter: boolean;
+  pauseFeature: boolean;
+  pauseFeatureId: string | null;
+  resumeFeature: boolean;
+  resumeFeatureId: string | null;
+  retryTask: boolean;
   runs: boolean;
   submit: boolean;
   submitRequest: string | null;
   idempotencyKey: string | null;
   wait: boolean;
+  watchRun: boolean;
+  watchRunId: string | null;
   waitRun: boolean;
   waitRunId: string | null;
   waitTimeoutMs: number | null;
@@ -39,9 +48,13 @@ const allowedValueOptions = new Set([
   "-t",
   "--theme",
   "--diagnostics",
+  "--cancel-feature",
   "--cancel-run",
   "--submit",
   "--idempotency-key",
+  "--pause-feature",
+  "--resume-feature",
+  "--watch-run",
   "--wait-run",
   "--wait-timeout"
 ]);
@@ -53,6 +66,7 @@ const allowedBooleanOptions = new Set([
   "--json",
   "--probe-agents",
   "--probe-router",
+  "--retry-task",
   "--runs",
   "--wait",
   "--themes",
@@ -85,6 +99,24 @@ export function parseCliArgs(args: string[], cwd: string): CliArgs {
   );
   const cancelRun = cancelRunFlagIndex >= 0;
   const cancelRunId = flagValue(optionArgs, cancelRunFlagIndex);
+  const cancelFeatureFlagIndex = lastFlagIndex(
+    optionArgs,
+    (arg) => arg === "--cancel-feature" || arg.startsWith("--cancel-feature=")
+  );
+  const cancelFeature = cancelFeatureFlagIndex >= 0;
+  const cancelFeatureId = flagValue(optionArgs, cancelFeatureFlagIndex);
+  const pauseFeatureFlagIndex = lastFlagIndex(
+    optionArgs,
+    (arg) => arg === "--pause-feature" || arg.startsWith("--pause-feature=")
+  );
+  const pauseFeature = pauseFeatureFlagIndex >= 0;
+  const pauseFeatureId = flagValue(optionArgs, pauseFeatureFlagIndex);
+  const resumeFeatureFlagIndex = lastFlagIndex(
+    optionArgs,
+    (arg) => arg === "--resume-feature" || arg.startsWith("--resume-feature=")
+  );
+  const resumeFeature = resumeFeatureFlagIndex >= 0;
+  const resumeFeatureId = flagValue(optionArgs, resumeFeatureFlagIndex);
   const submitFlagIndex = lastFlagIndex(
     optionArgs,
     (arg) => arg === "--submit" || arg.startsWith("--submit=")
@@ -106,6 +138,12 @@ export function parseCliArgs(args: string[], cwd: string): CliArgs {
   );
   const waitRun = waitRunFlagIndex >= 0;
   const waitRunId = flagValue(optionArgs, waitRunFlagIndex);
+  const watchRunFlagIndex = lastFlagIndex(
+    optionArgs,
+    (arg) => arg === "--watch-run" || arg.startsWith("--watch-run=")
+  );
+  const watchRun = watchRunFlagIndex >= 0;
+  const watchRunId = flagValue(optionArgs, watchRunFlagIndex);
   const waitTimeoutSeconds = Number(flagValue(optionArgs, waitTimeoutFlagIndex));
   const waitTimeoutMs = waitTimeoutFlagIndex >= 0 && Number.isFinite(waitTimeoutSeconds)
     ? waitTimeoutSeconds * 1000
@@ -117,6 +155,7 @@ export function parseCliArgs(args: string[], cwd: string): CliArgs {
   const json = optionArgs.includes("--json");
   const probeAgents = optionArgs.includes("--probe-agents");
   const probeRouter = optionArgs.includes("--probe-router");
+  const retryTask = optionArgs.includes("--retry-task");
   const runs = optionArgs.includes("--runs");
   const wait = optionArgs.includes("--wait");
   const themes = optionArgs.includes("--themes");
@@ -132,6 +171,8 @@ export function parseCliArgs(args: string[], cwd: string): CliArgs {
 
   return {
     appRoot,
+    cancelFeature,
+    cancelFeatureId,
     cancelRun,
     cancelRunId,
     diagnostics,
@@ -143,11 +184,18 @@ export function parseCliArgs(args: string[], cwd: string): CliArgs {
     json,
     probeAgents,
     probeRouter,
+    pauseFeature,
+    pauseFeatureId,
+    resumeFeature,
+    resumeFeatureId,
+    retryTask,
     runs,
     submit,
     submitRequest,
     idempotencyKey,
     wait,
+    watchRun,
+    watchRunId,
     waitRun,
     waitRunId,
     waitTimeoutMs,
@@ -218,6 +266,25 @@ export function validateCliArgs(args: string[]): string[] {
   );
   const cancelRun = cancelRunFlagIndex >= 0;
   const cancelRunId = flagValue(optionArgs, cancelRunFlagIndex);
+  const cancelFeatureFlagIndex = lastFlagIndex(
+    optionArgs,
+    (arg) => arg === "--cancel-feature" || arg.startsWith("--cancel-feature=")
+  );
+  const cancelFeature = cancelFeatureFlagIndex >= 0;
+  const cancelFeatureId = flagValue(optionArgs, cancelFeatureFlagIndex);
+  const pauseFeatureFlagIndex = lastFlagIndex(
+    optionArgs,
+    (arg) => arg === "--pause-feature" || arg.startsWith("--pause-feature=")
+  );
+  const pauseFeature = pauseFeatureFlagIndex >= 0;
+  const pauseFeatureId = flagValue(optionArgs, pauseFeatureFlagIndex);
+  const resumeFeatureFlagIndex = lastFlagIndex(
+    optionArgs,
+    (arg) => arg === "--resume-feature" || arg.startsWith("--resume-feature=")
+  );
+  const resumeFeature = resumeFeatureFlagIndex >= 0;
+  const resumeFeatureId = flagValue(optionArgs, resumeFeatureFlagIndex);
+  const retryTask = optionArgs.includes("--retry-task");
   const submitFlagIndex = lastFlagIndex(
     optionArgs,
     (arg) => arg === "--submit" || arg.startsWith("--submit=")
@@ -236,32 +303,66 @@ export function validateCliArgs(args: string[]): string[] {
   );
   const waitRun = waitRunFlagIndex >= 0;
   const waitRunId = flagValue(optionArgs, waitRunFlagIndex);
-  const supervisorCommandCount = [runs, cancelRun, waitRun, submit].filter(Boolean).length;
+  const watchRunFlagIndex = lastFlagIndex(
+    optionArgs,
+    (arg) => arg === "--watch-run" || arg.startsWith("--watch-run=")
+  );
+  const watchRun = watchRunFlagIndex >= 0;
+  const watchRunId = flagValue(optionArgs, watchRunFlagIndex);
+  const supervisorCommandCount = [
+    runs,
+    cancelRun,
+    waitRun,
+    watchRun,
+    submit,
+    cancelFeature,
+    pauseFeature,
+    resumeFeature,
+    retryTask
+  ].filter(Boolean).length;
   if (supervisorCommandCount > 1) {
-    errors.push("Only one of --runs, --cancel-run, --wait-run, or --submit may be used");
+    errors.push("Only one Supervisor command may be used at a time");
   }
   if (optionArgs.includes("--json") && supervisorCommandCount === 0) {
-    errors.push("--json requires --runs, --cancel-run, --wait-run, or --submit");
+    errors.push("--json requires a Supervisor command");
   }
   if (submit && !submitRequest) {
     errors.push("Invalid --submit: expected request text or - for piped stdin");
   }
-  if (wait && !submit) {
-    errors.push("--wait requires --submit");
+  const startsRun = submit || resumeFeature || retryTask;
+  if (wait && !startsRun) {
+    errors.push("--wait requires --submit, --retry-task, or --resume-feature");
   }
   if (idempotencyKeyFlagIndex >= 0) {
     if (!idempotencyKey || !/^[A-Za-z0-9._:-]{1,128}$/.test(idempotencyKey)) {
       errors.push("Invalid --idempotency-key: expected 1-128 letters, numbers, dot, underscore, colon, or hyphen");
     }
-    if (!submit) {
-      errors.push("--idempotency-key requires --submit");
+    if (!startsRun) {
+      errors.push("--idempotency-key requires --submit, --retry-task, or --resume-feature");
     }
+  }
+  for (const [option, enabled, value] of [
+    ["--cancel-feature", cancelFeature, cancelFeatureId],
+    ["--pause-feature", pauseFeature, pauseFeatureId],
+    ["--resume-feature", resumeFeature, resumeFeatureId]
+  ] as const) {
+    if (enabled && !value) {
+      errors.push(`Invalid ${option}: expected a Feature id`);
+    } else if (value && !/^[a-z0-9][a-z0-9-]{0,95}$/.test(value)) {
+      errors.push(`Invalid ${option}: expected a lowercase Feature id`);
+    }
+  }
+  if ((cancelFeature || pauseFeature || resumeFeature || retryTask) && !rawTaskId) {
+    errors.push("Task and Feature controls require --task <id>");
   }
   if (cancelRunId && !/^run-[A-Za-z0-9._-]+$/.test(cancelRunId)) {
     errors.push("Invalid --cancel-run: expected run- followed by letters, numbers, dot, underscore, or hyphen");
   }
   if (waitRunId && !/^run-[A-Za-z0-9._-]+$/.test(waitRunId)) {
     errors.push("Invalid --wait-run: expected run- followed by letters, numbers, dot, underscore, or hyphen");
+  }
+  if (watchRunId && !/^run-[A-Za-z0-9._-]+$/.test(watchRunId)) {
+    errors.push("Invalid --watch-run: expected run- followed by letters, numbers, dot, underscore, or hyphen");
   }
   const waitTimeoutFlagIndex = lastFlagIndex(
     optionArgs,
@@ -273,8 +374,8 @@ export function validateCliArgs(args: string[]): string[] {
     if (!rawWaitTimeout || !Number.isFinite(waitTimeoutSeconds) || waitTimeoutSeconds <= 0) {
       errors.push("Invalid --wait-timeout: expected a positive number of seconds");
     }
-    if (!waitRun && !submit) {
-      errors.push("--wait-timeout requires --wait-run or --submit");
+    if (!waitRun && !watchRun && !startsRun) {
+      errors.push("--wait-timeout requires --wait-run, --watch-run, --submit, --retry-task, or --resume-feature");
     }
   }
   return errors;

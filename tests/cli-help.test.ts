@@ -19,6 +19,11 @@ describe("buildCliHelpText", () => {
     expect(help).toContain("--wait");
     expect(help).toContain("--cancel-run [id]");
     expect(help).toContain("--wait-run [id]");
+    expect(help).toContain("--watch-run [id]");
+    expect(help).toContain("--pause-feature <id>");
+    expect(help).toContain("--cancel-feature <id>");
+    expect(help).toContain("--resume-feature <id>");
+    expect(help).toContain("--retry-task");
     expect(help).toContain("--wait-timeout <s>");
     expect(help).toContain("never cancels the run");
     expect(help).toContain("--json");

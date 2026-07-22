@@ -6,12 +6,15 @@ import { readProcessStartToken } from "../src/core/process-identity.js";
 import type { SupervisorRunRequest } from "../src/supervisor/protocol.js";
 import {
   formatSupervisorCancellation,
+  formatSupervisorFeatureCommand,
   formatSupervisorRuns,
   formatSupervisorSubmission,
   formatSupervisorWait,
   inspectSupervisorRuns,
+  requestSupervisorFeatureCommand,
   requestSupervisorRunCancellation,
   submitSupervisorRun,
+  submitSupervisorTaskOperation,
   supervisorWaitExitCode,
   waitForSupervisorRun
 } from "../src/supervisor/operations.js";
@@ -20,6 +23,7 @@ import {
   claimSupervisorController,
   createSupervisorRun,
   readSupervisorCommands,
+  readSupervisorRunRequest,
   readSupervisorRunState,
   supervisorRunFiles,
   writeSupervisorRunState,
@@ -151,6 +155,71 @@ describe("Supervisor operations", () => {
     expect(results.map((result) => result.reused).sort()).toEqual([false, true]);
     expect(new Set(results.map((result) => result.run.run_id))).toHaveLength(1);
     expect(launches).toBe(1);
+  });
+
+  it("submits retry and Feature resume operations through the detached Supervisor", async () => {
+    const launched: SupervisorRunRequest[] = [];
+    const launch = async (files: SupervisorRunFiles, submitted: SupervisorRunRequest) => {
+      launched.push(submitted);
+      const state = await readSupervisorRunState(files);
+      await writeSupervisorRunState(files, {
+        ...state,
+        status: "completed",
+        updated_at: new Date().toISOString(),
+        finished_at: new Date().toISOString(),
+        result: {
+          mode: "complex",
+          taskId: submitted.kind === "handle-request" ? null : submitted.task_id,
+          summary: "done",
+          workers: []
+        }
+      });
+    };
+    const retryRoot = join(root, "retry");
+    const retryInput = {
+      appRoot: retryRoot,
+      workspaceRoot: retryRoot,
+      dataDir: ".parallel-codex",
+      cwd: retryRoot,
+      kind: "retry-task" as const,
+      taskId: "task-operation",
+      idempotencyKey: "ci:retry-operation"
+    };
+
+    const retry = await submitSupervisorTaskOperation(retryInput, { launch });
+    const reused = await submitSupervisorTaskOperation(retryInput, { launch });
+    const resumeRoot = join(root, "resume");
+    const resume = await submitSupervisorTaskOperation({
+      appRoot: resumeRoot,
+      workspaceRoot: resumeRoot,
+      dataDir: ".parallel-codex",
+      cwd: resumeRoot,
+      kind: "resume-feature",
+      taskId: "task-operation",
+      featureId: "0001-ui"
+    }, { launch });
+
+    expect(retry).toMatchObject({ reused: false, run: { kind: "retry-task", task_id: "task-operation" } });
+    expect(reused).toMatchObject({ reused: true, run: { run_id: retry.run.run_id } });
+    expect(resume).toMatchObject({ reused: false, run: { kind: "resume-feature", task_id: "task-operation" } });
+    expect(launched.map((submitted) => submitted.kind)).toEqual(["retry-task", "resume-feature"]);
+    expect(launched[1]).toMatchObject({ task_id: "task-operation", feature_id: "0001-ui" });
+    expect(JSON.stringify(launched)).not.toContain("ci:retry-operation");
+
+    const persisted = await readSupervisorRunRequest(supervisorRunFiles(join(
+      resumeRoot,
+      ".parallel-codex",
+      "supervisor",
+      "runs",
+      resume.run.run_id
+    )));
+    expect(persisted).toMatchObject({ kind: "resume-feature", feature_id: "0001-ui" });
+    await expect(submitSupervisorTaskOperation({
+      ...retryInput,
+      kind: "resume-feature",
+      featureId: "../outside",
+      idempotencyKey: null
+    }, { launch })).rejects.toThrow("Unsafe feature id");
   });
 
   it("reports lock cleanup failure without turning a successful submission into a failure", async () => {
@@ -315,6 +384,61 @@ describe("Supervisor operations", () => {
     });
     await expect(requestSupervisorRunCancellation(root, ".parallel-codex", "run-stale"))
       .rejects.toThrow("Supervisor run is already cancelled: run-stale");
+  });
+
+  it("appends validated pause and cancel commands for an active Task Feature", async () => {
+    const files = await createSupervisorRun(root, ".parallel-codex", {
+      version: 1,
+      run_id: "run-feature-control",
+      kind: "retry-task",
+      app_root: root,
+      workspace_root: root,
+      data_dir: ".parallel-codex",
+      created_at: "2026-07-21T00:00:00.000Z",
+      cwd: root,
+      task_id: "task-feature-control"
+    });
+    const state = await readSupervisorRunState(files);
+    const processStartToken = await readProcessStartToken(process.pid);
+    await writeSupervisorRunState(files, {
+      ...state,
+      status: "running",
+      task_id: "task-feature-control",
+      updated_at: "2026-07-21T00:00:01.000Z",
+      pid: process.pid,
+      ...(processStartToken ? { process_start_token: processStartToken } : {})
+    });
+
+    const paused = await requestSupervisorFeatureCommand(root, ".parallel-codex", {
+      action: "pause",
+      taskId: "task-feature-control",
+      featureId: "0001-ui"
+    }, new Date("2026-07-21T00:00:02.000Z"));
+    const cancelled = await requestSupervisorFeatureCommand(root, ".parallel-codex", {
+      action: "cancel",
+      taskId: "task-feature-control",
+      featureId: "0002-engine"
+    }, new Date("2026-07-21T00:00:03.000Z"));
+
+    expect(paused).toMatchObject({
+      action: "pause",
+      task_id: "task-feature-control",
+      feature_id: "0001-ui",
+      run: { run_id: "run-feature-control" }
+    });
+    expect(formatSupervisorFeatureCommand(paused)).toBe(
+      "Pause requested · 0001-ui · task task-feature-control · run-feature-control"
+    );
+    expect(formatSupervisorFeatureCommand(cancelled)).toContain("Cancellation requested · 0002-engine");
+    expect(await readSupervisorCommands(files)).toEqual([
+      expect.objectContaining({ type: "pause-feature", task_id: "task-feature-control", feature_id: "0001-ui" }),
+      expect.objectContaining({ type: "cancel-feature", task_id: "task-feature-control", feature_id: "0002-engine" })
+    ]);
+    await expect(requestSupervisorFeatureCommand(root, ".parallel-codex", {
+      action: "pause",
+      taskId: "task-feature-control",
+      featureId: "../outside"
+    })).rejects.toThrow("Unsafe feature id");
   });
 
   it("waits for a live run to finish without reading its private request or writing commands", async () => {

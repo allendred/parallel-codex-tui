@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import React from "react";
+import { once } from "node:events";
 import { join } from "node:path";
 import { render } from "ink";
 import { ZodError } from "zod";
@@ -32,16 +33,25 @@ import { version } from "./version.js";
 import { SupervisorOrchestrator } from "./supervisor/client.js";
 import {
   formatSupervisorCancellation,
+  formatSupervisorFeatureCommand,
   formatSupervisorRuns,
   formatSupervisorSubmission,
   formatSupervisorWait,
   inspectSupervisorRuns,
+  requestSupervisorFeatureCommand,
   requestSupervisorRunCancellation,
   submitSupervisorRun,
+  submitSupervisorTaskOperation,
   supervisorWaitExitCode,
-  waitForSupervisorRun
+  waitForSupervisorRun,
+  type SupervisorSubmissionResult
 } from "./supervisor/operations.js";
 import { runSupervisorJob } from "./supervisor/runner.js";
+import {
+  formatSupervisorWatchRecord,
+  watchSupervisorRun,
+  type SupervisorWatchRecord
+} from "./supervisor/watch.js";
 
 main().catch((error) => {
   if (error instanceof WorkspaceSelectionCancelledError) {
@@ -110,14 +120,25 @@ async function main(): Promise<void> {
     } finally {
       runtime.index.close();
     }
-  } else if (cliArgs.runs || cliArgs.cancelRun || cliArgs.waitRun || cliArgs.submit) {
+  } else if (
+    cliArgs.runs
+    || cliArgs.cancelRun
+    || cliArgs.waitRun
+    || cliArgs.watchRun
+    || cliArgs.submit
+    || cliArgs.cancelFeature
+    || cliArgs.pauseFeature
+    || cliArgs.resumeFeature
+    || cliArgs.retryTask
+  ) {
     const selectedWorkspace = await selectWorkspaceForCli({
       appRoot: cliArgs.appRoot,
       cwd: process.cwd(),
       explicitWorkspace: cliArgs.explicitWorkspace,
       interactive: false
     });
-    if (cliArgs.submit && !(await pathExists(localConfigPath))) {
+    const startsSupervisorRun = cliArgs.submit || cliArgs.resumeFeature || cliArgs.retryTask;
+    if (startsSupervisorRun && !(await pathExists(localConfigPath))) {
       await writeDefaultConfig(cliArgs.appRoot);
     }
     const config = await loadConfig(cliArgs.appRoot);
@@ -135,6 +156,17 @@ async function main(): Promise<void> {
           cliArgs.cancelRunId
         );
         console.log(cliArgs.json ? JSON.stringify(result, null, 2) : formatSupervisorCancellation(result));
+      } else if (cliArgs.cancelFeature || cliArgs.pauseFeature) {
+        const result = await requestSupervisorFeatureCommand(
+          workspaceRoot,
+          config.dataDir,
+          {
+            action: cliArgs.pauseFeature ? "pause" : "cancel",
+            taskId: cliArgs.taskId!,
+            featureId: (cliArgs.pauseFeatureId ?? cliArgs.cancelFeatureId)!
+          }
+        );
+        console.log(cliArgs.json ? JSON.stringify(result, null, 2) : formatSupervisorFeatureCommand(result));
       } else if (cliArgs.waitRun) {
         const result = await waitForSupervisorRun(
           workspaceRoot,
@@ -144,6 +176,36 @@ async function main(): Promise<void> {
         );
         console.log(cliArgs.json ? JSON.stringify(result, null, 2) : formatSupervisorWait(result));
         process.exitCode = supervisorWaitExitCode(result.outcome);
+      } else if (cliArgs.watchRun) {
+        const result = await watchSupervisorRun(
+          workspaceRoot,
+          config.dataDir,
+          cliArgs.watchRunId,
+          {
+            timeoutMs: cliArgs.waitTimeoutMs,
+            onRecord: (record) => writeSupervisorWatchRecord(record, cliArgs.json)
+          }
+        );
+        process.exitCode = supervisorWaitExitCode(result.outcome);
+      } else if (cliArgs.resumeFeature || cliArgs.retryTask) {
+        const submission = await submitSupervisorTaskOperation({
+          appRoot: cliArgs.appRoot,
+          workspaceRoot,
+          dataDir: config.dataDir,
+          cwd: workspaceRoot,
+          kind: cliArgs.resumeFeature ? "resume-feature" : "retry-task",
+          taskId: cliArgs.taskId!,
+          featureId: cliArgs.resumeFeatureId,
+          idempotencyKey: cliArgs.idempotencyKey
+        });
+        await printSupervisorSubmission(
+          submission,
+          workspaceRoot,
+          config.dataDir,
+          cliArgs.wait || cliArgs.waitTimeoutMs !== null,
+          cliArgs.waitTimeoutMs,
+          cliArgs.json
+        );
       } else {
         const request = await resolveSubmitRequest(cliArgs.submitRequest);
         const submission = await submitSupervisorRun({
@@ -155,24 +217,14 @@ async function main(): Promise<void> {
           taskId: cliArgs.taskId,
           idempotencyKey: cliArgs.idempotencyKey
         });
-        const waitAfterSubmit = cliArgs.wait || cliArgs.waitTimeoutMs !== null;
-        if (waitAfterSubmit) {
-          const wait = await waitForSupervisorRun(
-            workspaceRoot,
-            config.dataDir,
-            submission.run.run_id,
-            { timeoutMs: cliArgs.waitTimeoutMs }
-          );
-          const result = { version: 1 as const, submission, wait };
-          console.log(cliArgs.json
-            ? JSON.stringify(result, null, 2)
-            : `${formatSupervisorSubmission(submission)}\n${formatSupervisorWait(wait)}`);
-          process.exitCode = supervisorWaitExitCode(wait.outcome);
-        } else {
-          console.log(cliArgs.json
-            ? JSON.stringify(submission, null, 2)
-            : formatSupervisorSubmission(submission));
-        }
+        await printSupervisorSubmission(
+          submission,
+          workspaceRoot,
+          config.dataDir,
+          cliArgs.wait || cliArgs.waitTimeoutMs !== null,
+          cliArgs.waitTimeoutMs,
+          cliArgs.json
+        );
       }
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -345,6 +397,39 @@ async function main(): Promise<void> {
       retryDeferredWorkspaceClosures(deferredWorkspaceClosures);
     }
   }
+}
+
+async function writeSupervisorWatchRecord(record: SupervisorWatchRecord, json: boolean): Promise<void> {
+  const rendered = json ? JSON.stringify(record) : formatSupervisorWatchRecord(record);
+  const output = rendered.endsWith("\n") ? rendered : `${rendered}\n`;
+  if (!process.stdout.write(output)) {
+    await once(process.stdout, "drain");
+  }
+}
+
+async function printSupervisorSubmission(
+  submission: SupervisorSubmissionResult,
+  workspaceRoot: string,
+  dataDir: string,
+  wait: boolean,
+  waitTimeoutMs: number | null,
+  json: boolean
+): Promise<void> {
+  if (!wait) {
+    console.log(json ? JSON.stringify(submission, null, 2) : formatSupervisorSubmission(submission));
+    return;
+  }
+  const waitResult = await waitForSupervisorRun(
+    workspaceRoot,
+    dataDir,
+    submission.run.run_id,
+    { timeoutMs: waitTimeoutMs }
+  );
+  const result = { version: 1 as const, submission, wait: waitResult };
+  console.log(json
+    ? JSON.stringify(result, null, 2)
+    : `${formatSupervisorSubmission(submission)}\n${formatSupervisorWait(waitResult)}`);
+  process.exitCode = supervisorWaitExitCode(waitResult.outcome);
 }
 
 interface InteractiveWorkspaceState {
