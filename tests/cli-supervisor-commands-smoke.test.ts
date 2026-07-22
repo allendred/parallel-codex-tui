@@ -1,14 +1,16 @@
-import { execFile } from "node:child_process";
+import { execFile, spawn as spawnChild } from "node:child_process";
 import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { describe, expect, it } from "vitest";
 import { spawn } from "node-pty";
-import { readProcessStartToken } from "../src/core/process-identity.js";
+import { processIsAlive, readProcessStartToken } from "../src/core/process-identity.js";
 import type {
   SupervisorCancellationResult,
-  SupervisorRunsReport
+  SupervisorRunsReport,
+  SupervisorSubmissionResult,
+  SupervisorSubmitAndWaitResult
 } from "../src/supervisor/operations.js";
 import {
   readSupervisorCommands,
@@ -22,6 +24,40 @@ import { NativeTerminalScreen } from "../src/tui/terminal-screen.js";
 const execFileAsync = promisify(execFile);
 
 describe("CLI Supervisor commands smoke", () => {
+  it("creates a missing Workspace and default config before headless submission", async () => {
+    const appRoot = await mkdtemp(join(tmpdir(), "pct-cli-supervisor-bootstrap-app-"));
+    const workspaceParent = await mkdtemp(join(tmpdir(), "pct-cli-supervisor-bootstrap-workspace-"));
+    const workspace = join(workspaceParent, "created-project");
+    const emptyBin = join(appRoot, "empty-bin");
+    await mkdir(emptyBin);
+    let runDir: string | null = null;
+    try {
+      const submitted = await runCliCommand(appRoot, workspace, [
+        "--submit",
+        "private bootstrap request",
+        "--json"
+      ], { PATH: emptyBin });
+      expect(submitted.stderr).toBe("");
+      const result = JSON.parse(submitted.stdout) as SupervisorSubmissionResult;
+      expect(result).toMatchObject({ version: 1, reused: false });
+      expect(submitted.stdout).not.toContain("private bootstrap request");
+      expect(await readFile(join(appRoot, ".parallel-codex", "config.toml"), "utf8"))
+        .toContain("[router]");
+      expect(await readFile(join(appRoot, ".parallel-codex", "workspaces.json"), "utf8"))
+        .toContain(workspace);
+      expect((await readdir(workspace))).toContain(".parallel-codex");
+      runDir = join(workspace, ".parallel-codex", "supervisor", "runs", result.run.run_id);
+      expect(await readFile(join(runDir, "request.json"), "utf8"))
+        .toContain("private bootstrap request");
+    } finally {
+      if (runDir) {
+        await stopSupervisor(runDir);
+      }
+      await rm(appRoot, { recursive: true, force: true });
+      await rm(workspaceParent, { recursive: true, force: true });
+    }
+  }, 15000);
+
   it("queries and cancels a live run from a second non-interactive CLI", async () => {
     const appRoot = await mkdtemp(join(tmpdir(), "pct-cli-supervisor-commands-app-"));
     const workspace = await mkdtemp(join(tmpdir(), "pct-cli-supervisor-commands-workspace-"));
@@ -220,6 +256,226 @@ describe("CLI Supervisor commands smoke", () => {
       await rm(workspace, { recursive: true, force: true });
     }
   }, 15000);
+
+  it("submits detached work directly, deduplicates it, and accepts piped Unicode stdin", async () => {
+    const appRoot = await mkdtemp(join(tmpdir(), "pct-cli-supervisor-submit-app-"));
+    const workspace = await mkdtemp(join(tmpdir(), "pct-cli-supervisor-submit-workspace-"));
+    await mkdir(join(appRoot, ".parallel-codex"), { recursive: true });
+    await writeFile(
+      join(appRoot, ".parallel-codex", "config.toml"),
+      [
+        "[router]",
+        'defaultMode = "simple"',
+        "",
+        "[pairing]",
+        'main = "mock"',
+        'judge = "mock"',
+        'actor = "mock"',
+        'critic = "mock"',
+        "",
+        "[workers.mock.model.env]",
+        'PCT_MOCK_DELAY_MS = "1200"',
+        ""
+      ].join("\n"),
+      "utf8"
+    );
+
+    const runDirs: string[] = [];
+    try {
+      const first = await runCliCommand(appRoot, workspace, [
+        "--submit",
+        "private direct submission",
+        "--idempotency-key",
+        "ci:direct-1",
+        "--json"
+      ]);
+      expect(first.stderr).toBe("");
+      const submitted = JSON.parse(first.stdout) as SupervisorSubmissionResult;
+      expect(submitted).toMatchObject({
+        version: 1,
+        reused: false,
+        run: { kind: "handle-request", controller_active: false, acknowledged: false }
+      });
+      expect(first.stdout).not.toContain("private direct submission");
+      const firstRunDir = join(workspace, ".parallel-codex", "supervisor", "runs", submitted.run.run_id);
+      runDirs.push(firstRunDir);
+      await expect(readFile(join(firstRunDir, "controller.json"), "utf8"))
+        .rejects.toMatchObject({ code: "ENOENT" });
+      expect(await readFile(join(firstRunDir, "request.json"), "utf8"))
+        .not.toContain("ci:direct-1");
+
+      const duplicate = await runCliCommand(appRoot, workspace, [
+        "--submit=private direct submission",
+        "--idempotency-key=ci:direct-1",
+        "--json"
+      ]);
+      expect(JSON.parse(duplicate.stdout) as SupervisorSubmissionResult).toMatchObject({
+        reused: true,
+        run: { run_id: submitted.run.run_id }
+      });
+      const duringRun = await runCliCommand(appRoot, workspace, ["--runs", "--json"]);
+      expect((JSON.parse(duringRun.stdout) as SupervisorRunsReport).runs).toHaveLength(1);
+
+      const waited = await runCliCommand(appRoot, workspace, [
+        "--wait-run",
+        submitted.run.run_id,
+        "--wait-timeout",
+        "10",
+        "--json"
+      ]);
+      expect(JSON.parse(waited.stdout)).toMatchObject({ outcome: "completed" });
+      await expect(readFile(join(firstRunDir, "acknowledged.json"), "utf8"))
+        .rejects.toMatchObject({ code: "ENOENT" });
+
+      const timedOut = await runCliCommand(appRoot, workspace, [
+        "--submit",
+        "private submit and wait timeout request",
+        "--wait-timeout",
+        "0.05",
+        "--json"
+      ]).then(
+        () => { throw new Error("Expected submit wait timeout"); },
+        (error: unknown) => error as Error & { code: number; stdout: string; stderr: string }
+      );
+      expect(timedOut).toMatchObject({ code: 4, stderr: "" });
+      const timedResult = JSON.parse(timedOut.stdout) as SupervisorSubmitAndWaitResult;
+      expect(timedResult).toMatchObject({
+        submission: { reused: false, run: { status: "running" } },
+        wait: { outcome: "timeout", run: { status: "running" } }
+      });
+      expect(timedOut.stdout).not.toContain("private submit and wait timeout request");
+      const timedRunDir = join(
+        workspace,
+        ".parallel-codex",
+        "supervisor",
+        "runs",
+        timedResult.submission.run.run_id
+      );
+      runDirs.push(timedRunDir);
+      expect(await readSupervisorCommands(supervisorRunFiles(timedRunDir))).toEqual([]);
+      const timedCompletion = await runCliCommand(appRoot, workspace, [
+        "--wait-run",
+        timedResult.submission.run.run_id,
+        "--wait-timeout",
+        "10",
+        "--json"
+      ]);
+      expect(JSON.parse(timedCompletion.stdout)).toMatchObject({ outcome: "completed" });
+
+      const piped = await runCliCommandWithInput(appRoot, workspace, [
+        "--submit=-",
+        "--wait",
+        "--json"
+      ], "实现输入可靠性\n并保留多轮记忆\n");
+      expect(piped.stderr).toBe("");
+      const combined = JSON.parse(piped.stdout) as SupervisorSubmitAndWaitResult;
+      expect(combined).toMatchObject({
+        version: 1,
+        submission: { reused: false, run: { kind: "handle-request" } },
+        wait: { outcome: "completed" }
+      });
+      expect(piped.stdout).not.toContain("实现输入可靠性");
+      const pipedRunDir = join(
+        workspace,
+        ".parallel-codex",
+        "supervisor",
+        "runs",
+        combined.submission.run.run_id
+      );
+      runDirs.push(pipedRunDir);
+      expect(await readFile(join(pipedRunDir, "request.json"), "utf8"))
+        .toContain("实现输入可靠性\\n并保留多轮记忆");
+    } finally {
+      for (const runDir of runDirs) {
+        await stopSupervisor(runDir);
+      }
+      await rm(appRoot, { recursive: true, force: true });
+      await rm(workspace, { recursive: true, force: true });
+    }
+  }, 30000);
+
+  it("continues an existing complex Task through headless multi-turn submission", async () => {
+    const appRoot = await mkdtemp(join(tmpdir(), "pct-cli-supervisor-submit-turn-app-"));
+    const workspace = await mkdtemp(join(tmpdir(), "pct-cli-supervisor-submit-turn-workspace-"));
+    await mkdir(join(appRoot, ".parallel-codex"), { recursive: true });
+    await writeFile(
+      join(appRoot, ".parallel-codex", "config.toml"),
+      [
+        "[router]",
+        'defaultMode = "complex"',
+        "",
+        "[pairing]",
+        'main = "mock"',
+        'judge = "mock"',
+        'actor = "mock"',
+        'critic = "mock"',
+        ""
+      ].join("\n"),
+      "utf8"
+    );
+
+    const runDirs: string[] = [];
+    try {
+      const first = await runCliCommand(appRoot, workspace, [
+        "--submit",
+        "build the first feature",
+        "--wait",
+        "--json"
+      ]);
+      const initial = JSON.parse(first.stdout) as SupervisorSubmitAndWaitResult;
+      expect(initial.wait).toMatchObject({ outcome: "completed" });
+      const taskId = initial.wait.run.task_id;
+      expect(taskId).toMatch(/^task-/);
+      runDirs.push(join(
+        workspace,
+        ".parallel-codex",
+        "supervisor",
+        "runs",
+        initial.submission.run.run_id
+      ));
+
+      const followUp = await runCliCommand(appRoot, workspace, [
+        "--task",
+        taskId!,
+        "--submit",
+        "add a second feature without losing the first turn",
+        "--wait",
+        "--json"
+      ]);
+      const continued = JSON.parse(followUp.stdout) as SupervisorSubmitAndWaitResult;
+      expect(continued).toMatchObject({
+        submission: {
+          run: { kind: "handle-task-turn", task_id: taskId }
+        },
+        wait: {
+          outcome: "completed",
+          run: { task_id: taskId }
+        }
+      });
+      runDirs.push(join(
+        workspace,
+        ".parallel-codex",
+        "supervisor",
+        "runs",
+        continued.submission.run.run_id
+      ));
+      const turns = await readdir(join(
+        workspace,
+        ".parallel-codex",
+        "sessions",
+        taskId!,
+        "turns"
+      ));
+      expect(turns.filter((entry) => /^\d{4}$/.test(entry))).toEqual(["0001", "0002"]);
+      expect(followUp.stdout).not.toContain("without losing the first turn");
+    } finally {
+      for (const runDir of runDirs) {
+        await stopSupervisor(runDir);
+      }
+      await rm(appRoot, { recursive: true, force: true });
+      await rm(workspace, { recursive: true, force: true });
+    }
+  }, 30000);
 });
 
 function startCli(appRoot: string, workspace: string) {
@@ -247,7 +503,12 @@ function startCli(appRoot: string, workspace: string) {
   return { child, screen, exits, screenWrites: () => screenWrites };
 }
 
-async function runCliCommand(appRoot: string, workspace: string, args: string[]) {
+async function runCliCommand(
+  appRoot: string,
+  workspace: string,
+  args: string[],
+  env: NodeJS.ProcessEnv = {}
+) {
   return execFileAsync(process.execPath, [
     "--import",
     "tsx",
@@ -259,7 +520,46 @@ async function runCliCommand(appRoot: string, workspace: string, args: string[])
     ...args
   ], {
     cwd: process.cwd(),
-    env: { ...process.env, FORCE_COLOR: "0" }
+    env: { ...process.env, FORCE_COLOR: "0", ...env }
+  });
+}
+
+async function runCliCommandWithInput(
+  appRoot: string,
+  workspace: string,
+  args: string[],
+  input: string
+): Promise<{ stdout: string; stderr: string }> {
+  return new Promise((resolve, reject) => {
+    const child = spawnChild(process.execPath, [
+      "--import",
+      "tsx",
+      "src/cli.tsx",
+      "--app-root",
+      appRoot,
+      "--workspace",
+      workspace,
+      ...args
+    ], {
+      cwd: process.cwd(),
+      env: { ...process.env, FORCE_COLOR: "0" },
+      stdio: ["pipe", "pipe", "pipe"]
+    });
+    let stdout = "";
+    let stderr = "";
+    child.stdout.setEncoding("utf8");
+    child.stderr.setEncoding("utf8");
+    child.stdout.on("data", (chunk) => { stdout += chunk; });
+    child.stderr.on("data", (chunk) => { stderr += chunk; });
+    child.once("error", reject);
+    child.once("close", (code) => {
+      if (code === 0) {
+        resolve({ stdout, stderr });
+        return;
+      }
+      reject(Object.assign(new Error(`CLI exited with code ${code}`), { code, stdout, stderr }));
+    });
+    child.stdin.end(input);
   });
 }
 
@@ -333,12 +633,32 @@ async function waitForExit(exits: number[]): Promise<void> {
 async function stopSupervisor(runDir: string): Promise<void> {
   try {
     const state = await readSupervisorRunState(supervisorRunFiles(runDir));
-    if (state.pid && state.status !== "completed" && state.status !== "failed" && state.status !== "cancelled") {
+    if (!state.pid) {
+      return;
+    }
+    if (state.status !== "completed" && state.status !== "failed" && state.status !== "cancelled") {
       process.kill(state.pid, "SIGTERM");
+    }
+    const deadline = Date.now() + 5000;
+    while (Date.now() < deadline && await recordedProcessIsAlive(state.pid, state.process_start_token)) {
+      await delay(25);
+    }
+    if (await recordedProcessIsAlive(state.pid, state.process_start_token)) {
+      process.kill(state.pid, "SIGKILL");
     }
   } catch {
     // Cleanup is best effort after a failed assertion.
   }
+}
+
+async function recordedProcessIsAlive(pid: number, expectedStartToken?: string): Promise<boolean> {
+  if (!processIsAlive(pid)) {
+    return false;
+  }
+  if (!expectedStartToken) {
+    return true;
+  }
+  return await readProcessStartToken(pid) === expectedStartToken;
 }
 
 function stopCli(tui: ReturnType<typeof startCli>): void {

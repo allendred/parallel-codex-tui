@@ -20,9 +20,10 @@ import { readRouterAudit } from "./core/router-audit.js";
 import { RoleConfigurationManager } from "./core/role-configuration.js";
 import { inheritMacSystemProxy } from "./core/system-proxy.js";
 import { loadTaskSessionDetails as loadPersistedTaskSessionDetails } from "./core/task-session-details.js";
-import { listWorkspaceChoices } from "./core/workspace.js";
+import { listWorkspaceChoices, prepareWorkspace } from "./core/workspace.js";
 import { runDoctor, runRuntimePreflight } from "./doctor.js";
 import { helpText } from "./cli-help.js";
+import { resolveSubmitRequest } from "./cli-submit.js";
 import { App } from "./tui/App.js";
 import { formatTuiThemeCatalog } from "./tui/theme-preview.js";
 import { configureTuiTheme } from "./tui/theme.js";
@@ -32,9 +33,11 @@ import { SupervisorOrchestrator } from "./supervisor/client.js";
 import {
   formatSupervisorCancellation,
   formatSupervisorRuns,
+  formatSupervisorSubmission,
   formatSupervisorWait,
   inspectSupervisorRuns,
   requestSupervisorRunCancellation,
+  submitSupervisorRun,
   supervisorWaitExitCode,
   waitForSupervisorRun
 } from "./supervisor/operations.js";
@@ -107,14 +110,20 @@ async function main(): Promise<void> {
     } finally {
       runtime.index.close();
     }
-  } else if (cliArgs.runs || cliArgs.cancelRun || cliArgs.waitRun) {
-    const workspaceRoot = await selectWorkspaceForCli({
+  } else if (cliArgs.runs || cliArgs.cancelRun || cliArgs.waitRun || cliArgs.submit) {
+    const selectedWorkspace = await selectWorkspaceForCli({
       appRoot: cliArgs.appRoot,
       cwd: process.cwd(),
       explicitWorkspace: cliArgs.explicitWorkspace,
       interactive: false
     });
+    if (cliArgs.submit && !(await pathExists(localConfigPath))) {
+      await writeDefaultConfig(cliArgs.appRoot);
+    }
     const config = await loadConfig(cliArgs.appRoot);
+    const workspaceRoot = cliArgs.submit
+      ? await prepareWorkspace(cliArgs.appRoot, selectedWorkspace)
+      : selectedWorkspace;
     try {
       if (cliArgs.runs) {
         const report = await inspectSupervisorRuns(workspaceRoot, config.dataDir);
@@ -126,7 +135,7 @@ async function main(): Promise<void> {
           cliArgs.cancelRunId
         );
         console.log(cliArgs.json ? JSON.stringify(result, null, 2) : formatSupervisorCancellation(result));
-      } else {
+      } else if (cliArgs.waitRun) {
         const result = await waitForSupervisorRun(
           workspaceRoot,
           config.dataDir,
@@ -135,6 +144,35 @@ async function main(): Promise<void> {
         );
         console.log(cliArgs.json ? JSON.stringify(result, null, 2) : formatSupervisorWait(result));
         process.exitCode = supervisorWaitExitCode(result.outcome);
+      } else {
+        const request = await resolveSubmitRequest(cliArgs.submitRequest);
+        const submission = await submitSupervisorRun({
+          appRoot: cliArgs.appRoot,
+          workspaceRoot,
+          dataDir: config.dataDir,
+          cwd: workspaceRoot,
+          request,
+          taskId: cliArgs.taskId,
+          idempotencyKey: cliArgs.idempotencyKey
+        });
+        const waitAfterSubmit = cliArgs.wait || cliArgs.waitTimeoutMs !== null;
+        if (waitAfterSubmit) {
+          const wait = await waitForSupervisorRun(
+            workspaceRoot,
+            config.dataDir,
+            submission.run.run_id,
+            { timeoutMs: cliArgs.waitTimeoutMs }
+          );
+          const result = { version: 1 as const, submission, wait };
+          console.log(cliArgs.json
+            ? JSON.stringify(result, null, 2)
+            : `${formatSupervisorSubmission(submission)}\n${formatSupervisorWait(wait)}`);
+          process.exitCode = supervisorWaitExitCode(wait.outcome);
+        } else {
+          console.log(cliArgs.json
+            ? JSON.stringify(submission, null, 2)
+            : formatSupervisorSubmission(submission));
+        }
       }
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);

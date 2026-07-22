@@ -73,8 +73,8 @@ export async function acquireProcessMutationTurn(
             if (released) {
               return;
             }
-            released = true;
             await removeIfExists(path);
+            released = true;
           }
         };
       }

@@ -7,9 +7,11 @@ import type { SupervisorRunRequest } from "../src/supervisor/protocol.js";
 import {
   formatSupervisorCancellation,
   formatSupervisorRuns,
+  formatSupervisorSubmission,
   formatSupervisorWait,
   inspectSupervisorRuns,
   requestSupervisorRunCancellation,
+  submitSupervisorRun,
   supervisorWaitExitCode,
   waitForSupervisorRun
 } from "../src/supervisor/operations.js";
@@ -19,7 +21,9 @@ import {
   createSupervisorRun,
   readSupervisorCommands,
   readSupervisorRunState,
-  writeSupervisorRunState
+  supervisorRunFiles,
+  writeSupervisorRunState,
+  type SupervisorRunFiles
 } from "../src/supervisor/store.js";
 
 describe("Supervisor operations", () => {
@@ -64,6 +68,182 @@ describe("Supervisor operations", () => {
     expect(formatSupervisorRuns(report)).toContain("running · controlled · unread · run-visible");
 
     await controller?.release();
+  });
+
+  it("submits one detached run and reuses it for an identical idempotency key", async () => {
+    let launches = 0;
+    const processStartToken = await readProcessStartToken(process.pid);
+    const launch = async (files: SupervisorRunFiles) => {
+      launches += 1;
+      const state = await readSupervisorRunState(files);
+      await writeSupervisorRunState(files, {
+        ...state,
+        status: "running",
+        updated_at: "2026-07-21T00:00:01.000Z",
+        started_at: "2026-07-21T00:00:01.000Z",
+        pid: process.pid,
+        ...(processStartToken ? { process_start_token: processStartToken } : {})
+      });
+    };
+    const input = {
+      appRoot: root,
+      workspaceRoot: root,
+      dataDir: ".parallel-codex",
+      cwd: root,
+      request: "private submitted request",
+      idempotencyKey: "ci:submit-1"
+    };
+
+    const first = await submitSupervisorRun(input, {
+      launch,
+      now: () => new Date("2026-07-21T00:00:00.000Z")
+    });
+    const second = await submitSupervisorRun(input, {
+      launch,
+      now: () => new Date("2026-07-21T00:00:02.000Z")
+    });
+
+    expect(first).toMatchObject({
+      version: 1,
+      reused: false,
+      run: { status: "running", control: "detached", controller_active: false }
+    });
+    expect(first.run.run_id).toMatch(/^run-idem-[a-f0-9]{24}$/);
+    expect(second).toMatchObject({ reused: true, run: { run_id: first.run.run_id } });
+    expect(launches).toBe(1);
+    expect(formatSupervisorSubmission(first)).toBe(
+      `Run submitted · ${first.run.run_id} · handle-request · running`
+    );
+    expect(JSON.stringify(first)).not.toContain("private submitted request");
+    await expect(submitSupervisorRun({ ...input, request: "different private request" }, { launch }))
+      .rejects.toThrow("different Supervisor request");
+  });
+
+  it("serializes concurrent submissions with the same idempotency key", async () => {
+    let launches = 0;
+    const processStartToken = await readProcessStartToken(process.pid);
+    const launch = async (files: SupervisorRunFiles) => {
+      launches += 1;
+      await delay(40);
+      const state = await readSupervisorRunState(files);
+      await writeSupervisorRunState(files, {
+        ...state,
+        status: "running",
+        updated_at: new Date().toISOString(),
+        pid: process.pid,
+        ...(processStartToken ? { process_start_token: processStartToken } : {})
+      });
+    };
+    const input = {
+      appRoot: root,
+      workspaceRoot: root,
+      dataDir: ".parallel-codex",
+      cwd: root,
+      request: "concurrent private request",
+      idempotencyKey: "ci:concurrent-submit"
+    };
+
+    const results = await Promise.all([
+      submitSupervisorRun(input, { launch }),
+      submitSupervisorRun(input, { launch })
+    ]);
+
+    expect(results.map((result) => result.reused).sort()).toEqual([false, true]);
+    expect(new Set(results.map((result) => result.run.run_id))).toHaveLength(1);
+    expect(launches).toBe(1);
+  });
+
+  it("reports lock cleanup failure without turning a successful submission into a failure", async () => {
+    let releaseAttempts = 0;
+    const result = await submitSupervisorRun({
+      appRoot: root,
+      workspaceRoot: root,
+      dataDir: ".parallel-codex",
+      cwd: root,
+      request: "private request that still starts"
+    }, {
+      acquireSubmissionTurn: async () => ({
+        release: async () => {
+          releaseAttempts += 1;
+          throw new Error("unlink denied");
+        }
+      }),
+      launch: async (files) => {
+        const state = await readSupervisorRunState(files);
+        await writeSupervisorRunState(files, {
+          ...state,
+          status: "completed",
+          updated_at: new Date().toISOString(),
+          finished_at: new Date().toISOString(),
+          result: { mode: "simple", taskId: null, summary: "done", workers: [] }
+        });
+      }
+    });
+
+    expect(result).toMatchObject({
+      reused: false,
+      run: { status: "completed" },
+      warnings: [expect.stringContaining("lock cleanup failed after 3 attempts: unlink denied")]
+    });
+    expect(formatSupervisorSubmission(result)).toContain("Run submitted");
+    expect(formatSupervisorSubmission(result)).toContain("Warning:");
+    expect(JSON.stringify(result)).not.toContain("private request that still starts");
+    expect(releaseAttempts).toBe(3);
+  });
+
+  it("serializes submission, rejects another active run, and persists startup failure", async () => {
+    const activeRoot = join(root, "active");
+    const processStartToken = await readProcessStartToken(process.pid);
+    await submitSupervisorRun({
+      appRoot: activeRoot,
+      workspaceRoot: activeRoot,
+      dataDir: ".parallel-codex",
+      cwd: activeRoot,
+      request: "first request"
+    }, {
+      launch: async (files) => {
+        const state = await readSupervisorRunState(files);
+        await writeSupervisorRunState(files, {
+          ...state,
+          status: "running",
+          updated_at: new Date().toISOString(),
+          pid: process.pid,
+          ...(processStartToken ? { process_start_token: processStartToken } : {})
+        });
+      }
+    });
+    await expect(submitSupervisorRun({
+      appRoot: activeRoot,
+      workspaceRoot: activeRoot,
+      dataDir: ".parallel-codex",
+      cwd: activeRoot,
+      request: "second request"
+    }, { launch: async () => undefined })).rejects.toThrow("already active in this workspace");
+
+    const failureRoot = join(root, "failure");
+    await expect(submitSupervisorRun({
+      appRoot: failureRoot,
+      workspaceRoot: failureRoot,
+      dataDir: ".parallel-codex",
+      cwd: failureRoot,
+      request: "private failed request"
+    }, {
+      launch: async () => {
+        throw new Error("launcher unavailable");
+      }
+    })).rejects.toThrow("launcher unavailable");
+    const [failed] = await inspectSupervisorRuns(failureRoot, ".parallel-codex").then((value) => value.runs);
+    expect(failed).toMatchObject({ status: "failed", control: "settled" });
+    expect(JSON.stringify(failed)).not.toContain("private failed request");
+    const failedState = await readSupervisorRunState(supervisorRunFiles(join(
+      failureRoot,
+      ".parallel-codex",
+      "supervisor",
+      "runs",
+      failed!.run_id
+    )));
+    expect(failedState.error).toBe("launcher unavailable");
+    expect(JSON.stringify(failedState)).not.toContain("private failed request");
   });
 
   it("cancels the latest active run and leaves terminal history untouched", async () => {

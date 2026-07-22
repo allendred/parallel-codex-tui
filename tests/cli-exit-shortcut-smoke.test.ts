@@ -77,6 +77,8 @@ describe("CLI exit shortcuts", () => {
       await waitForExit(exits);
       await waitForPath(survivedPath);
       await waitForTaskStatus(taskDir, "failed");
+      await waitForPathMissing(join(taskDir, "run-owner.json"));
+      await waitForPathMissing(join(taskDir, "judge-codex", "process.json"));
 
       expect(exits[0]).toBe(0);
       expect(await pathExists(terminatedPath)).toBe(false);
@@ -247,6 +249,16 @@ async function waitForPath(path: string): Promise<void> {
     await new Promise((resolve) => setTimeout(resolve, 50));
   }
   throw new Error(`Timed out waiting for ${path}`);
+}
+
+async function waitForPathMissing(path: string): Promise<void> {
+  for (let attempt = 0; attempt < 160; attempt += 1) {
+    if (!(await pathExists(path))) {
+      return;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+  throw new Error(`Timed out waiting for removal of ${path}`);
 }
 
 async function waitForTaskDir(workspace: string): Promise<string> {

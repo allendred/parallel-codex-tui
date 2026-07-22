@@ -1,7 +1,4 @@
 import { randomUUID } from "node:crypto";
-import { spawn } from "node:child_process";
-import { closeSync, openSync } from "node:fs";
-import { join, resolve } from "node:path";
 import type { SessionManager } from "../core/session-manager.js";
 import type {
   HandleRequestInput,
@@ -37,6 +34,15 @@ import {
   type SupervisorRunFiles,
   type SupervisorRunRecord
 } from "./store.js";
+import {
+  launchSupervisorProcess,
+  runWithSupervisorSubmissionTurn,
+  supervisorSubmissionLockWarning,
+  type SupervisorLauncher,
+  type SupervisorSubmissionTurnAcquirer
+} from "./launcher.js";
+
+export type { SupervisorLauncher } from "./launcher.js";
 
 const RUN_POLL_MS = 100;
 const QUEUED_START_GRACE_MS = 3000;
@@ -47,14 +53,10 @@ export interface SupervisorOrchestratorOptions {
   appRoot: string;
   workspaceRoot: string;
   dataDir: string;
+  acquireSubmissionTurn?: SupervisorSubmissionTurnAcquirer;
   launch?: SupervisorLauncher;
   now?: () => Date;
 }
-
-export type SupervisorLauncher = (
-  files: SupervisorRunFiles,
-  request: SupervisorRunRequest
-) => Promise<void>;
 
 interface WatchedRun {
   files: SupervisorRunFiles;
@@ -279,59 +281,92 @@ export class SupervisorOrchestrator {
     if (this.currentRun) {
       throw new Error("A Supervisor run is already attached in this TUI.");
     }
-    const active = (await this.reconcileRuns()).filter(({ state }) => !supervisorRunIsTerminal(state));
-    if (active.length > 0) {
-      throw new Error("A background run is already active in this workspace. Reopen the TUI to attach to it.");
-    }
-
-    const createdAt = this.now().toISOString();
-    const request = {
-      ...input,
-      version: 1 as const,
-      run_id: createSupervisorRunId(this.now()),
-      app_root: this.options.appRoot,
-      workspace_root: this.options.workspaceRoot,
-      data_dir: this.options.dataDir,
-      created_at: createdAt
-    } as SupervisorRunRequest;
-    const files = await createSupervisorRun(
-      this.options.workspaceRoot,
-      this.options.dataDir,
-      request
-    );
-    const controller = await claimSupervisorController(files);
-    if (!controller) {
-      throw new Error("The new Supervisor run was claimed by another TUI before it could start.");
-    }
-    const watched: WatchedRun = {
-      files,
-      controller,
-      detached: this.detaching,
-      cancelSent: false
-    };
-    this.currentRun = watched;
-    this.notifyBackgroundRunState();
+    const inputTaskId = "task_id" in input ? input.task_id : null;
+    const startup: {
+      files: SupervisorRunFiles | null;
+      controller: SupervisorControllerLease | null;
+    } = { files: null, controller: null };
+    let watched: WatchedRun | null = null;
     try {
-      await this.launch(files, request);
-    } catch (error) {
-      if (this.currentRun === watched) {
-        this.currentRun = null;
-        this.notifyBackgroundRunState();
+      const completed = await runWithSupervisorSubmissionTurn(
+        this.options.workspaceRoot,
+        this.options.dataDir,
+        async () => {
+          const active = (await this.reconcileRuns()).filter(({ state }) => !supervisorRunIsTerminal(state));
+          if (active.length > 0) {
+            throw new Error("A background run is already active in this workspace. Reopen the TUI to attach to it.");
+          }
+
+          const createdAt = this.now().toISOString();
+          const request = {
+            ...input,
+            version: 1 as const,
+            run_id: createSupervisorRunId(this.now()),
+            app_root: this.options.appRoot,
+            workspace_root: this.options.workspaceRoot,
+            data_dir: this.options.dataDir,
+            created_at: createdAt
+          } as SupervisorRunRequest;
+          startup.files = await createSupervisorRun(
+            this.options.workspaceRoot,
+            this.options.dataDir,
+            request
+          );
+          startup.controller = await claimSupervisorController(startup.files);
+          if (!startup.controller) {
+            throw new Error("The new Supervisor run was claimed by another TUI before it could start.");
+          }
+          const submitted = {
+            files: startup.files,
+            controller: startup.controller,
+            detached: false,
+            cancelSent: false
+          } satisfies WatchedRun;
+          await this.launch(startup.files, request);
+          return submitted;
+        },
+        this.options.acquireSubmissionTurn
+      );
+      watched = completed.value;
+      watched.detached = this.detaching;
+      this.currentRun = watched;
+      this.notifyBackgroundRunState();
+      if (completed.releaseError) {
+        const warning = supervisorSubmissionLockWarning(completed.releaseError);
+        await Promise.resolve()
+          .then(() => this.options.sessions.appendChatMessage({
+            from: "system",
+            text: warning,
+            ...(inputTaskId ? { taskId: inputTaskId } : {})
+          }))
+          .catch(() => undefined);
       }
-      await controller.release();
-      const message = error instanceof Error ? error.message : String(error);
-      const failedAt = this.now().toISOString();
-      const state = await readSupervisorRunState(files);
-      await writeSupervisorRunState(files, {
-        ...state,
-        status: "failed",
-        updated_at: failedAt,
-        finished_at: failedAt,
-        error: message
-      });
-      await this.options.sessions.appendChatMessage({ from: "system", text: message });
-      this.settledRun = files;
+    } catch (error) {
+      await startup.controller?.release().catch(() => undefined);
+      if (startup.files) {
+        const message = error instanceof Error ? error.message : String(error);
+        const failedAt = this.now().toISOString();
+        const state = await readSupervisorRunState(startup.files);
+        if (!supervisorRunIsTerminal(state)) {
+          await writeSupervisorRunState(startup.files, {
+            ...state,
+            status: "failed",
+            updated_at: failedAt,
+            finished_at: failedAt,
+            error: message
+          });
+        }
+        await this.options.sessions.appendChatMessage({
+          from: "system",
+          text: message,
+          ...(inputTaskId ? { taskId: inputTaskId } : {})
+        });
+        this.settledRun = startup.files;
+      }
       throw error;
+    }
+    if (!watched) {
+      throw new Error("Supervisor run submission completed without a run.");
     }
     return this.watchRun(watched, callbacks);
   }
@@ -494,59 +529,6 @@ function dispatchSupervisorEvent(
       callbacks.onWorker?.(payload as Parameters<NonNullable<SupervisorRunCallbacks["onWorker"]>>[0]);
       break;
   }
-}
-
-async function launchSupervisorProcess(
-  files: SupervisorRunFiles,
-  request: SupervisorRunRequest
-): Promise<void> {
-  const entrypoint = process.argv[1] ? resolve(process.argv[1]) : "";
-  if (!entrypoint) {
-    throw new Error("Cannot locate the parallel-codex-tui CLI entrypoint for Supervisor launch.");
-  }
-  const errorLog = openSync(join(files.dir, "supervisor.log"), "a");
-  const child = spawn(process.execPath, [...process.execArgv, entrypoint], {
-    cwd: process.cwd(),
-    detached: true,
-    env: {
-      ...process.env,
-      PCT_SUPERVISOR_RUN_DIR: files.dir
-    },
-    stdio: ["ignore", "ignore", errorLog]
-  });
-  try {
-    await new Promise<void>((resolve, reject) => {
-      child.once("spawn", resolve);
-      child.once("error", reject);
-    });
-  } finally {
-    closeSync(errorLog);
-  }
-  let exitCode: number | null | undefined;
-  const onExit = (code: number | null) => {
-    exitCode = code;
-  };
-  child.once("exit", onExit);
-  const deadline = Date.now() + 5000;
-  while (Date.now() < deadline) {
-    const state = await readSupervisorRunState(files);
-    if (state.status !== "queued") {
-      child.off("exit", onExit);
-      child.unref();
-      return;
-    }
-    if (exitCode !== undefined) {
-      throw new Error(`Supervisor process exited before startup (code ${exitCode ?? "signal"}).`);
-    }
-    await delay(25);
-  }
-  child.off("exit", onExit);
-  try {
-    child.kill("SIGTERM");
-  } catch {
-    // The startup failure below remains the useful error when the child already exited.
-  }
-  throw new Error("Supervisor process did not publish startup state within 5s.");
 }
 
 function delay(ms: number): Promise<void> {

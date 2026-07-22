@@ -1,14 +1,31 @@
-import { randomUUID } from "node:crypto";
-import type { SupervisorRunKind, SupervisorRunStatus } from "./protocol.js";
+import { createHash, randomUUID } from "node:crypto";
+import { isDeepStrictEqual } from "node:util";
+import type { RoleExecutionSelection } from "../core/role-configuration.js";
+import type {
+  SupervisorRunKind,
+  SupervisorRunRequest,
+  SupervisorRunStatus
+} from "./protocol.js";
+import {
+  launchSupervisorProcess,
+  runWithSupervisorSubmissionTurn,
+  supervisorSubmissionLockWarning,
+  type SupervisorLauncher,
+  type SupervisorSubmissionTurnAcquirer
+} from "./launcher.js";
 import {
   appendSupervisorCommand,
+  createSupervisorRun,
+  createSupervisorRunId,
   listSupervisorRuns,
   readSupervisorController,
+  readSupervisorRunRequest,
   readSupervisorRunState,
   supervisorControllerIsActive,
   supervisorRunIsAcknowledged,
   supervisorRunIsTerminal,
   supervisorRunProcessIsActive,
+  writeSupervisorRunState,
   type SupervisorRunRecord
 } from "./store.js";
 
@@ -68,6 +85,104 @@ export interface SupervisorWaitOptions {
   timeoutMs?: number | null;
   pollIntervalMs?: number;
   now?: () => Date;
+}
+
+export interface SupervisorSubmissionInput {
+  appRoot: string;
+  workspaceRoot: string;
+  dataDir: string;
+  cwd: string;
+  request: string;
+  taskId?: string | null;
+  roleSelection?: RoleExecutionSelection;
+  idempotencyKey?: string | null;
+}
+
+export interface SupervisorSubmissionOptions {
+  acquireSubmissionTurn?: SupervisorSubmissionTurnAcquirer;
+  launch?: SupervisorLauncher;
+  now?: () => Date;
+}
+
+export interface SupervisorSubmissionResult {
+  version: 1;
+  reused: boolean;
+  run: SupervisorRunView;
+  warnings?: string[];
+}
+
+export interface SupervisorSubmitAndWaitResult {
+  version: 1;
+  submission: SupervisorSubmissionResult;
+  wait: SupervisorWaitResult;
+}
+
+export async function submitSupervisorRun(
+  input: SupervisorSubmissionInput,
+  options: SupervisorSubmissionOptions = {}
+): Promise<SupervisorSubmissionResult> {
+  const requestText = input.request.trim();
+  if (!requestText) {
+    throw new Error("Supervisor submission request cannot be empty");
+  }
+  const idempotencyKey = input.idempotencyKey?.trim() || null;
+  if (idempotencyKey && !/^[A-Za-z0-9._:-]{1,128}$/.test(idempotencyKey)) {
+    throw new Error("Invalid idempotency key: expected 1-128 letters, numbers, dot, underscore, colon, or hyphen");
+  }
+
+  const now = options.now ?? (() => new Date());
+  const launch = options.launch ?? launchSupervisorProcess;
+  const createdAt = now().toISOString();
+  const runId = idempotencyKey
+    ? idempotentRunId(input.workspaceRoot, idempotencyKey)
+    : createSupervisorRunId(now());
+  const request = submissionRequest(input, requestText, runId, createdAt);
+  const completed = await runWithSupervisorSubmissionTurn(
+    input.workspaceRoot,
+    input.dataDir,
+    async () => {
+      const records = await listSupervisorRuns(input.workspaceRoot, input.dataDir);
+      const existing = records.find((record) => record.state.run_id === runId);
+      if (existing) {
+        const persistedRequest = await readSupervisorRunRequest(existing.files);
+        if (!sameSubmission(persistedRequest, request)) {
+          throw new Error("Idempotency key is already associated with a different Supervisor request");
+        }
+        if (existing.state.status === "queued" && !(await supervisorRunProcessIsActive(existing.state))) {
+          await launchOrFail(existing.files, persistedRequest, launch, now);
+          existing.state = await readSupervisorRunState(existing.files);
+        }
+        return {
+          version: 1,
+          reused: true,
+          run: await inspectSupervisorRun(existing, now())
+        } satisfies SupervisorSubmissionResult;
+      }
+
+      await reconcileStaleRuns(records, now());
+      const active = records.find(({ state }) => !isTerminalStatus(state.status));
+      if (active) {
+        throw new Error(`A background run is already active in this workspace: ${active.state.run_id}`);
+      }
+
+      const files = await createSupervisorRun(input.workspaceRoot, input.dataDir, request);
+      await launchOrFail(files, request, launch, now);
+      const state = await readSupervisorRunState(files);
+      return {
+        version: 1,
+        reused: false,
+        run: await inspectSupervisorRun({ files, state }, now())
+      } satisfies SupervisorSubmissionResult;
+    },
+    options.acquireSubmissionTurn
+  );
+  if (!completed.releaseError) {
+    return completed.value;
+  }
+  return {
+    ...completed.value,
+    warnings: [supervisorSubmissionLockWarning(completed.releaseError)]
+  };
 }
 
 export async function inspectSupervisorRuns(
@@ -218,6 +333,15 @@ export function formatSupervisorRuns(report: SupervisorRunsReport): string {
   return lines.join("\n");
 }
 
+export function formatSupervisorSubmission(result: SupervisorSubmissionResult): string {
+  const action = result.reused ? "Run reused" : "Run submitted";
+  const target = result.run.task_id ? `task ${result.run.task_id}` : result.run.kind;
+  return [
+    `${action} · ${result.run.run_id} · ${target} · ${result.run.status}`,
+    ...(result.warnings ?? []).map((warning) => `Warning: ${warning}`)
+  ].join("\n");
+}
+
 export function formatSupervisorCancellation(result: SupervisorCancellationResult): string {
   const target = result.run.task_id ? `task ${result.run.task_id}` : result.run.kind;
   return `Cancellation requested · ${result.run.run_id} · ${target}`;
@@ -296,6 +420,92 @@ function controlState(
 
 function isTerminalStatus(status: SupervisorRunStatus): status is SupervisorTerminalStatus {
   return status === "completed" || status === "failed" || status === "cancelled";
+}
+
+function submissionRequest(
+  input: SupervisorSubmissionInput,
+  request: string,
+  runId: string,
+  createdAt: string
+): SupervisorRunRequest {
+  const base = {
+    version: 1 as const,
+    run_id: runId,
+    app_root: input.appRoot,
+    workspace_root: input.workspaceRoot,
+    data_dir: input.dataDir,
+    created_at: createdAt,
+    request,
+    cwd: input.cwd,
+    ...(input.roleSelection ? { role_selection: input.roleSelection } : {})
+  };
+  return input.taskId
+    ? { ...base, kind: "handle-task-turn", task_id: input.taskId }
+    : { ...base, kind: "handle-request" };
+}
+
+function idempotentRunId(workspaceRoot: string, key: string): string {
+  const digest = createHash("sha256")
+    .update(workspaceRoot)
+    .update("\0")
+    .update(key)
+    .digest("hex")
+    .slice(0, 24);
+  return `run-idem-${digest}`;
+}
+
+function sameSubmission(left: SupervisorRunRequest, right: SupervisorRunRequest): boolean {
+  return isDeepStrictEqual(submissionIdentity(left), submissionIdentity(right));
+}
+
+function submissionIdentity(request: SupervisorRunRequest): Omit<SupervisorRunRequest, "run_id" | "created_at"> {
+  const { run_id: _runId, created_at: _createdAt, ...identity } = request;
+  return identity;
+}
+
+async function reconcileStaleRuns(records: SupervisorRunRecord[], now: Date): Promise<void> {
+  for (const record of records) {
+    if (isTerminalStatus(record.state.status) || await supervisorRunProcessIsActive(record.state)) {
+      continue;
+    }
+    const ageMs = now.getTime() - Date.parse(record.state.created_at);
+    if (record.state.status === "queued" && ageMs < QUEUED_START_GRACE_MS) {
+      continue;
+    }
+    const failedAt = now.toISOString();
+    record.state = {
+      ...record.state,
+      status: "failed",
+      updated_at: failedAt,
+      finished_at: failedAt,
+      error: `Supervisor exited unexpectedly while ${record.state.kind} was running.`
+    };
+    await writeSupervisorRunState(record.files, record.state);
+  }
+}
+
+async function launchOrFail(
+  files: SupervisorRunRecord["files"],
+  request: SupervisorRunRequest,
+  launch: SupervisorLauncher,
+  now: () => Date
+): Promise<void> {
+  try {
+    await launch(files, request);
+  } catch (error) {
+    const current = await readSupervisorRunState(files);
+    if (!isTerminalStatus(current.status)) {
+      const failedAt = now().toISOString();
+      await writeSupervisorRunState(files, {
+        ...current,
+        status: "failed",
+        updated_at: failedAt,
+        finished_at: failedAt,
+        error: error instanceof Error ? error.message : String(error)
+      });
+    }
+    throw error;
+  }
 }
 
 function formatDuration(milliseconds: number): string {

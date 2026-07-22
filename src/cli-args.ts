@@ -17,6 +17,10 @@ export interface CliArgs {
   probeAgents: boolean;
   probeRouter: boolean;
   runs: boolean;
+  submit: boolean;
+  submitRequest: string | null;
+  idempotencyKey: string | null;
+  wait: boolean;
   waitRun: boolean;
   waitRunId: string | null;
   waitTimeoutMs: number | null;
@@ -36,6 +40,8 @@ const allowedValueOptions = new Set([
   "--theme",
   "--diagnostics",
   "--cancel-run",
+  "--submit",
+  "--idempotency-key",
   "--wait-run",
   "--wait-timeout"
 ]);
@@ -48,6 +54,7 @@ const allowedBooleanOptions = new Set([
   "--probe-agents",
   "--probe-router",
   "--runs",
+  "--wait",
   "--themes",
   "--version",
   "-v"
@@ -78,6 +85,17 @@ export function parseCliArgs(args: string[], cwd: string): CliArgs {
   );
   const cancelRun = cancelRunFlagIndex >= 0;
   const cancelRunId = flagValue(optionArgs, cancelRunFlagIndex);
+  const submitFlagIndex = lastFlagIndex(
+    optionArgs,
+    (arg) => arg === "--submit" || arg.startsWith("--submit=")
+  );
+  const idempotencyKeyFlagIndex = lastFlagIndex(
+    optionArgs,
+    (arg) => arg === "--idempotency-key" || arg.startsWith("--idempotency-key=")
+  );
+  const submit = submitFlagIndex >= 0;
+  const submitRequest = flagValue(optionArgs, submitFlagIndex, true);
+  const idempotencyKey = flagValue(optionArgs, idempotencyKeyFlagIndex);
   const waitRunFlagIndex = lastFlagIndex(
     optionArgs,
     (arg) => arg === "--wait-run" || arg.startsWith("--wait-run=")
@@ -100,6 +118,7 @@ export function parseCliArgs(args: string[], cwd: string): CliArgs {
   const probeAgents = optionArgs.includes("--probe-agents");
   const probeRouter = optionArgs.includes("--probe-router");
   const runs = optionArgs.includes("--runs");
+  const wait = optionArgs.includes("--wait");
   const themes = optionArgs.includes("--themes");
   const version = optionArgs.includes("--version") || optionArgs.includes("-v");
   const appRootValue = flagValue(optionArgs, appRootFlagIndex);
@@ -125,6 +144,10 @@ export function parseCliArgs(args: string[], cwd: string): CliArgs {
     probeAgents,
     probeRouter,
     runs,
+    submit,
+    submitRequest,
+    idempotencyKey,
+    wait,
     waitRun,
     waitRunId,
     waitTimeoutMs,
@@ -195,18 +218,44 @@ export function validateCliArgs(args: string[]): string[] {
   );
   const cancelRun = cancelRunFlagIndex >= 0;
   const cancelRunId = flagValue(optionArgs, cancelRunFlagIndex);
+  const submitFlagIndex = lastFlagIndex(
+    optionArgs,
+    (arg) => arg === "--submit" || arg.startsWith("--submit=")
+  );
+  const idempotencyKeyFlagIndex = lastFlagIndex(
+    optionArgs,
+    (arg) => arg === "--idempotency-key" || arg.startsWith("--idempotency-key=")
+  );
+  const submit = submitFlagIndex >= 0;
+  const submitRequest = flagValue(optionArgs, submitFlagIndex, true);
+  const idempotencyKey = flagValue(optionArgs, idempotencyKeyFlagIndex);
+  const wait = optionArgs.includes("--wait");
   const waitRunFlagIndex = lastFlagIndex(
     optionArgs,
     (arg) => arg === "--wait-run" || arg.startsWith("--wait-run=")
   );
   const waitRun = waitRunFlagIndex >= 0;
   const waitRunId = flagValue(optionArgs, waitRunFlagIndex);
-  const supervisorCommandCount = [runs, cancelRun, waitRun].filter(Boolean).length;
+  const supervisorCommandCount = [runs, cancelRun, waitRun, submit].filter(Boolean).length;
   if (supervisorCommandCount > 1) {
-    errors.push("Only one of --runs, --cancel-run, or --wait-run may be used");
+    errors.push("Only one of --runs, --cancel-run, --wait-run, or --submit may be used");
   }
   if (optionArgs.includes("--json") && supervisorCommandCount === 0) {
-    errors.push("--json requires --runs, --cancel-run, or --wait-run");
+    errors.push("--json requires --runs, --cancel-run, --wait-run, or --submit");
+  }
+  if (submit && !submitRequest) {
+    errors.push("Invalid --submit: expected request text or - for piped stdin");
+  }
+  if (wait && !submit) {
+    errors.push("--wait requires --submit");
+  }
+  if (idempotencyKeyFlagIndex >= 0) {
+    if (!idempotencyKey || !/^[A-Za-z0-9._:-]{1,128}$/.test(idempotencyKey)) {
+      errors.push("Invalid --idempotency-key: expected 1-128 letters, numbers, dot, underscore, colon, or hyphen");
+    }
+    if (!submit) {
+      errors.push("--idempotency-key requires --submit");
+    }
   }
   if (cancelRunId && !/^run-[A-Za-z0-9._-]+$/.test(cancelRunId)) {
     errors.push("Invalid --cancel-run: expected run- followed by letters, numbers, dot, underscore, or hyphen");
@@ -224,8 +273,8 @@ export function validateCliArgs(args: string[]): string[] {
     if (!rawWaitTimeout || !Number.isFinite(waitTimeoutSeconds) || waitTimeoutSeconds <= 0) {
       errors.push("Invalid --wait-timeout: expected a positive number of seconds");
     }
-    if (!waitRun) {
-      errors.push("--wait-timeout requires --wait-run");
+    if (!waitRun && !submit) {
+      errors.push("--wait-timeout requires --wait-run or --submit");
     }
   }
   return errors;
@@ -245,7 +294,7 @@ function lastFlagIndex(args: string[], predicate: (arg: string) => boolean): num
   return -1;
 }
 
-function flagValue(args: string[], flagIndex: number): string | null {
+function flagValue(args: string[], flagIndex: number, allowDash = false): string | null {
   const flag = flagIndex >= 0 ? args[flagIndex] : null;
   const inlineMatch = flag?.match(/^-{1,2}[^=]+=(.*)$/);
   if (inlineMatch) {
@@ -253,7 +302,7 @@ function flagValue(args: string[], flagIndex: number): string | null {
   }
 
   const value = flagIndex >= 0 ? args[flagIndex + 1] : null;
-  return value && !value.startsWith("-") ? value : null;
+  return value && (!value.startsWith("-") || (allowDash && value === "-")) ? value : null;
 }
 
 function cliThemeValue(value: string | null): TuiThemeName | null {

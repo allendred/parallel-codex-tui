@@ -9,6 +9,7 @@ import {
   SupervisorOrchestrator,
   type SupervisorLauncher
 } from "../src/supervisor/client.js";
+import type { SupervisorSubmissionTurnAcquirer } from "../src/supervisor/launcher.js";
 import type { SupervisorRunRequest } from "../src/supervisor/protocol.js";
 import {
   appendSupervisorEvent,
@@ -127,7 +128,44 @@ describe("SupervisorOrchestrator", () => {
     expect((await readSupervisorRunState(launchedFiles!)).status).toBe("running");
   });
 
-  async function createClient(launch: SupervisorLauncher): Promise<SupervisorOrchestrator> {
+  it("keeps watching a successful run when submission lock cleanup fails", async () => {
+    let releaseAttempts = 0;
+    const appendChatMessage = vi.fn(async () => undefined);
+    const client = await createClient(async (files) => {
+      const state = await readSupervisorRunState(files);
+      await writeSupervisorRunState(files, {
+        ...state,
+        status: "completed",
+        updated_at: "2026-07-21T00:00:04.000Z",
+        finished_at: "2026-07-21T00:00:04.000Z",
+        result: { mode: "simple", taskId: null, summary: "still observed", workers: [] }
+      });
+    }, {
+      appendChatMessage,
+      acquireSubmissionTurn: async () => ({
+        release: async () => {
+          releaseAttempts += 1;
+          throw new Error("lock unlink denied");
+        }
+      })
+    });
+
+    await expect(client.handleRequest({ request: "hello", cwd: root }))
+      .resolves.toMatchObject({ summary: "still observed" });
+    expect(releaseAttempts).toBe(3);
+    expect(appendChatMessage).toHaveBeenCalledWith(expect.objectContaining({
+      from: "system",
+      text: expect.stringContaining("lock cleanup failed after 3 attempts: lock unlink denied")
+    }));
+  });
+
+  async function createClient(
+    launch: SupervisorLauncher,
+    overrides: {
+      acquireSubmissionTurn?: SupervisorSubmissionTurnAcquirer;
+      appendChatMessage?: ReturnType<typeof vi.fn>;
+    } = {}
+  ): Promise<SupervisorOrchestrator> {
     return SupervisorOrchestrator.open({
       delegate: {
         routeInitialRequest: vi.fn(async () => ({
@@ -143,10 +181,11 @@ describe("SupervisorOrchestrator", () => {
           }
         }))
       } as unknown as Orchestrator,
-      sessions: { appendChatMessage: vi.fn() } as unknown as SessionManager,
+      sessions: { appendChatMessage: overrides.appendChatMessage ?? vi.fn() } as unknown as SessionManager,
       appRoot: root,
       workspaceRoot: root,
       dataDir: ".parallel-codex",
+      acquireSubmissionTurn: overrides.acquireSubmissionTurn,
       launch
     });
   }

@@ -560,7 +560,16 @@ describe("ProcessWorkerAdapter", () => {
     const promptPath = join(filesDir, "prompt.md");
     const outputLogPath = join(filesDir, "output.log");
     const statusPath = join(filesDir, "status.json");
-    const script = "setTimeout(()=>console.log('first output'),400);setTimeout(()=>process.exit(0),500)";
+    const outputGatePath = join(root, "allow-output");
+    const script = [
+      "const fs=require('node:fs');",
+      `const gate=${JSON.stringify(outputGatePath)};`,
+      "const timer=setInterval(()=>{",
+      "if(!fs.existsSync(gate))return;",
+      "clearInterval(timer);console.log('first output');setTimeout(()=>process.exit(0),100);",
+      "},10);"
+    ].join("");
+    const statusTransitions: Array<{ state: string; phase: string }> = [];
 
     await writeText(promptPath, "wait for output");
     const adapter = new ProcessWorkerAdapter(process.execPath, ["-e", script]);
@@ -574,19 +583,20 @@ describe("ProcessWorkerAdapter", () => {
       outputLogPath,
       statusPath,
       prompt: "wait for output",
-      firstOutputTimeoutMs: 1000,
-      idleTimeoutMs: 1000
+      firstOutputTimeoutMs: 5000,
+      idleTimeoutMs: 5000,
+      onStatus: ({ state, phase }) => {
+        statusTransitions.push({ state, phase });
+      }
     });
 
-    await new Promise((resolve) => setTimeout(resolve, 120));
-    await expect(readJson(statusPath, WorkerStatusSchema)).resolves.toMatchObject({
+    await expect(waitForStatusPhase(statusPath, "process-starting")).resolves.toMatchObject({
       state: "starting",
       phase: "process-starting"
     });
-    await expect(waitForStatusPhase(statusPath, "process-output")).resolves.toMatchObject({
-      state: "running"
-    });
+    await writeText(outputGatePath, "continue");
     await expect(running).resolves.toMatchObject({ exitCode: 0 });
+    expect(statusTransitions).toContainEqual({ state: "running", phase: "process-output" });
   });
 
   it("records the owned child identity while running and clears it after exit", async () => {

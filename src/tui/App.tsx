@@ -1834,6 +1834,12 @@ export function App({
           setView(taskSessionsReturnViewRef.current);
           return;
         }
+        if ((chunk === "x" || chunk === "X") && taskSessionQueryRef.current.trim()) {
+          const selectedSession = taskSessionsRef.current[selectedTaskSessionIndexRef.current];
+          void refreshTaskSessionsRef.current(selectedSession?.id ?? null, "");
+          setTaskSessionsNotice("Task search cleared");
+          return;
+        }
         if (taskSessionsLoadingRef.current) {
           return;
         }
@@ -1865,11 +1871,6 @@ export function App({
           return;
         }
         const selectedSession = taskSessionsRef.current[selectedTaskSessionIndexRef.current];
-        if ((chunk === "x" || chunk === "X") && taskSessionQueryRef.current.trim()) {
-          void refreshTaskSessionsRef.current(selectedSession?.id ?? null, "");
-          setTaskSessionsNotice("Task search cleared");
-          return;
-        }
         if (chunk === "r" || chunk === "R") {
           if (selectedSession) {
             updateTaskSessionAction({

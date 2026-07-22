@@ -19,6 +19,10 @@ describe("parseCliArgs", () => {
     expect(parsed.probeAgents).toBe(false);
     expect(parsed.probeRouter).toBe(false);
     expect(parsed.runs).toBe(false);
+    expect(parsed.submit).toBe(false);
+    expect(parsed.submitRequest).toBeNull();
+    expect(parsed.idempotencyKey).toBeNull();
+    expect(parsed.wait).toBe(false);
     expect(parsed.waitRun).toBe(false);
     expect(parsed.waitRunId).toBeNull();
     expect(parsed.waitTimeoutMs).toBeNull();
@@ -124,6 +128,26 @@ describe("parseCliArgs", () => {
     expect(waitSelected.waitRun).toBe(true);
     expect(waitSelected.waitRunId).toBe("run-20260721T000000Z-deadbeef");
     expect(waitSelected.json).toBe(true);
+  });
+
+  it("accepts detached submissions, stdin, waiting, and idempotency", () => {
+    const direct = parseCliArgs([
+      "--submit",
+      "build a game",
+      "--idempotency-key",
+      "ci:game-1",
+      "--json"
+    ], "/app");
+    const stdin = parseCliArgs(["--submit=-", "--wait", "--wait-timeout=2.5"], "/app");
+
+    expect(direct.submit).toBe(true);
+    expect(direct.submitRequest).toBe("build a game");
+    expect(direct.idempotencyKey).toBe("ci:game-1");
+    expect(direct.json).toBe(true);
+    expect(stdin.submit).toBe(true);
+    expect(stdin.submitRequest).toBe("-");
+    expect(stdin.wait).toBe(true);
+    expect(stdin.waitTimeoutMs).toBe(2500);
   });
 
   it("accepts themes without changing workspace parsing", () => {
@@ -272,13 +296,13 @@ describe("validateCliArgs", () => {
     expect(validateCliArgs(["--wait-run"])).toEqual([]);
     expect(validateCliArgs(["--wait-run=run-safe_01", "--wait-timeout", "2.5", "--json"])).toEqual([]);
     expect(validateCliArgs(["--runs", "--cancel-run"])).toEqual([
-      "Only one of --runs, --cancel-run, or --wait-run may be used"
+      "Only one of --runs, --cancel-run, --wait-run, or --submit may be used"
     ]);
     expect(validateCliArgs(["--cancel-run", "--wait-run"])).toEqual([
-      "Only one of --runs, --cancel-run, or --wait-run may be used"
+      "Only one of --runs, --cancel-run, --wait-run, or --submit may be used"
     ]);
     expect(validateCliArgs(["--json"])).toEqual([
-      "--json requires --runs, --cancel-run, or --wait-run"
+      "--json requires --runs, --cancel-run, --wait-run, or --submit"
     ]);
     expect(validateCliArgs(["--cancel-run=../../outside"])).toEqual([
       "Invalid --cancel-run: expected run- followed by letters, numbers, dot, underscore, or hyphen"
@@ -290,10 +314,30 @@ describe("validateCliArgs", () => {
       "Invalid --wait-timeout: expected a positive number of seconds"
     ]);
     expect(validateCliArgs(["--wait-timeout", "5"])).toEqual([
-      "--wait-timeout requires --wait-run"
+      "--wait-timeout requires --wait-run or --submit"
     ]);
     expect(validateCliArgs(["--wait-run", "--wait-timeout"])).toEqual([
       "Invalid --wait-timeout: expected a positive number of seconds"
+    ]);
+  });
+
+  it("validates detached submission command combinations", () => {
+    expect(validateCliArgs(["--submit", "build it"])).toEqual([]);
+    expect(validateCliArgs(["--submit", "-", "--wait", "--json"])).toEqual([]);
+    expect(validateCliArgs(["--submit=build it", "--wait-timeout", "5"])).toEqual([]);
+    expect(validateCliArgs(["--submit", "build", "--idempotency-key", "ci:build-1"])).toEqual([]);
+    expect(validateCliArgs(["--submit"])).toEqual([
+      "Invalid --submit: expected request text or - for piped stdin"
+    ]);
+    expect(validateCliArgs(["--submit", "build", "--runs"])).toEqual([
+      "Only one of --runs, --cancel-run, --wait-run, or --submit may be used"
+    ]);
+    expect(validateCliArgs(["--wait"])).toEqual(["--wait requires --submit"]);
+    expect(validateCliArgs(["--idempotency-key", "ci-1"])).toEqual([
+      "--idempotency-key requires --submit"
+    ]);
+    expect(validateCliArgs(["--submit", "build", "--idempotency-key", "bad/key"])).toEqual([
+      "Invalid --idempotency-key: expected 1-128 letters, numbers, dot, underscore, colon, or hyphen"
     ]);
   });
 

@@ -6,9 +6,9 @@ Built with Codex-assisted development.
 
 ## Current Release
 
-`v0.4.2` is available from [npm](https://www.npmjs.com/package/parallel-codex-tui/v/0.4.2) and as a [GitHub Release](https://github.com/allendred/parallel-codex-tui/releases/tag/v0.4.2). It extends the non-interactive Supervisor control plane with `--wait-run [id]` and `--wait-timeout <seconds>`. A second terminal or automation can now wait for a detached run, receive a versioned JSON result, and distinguish completion, failure, cancellation, stale ownership, and local wait timeout without taking the TUI control lease or cancelling the underlying task.
+`v0.4.3` is available from [npm](https://www.npmjs.com/package/parallel-codex-tui/v/0.4.3) and as a [GitHub Release](https://github.com/allendred/parallel-codex-tui/releases/tag/v0.4.3). It adds headless `--submit` execution for scripts and CI, piped stdin, optional waiting, automation-safe idempotency keys, and `--task` continuation of an existing multi-turn Task. Routing and execution happen inside the detached Supervisor, so automation receives the persisted run id immediately and can leave the task running after its own process exits.
 
-Main and parallel executions run in a detached, per-request Supervisor after the Router resolves in the foreground. `Ctrl+C` closes the outer TUI without stopping an attached run, reopening the same workspace restores its live events or terminal result, and `Esc` remains the explicit cancellation command. One TUI owns the control lease while additional TUIs observe the same run; an observer takes control automatically after the prior controller detaches or exits.
+Interactive Main and parallel executions run in a detached, per-request Supervisor after the Router resolves in the foreground; headless submissions route inside that Supervisor. `Ctrl+C` closes the outer TUI without stopping an attached run, reopening the same workspace restores its live events or terminal result, and `Esc` remains the explicit cancellation command. One TUI owns the control lease while additional TUIs observe the same run; an observer takes control automatically after the prior controller detaches or exits.
 
 Supervisor requests, state, events, commands, controller ownership, acknowledgements, and diagnostic output are retained under `.parallel-codex/supervisor/runs/<run-id>/`. The Supervisor writes the final chat result itself, so completion survives a closed terminal without duplicate history when the TUI is reopened. Unexpected Supervisor exit is converted into a durable failed state instead of leaving an indefinitely running UI.
 
@@ -39,7 +39,7 @@ Highlights:
 - Named Worker Providers support Codex-compatible, Claude-compatible, OpenAI-compatible, Anthropic-compatible, and custom generic commands with independent role, model, environment, permission, resume, and interactive settings.
 - Worker overview, Feature board, collaboration timeline, Task and Main conversation centers, status details, rendered Markdown/Diff/error logs, Unicode search, keyboard navigation, mouse scrolling, and configurable themes share one terminal UI system.
 
-Release acceptance includes a real three-Feature Tetris task with parallel Actor/Critic waves and final integration review. A clean `v0.2.5` task also ran Codex Judge and Actor, a buffered Claude Critic that independently executed `node --test` and `npm test`, atomic integration, and a resumed Codex Judge that independently passed all seven acceptance criteria. Real Codex and Claude probes both proved fresh and same-session resume calls; Codex fresh and resume runs executed workspace writes with root-level `-a never`, and Claude automated sessions executed safe Bash tools with `auto` permissions. The semantic Router completed a live classification, and one TUI completed Main calls in two workspaces before restoring the first workspace without leaking chat state. PTY coverage runs in Apple Terminal, tmux, and Zellij profiles at narrow and wide sizes, including status/log equivalence, preserving the native output tail across status-detail round trips, and proving both inline and on-demand file memory after native-session rollover. Supervisor PTY coverage proves detached Main and complex execution, restart recovery, controller/observer takeover, explicit cancellation, process-owner crash recovery, out-of-process status/cancellation, and detached wait/timeout commands. The deterministic repository suite contains 1,368 tests across 143 files: 1,367 pass by default, while one quota-consuming real-Agent test is skipped and passes through `npm run test:real-agents`.
+Release acceptance includes a real three-Feature Tetris task with parallel Actor/Critic waves and final integration review. A clean `v0.2.5` task also ran Codex Judge and Actor, a buffered Claude Critic that independently executed `node --test` and `npm test`, atomic integration, and a resumed Codex Judge that independently passed all seven acceptance criteria. Real Codex and Claude probes both proved fresh and same-session resume calls; Codex fresh and resume runs executed workspace writes with root-level `-a never`, and Claude automated sessions executed safe Bash tools with `auto` permissions. The semantic Router completed a live classification, and one TUI completed Main calls in two workspaces before restoring the first workspace without leaking chat state. PTY coverage runs in Apple Terminal, tmux, and Zellij profiles at narrow and wide sizes, including status/log equivalence, preserving the native output tail across status-detail round trips, and proving both inline and on-demand file memory after native-session rollover. Supervisor PTY coverage proves detached Main and complex execution, restart recovery, controller/observer takeover, explicit cancellation, process-owner crash recovery, out-of-process status/cancellation, detached wait/timeout commands, headless submission, idempotent concurrent retries, missing-Workspace bootstrap, and same-Task continuation. The deterministic repository suite contains 1,381 tests across 144 files: 1,380 pass by default, while one quota-consuming real-Agent test is skipped and passes through `npm run test:real-agents`.
 
 Real Provider probes depend on valid local CLI credentials. In particular, authenticate the Claude CLI before selecting a Claude-compatible Worker, then run `parallel-codex-tui --doctor --probe-agents` to prove fresh and resumed calls on that machine.
 
@@ -69,6 +69,9 @@ parallel-codex-tui --diagnostics
 parallel-codex-tui --diagnostics ./support-bundle
 parallel-codex-tui --workspace /path/to/project --runs
 parallel-codex-tui --workspace /path/to/project --runs --json
+parallel-codex-tui --workspace /path/to/project --submit "implement the next feature"
+parallel-codex-tui --workspace /path/to/project --submit "implement the next feature" --wait --json
+printf 'review the current diff\n' | parallel-codex-tui --workspace /path/to/project --submit -
 parallel-codex-tui --workspace /path/to/project --cancel-run
 parallel-codex-tui --workspace /path/to/project --wait-run
 parallel-codex-tui --workspace /path/to/project --wait-run --wait-timeout 600 --json
@@ -103,7 +106,7 @@ For development without linking, run:
 npm run dev -- --workspace /path/to/project
 ```
 
-CLI options with values can also be passed as `--workspace=/path/to/project`, `--app-root=/path/to/app`, `--task=task-id`, `--theme=paper`, `-w=/path/to/project`, and `-t=task-id`.
+CLI options with values can also be passed as `--workspace=/path/to/project`, `--app-root=/path/to/app`, `--task=task-id`, `--theme=paper`, `--submit=request`, `--idempotency-key=ci:build-1`, `-w=/path/to/project`, and `-t=task-id`.
 
 Check available flags or the installed version without starting the TUI:
 
@@ -116,6 +119,9 @@ parallel-codex-tui --diagnostics
 parallel-codex-tui --diagnostics ./support-bundle
 parallel-codex-tui --workspace /path/to/project --runs
 parallel-codex-tui --workspace /path/to/project --runs --json
+parallel-codex-tui --workspace /path/to/project --submit "implement the next feature"
+parallel-codex-tui --workspace /path/to/project --submit "implement the next feature" --idempotency-key ci:feature-1 --wait --json
+parallel-codex-tui --workspace /path/to/project --task task-20260721-example --submit "continue with the next requirement" --wait
 parallel-codex-tui --workspace /path/to/project --cancel-run
 parallel-codex-tui --workspace /path/to/project --cancel-run run-20260721T000000Z-deadbeef
 parallel-codex-tui --workspace /path/to/project --wait-run
@@ -148,6 +154,23 @@ parallel-codex-tui --workspace /path/to/project --runs --json
 ```
 
 Runs are ordered newest first. Text and JSON output include the run and Task ids, operation kind, lifecycle status, control state, timestamps, Supervisor PID, process liveness, controller PID/liveness, and whether the terminal result has been acknowledged by a TUI. Control states distinguish `starting`, `controlled`, `detached`, `settled`, and `stale`. The JSON document is versioned as `1` and intentionally excludes the original request, prompts, Worker logs, command arguments, and environment values.
+
+Submit a new request without opening the TUI, or continue an existing Task:
+
+```bash
+parallel-codex-tui --workspace /path/to/project --submit "implement the next feature"
+printf 'review the current diff\n' | parallel-codex-tui --workspace /path/to/project --submit -
+parallel-codex-tui --workspace /path/to/project --submit "implement the next feature" --wait --json
+parallel-codex-tui --workspace /path/to/project --submit "implement the next feature" --wait-timeout 600 --json
+parallel-codex-tui --workspace /path/to/project --submit "implement the next feature" --idempotency-key ci:feature-1 --json
+parallel-codex-tui --workspace /path/to/project --task task-20260721-example --submit "continue with the next requirement" --wait
+```
+
+`--submit` prepares and remembers the selected Workspace, creates the default app configuration when it is missing, persists the run, and starts a detached Supervisor before returning. The Router runs inside the Supervisor, so the calling shell does not have to remain open during classification or Worker execution. `--submit -` reads at most 1 MiB of piped UTF-8 input and rejects an interactive terminal or empty request. A submission does not claim `controller.json`, acknowledge the result, or print the request; its text and versioned JSON output contain only bounded run metadata.
+
+Use `--wait` to remain until the submitted run settles. `--wait-timeout <seconds>` implies waiting and exits with code `4` when only the local deadline expires; it never appends a cancellation command, and the detached Supervisor continues running. Combined JSON contains separate versioned `submission` and `wait` objects. Passing an existing `--task` creates a new `handle-task-turn` run against the same durable Task and native Worker history.
+
+For retried CI jobs, `--idempotency-key <key>` accepts 1-128 letters, numbers, dots, underscores, colons, or hyphens. The raw key is never persisted or emitted: a Workspace-scoped SHA-256 digest selects the run id. Concurrent submissions with the same key and identical request start exactly one Supervisor and reuse its metadata; changing the request for an existing key is rejected. Without an idempotency key, a second submission is rejected while another run remains active in that Workspace.
 
 Cancel the latest active run, or address one explicitly:
 
@@ -595,12 +618,12 @@ The release job installs npm `^11.5.1`, runs on Node `24.15.x`, publishes the pr
 To publish a release, update `package.json` and `src/version.ts` to the same version, then push a matching tag:
 
 ```bash
-VERSION=0.4.2
+VERSION=0.4.3
 git tag "v$VERSION"
 git push origin "v$VERSION"
 ```
 
-You can also run the Release workflow manually and enter the same tag value. The release tag must match `package.json`; for example, package version `0.4.2` requires tag `v0.4.2`. Published tags such as `v0.2.10` are immutable and must not be moved or reused.
+You can also run the Release workflow manually and enter the same tag value. The release tag must match `package.json`; for example, package version `0.4.3` requires tag `v0.4.3`. Published tags such as `v0.2.10` are immutable and must not be moved or reused.
 
 ## Publishing Hygiene
 

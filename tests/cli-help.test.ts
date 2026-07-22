@@ -14,6 +14,9 @@ describe("buildCliHelpText", () => {
     expect(help).toContain("--probe-router");
     expect(help).toContain("live Codex Router request");
     expect(help).toContain("--runs");
+    expect(help).toContain("--submit <request>");
+    expect(help).toContain("--idempotency-key <key>");
+    expect(help).toContain("--wait");
     expect(help).toContain("--cancel-run [id]");
     expect(help).toContain("--wait-run [id]");
     expect(help).toContain("--wait-timeout <s>");
