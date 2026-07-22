@@ -496,7 +496,14 @@ describe("CLI Supervisor commands smoke", () => {
         request: "private watch request",
         cwd: workspace
       });
-      const logPath = join(workspace, "actor.log");
+      const workerDir = join(
+        workspace,
+        ".parallel-codex",
+        "sessions",
+        "task-cli-watch",
+        "actor-codex-0001-watch"
+      );
+      const logPath = join(workerDir, "output.log");
       const worker = {
         id: "actor-codex-0001-watch",
         featureId: "0001-watch",
@@ -504,8 +511,9 @@ describe("CLI Supervisor commands smoke", () => {
         engine: "codex" as const,
         label: "CLI watch",
         logPath,
-        statusPath: join(workspace, "actor-status.json")
+        statusPath: join(workerDir, "status.json")
       };
+      await mkdir(workerDir, { recursive: true });
       await writeFile(logPath, "first line\n", "utf8");
       const initial = await readSupervisorRunState(files);
       const processStartToken = await readProcessStartToken(process.pid);

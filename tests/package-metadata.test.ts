@@ -192,7 +192,7 @@ describe("package metadata", () => {
 
     expect(readme).toContain("## Requirements");
     expect(readme).toContain("## Current Release");
-    expect(readme).toContain("v0.4.4` is available from [npm]");
+    expect(readme).toContain("v0.4.5` is available from [npm]");
     expect(readme).toContain("`Ctrl+T`, then `C`, opens every persisted Main conversation");
     expect(readme).toContain("`.parallel-codex/sessions/main/conversations/<conversation>/`");
     expect(readme).toContain("restores those exact Main bindings");
@@ -204,7 +204,7 @@ describe("package metadata", () => {
     expect(readme).toContain("keeps terminal scrolling and copying available at the same time");
     expect(readme).toContain("real three-Feature Tetris task");
     expect(readme).toContain("20-turn soak verifies 80 ordered Workers");
-    expect(readme).toContain("1,390 tests across 145 files: 1,389 pass by default");
+    expect(readme).toContain("1,395 tests across 145 files: 1,394 pass by default");
     expect(readme).toContain("same Judge native session for a bounded DAG replan");
     expect(readme).toContain("Real Codex and Claude probes both proved fresh and same-session resume calls");
     expect(readme).toContain("authenticate the Claude CLI");
@@ -219,6 +219,10 @@ describe("package metadata", () => {
     expect(readme).toContain("parallel-codex-tui --workspace /path/to/project --cancel-run");
     expect(readme).toContain("parallel-codex-tui --workspace /path/to/project --wait-run");
     expect(readme).toContain("parallel-codex-tui --workspace /path/to/project --watch-run");
+    expect(readme).toContain("Worker logs are streamed in at most 64 KiB chunks");
+    expect(readme).toContain("terminal run drains every already-persisted chunk before emitting its finish record");
+    expect(readme).toContain("including canonical-path checks against symlink escape");
+    expect(readme).toContain("one versioned warning record and its contents are not read");
     expect(readme).toContain("--pause-feature 0001-ui");
     expect(readme).toContain("--resume-feature 0001-ui --wait");
     expect(readme).toContain("one compact, versioned JSON Lines record");
@@ -559,8 +563,8 @@ describe("package metadata", () => {
     expect(readme).toContain('git tag "v$VERSION"');
     expect(readme).toContain('git push origin "v$VERSION"');
     expect(readme).toContain("The release tag must match `package.json`");
-    expect(readme).toContain("VERSION=0.4.4");
-    expect(readme).toContain("package version `0.4.4` requires tag `v0.4.4`");
+    expect(readme).toContain("VERSION=0.4.5");
+    expect(readme).toContain("package version `0.4.5` requires tag `v0.4.5`");
     expect(readme).toContain("Published tags such as `v0.2.10` are immutable");
   });
 

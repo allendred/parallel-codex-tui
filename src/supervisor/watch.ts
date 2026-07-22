@@ -1,5 +1,11 @@
+import { realpath } from "node:fs/promises";
+import { isAbsolute, relative, resolve, sep } from "node:path";
+import { sessionsRoot } from "../core/paths.js";
 import type { WorkerLogRef } from "../orchestrator/orchestrator.js";
-import { createIncrementalTextFileReader, type IncrementalTextFileReader } from "../tui/incremental-text-file.js";
+import {
+  createIncrementalTextFileChunkReader,
+  type IncrementalTextFileChunkReader
+} from "../tui/incremental-text-file.js";
 import { supervisorEventPayload, type SupervisorRunEvent } from "./protocol.js";
 import {
   listSupervisorRuns,
@@ -15,6 +21,8 @@ import {
 } from "./operations.js";
 
 const WATCH_POLL_MS = 100;
+const WATCH_LOG_CHUNK_BYTES = 64 * 1024;
+const WATCH_LOG_CHUNKS_PER_POLL = 16;
 
 export type SupervisorWatchRecord =
   | {
@@ -38,6 +46,14 @@ export type SupervisorWatchRecord =
       worker: SupervisorWatchWorker;
       reset: boolean;
       text: string;
+    }
+  | {
+      version: 1;
+      type: "warning";
+      at: string;
+      run_id: string;
+      worker: SupervisorWatchWorker;
+      message: string;
     }
   | {
       version: 1;
@@ -65,8 +81,10 @@ export interface SupervisorWatchOptions {
 
 interface WatchedWorker {
   ref: WorkerLogRef;
-  reader: IncrementalTextFileReader;
-  textLength: number;
+  logPath: string;
+  reader: IncrementalTextFileChunkReader | null;
+  pathWarning: string | null;
+  pathWarningEmitted: boolean;
 }
 
 export async function watchSupervisorRun(
@@ -87,6 +105,7 @@ export async function watchSupervisorRun(
   }
 
   const record = await selectSupervisorRun(workspaceRoot, dataDir, runId, now());
+  const sessionLogsRoot = resolve(sessionsRoot(workspaceRoot, dataDir));
   const startedAt = Date.now();
   const workers = new Map<string, WatchedWorker>();
   let nextEventSequence = 0;
@@ -112,19 +131,31 @@ export async function watchSupervisorRun(
         run_id: record.state.run_id,
         event
       });
-      registerWorkerFromEvent(event, workers);
+      registerWorkerFromEvent(event, workers, sessionLogsRoot);
     }
 
     record.state = await readSupervisorRunState(record.files);
     for (const worker of record.state.result?.workers ?? []) {
-      registerWorker(worker, workers);
+      registerWorker(worker, workers, sessionLogsRoot);
     }
-    await emitWorkerOutput(record.state.run_id, workers, now, options.onRecord);
+    const workerOutputPending = await emitWorkerOutput(
+      record.state.run_id,
+      workers,
+      sessionLogsRoot,
+      now,
+      options.onRecord
+    );
 
     const view = await inspectSupervisorRunRecord(record, now());
     const waitedMs = Math.max(0, Date.now() - startedAt);
-    const outcome = watchOutcome(view, waitedMs, timeoutMs);
+    const outcome = workerOutputPending && timeoutMs !== null && waitedMs >= timeoutMs
+      ? "timeout"
+      : watchOutcome(view, waitedMs, timeoutMs);
     if (outcome) {
+      if (outcome !== "timeout" && workerOutputPending) {
+        await delay(0);
+        continue;
+      }
       const result: SupervisorWaitResult = {
         version: 1,
         outcome,
@@ -155,6 +186,8 @@ export function formatSupervisorWatchRecord(record: SupervisorWatchRecord): stri
       const reset = record.reset ? " · reset" : "";
       return `log · ${record.worker.role}/${record.worker.engine} · ${record.worker.label}${reset}\n${record.text}`;
     }
+    case "warning":
+      return `warning · ${record.worker.role}/${record.worker.engine} · ${record.worker.label} · ${record.message}`;
     case "finish": {
       const heading = `Run ${record.result.outcome} · ${record.result.run.run_id} · ${runTarget(record.result.run)} · watched ${formatDuration(record.result.waited_ms)}`;
       const detail = record.summary ?? record.error;
@@ -196,55 +229,105 @@ async function selectSupervisorRun(
 
 function registerWorkerFromEvent(
   event: SupervisorRunEvent,
-  workers: Map<string, WatchedWorker>
+  workers: Map<string, WatchedWorker>,
+  sessionLogsRoot: string
 ): void {
   if (event.type !== "worker") {
     return;
   }
   try {
-    registerWorker(supervisorEventPayload(event) as WorkerLogRef, workers);
+    registerWorker(supervisorEventPayload(event) as WorkerLogRef, workers, sessionLogsRoot);
   } catch {
     // The raw event remains visible even when a damaged Worker payload cannot be followed.
   }
 }
 
-function registerWorker(worker: WorkerLogRef, workers: Map<string, WatchedWorker>): void {
+function registerWorker(
+  worker: WorkerLogRef,
+  workers: Map<string, WatchedWorker>,
+  sessionLogsRoot: string
+): void {
   const current = workers.get(worker.id);
   if (current?.ref.logPath === worker.logPath) {
     current.ref = worker;
     return;
   }
+  const logPath = resolve(sessionLogsRoot, worker.logPath);
+  const pathWarning = pathIsInside(sessionLogsRoot, logPath)
+    ? null
+    : "Worker log path is outside the Workspace session root; output was not read";
   workers.set(worker.id, {
     ref: worker,
-    reader: createIncrementalTextFileReader(worker.logPath),
-    textLength: 0
+    logPath,
+    reader: pathWarning
+      ? null
+      : createIncrementalTextFileChunkReader(logPath, { maxBytesPerRead: WATCH_LOG_CHUNK_BYTES }),
+    pathWarning,
+    pathWarningEmitted: false
   });
 }
 
 async function emitWorkerOutput(
   runId: string,
   workers: Map<string, WatchedWorker>,
+  sessionLogsRoot: string,
+  now: () => Date,
+  onRecord: SupervisorWatchOptions["onRecord"]
+): Promise<boolean> {
+  let pending = false;
+  for (const worker of workers.values()) {
+    if (!worker.reader) {
+      await emitWorkerPathWarning(runId, worker, now, onRecord);
+      continue;
+    }
+    if (!(await logPathIsInside(sessionLogsRoot, worker.logPath))) {
+      worker.pathWarning = "Worker log resolves outside the Workspace session root; output was not read";
+      await emitWorkerPathWarning(runId, worker, now, onRecord);
+      continue;
+    }
+
+    let hasMore = false;
+    for (let chunkIndex = 0; chunkIndex < WATCH_LOG_CHUNKS_PER_POLL; chunkIndex += 1) {
+      const snapshot = await worker.reader.read();
+      hasMore = snapshot.hasMore;
+      if (snapshot.text || snapshot.reset) {
+        await onRecord({
+          version: 1,
+          type: "worker-output",
+          at: now().toISOString(),
+          run_id: runId,
+          worker: watchWorker(worker.ref),
+          reset: snapshot.reset,
+          text: snapshot.text
+        });
+      }
+      if (!hasMore) {
+        break;
+      }
+    }
+    pending ||= hasMore;
+  }
+  return pending;
+}
+
+async function emitWorkerPathWarning(
+  runId: string,
+  worker: WatchedWorker,
   now: () => Date,
   onRecord: SupervisorWatchOptions["onRecord"]
 ): Promise<void> {
-  for (const worker of workers.values()) {
-    const snapshot = await worker.reader.read();
-    const start = snapshot.reset ? 0 : Math.min(worker.textLength, snapshot.text.length);
-    const text = snapshot.text.slice(start);
-    worker.textLength = snapshot.text.length;
-    if (!text) {
-      continue;
-    }
-    await onRecord({
-      version: 1,
-      type: "worker-output",
-      at: now().toISOString(),
-      run_id: runId,
-      worker: watchWorker(worker.ref),
-      reset: snapshot.reset,
-      text
-    });
+  if (!worker.pathWarning || worker.pathWarningEmitted) {
+    return;
   }
+  worker.pathWarningEmitted = true;
+  await onRecord({
+    version: 1,
+    type: "warning",
+    at: now().toISOString(),
+    run_id: runId,
+    worker: watchWorker(worker.ref),
+    message: worker.pathWarning
+  });
 }
 
 function watchWorker(worker: WorkerLogRef): SupervisorWatchWorker {
@@ -255,6 +338,27 @@ function watchWorker(worker: WorkerLogRef): SupervisorWatchWorker {
     engine: worker.engine,
     label: worker.label
   };
+}
+
+async function logPathIsInside(root: string, path: string): Promise<boolean> {
+  if (!pathIsInside(root, path)) {
+    return false;
+  }
+  try {
+    const canonicalRoot = await realpath(root);
+    const canonicalPath = await realpath(path);
+    return pathIsInside(canonicalRoot, canonicalPath);
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === "ENOENT";
+  }
+}
+
+function pathIsInside(root: string, path: string): boolean {
+  const fromRoot = relative(resolve(root), resolve(path));
+  return fromRoot !== ""
+    && fromRoot !== ".."
+    && !fromRoot.startsWith(`..${sep}`)
+    && !isAbsolute(fromRoot);
 }
 
 function watchOutcome(

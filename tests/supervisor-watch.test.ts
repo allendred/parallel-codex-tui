@@ -1,4 +1,4 @@
-import { appendFile, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { appendFile, mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -33,8 +33,9 @@ describe("Supervisor watch", () => {
     const files = await createSupervisorRun(root, ".parallel-codex", request(root, "run-watch"));
     const state = await readSupervisorRunState(files);
     const processStartToken = await readProcessStartToken(process.pid);
-    const logPath = join(root, "worker.log");
-    const statusPath = join(root, "worker-status.json");
+    const workerDir = join(root, ".parallel-codex", "sessions", "task-watch", "actor-codex-watch");
+    const logPath = join(workerDir, "output.log");
+    const statusPath = join(workerDir, "status.json");
     const worker = {
       id: "actor-codex-0001-watch",
       featureId: "0001-watch",
@@ -44,6 +45,7 @@ describe("Supervisor watch", () => {
       logPath,
       statusPath
     };
+    await mkdir(workerDir, { recursive: true });
     await writeFile(logPath, "alpha\n", "utf8");
     await writeSupervisorRunState(files, {
       ...state,
@@ -151,6 +153,141 @@ describe("Supervisor watch", () => {
     expect(await readSupervisorCommands(files)).toEqual([]);
     expect(await pathExists(files.controllerPath)).toBe(false);
     expect(await pathExists(files.acknowledgedPath)).toBe(false);
+  });
+
+  it("drains a terminal Worker log in bounded chunks before emitting finish", async () => {
+    const files = await createSupervisorRun(root, ".parallel-codex", request(root, "run-watch-large"));
+    const state = await readSupervisorRunState(files);
+    const workerDir = join(root, ".parallel-codex", "sessions", "task-watch-large", "actor-codex-large");
+    const logPath = join(workerDir, "output.log");
+    const largeOutput = `${"0123456789abcdef".repeat(70_000)}尾部\n`;
+    const worker = {
+      id: "actor-codex-large",
+      featureId: "0001-large",
+      role: "actor" as const,
+      engine: "codex" as const,
+      label: "Large persisted log",
+      logPath,
+      statusPath: join(workerDir, "status.json")
+    };
+    await mkdir(workerDir, { recursive: true });
+    await writeFile(logPath, largeOutput, "utf8");
+    await writeSupervisorRunState(files, {
+      ...state,
+      status: "completed",
+      updated_at: "2026-07-22T00:00:04.000Z",
+      started_at: "2026-07-22T00:00:01.000Z",
+      finished_at: "2026-07-22T00:00:04.000Z",
+      task_id: "task-watch-large",
+      result: {
+        mode: "complex",
+        taskId: "task-watch-large",
+        summary: "large output complete",
+        workers: [worker]
+      }
+    });
+    const records: SupervisorWatchRecord[] = [];
+
+    const result = await watchSupervisorRun(root, ".parallel-codex", "run-watch-large", {
+      pollIntervalMs: 10,
+      onRecord: (record) => {
+        records.push(record);
+      }
+    });
+
+    const outputRecords = records.filter((record): record is Extract<
+      SupervisorWatchRecord,
+      { type: "worker-output" }
+    > => record.type === "worker-output");
+    expect(result.outcome).toBe("completed");
+    expect(outputRecords.length).toBeGreaterThan(16);
+    expect(outputRecords.every((record) => Buffer.byteLength(record.text) <= 64 * 1024)).toBe(true);
+    expect(outputRecords.map((record) => record.text).join("")).toBe(largeOutput);
+    expect(records.at(-1)?.type).toBe("finish");
+
+    const timedRecords: SupervisorWatchRecord[] = [];
+    let delayed = false;
+    const timedResult = await watchSupervisorRun(root, ".parallel-codex", "run-watch-large", {
+      timeoutMs: 1,
+      onRecord: async (record) => {
+        timedRecords.push(record);
+        if (record.type === "worker-output" && !delayed) {
+          delayed = true;
+          await new Promise((resolve) => setTimeout(resolve, 5));
+        }
+      }
+    });
+    const timedOutput = timedRecords.filter((record): record is Extract<
+      SupervisorWatchRecord,
+      { type: "worker-output" }
+    > => record.type === "worker-output");
+    expect(timedResult.outcome).toBe("timeout");
+    expect(timedOutput).toHaveLength(16);
+    expect(timedOutput.map((record) => record.text).join("").length).toBeLessThan(largeOutput.length);
+    expect(timedRecords.at(-1)).toMatchObject({ type: "finish", result: { outcome: "timeout" } });
+  });
+
+  it("warns without reading Worker logs outside the Workspace session root", async () => {
+    const files = await createSupervisorRun(root, ".parallel-codex", request(root, "run-watch-boundary"));
+    const state = await readSupervisorRunState(files);
+    const sessionsDir = join(root, ".parallel-codex", "sessions");
+    const linkedWorkerDir = join(sessionsDir, "task-watch-boundary", "actor-linked");
+    const outsideLog = join(root, "outside-secret.log");
+    const linkedLog = join(linkedWorkerDir, "output.log");
+    await mkdir(linkedWorkerDir, { recursive: true });
+    await writeFile(outsideLog, "SECRET_OUTSIDE_CONTENT\n", "utf8");
+    await symlink(outsideLog, linkedLog);
+    const workers = [
+      {
+        id: "actor-outside",
+        featureId: "0001-outside",
+        role: "actor" as const,
+        engine: "codex" as const,
+        label: "Outside path",
+        logPath: outsideLog,
+        statusPath: join(root, "outside-status.json")
+      },
+      {
+        id: "actor-linked",
+        featureId: "0002-linked",
+        role: "actor" as const,
+        engine: "codex" as const,
+        label: "Linked path",
+        logPath: linkedLog,
+        statusPath: join(linkedWorkerDir, "status.json")
+      }
+    ];
+    await writeSupervisorRunState(files, {
+      ...state,
+      status: "completed",
+      updated_at: "2026-07-22T00:00:04.000Z",
+      started_at: "2026-07-22T00:00:01.000Z",
+      finished_at: "2026-07-22T00:00:04.000Z",
+      task_id: "task-watch-boundary",
+      result: {
+        mode: "complex",
+        taskId: "task-watch-boundary",
+        summary: "boundary checked",
+        workers
+      }
+    });
+    const records: SupervisorWatchRecord[] = [];
+
+    await watchSupervisorRun(root, ".parallel-codex", "run-watch-boundary", {
+      onRecord: (record) => {
+        records.push(record);
+      }
+    });
+
+    const warnings = records.filter((record): record is Extract<
+      SupervisorWatchRecord,
+      { type: "warning" }
+    > => record.type === "warning");
+    expect(warnings).toHaveLength(2);
+    expect(warnings.map((record) => record.worker.id)).toEqual(["actor-outside", "actor-linked"]);
+    expect(records.some((record) => record.type === "worker-output")).toBe(false);
+    expect(JSON.stringify(records)).not.toContain("SECRET_OUTSIDE_CONTENT");
+    expect(formatSupervisorWatchRecord(warnings[0]!)).toContain("warning · actor/codex · Outside path");
   });
 
   it("rejects missing runs and invalid timing options", async () => {

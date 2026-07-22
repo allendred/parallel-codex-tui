@@ -22,7 +22,7 @@ function runCli(args: string[], options: { env?: NodeJS.ProcessEnv } = {}): Prom
           ...process.env,
           ...options.env
         },
-        timeout: 8000
+        timeout: 12000
       },
       (error, stdout, stderr) => {
         if (error && !("code" in error)) {

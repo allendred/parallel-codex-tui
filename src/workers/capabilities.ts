@@ -57,7 +57,7 @@ export async function diagnoseAgentCapabilities(
 ): Promise<AgentCapabilityDiagnostics> {
   const targets = capabilityTargets(config, options);
   const runner = options.runner ?? runCapabilityCommand;
-  const timeoutMs = options.timeoutMs ?? 3000;
+  const timeoutMs = options.timeoutMs ?? 5000;
   const reports = await Promise.all(targets.map(async (target) => {
     if (options.availableCommands && !options.availableCommands.has(target.command)) {
       return null;

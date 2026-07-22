@@ -62,6 +62,7 @@ describe("diagnoseAgentCapabilities", () => {
       ]
     });
     expect(runner).toHaveBeenCalledTimes(5);
+    expect(runner.mock.calls.every((call) => call[3] === 5000)).toBe(true);
   });
 
   it("fails when recognized Codex help is missing the root approval option", async () => {

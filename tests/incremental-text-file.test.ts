@@ -2,7 +2,10 @@ import { appendFile, mkdtemp, unlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { createIncrementalTextFileReader } from "../src/tui/incremental-text-file.js";
+import {
+  createIncrementalTextFileChunkReader,
+  createIncrementalTextFileReader
+} from "../src/tui/incremental-text-file.js";
 
 describe("incremental text file reader", () => {
   it("reads an existing file once and only consumes appended bytes afterward", async () => {
@@ -108,4 +111,67 @@ describe("incremental text file reader", () => {
       bytesRead: Buffer.byteLength("new generation\n")
     });
   });
+
+  it("streams bounded chunks without retaining cumulative text", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pct-incremental-chunks-"));
+    const path = join(root, "output.log");
+    const content = "A你好B\n";
+    await writeFile(path, content, "utf8");
+    const reader = createIncrementalTextFileChunkReader(path, { maxBytesPerRead: 2 });
+    const chunks: string[] = [];
+    const byteCounts: number[] = [];
+    let hasMore = true;
+
+    while (hasMore) {
+      const snapshot = await reader.read();
+      chunks.push(snapshot.text);
+      byteCounts.push(snapshot.bytesRead);
+      hasMore = snapshot.hasMore;
+    }
+
+    expect(chunks.join("")).toBe(content);
+    expect(byteCounts.every((count) => count <= 2)).toBe(true);
+    await expect(reader.read()).resolves.toMatchObject({
+      text: "",
+      changed: false,
+      reset: false,
+      bytesRead: 0,
+      hasMore: false
+    });
+  });
+
+  it("resets a bounded chunk cursor after an in-place rewrite", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pct-incremental-chunk-rewrite-"));
+    const path = join(root, "output.log");
+    const original = `${"old-".repeat(40)}\n`;
+    const replacement = `${"new-".repeat(80)}\n`;
+    await writeFile(path, original, "utf8");
+    const reader = createIncrementalTextFileChunkReader(path, { maxBytesPerRead: 32 });
+    await drainChunkReader(reader);
+
+    await writeFile(path, replacement, "utf8");
+    const firstReplacement = await reader.read();
+    const remainder = await drainChunkReader(reader);
+
+    expect(firstReplacement).toMatchObject({ reset: true, bytesRead: 32, hasMore: true });
+    expect(`${firstReplacement.text}${remainder}`).toBe(replacement);
+  });
+
+  it("rejects an invalid bounded chunk size", () => {
+    expect(() => createIncrementalTextFileChunkReader("output.log", { maxBytesPerRead: 0 }))
+      .toThrow("chunk size must be a positive safe integer");
+  });
 });
+
+async function drainChunkReader(
+  reader: ReturnType<typeof createIncrementalTextFileChunkReader>
+): Promise<string> {
+  let text = "";
+  let hasMore = true;
+  while (hasMore) {
+    const snapshot = await reader.read();
+    text += snapshot.text;
+    hasMore = snapshot.hasMore;
+  }
+  return text;
+}
