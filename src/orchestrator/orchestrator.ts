@@ -26,7 +26,7 @@ import {
   type RouterExecutionProgress
 } from "../core/router.js";
 import type { SessionManager, TaskSession, TaskTurn, WorkerFiles } from "../core/session-manager.js";
-import { FeatureStatusSchema, RouteDecisionSchema, TaskMetaSchema, WorkerStatusSchema, type ChatRecord, type EngineName, type FeatureAssignment, type NativeSession, type RouteDecision, type RouterFallbackResolution, type WorkerRole, type WorkerStatus } from "../domain/schemas.js";
+import { FeatureStatusSchema, RouteDecisionSchema, TaskMetaSchema, WorkerStatusSchema, type ChatRecord, type EngineName, type FeatureAssignment, type NativeSession, type RouteDecision, type RouterFallbackResolution, type TaskState, type WorkerRole, type WorkerStatus } from "../domain/schemas.js";
 import { getAdapter, type WorkerRegistry } from "../workers/registry.js";
 import { workerProvider } from "../workers/provider.js";
 import type { WorkerModelRunConfig, WorkerResult, WorkerRunSpec } from "../workers/types.js";
@@ -692,6 +692,11 @@ export class Orchestrator {
   async canRetryTask(taskId: string): Promise<boolean> {
     const meta = await readTaskMetaIfValid(this.sessions.taskFromId(taskId).metaPath);
     return meta?.status === "failed" || meta?.status === "cancelled" || meta?.status === "paused";
+  }
+
+  async taskState(taskId: string): Promise<TaskState | null> {
+    const meta = await readTaskMetaIfValid(this.sessions.taskFromId(taskId).metaPath);
+    return meta?.status ?? null;
   }
 
   async cancelFeature(taskId: string, featureId: string): Promise<FeatureCancellationResult> {

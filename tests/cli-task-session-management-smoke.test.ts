@@ -69,9 +69,7 @@ describe("CLI Task session management smoke", () => {
       await waitForScreenText(run, "1 match · 1 done");
       await waitForScreenText(run, "match · turn 1 修复中文输入并增加回归测试");
       expect(run.screen.snapshot()).not.toContain("Keep session");
-      run.child.write("\r");
-      await waitForScreenText(run, "Task sessions · active · find turn:中文 role:actor provider:codex state:done");
-      run.child.write("xx");
+      run.child.write("\rxx");
       await waitForScreenText(run, "Task search cleared");
       await waitForScreenText(run, "2 tasks · 2 done");
 

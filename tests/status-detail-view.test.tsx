@@ -82,6 +82,32 @@ describe("StatusDetailView", () => {
     view.unmount();
   });
 
+  it.each([
+    ["done", "success"],
+    ["failed", "danger"],
+    ["paused", "warning"],
+    ["actor_running", "active"]
+  ] as const)("shows the canonical %s task state", (taskState, tone) => {
+    const lines = statusDetailDisplayLines({
+      cwd: "/tmp/project",
+      taskId: "task-20260720-0720-lifecycle",
+      mode: "complex",
+      busy: taskState === "done",
+      canRetry: taskState === "done",
+      taskState,
+      taskStatus: "workers 1 | done 1",
+      routeStatus: "route complex",
+      pairing: { main: "codex", judge: "codex", actor: "codex", critic: "claude" },
+      workers: [],
+      selectedWorkerIndex: 0
+    }, 120, 12);
+
+    expect(lines[1]).toEqual({
+      text: `task · 0720-lifecycle · complex · ${taskState.replaceAll("_", " ")}`,
+      tone
+    });
+  });
+
   it("shows the actual per-role provider and model matrix when available", () => {
     const lines = statusDetailDisplayLines({
       cwd: "/tmp/project",

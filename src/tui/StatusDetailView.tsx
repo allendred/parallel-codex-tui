@@ -6,6 +6,7 @@ import type {
   RoleConfigurationSnapshot,
   RoleExecutionSelection
 } from "../core/role-configuration.js";
+import type { TaskState } from "../domain/schemas.js";
 import type { WorkerLogRef } from "../orchestrator/orchestrator.js";
 import { compactEndByDisplayWidth, displayWidth, wrapByDisplayWidth } from "./display-width.js";
 import { TUI_THEME } from "./theme.js";
@@ -23,6 +24,7 @@ export interface StatusDetailViewProps {
   mode: "simple" | "complex" | null;
   busy: boolean;
   canRetry: boolean;
+  taskState?: TaskState | null;
   taskStatus: string;
   routeStatus: string;
   routeReason?: string;
@@ -73,7 +75,7 @@ export function statusDetailDisplayLines(
     { text: "Status", tone: "heading" },
     {
       text: fitStatusDetailText(taskDetail(input), safeWidth),
-      tone: input.busy ? "active" : input.canRetry ? "warning" : "text"
+      tone: taskStateTone(input.taskState, input.busy, input.canRetry)
     },
     {
       text: fitStatusDetailText(`workspace · ${basename(input.cwd) || input.cwd} · ${input.cwd}`, safeWidth),
@@ -166,8 +168,34 @@ function taskDetail(input: Omit<StatusDetailViewProps, "height" | "terminalWidth
   if (!input.taskId) {
     return "task · none";
   }
-  const state = input.busy ? "running" : input.canRetry ? "retryable" : "ready";
+  const state = input.taskState
+    ? humanizeStatusDetail(input.taskState)
+    : input.busy
+      ? "running"
+      : input.canRetry
+        ? "retryable"
+        : "ready";
   return ["task", compactTaskId(input.taskId), input.mode, state].filter(Boolean).join(" · ");
+}
+
+function taskStateTone(
+  state: TaskState | null | undefined,
+  busy: boolean,
+  canRetry: boolean
+): StatusDetailTone {
+  if (state === "done") {
+    return "success";
+  }
+  if (state === "failed") {
+    return "danger";
+  }
+  if (state === "paused" || state === "cancelled" || state === "revision_needed") {
+    return "warning";
+  }
+  if (state) {
+    return "active";
+  }
+  return busy ? "active" : canRetry ? "warning" : "text";
 }
 
 function workerSummary(workers: WorkerLogRef[], taskStatus: string): string {

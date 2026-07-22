@@ -192,7 +192,7 @@ describe("package metadata", () => {
 
     expect(readme).toContain("## Requirements");
     expect(readme).toContain("## Current Release");
-    expect(readme).toContain("v0.4.5` is available from [npm]");
+    expect(readme).toContain("v0.4.6` is available from [npm]");
     expect(readme).toContain("`Ctrl+T`, then `C`, opens every persisted Main conversation");
     expect(readme).toContain("`.parallel-codex/sessions/main/conversations/<conversation>/`");
     expect(readme).toContain("restores those exact Main bindings");
@@ -204,7 +204,7 @@ describe("package metadata", () => {
     expect(readme).toContain("keeps terminal scrolling and copying available at the same time");
     expect(readme).toContain("real three-Feature Tetris task");
     expect(readme).toContain("20-turn soak verifies 80 ordered Workers");
-    expect(readme).toContain("1,395 tests across 145 files: 1,394 pass by default");
+    expect(readme).toContain("1,401 tests across 146 files: 1,399 pass by default");
     expect(readme).toContain("same Judge native session for a bounded DAG replan");
     expect(readme).toContain("Real Codex and Claude probes both proved fresh and same-session resume calls");
     expect(readme).toContain("authenticate the Claude CLI");
@@ -563,8 +563,8 @@ describe("package metadata", () => {
     expect(readme).toContain('git tag "v$VERSION"');
     expect(readme).toContain('git push origin "v$VERSION"');
     expect(readme).toContain("The release tag must match `package.json`");
-    expect(readme).toContain("VERSION=0.4.5");
-    expect(readme).toContain("package version `0.4.5` requires tag `v0.4.5`");
+    expect(readme).toContain("VERSION=0.4.6");
+    expect(readme).toContain("package version `0.4.6` requires tag `v0.4.6`");
     expect(readme).toContain("Published tags such as `v0.2.10` are immutable");
   });
 

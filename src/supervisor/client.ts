@@ -249,6 +249,10 @@ export class SupervisorOrchestrator {
     return this.options.delegate.canRetryTask(taskId);
   }
 
+  taskState(taskId: string) {
+    return this.options.delegate.taskState(taskId);
+  }
+
   listTaskWorkers(taskId: string): Promise<WorkerLogRef[]> {
     return this.options.delegate.listTaskWorkers(taskId);
   }

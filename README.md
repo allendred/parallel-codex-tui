@@ -6,7 +6,7 @@ Built with Codex-assisted development.
 
 ## Current Release
 
-`v0.4.5` is available from [npm](https://www.npmjs.com/package/parallel-codex-tui/v/0.4.5) and as a [GitHub Release](https://github.com/allendred/parallel-codex-tui/releases/tag/v0.4.5). It makes read-only `--watch-run` streaming bounded and workspace-scoped: Worker output is read in at most 64 KiB chunks without retaining the lifetime log, all persisted output is drained before a terminal finish record, and paths outside the workspace session tree produce a structured warning without exposing their contents. The external Feature pause/cancel and detached Task retry/Feature resume commands from `v0.4.4` remain included.
+`v0.4.6` is available from [npm](https://www.npmjs.com/package/parallel-codex-tui/v/0.4.6) and as a [GitHub Release](https://github.com/allendred/parallel-codex-tui/releases/tag/v0.4.6). Status details now read the authoritative persisted Task lifecycle instead of inferring it from transient UI activity, so `actor running`, `paused`, `done`, and `failed` remain accurate across view changes, Task restoration, Supervisor completion, and workspace switches. Session-center input also handles coalesced submit and command keys without dropping Unicode rename text. A deterministic dual-workspace stress acceptance repeatedly restarts the CLI through concurrent Main and complex multi-Turn runs, then verifies isolated native sessions, requests, Tasks, Workers, Supervisor runs, and workspace registration. The bounded, workspace-scoped `--watch-run` streaming from `v0.4.5` remains included.
 
 Interactive Main and parallel executions run in a detached, per-request Supervisor after the Router resolves in the foreground; headless submissions route inside that Supervisor. `Ctrl+C` closes the outer TUI without stopping an attached run, reopening the same workspace restores its live events or terminal result, and `Esc` remains the explicit cancellation command. One TUI owns the control lease while additional TUIs observe the same run; an observer takes control automatically after the prior controller detaches or exits.
 
@@ -41,7 +41,7 @@ Highlights:
 - Named Worker Providers support Codex-compatible, Claude-compatible, OpenAI-compatible, Anthropic-compatible, and custom generic commands with independent role, model, environment, permission, resume, and interactive settings.
 - Worker overview, Feature board, collaboration timeline, Task and Main conversation centers, status details, rendered Markdown/Diff/error logs, Unicode search, keyboard navigation, mouse scrolling, and configurable themes share one terminal UI system.
 
-Release acceptance includes a real three-Feature Tetris task with parallel Actor/Critic waves and final integration review. A clean `v0.2.5` task also ran Codex Judge and Actor, a buffered Claude Critic that independently executed `node --test` and `npm test`, atomic integration, and a resumed Codex Judge that independently passed all seven acceptance criteria. Real Codex and Claude probes both proved fresh and same-session resume calls; Codex fresh and resume runs executed workspace writes with root-level `-a never`, and Claude automated sessions executed safe Bash tools with `auto` permissions. The semantic Router completed a live classification, and one TUI completed Main calls in two workspaces before restoring the first workspace without leaking chat state. PTY coverage runs in Apple Terminal, tmux, and Zellij profiles at narrow and wide sizes, including status/log equivalence, preserving the native output tail across status-detail round trips, and proving both inline and on-demand file memory after native-session rollover. Supervisor PTY coverage proves detached Main and complex execution, restart recovery, controller/observer takeover, explicit cancellation, process-owner crash recovery, out-of-process status/cancellation, detached wait/timeout commands, headless submission, idempotent concurrent retries, missing-Workspace bootstrap, same-Task continuation, read-only event and Worker-output streaming, and external Feature recovery controls. The deterministic repository suite contains 1,395 tests across 145 files: 1,394 pass by default, while one quota-consuming real-Agent test is skipped and passes through `npm run test:real-agents`.
+Release acceptance includes a real three-Feature Tetris task with parallel Actor/Critic waves and final integration review. A clean `v0.2.5` task also ran Codex Judge and Actor, a buffered Claude Critic that independently executed `node --test` and `npm test`, atomic integration, and a resumed Codex Judge that independently passed all seven acceptance criteria. Real Codex and Claude probes both proved fresh and same-session resume calls; Codex fresh and resume runs executed workspace writes with root-level `-a never`, and Claude automated sessions executed safe Bash tools with `auto` permissions. The semantic Router completed a live classification, and one TUI completed Main calls in two workspaces before restoring the first workspace without leaking chat state. PTY coverage runs in Apple Terminal, tmux, and Zellij profiles at narrow and wide sizes, including status/log equivalence, preserving the native output tail across status-detail round trips, and proving both inline and on-demand file memory after native-session rollover. Supervisor PTY coverage proves detached Main and complex execution, restart recovery, controller/observer takeover, explicit cancellation, process-owner crash recovery, out-of-process status/cancellation, detached wait/timeout commands, headless submission, idempotent concurrent retries, missing-Workspace bootstrap, same-Task continuation, read-only event and Worker-output streaming, and external Feature recovery controls. The deterministic repository suite contains 1,401 tests across 146 files: 1,399 pass by default, while the dual-workspace restart stress test and quota-consuming real-Agent test are opt-in through `npm run test:stress` and `npm run test:real-agents`.
 
 Real Provider probes depend on valid local CLI credentials. In particular, authenticate the Claude CLI before selecting a Claude-compatible Worker, then run `parallel-codex-tui --doctor --probe-agents` to prove fresh and resumed calls on that machine.
 
@@ -612,13 +612,14 @@ Run the deterministic release checks from a source checkout:
 ```bash
 npm test
 npm run test:stability
+npm run test:stress
 npm run test:terminal-hosts
 npm run typecheck
 npm run build
 npm run verify:package
 ```
 
-`test:stability` covers 20 same-task turns, 80 historical Workers, restart recovery, workspace switching, orphan cleanup, and interrupted startup. `test:terminal-hosts` uses real PTYs and exercises Apple Terminal, tmux, and Zellij profiles when those hosts are installed; unsupported hosts are reported as skipped.
+`test:stability` covers 20 same-task turns, 80 historical Workers, restart recovery, workspace switching, orphan cleanup, and interrupted startup. `test:stress` runs two workspaces concurrently through ten restarted Main calls, one complex Task, and five restarted follow-up Turns per workspace, then checks native sessions, requests, Task state, Worker state, Supervisor runs, and registration isolation. `test:terminal-hosts` uses real PTYs and exercises Apple Terminal, tmux, and Zellij profiles when those hosts are installed; unsupported hosts are reported as skipped.
 
 Real Agent acceptance is deliberately opt-in because it uses model quota and local credentials:
 
@@ -649,12 +650,12 @@ The release job installs npm `^11.5.1`, runs on Node `24.15.x`, publishes the pr
 To publish a release, update `package.json` and `src/version.ts` to the same version, then push a matching tag:
 
 ```bash
-VERSION=0.4.5
+VERSION=0.4.6
 git tag "v$VERSION"
 git push origin "v$VERSION"
 ```
 
-You can also run the Release workflow manually and enter the same tag value. The release tag must match `package.json`; for example, package version `0.4.5` requires tag `v0.4.5`. Published tags such as `v0.2.10` are immutable and must not be moved or reused.
+You can also run the Release workflow manually and enter the same tag value. The release tag must match `package.json`; for example, package version `0.4.6` requires tag `v0.4.6`. Published tags such as `v0.2.10` are immutable and must not be moved or reused.
 
 ## Publishing Hygiene
 

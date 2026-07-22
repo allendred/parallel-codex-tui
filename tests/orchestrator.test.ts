@@ -3178,6 +3178,7 @@ describe("Orchestrator", () => {
       status: "failed"
     });
     await expect(orchestrator.canRetryTask(taskId)).resolves.toBe(true);
+    await expect(orchestrator.taskState(taskId)).resolves.toBe("failed");
     expect(JSON.parse(await readTextIfExists(
       join(taskDir, "features", "0001-healthy", "status.json")
     ))).toMatchObject({ state: "failed" });
@@ -3193,6 +3194,7 @@ describe("Orchestrator", () => {
     await expect(readJson(join(taskDir, "meta.json"), TaskMetaSchema)).resolves.toMatchObject({
       status: "done"
     });
+    await expect(orchestrator.taskState(taskId)).resolves.toBe("done");
   });
 
   it("retries a failed task in the same task and turn with its native worker session", async () => {

@@ -20,7 +20,7 @@ import type { TaskIndexSummary } from "../core/session-index.js";
 import type { MainConversationActivation, MainConversationSummary } from "../core/session-manager.js";
 import type { TaskSessionDetails, TaskSessionWorkerDetail } from "../core/task-session-details.js";
 import type { WorkspaceChoice } from "../core/workspace.js";
-import { WorkerStatusSchema, type EngineName, type RouteDecision, type WorkerStatus } from "../domain/schemas.js";
+import { WorkerStatusSchema, type EngineName, type RouteDecision, type TaskState, type WorkerStatus } from "../domain/schemas.js";
 import type {
   HandleRequestInput,
   HandleRequestResult,
@@ -127,6 +127,7 @@ export interface AppProps {
   initialRoute?: RouteDecision | null;
   initialWorkers?: WorkerLogRef[];
   initialCanRetryTask?: boolean;
+  initialTaskState?: TaskState | null;
   initialMessages?: Message[];
   persistChatMessage?: (message: Message, taskId?: string) => Promise<void>;
   reloadConfig?: () => Promise<AppConfig>;
@@ -183,6 +184,7 @@ export type AppOrchestrator = Pick<Orchestrator,
   | "updateRoleConfiguration"
   | "validateRoleConfiguration"
 > & {
+  taskState?: (taskId: string) => Promise<TaskState | null>;
   persistsRunResults?: boolean;
   restorePendingRun?: (input: Omit<HandleRequestInput, "request">) => Promise<HandleRequestResult | null>;
   detachBackgroundRuns?: () => void;
@@ -197,6 +199,7 @@ export interface ActivatedTaskSession {
   route: RouteDecision | null;
   workers: WorkerLogRef[];
   canRetry: boolean;
+  taskState: TaskState;
 }
 
 export interface Message {
@@ -291,6 +294,7 @@ export function App({
   initialRoute = null,
   initialWorkers,
   initialCanRetryTask = false,
+  initialTaskState = null,
   initialMessages = [],
   persistChatMessage,
   reloadConfig,
@@ -347,6 +351,10 @@ export function App({
   const [activeTaskId, setActiveTaskId] = useState<string | null>(initialTaskId);
   const [activeMode, setActiveMode] = useState<"simple" | "complex" | null>(initialTaskId ? "complex" : null);
   const [canRetryTask, setCanRetryTask] = useState(initialCanRetryTask);
+  const [taskLifecycle, setTaskLifecycle] = useState<{ taskId: string; state: TaskState } | null>(() => (
+    initialTaskId && initialTaskState ? { taskId: initialTaskId, state: initialTaskState } : null
+  ));
+  const canonicalTaskState = taskLifecycle?.taskId === activeTaskId ? taskLifecycle.state : null;
   const [attachError, setAttachError] = useState<string | null>(null);
   const [configChange, setConfigChange] = useState<RuntimeConfigChange | null>(null);
   const [roleConfigurationSnapshot, setRoleConfigurationSnapshot] = useState<RoleConfigurationSnapshot | null>(null);
@@ -975,6 +983,46 @@ export function App({
   }, [nativeInput]);
 
   useEffect(() => {
+    if (!activeTaskId) {
+      setTaskLifecycle(null);
+      return;
+    }
+    if (!orchestrator.taskState) {
+      return;
+    }
+
+    const taskId = activeTaskId;
+    let active = true;
+    let refreshInFlight = false;
+
+    async function refreshTaskState() {
+      if (refreshInFlight) {
+        return;
+      }
+      refreshInFlight = true;
+      try {
+        const state = await orchestrator.taskState?.(taskId) ?? null;
+        if (active && activeTaskIdRef.current === taskId) {
+          setTaskLifecycle(state ? { taskId, state } : null);
+        }
+      } catch {
+        // Keep the last valid persisted state while metadata is being replaced.
+      } finally {
+        refreshInFlight = false;
+      }
+    }
+
+    void refreshTaskState();
+    const interval = setInterval(() => {
+      void refreshTaskState();
+    }, 1000);
+    return () => {
+      active = false;
+      clearInterval(interval);
+    };
+  }, [activeTaskId, orchestrator]);
+
+  useEffect(() => {
     if (!initialTaskId || activeTaskId !== initialTaskId || initialWorkers !== undefined) {
       return;
     }
@@ -1580,6 +1628,28 @@ export function App({
         return;
       }
       if (currentView === "sessions") {
+        const sessionChunks = tokenizeRawInput(chunk);
+        if (sessionChunks.length > 1) {
+          const taskAction = taskSessionActionRef.current;
+          const conversationAction = mainConversationActionRef.current;
+          const editingText = taskAction?.type === "search"
+            || taskAction?.type === "rename"
+            || conversationAction?.type === "rename";
+          const submitIndex = sessionChunks.findIndex((sessionChunk) => (
+            sessionChunk === "\r" || sessionChunk === "\n"
+          ));
+          if (editingText && submitIndex >= 0 && submitIndex < sessionChunks.length - 1) {
+            handleRawInput(sessionChunks.slice(0, submitIndex + 1).join(""));
+            handleRawInput(sessionChunks.slice(submitIndex + 1).join(""));
+            return;
+          }
+          if (!editingText) {
+            for (const sessionChunk of sessionChunks) {
+              handleRawInput(sessionChunk);
+            }
+            return;
+          }
+        }
         if (isExitShortcut(chunk, {})) {
           requestAppExit();
           return;
@@ -3262,6 +3332,7 @@ export function App({
     setActiveTaskId(nextMemory.activeTaskId);
     setActiveMode(nextMemory.activeMode);
     setCanRetryTask(false);
+    setTaskLifecycle(null);
     setStatus(null);
     setRoutePending(null);
     setRouteAnnouncement(null);
@@ -3805,6 +3876,7 @@ export function App({
       setActiveTaskId(restored.taskId);
       setActiveMode("complex");
       setCanRetryTask(restored.canRetry);
+      setTaskLifecycle({ taskId: restored.taskId, state: restored.taskState });
       setStatus(restoredWorkerStatusLine(restored.taskId, restored.workers));
       setRoutePending(null);
       setLastRoute(restored.route);
@@ -4388,6 +4460,7 @@ export function App({
             mode={activeMode}
             busy={busy}
             canRetry={canRetryTask}
+            taskState={canonicalTaskState}
             taskStatus={visibleTaskStatus}
             routeStatus={visibleRouteStatus}
             routeReason={routePending ? undefined : lastRoute?.reason}

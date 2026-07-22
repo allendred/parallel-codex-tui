@@ -9,6 +9,36 @@ import { App } from "../src/tui/App.js";
 import type { TaskSessionListItem } from "../src/tui/TaskSessionsView.js";
 
 describe("App initial task restore", () => {
+  it("refreshes the status view from the canonical persisted task state", async () => {
+    const testInput = installTestInputStream();
+    const persistedState = deferred<"done">();
+    const taskState = vi.fn(() => persistedState.promise);
+    const orchestrator = { taskState } as unknown as Orchestrator;
+    const view = render(
+      <App
+        config={defaultConfig("/tmp/pct-app-task-state")}
+        orchestrator={orchestrator}
+        cwd="/tmp/pct-workspace"
+        initialTaskId="task-20260707-033720-fefc"
+        initialTaskState="actor_running"
+        initialWorkers={[]}
+      />
+    );
+
+    try {
+      await settleEffects();
+      testInput.send(view.stdin, "\x13");
+      await waitForFrame(view.lastFrame, "task · 033720-fefc · complex · actor running");
+
+      persistedState.resolve("done");
+      await waitForFrame(view.lastFrame, "task · 033720-fefc · complex · done");
+      expect(taskState).toHaveBeenCalledWith("task-20260707-033720-fefc");
+    } finally {
+      view.unmount();
+      testInput.restore();
+    }
+  });
+
   it("opens preloaded worker logs before the asynchronous restore fallback resolves", async () => {
     const testInput = installTestInputStream();
     const workerRestore = deferred<WorkerLogRef[]>();

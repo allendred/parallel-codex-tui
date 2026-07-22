@@ -268,6 +268,7 @@ async function main(): Promise<void> {
         initialRoute={state.initialRoute}
         initialWorkers={state.initialWorkers}
         initialCanRetryTask={state.initialCanRetryTask}
+        initialTaskState={state.initialTaskState}
         initialMessages={state.initialMessages}
         workspaceChoices={state.workspaceChoices}
         shutdownSignal={shutdownController.signal}
@@ -344,7 +345,7 @@ async function main(): Promise<void> {
             state.runtime.orchestrator.canRetryTask(taskId)
           ]);
           await state.runtime.index.setActiveTaskId(taskId);
-          return { taskId, route, workers, canRetry };
+          return { taskId, route, workers, canRetry, taskState: meta.status };
         }}
         startMainConversation={async () => {
           await state.runtime.sessions.startNewMainConversation();
@@ -439,6 +440,7 @@ interface InteractiveWorkspaceState {
   initialRoute: Awaited<ReturnType<AppRuntime["sessions"]["readLatestRoute"]>>;
   initialWorkers: Awaited<ReturnType<AppRuntime["orchestrator"]["listTaskWorkers"]>>;
   initialCanRetryTask: boolean;
+  initialTaskState: Awaited<ReturnType<AppRuntime["orchestrator"]["taskState"]>>;
   initialMessages: Array<{ from: "user" | "system"; text: string }>;
   workspaceChoices: Awaited<ReturnType<typeof listWorkspaceChoices>>;
 }
@@ -496,12 +498,13 @@ async function loadInteractiveWorkspace(
     } else if (!initialTaskId && typeof rememberedTaskId === "string") {
       await runtime.index.setActiveTaskId(null);
     }
-    const [initialRoute, initialWorkers, initialCanRetryTask, initialHistory, workspaceChoices, preflight] = await Promise.all([
+    const [initialRoute, initialWorkers, initialCanRetryTask, initialTaskState, initialHistory, workspaceChoices, preflight] = await Promise.all([
       initialTaskId
         ? runtime.sessions.readLatestRoute(runtime.sessions.taskFromId(initialTaskId))
         : null,
       initialTaskId ? runtime.orchestrator.listTaskWorkers(initialTaskId) : [],
       initialTaskId ? runtime.orchestrator.canRetryTask(initialTaskId) : false,
+      initialTaskId ? runtime.orchestrator.taskState(initialTaskId) : null,
       runtime.sessions.readChatHistory(),
       listWorkspaceChoices(appRoot),
       preflightPromise
@@ -520,6 +523,7 @@ async function loadInteractiveWorkspace(
       initialRoute,
       initialWorkers,
       initialCanRetryTask,
+      initialTaskState,
       initialMessages: [
         ...initialHistory.map(({ from, text, task_id }) => ({
           from,
